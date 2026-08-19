@@ -107,3 +107,42 @@ what showed it (fan-in 12, third highest in the codebase).
 ⚠️ **DO NOT WIRE THESE TO SATISFY A CHECKER.** Three of the five modules first
 reported as orphans were live code the checker could not see. Inventing a
 consumer to clear a report is how a codebase grows call sites nobody wanted.
+
+---
+
+## UPDATE — 2026-08-19, Phase 0.3 part 1: the repo imports
+
+**`analysis/market_state.py` replaces `analysis/regime_classifier.py`.**
+**68 of 69 runtime modules import.** The one failure is `debug_status.py`,
+which shells out to `sudo` at import time — a diagnostic script, not a runtime
+path.
+
+**The cut was KEEP THE TYPES, DROP THE SCORING**, and the file map is what
+showed it was possible: `regime_classifier` had **fan-in 12**, third highest in
+the codebase, but **eight of its nine importers wanted only `RegimeState` and
+`Regime`** — the dataclass and the enum. Two called the classifier.
+
+**What `MarketState` carries** is what `RegimeState` always really was: a
+CARRIER for structural facts computed elsewhere — adx, atr_normalized,
+bb_width_pct, trend_direction, structure_sequence, sweep_recent, flat_angle_deg,
+sweep_age_bars, vix_regime, timeframe_alignment. Those pass through untouched.
+
+**`Regime` — the six-label vocabulary — survives deliberately**, and the names
+are unchanged so historical journals, trade rows and replay logs stay readable
+against v4 code. **The names survive; the way they were COMPUTED does not.**
+
+⚠️ **`conviction` IS STILL PRESENT AND IS ON ITS WAY OUT. 49 live reads across 8
+files.** Removing the field outright would be one large blind edit with nothing
+importable until every site was fixed — and nothing testable until all of it
+compiled. It stays defaulted and unread by `market_state` itself so the call
+sites can be removed **file by file with tests passing at each step**.
+**It must not be reintroduced as a gate.**
+
+⚠️ `RegimeState` remains as a temporary alias for `MarketState` for the same
+reason. Remove when the last importer reads `MarketState` directly.
+
+### STILL TO DO IN PHASE 0.3
+- Remove the 49 `conviction` reads, file by file.
+- Split `trend_engine`: ADX and the EMA stack are primitives v4 wants; the
+  `direction` vote measured **34.2% on puts** and must stay DESCRIPTIVE.
+- `main.py` deep clean — the regime gates in the dispatch path.

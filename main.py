@@ -754,7 +754,7 @@ from analysis.trend_engine import get_trend_engine
 from analysis.structure_analyzer import get_structure_analyzer
 from analysis.entry_snapshot import to_json as _entry_snapshot_json
 from analysis.liquidity_mapper import get_liquidity_mapper
-from analysis.regime_classifier import get_regime_classifier, RegimeState, Regime
+from analysis.market_state import RegimeState, Regime
 from analysis.orb_engine import get_orb_engine, ORBState
 
 # ── L2.5 (2026-07-21): wire the Layer-1 confluence scorer + Layer-2 conviction

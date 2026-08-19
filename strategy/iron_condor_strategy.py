@@ -197,7 +197,7 @@ from zoneinfo import ZoneInfo
 
 from strategy import credit_vertical as cv
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
-from analysis.regime_classifier import RegimeState, Regime
+from analysis.market_state import RegimeState, Regime
 from analysis.volatility_engine import VolatilityState, VolatilityEngine
 from data.options_chain import OptionContract, OptionsChain
 from data.macro_data import MacroSnapshot

@@ -102,7 +102,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
-from analysis.regime_classifier import RegimeState, Regime
+from analysis.market_state import RegimeState, Regime
 from analysis.volatility_engine import VolatilityState
 from analysis.liquidity_mapper import LiquidityMap
 from data.options_chain import OptionsChain, OptionContract

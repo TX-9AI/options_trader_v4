@@ -133,7 +133,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from strategy.base_strategy import OptionsSignal
-from analysis.regime_classifier import RegimeState, Regime
+from analysis.market_state import RegimeState, Regime
 from analysis.volatility_engine import VolatilityState
 from analysis.structure_analyzer import StructureMap
 from analysis.liquidity_mapper import LiquidityMap

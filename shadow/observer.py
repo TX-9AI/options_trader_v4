@@ -62,7 +62,7 @@ from analysis.volatility_engine import get_volatility_engine
 from analysis.trend_engine import get_trend_engine
 from analysis.structure_analyzer import get_structure_analyzer
 from analysis.liquidity_mapper import get_liquidity_mapper
-from analysis.regime_classifier import get_regime_classifier
+from analysis.market_state import MarketState
 
 from shadow.primitives import TickAccumulator, compute_primitives
 from shadow.scorers import build_scorers

@@ -155,7 +155,7 @@ from typing import Optional
 from analysis.level_grade import grade_level as _grade_level
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
 from config import SWEEP_SETUP_FLOOR, SWEEP_SETUP_FLOOR_SHORT   # SWP.2
-from analysis.regime_classifier import RegimeState   # v3.3: `Regime` no longer
+from analysis.market_state import RegimeState   # v3.3: `Regime` no longer
 # imported — the enum was used ONLY by the removed label gate. Leaving a dead
 # import would let a future edit silently re-introduce the gate it belongs to.
 from analysis.volatility_engine import VolatilityState

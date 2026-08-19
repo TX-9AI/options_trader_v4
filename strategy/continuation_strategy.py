@@ -237,7 +237,7 @@ import os
 import logging
 from typing import Optional
 
-from analysis.regime_classifier import RegimeState, Regime
+from analysis.market_state import RegimeState, Regime
 from analysis.volatility_engine import VolatilityState
 from analysis.trend_engine import TrendState
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
