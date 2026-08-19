@@ -170,6 +170,74 @@ def features(rows, i, side):
     }
 
 
+def derived_features(rows, i, side, prior_hi=None, prior_lo=None):
+    """Structure the TAPE can supply that no v3 column ever carried.
+
+    ⚠️ WHY THESE AND NOT MORE RECORDED COLUMNS. On ContinuationStrategy's 366
+    joined trades the recorded columns were either PRE-FILTERED GATES or EMPTY:
+    ADX > 30 held on 91% of good entries and 88% of bad - it is continuation's
+    own entry gate, so every trade in the sample had already cleared it, and a
+    condition cannot be measured on a population it selected. `flat_angle_deg`
+    was 98%/99% below 10 degrees. `gap_pct` and `level_strength` were 0%
+    populated and `vix_at_entry` 2% - fixed on 2026-08-18/19, after this sample
+    ends.
+    **Everything below is computed from OHLC and needs no column to have
+    existed**, which is the only reason the v3 book can be asked these
+    questions at all.
+    """
+    if i < 30 or i >= len(rows):
+        return {}
+    _, o, h, l, c = rows[i]
+    cs = [r[4] for r in rows[:i + 1]]
+    hs = [r[2] for r in rows[:i + 1]]
+    ls = [r[3] for r in rows[:i + 1]]
+    bull = side == "call"
+    out = {}
+
+    # ── VWAP: a session anchor, and the closest thing to "fair" on the day ────
+    # Typical price, unweighted - volume is not in these files. An unweighted
+    # anchor is still an anchor; it is simply not VWAP and is not called that.
+    tp = [(hs[k] + ls[k] + cs[k]) / 3.0 for k in range(i + 1)]
+    anchor = sum(tp) / len(tp)
+    rng = max(max(hs) - min(ls), 1e-9)
+    d_anchor = (c - anchor) / rng
+    d_dir = d_anchor if bull else -d_anchor
+    out["above the session anchor, with the trade"] = d_dir > 0
+    out["far from anchor (> 15% of range, with)"] = d_dir > 0.15
+    out["far from anchor AGAINST the trade"] = d_dir < -0.15
+    out["hugging the anchor (within 5% of range)"] = abs(d_anchor) < 0.05
+
+    # ── channel position: a regression through the last 30 bars, and where
+    #    price sits inside its own dispersion. This is the pitchfork question
+    #    asked without a fork - slope plus containment.
+    look = 30
+    ys = cs[-look:]
+    n = len(ys)
+    mx = (n - 1) / 2.0
+    my = sum(ys) / n
+    den = sum((k - mx) ** 2 for k in range(n)) or 1e-9
+    slope = sum((k - mx) * (ys[k] - my) for k in range(n)) / den
+    resid = [ys[k] - (my + slope * (k - mx)) for k in range(n)]
+    sd = (sum(r * r for r in resid) / n) ** 0.5 or 1e-9
+    z = resid[-1] / sd                       # where in the channel, in sigma
+    slope_dir = slope if bull else -slope
+    out["channel slopes with the trade"] = slope_dir > 0
+    out["at the channel edge WITH the trade (z > 1)"] = (z > 1 if bull else z < -1)
+    out["at the channel edge AGAINST the trade (z < -1)"] = (z < -1 if bull else z > 1)
+    out["mid-channel (|z| < 0.5)"] = abs(z) < 0.5
+
+    # ── prior-session extremes: the levels the mapper names PDH/PDL ───────────
+    if prior_hi and prior_lo and prior_hi > prior_lo:
+        near = 0.0015                        # 0.15% - a level is "in play"
+        out["within 0.15% of prior-day high"] = abs(c - prior_hi) / c < near
+        out["within 0.15% of prior-day low"] = abs(c - prior_lo) / c < near
+        beyond = (c > prior_hi) if bull else (c < prior_lo)
+        out["beyond the prior-day extreme, with the trade"] = bool(beyond)
+        inside = prior_lo < c < prior_hi
+        out["inside yesterday's range"] = bool(inside)
+    return out
+
+
 def recorded_features(r):
     """Conditions from columns the bot RECORDED at entry, not derived from tape.
 
@@ -249,7 +317,7 @@ def main(argv):
                     help="secondary label: ever reached this %% of premium")
     a = ap.parse_args(argv[1:])
 
-    tapes, rows = {}, []
+    tapes, rows, prior = {}, [], {}
     for db in sorted(glob.glob(os.path.expanduser(a.trades))):
         if "_archive" in db or db.endswith(".bak"):
             continue
@@ -304,6 +372,9 @@ def main(argv):
                 continue
             rf, rpop = recorded_features(r)
             f.update(rf)
+            f.update(derived_features(tape, i, side,
+                                      prior.get(key, (None, None))[0],
+                                      prior.get(key, (None, None))[1]))
             rows.append({"day": day, "sym": sym, "side": side, "strategy": strat,
                          "right": right, "mfe": mfe, "feat": f, "pop": rpop})
 
