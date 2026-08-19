@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-86 Python modules across 11 local packages.
+87 Python modules across 11 local packages.
 
 ## Fan-in leaderboard - widest blast radius
 
@@ -310,6 +310,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `stress_theta_bleed.py`
 - **calls:** `config.py`, `execution/exit_engine.py`
 - **called by:** (entry point)
+
+### `tests/chain_feasibility.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_imports.py`
 - **calls:** (none)
