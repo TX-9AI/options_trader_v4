@@ -87,6 +87,102 @@ def load(path):
     return rows
 
 
+def forward_facts(rth, n_open):
+    """What happened AFTER the opening window closed. The tradeable part.
+
+    ⚠️ THE INCLUSIVE MEASURE IS PARTLY TAUTOLOGICAL AND THE FIRST VERSION OF
+    THIS TOOL SHIPPED IT AS A FINDING. `up_excursion` asked whether the day's
+    larger excursion was above the OPEN - but the opening candle's own range IS
+    part of the day's range. A green 30m bar that runs 0.5% has already
+    contributed that 0.5% to (high - open). The measure contained its own
+    predictor, which is why the numbers rose monotonically with window length:
+    5m 67%, 10m 72%, 15m 76%, 30m 82%. **The longer the window, the more of the
+    day it physically contains.** The 89% cell was the most contaminated, not
+    the best.
+
+    ⚠️ BUT THE OPERATOR IS RIGHT THAT IT IS NOT PURE ARTIFACT. A trend day
+    genuinely does begin at the open; the opening candle is the START of the
+    move, not a coincidence. Two claims are tangled and only one is tradeable:
+        "the opening move is PART of the day's move"  - descriptively true, and
+            unactionable: by the time you know the bar was green it is spent.
+        "AFTER the opening, price CONTINUES that way" - actionable, and the
+            only number a trigger can use.
+    Both are reported. **The GAP between them is how much of the day's move
+    happens during the opening window** - worth knowing on its own, and if it
+    accounts for all of it, the design consequence is that you must be in before
+    10:00, which points straight at ORB.
+    """
+    if len(rth) <= n_open + 20:
+        return None
+    anchor = rth[n_open - 1][4]          # close of the opening window
+    after = rth[n_open:]
+    c = after[-1][4]
+    hi = max(r[2] for r in after)
+    lo = min(r[3] for r in after)
+    return {
+        "fwd_up_close": c > anchor,
+        "fwd_up_excursion": (hi - anchor) >= (anchor - lo),
+        "fwd_range_pct": (hi - lo) / anchor * 100.0,
+        "fwd_move_pct": (c - anchor) / anchor * 100.0,
+        "anchor": anchor,
+    }
+
+
+def indicators(rth, n_open):
+    """VWAP, Bollinger, ADX and channel slope AS AT the opening window close.
+
+    Everything is computed on bars 0..n_open-1 ONLY. A single bar of lookahead
+    turns a predictor into a description of the answer, and that error is not
+    visible in the output - it just looks like a strong result.
+    """
+    seg = rth[:n_open]
+    if len(seg) < 5:
+        return {}
+    hs = [r[2] for r in seg]
+    ls = [r[3] for r in seg]
+    cs = [r[4] for r in seg]
+    c = cs[-1]
+    out = {}
+
+    # VWAP proxy: typical price, unweighted (volume is not in these files).
+    # An unweighted anchor is still an anchor; it is not called VWAP.
+    tp = [(hs[k] + ls[k] + cs[k]) / 3.0 for k in range(len(seg))]
+    anch = sum(tp) / len(tp)
+    out["above_anchor"] = c > anch
+    out["anchor_dist_pct"] = (c - anch) / anch * 100.0
+
+    # Bollinger on what exists so far
+    m = sum(cs) / len(cs)
+    sd = (sum((x - m) ** 2 for x in cs) / len(cs)) ** 0.5 or 1e-9
+    out["bb_z"] = (c - m) / sd
+    out["bb_width_pct"] = (4 * sd) / m * 100.0
+
+    # Wilder ADX needs 14+ periods; below that it is not ADX and is not reported
+    if len(seg) >= 15:
+        trs, pdm, ndm = [], [], []
+        for k in range(1, len(seg)):
+            up = hs[k] - hs[k - 1]
+            dn = ls[k - 1] - ls[k]
+            pdm.append(up if (up > dn and up > 0) else 0.0)
+            ndm.append(dn if (dn > up and dn > 0) else 0.0)
+            trs.append(max(hs[k] - ls[k], abs(hs[k] - cs[k - 1]),
+                           abs(ls[k] - cs[k - 1])))
+        atr = sum(trs) or 1e-9
+        pdi = 100.0 * sum(pdm) / atr
+        ndi = 100.0 * sum(ndm) / atr
+        dx = 100.0 * abs(pdi - ndi) / max(pdi + ndi, 1e-9)
+        out["adx_proxy"] = dx
+        out["di_bull"] = pdi > ndi
+
+    # channel slope over the opening window
+    n = len(cs)
+    mx = (n - 1) / 2.0
+    my = sum(cs) / n
+    den = sum((k - mx) ** 2 for k in range(n)) or 1e-9
+    out["slope_up"] = (sum((k - mx) * (cs[k] - my) for k in range(n)) / den) > 0
+    return out
+
+
 def session_facts(rows):
     """Everything the opening can say, and what the day then did."""
     if len(rows) < 60:
@@ -113,6 +209,13 @@ def session_facts(rows):
             "close_in_range": (bc - bl) / max(bh - bl, 1e-9),
             "high": bh, "low": bl, "close": bc, "open": bo,
         }
+    # forward-only outcomes and indicator state, per opening window
+    for n, name in ((5, "5m"), (10, "10m"), (15, "15m"), (30, "30m")):
+        fw = forward_facts(rth, n)
+        if fw:
+            f[name].update(fw)
+        f[name].update(indicators(rth, n))
+
     # the day's answer
     f["day"] = {
         "up_close": close > o,
@@ -173,49 +276,87 @@ def main(argv):
     print("     ONE observation, not twenty.")
     print("=" * 86)
 
-    # ── 1. does the opening candle's colour call the day? ────────────────────
-    print("\n  1. OPENING CANDLE COLOUR -> DAY DIRECTION")
-    print(f"    {'opening':8}{'outcome':12}{'n':>6}{'agree':>8}  verdict")
-    print("    " + "-" * 62)
+    # ── 1. INCLUSIVE vs FORWARD-ONLY, side by side ──────────────────────────
+    print("\n  1. OPENING COLOUR -> DAY DIRECTION: inclusive vs FORWARD-ONLY")
+    print("     INCLUSIVE measures from the session OPEN - the opening candle's")
+    print("     own range is inside the answer, so it is partly tautological.")
+    print("     FORWARD measures from the window CLOSE - the only tradeable part.")
+    print("     ⚠️ THE GAP IS HOW MUCH OF THE DAY HAPPENS DURING THE OPENING.")
+    print(f"    {'window':8}{'outcome':11}{'n':>6}{'incl':>7}{'fwd':>7}{'gap':>7}  forward verdict")
+    print("    " + "-" * 72)
     for name in ("5m", "10m", "15m", "30m"):
-        for outcome, key in (("close", "up_close"), ("excursion", "up_excursion")):
-            n = k = 0
-            for f in facts:
-                n += 1
-                if f[name]["green"] == f["day"][key]:
-                    k += 1
-            print(f"    {name:8}{outcome:12}{n:>6}{k/n:>7.0%}  {_verdict(k, n)}")
-
-    # ── 2. does a DECISIVE opening call it better than a marginal one? ───────
-    print("\n  2. ONLY DECISIVE OPENINGS (body >= 0.20% of price)")
-    print("     A doji calls nothing; the question is whether CONVICTION in the")
-    print("     opening candle carries information the bare colour does not.")
-    print(f"    {'opening':8}{'outcome':12}{'n':>6}{'agree':>8}  verdict")
-    print("    " + "-" * 62)
-    for name in ("5m", "10m", "15m", "30m"):
-        for outcome, key in (("close", "up_close"), ("excursion", "up_excursion")):
-            sel = [f for f in facts if f[name]["body_pct"] >= 0.20]
+        for outcome, ik, fk in (("close", "up_close", "fwd_up_close"),
+                                ("excursion", "up_excursion", "fwd_up_excursion")):
+            sel = [f for f in facts if fk in f[name]]
             n = len(sel)
-            k = sum(1 for f in sel if f[name]["green"] == f["day"][key])
-            print(f"    {name:8}{outcome:12}{n:>6}"
-                  f"{(k/n if n else 0):>7.0%}  {_verdict(k, n)}")
+            if not n:
+                continue
+            ki = sum(1 for f in sel if f[name]["green"] == f["day"][ik])
+            kf = sum(1 for f in sel if f[name]["green"] == f[name][fk])
+            print(f"    {name:8}{outcome:11}{n:>6}{ki/n:>6.0%}{kf/n:>7.0%}"
+                  f"{(ki-kf)/n:>+7.0%}  {_verdict(kf, n)}")
 
-    # ── 3. close-in-range: WHERE the opening candle closed, not just colour ──
-    print("\n  3. OPENING CLOSED IN THE TOP/BOTTOM THIRD OF ITS OWN RANGE")
-    print("     Colour says which side of the open; this says whether the bar")
-    print("     CLOSED ON ITS HIGHS - a different and usually stronger claim.")
-    print(f"    {'opening':8}{'outcome':12}{'n':>6}{'agree':>8}  verdict")
-    print("    " + "-" * 62)
+    # ── 2. decisive openings, FORWARD only ──────────────────────────────────
+    print("\n  2. DECISIVE OPENINGS (body >= 0.20%) - FORWARD ONLY")
+    print(f"    {'window':8}{'outcome':11}{'n':>6}{'fwd':>7}  verdict")
+    print("    " + "-" * 60)
     for name in ("5m", "10m", "15m", "30m"):
-        for outcome, key in (("close", "up_close"), ("excursion", "up_excursion")):
+        for outcome, fk in (("close", "fwd_up_close"),
+                            ("excursion", "fwd_up_excursion")):
             sel = [f for f in facts
-                   if f[name]["close_in_range"] >= 0.67
-                   or f[name]["close_in_range"] <= 0.33]
+                   if fk in f[name] and f[name]["body_pct"] >= 0.20]
             n = len(sel)
+            if not n:
+                continue
+            k = sum(1 for f in sel if f[name]["green"] == f[name][fk])
+            print(f"    {name:8}{outcome:11}{n:>6}{k/n:>6.0%}  {_verdict(k, n)}")
+
+    # ── 3. closed on its highs, FORWARD only ────────────────────────────────
+    print("\n  3. OPENING CLOSED IN TOP/BOTTOM THIRD OF ITS RANGE - FORWARD ONLY")
+    print(f"    {'window':8}{'outcome':11}{'n':>6}{'fwd':>7}  verdict")
+    print("    " + "-" * 60)
+    for name in ("5m", "10m", "15m", "30m"):
+        for outcome, fk in (("close", "fwd_up_close"),
+                            ("excursion", "fwd_up_excursion")):
+            sel = [f for f in facts if fk in f[name]
+                   and (f[name]["close_in_range"] >= 0.67
+                        or f[name]["close_in_range"] <= 0.33)]
+            n = len(sel)
+            if not n:
+                continue
             k = sum(1 for f in sel
-                    if (f[name]["close_in_range"] >= 0.67) == f["day"][key])
-            print(f"    {name:8}{outcome:12}{n:>6}"
-                  f"{(k/n if n else 0):>7.0%}  {_verdict(k, n)}")
+                    if (f[name]["close_in_range"] >= 0.67) == f[name][fk])
+            print(f"    {name:8}{outcome:11}{n:>6}{k/n:>6.0%}  {_verdict(k, n)}")
+
+    # ── 4. indicator state AT the 15m close -> forward direction ────────────
+    print("\n  4. INDICATOR STATE AT THE 15m CLOSE -> FORWARD DIRECTION")
+    print("     All computed on the opening window ONLY. A single bar of")
+    print("     lookahead turns a predictor into a description of the answer,")
+    print("     and it does not look wrong in the output.")
+    print(f"    {'signal':34}{'n':>6}{'fwd close':>11}{'fwd exc':>9}  verdict (exc)")
+    print("    " + "-" * 74)
+    tests = [
+        ("price above the opening anchor", lambda f: f["15m"].get("above_anchor")),
+        ("anchor distance > 0.1%", lambda f: (f["15m"].get("anchor_dist_pct") or 0) > 0.1),
+        ("bb z-score > +1 (upper band)", lambda f: (f["15m"].get("bb_z") or 0) > 1),
+        ("bb z-score < -1 (lower band)", lambda f: (f["15m"].get("bb_z") or 0) < -1),
+        ("channel slope up", lambda f: f["15m"].get("slope_up")),
+        ("DI+ > DI- (directional index)", lambda f: f["15m"].get("di_bull")),
+        ("ADX proxy > 25 AND DI+ > DI-",
+         lambda f: (f["15m"].get("adx_proxy") or 0) > 25 and f["15m"].get("di_bull")),
+        ("ADX proxy > 25 AND DI- > DI+",
+         lambda f: (f["15m"].get("adx_proxy") or 0) > 25 and f["15m"].get("di_bull") is False),
+    ]
+    for label, fn in tests:
+        sel = [f for f in facts if "fwd_up_close" in f["15m"] and fn(f) is not None]
+        pos = [f for f in sel if fn(f)]
+        n = len(pos)
+        if n < 10:
+            print(f"    {label:34}{n:>6}   (too few)")
+            continue
+        kc = sum(1 for f in pos if f["15m"]["fwd_up_close"])
+        ke = sum(1 for f in pos if f["15m"]["fwd_up_excursion"])
+        print(f"    {label:34}{n:>6}{kc/n:>10.0%}{ke/n:>9.0%}  {_verdict(ke, n)}")
 
     # ── 4. the ORB break: which side broke FIRST ────────────────────────────
     print("\n  4. FIRST BREAK OF THE 15m OPENING RANGE -> DAY DIRECTION")
