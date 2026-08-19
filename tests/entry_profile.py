@@ -170,6 +170,70 @@ def features(rows, i, side):
     }
 
 
+def recorded_features(r):
+    """Conditions from columns the bot RECORDED at entry, not derived from tape.
+
+    Returns (conditions, populated) - `populated` marks which source columns
+    actually carried data, because three of these were largely EMPTY in the v3
+    book and only fixed on 2026-08-18/19:
+        flat_angle_deg   100% ties on ONE value - computed every tick, never
+                         attached to the regime object
+        level_strength   94% ties on TWO - the formula collapsed because
+                         touch_count is a constant, and only a hard-gated
+                         strategy wrote it
+        vix_at_entry     58% default-zero - the two highest-volume strategies
+                         never set it
+    An empty column reads as "no signal" when it is "no data", and that
+    confusion has already cost this project one wrong conclusion per column.
+    """
+    out, pop = {}, {}
+
+    def _f(name, default=None):
+        v = r.get(name)
+        try:
+            return float(v) if v is not None else default
+        except Exception:                                      # noqa: BLE001
+            return default
+
+    adx = _f("adx_at_entry")
+    pop["adx_at_entry"] = adx is not None and adx > 0
+    if pop["adx_at_entry"]:
+        out["ADX > 20 (trending)"] = adx > 20
+        out["ADX > 30 (strong)"] = adx > 30
+        out["ADX < 15 (no trend)"] = adx < 15
+
+    vix = _f("vix_at_entry")
+    pop["vix_at_entry"] = vix is not None and vix > 0
+    if pop["vix_at_entry"]:
+        out["VIX < 15 (calm)"] = vix < 15
+        out["VIX > 20 (elevated)"] = vix > 20
+
+    ang = _f("flat_angle_deg", -1.0)
+    pop["flat_angle_deg"] = ang is not None and ang >= 0
+    if pop["flat_angle_deg"]:
+        out["flat angle < 10 deg (flat tape)"] = ang < 10
+        out["flat angle > 20 deg (sloped)"] = ang > 20
+
+    lvl = _f("level_strength")
+    pop["level_strength"] = lvl is not None and lvl > 0
+    if pop["level_strength"]:
+        out["graded level nearby (strength > 0.5)"] = lvl > 0.5
+        out["premium level nearby (strength > 0.8)"] = lvl > 0.8
+
+    gap = _f("gap_pct")
+    pop["gap_pct"] = gap is not None
+    if pop["gap_pct"]:
+        out["gap |>| 0.5%"] = abs(gap) > 0.5
+        out["gap |>| 1.5% (large)"] = abs(gap) > 1.5
+
+    ss = _f("setup_score")
+    pop["setup_score"] = ss is not None and ss > 0
+    if pop["setup_score"]:
+        out["setup_score > 1.0"] = ss > 1.0
+
+    return out, pop
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--trades", default=TRADES)
@@ -238,8 +302,10 @@ def main(argv):
             f = features(tape, i, side)
             if not f:
                 continue
+            rf, rpop = recorded_features(r)
+            f.update(rf)
             rows.append({"day": day, "sym": sym, "side": side, "strategy": strat,
-                         "right": right, "mfe": mfe, "feat": f})
+                         "right": right, "mfe": mfe, "feat": f, "pop": rpop})
 
     if not rows:
         print("no usable trades. ABSENT MEASUREMENT, not a null.")
@@ -276,10 +342,39 @@ def main(argv):
         print("     built on those describes the sample, not the setup.")
     print("=" * 88)
 
-    keys = list(rows[0]["feat"].keys())
+    # ⚠️ REPORT COVERAGE BEFORE ANY LIFT. Three recorded columns were largely
+    # EMPTY in the v3 book and only fixed on 2026-08-18/19. A feature present on
+    # 5% of rows cannot be judged, and its lift is noise dressed as a finding -
+    # the exact error that made flat_angle_deg, level_strength and vix_at_entry
+    # read as measured nulls when they were unwritten columns.
+    popcount = collections.Counter()
+    for r in rows:
+        for k, v in (r.get("pop") or {}).items():
+            if v:
+                popcount[k] += 1
+    if popcount or any(r.get("pop") for r in rows):
+        print("\n  RECORDED-COLUMN COVERAGE (how many trades actually carry it)")
+        srcs = sorted({k for r in rows for k in (r.get("pop") or {})})
+        for k in srcs:
+            n = popcount.get(k, 0)
+            pct = 100.0 * n / len(rows)
+            note = ("USABLE" if pct >= 60 else
+                    "THIN - lift is not interpretable" if pct >= 15 else
+                    "EMPTY - no data, NOT a null result")
+            print(f"    {k:24}{n:>6}/{len(rows)}  {pct:>5.0f}%  {note}")
+
+    # a feature only appears on rows where its source column was populated, so
+    # union the keys rather than reading them off the first row
+    keys = sorted({k for r in rows for k in r["feat"]})
 
     def rate(pop, k):
-        return sum(1 for r in pop if r["feat"][k]) / len(pop) if pop else 0.0
+        # only count rows where the feature EXISTS - a row whose source column
+        # was empty must not be scored as False
+        have = [r for r in pop if k in r["feat"]]
+        return (sum(1 for r in have if r["feat"][k]) / len(have)) if have else 0.0
+
+    def nfeat(k):
+        return sum(1 for r in rows if k in r["feat"])
 
     scored = []
     for k in keys:
@@ -293,7 +388,9 @@ def main(argv):
     for lift, k, g, b in scored:
         if lift <= 0:
             continue
-        note = ("AMBIENT - true of entries generally" if g > 0.90 and b > 0.85
+        nf = nfeat(k)
+        note = ("n=%d TOO THIN" % nf if nf < 60
+                else "AMBIENT - true of entries generally" if g > 0.90 and b > 0.85
                 else "strong" if lift >= 0.10
                 else "weak - keep only in company")
         print(f"    {k:46}{g:>6.0%}{b:>7.0%}{lift:>+8.0%}  {note}")
