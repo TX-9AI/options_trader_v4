@@ -545,3 +545,59 @@ constant is a future investigation.
 "did not run the test that already existed" as "did not read the header" —
 `test_dispatch_slot_map` had a pin that caught a regression I would otherwise
 have shipped. **Run the module's tests before editing it, not only after.**
+
+## 33. THE FILE MAP IS GENERATED INSIDE THE LAND COMMAND, AND DRIFT FAILS.
+Added 2026-08-19.
+
+`docs/FILE_MAP.md` is produced by `tests/gen_file_map.py` from the real import
+graph — parsed, never executed, so a module that crashes on import still maps.
+**The generator runs INSIDE the land command**, between the verification gate
+and `git add`, so the commit always carries a current map:
+
+    extract → verify → REGENERATE MAP → git add -A → commit → push → cleanup
+
+If regeneration reports broken imports, or `--check` reports drift, **the gate
+fails and nothing stages.** Operator, 2026-08-19: *"I'm in favour of good
+discipline as a backstop to sloppy execution."* A warning that fires on every
+structural change gets ignored within a week — which is exactly how v3's map
+came to be written from memory.
+
+**WHY IT EARNS ITS PLACE.** v3's map was hand-maintained and its own header
+admitted the consequence: *"it is a snapshot, and it will drift."* It did. At
+the v4 split a module was nearly excised on a reading of its imports while the
+map recorded its fan-in as **12 — third highest in the codebase.**
+
+⚠️ **THE THREE FAILURES IT CATCHES WERE ALL SEEN FOR REAL DURING THE PORT:**
+· **Broken local import** — eight files after the deliberate engine drop, found
+  by running imports BY HAND because nothing checked.
+· **Orphans** — twenty files silently omitted from the port manifest. Nothing
+  errored, because an absent file breaks nothing until it is needed.
+· **Drift** — the map disagreeing with the code.
+
+⚠️ **AND AN ORPHAN REPORT MUST BE TRUSTWORTHY OR IT IS NOISE.** The first run
+flagged 12; **only 2 were real.** Services and CLI helpers SHOULD have no
+importers, and three modules were missed because the resolver did not handle
+`from <package> import <module>` — the form used by
+`from strategy import credit_vertical as cv`, a module that was live and had
+traded four times the day before. **I was one step from "wiring in" working
+code on the strength of a broken checker.** Entry points are listed explicitly;
+the resolver handles both import forms.
+
+## 34. TESTS ARE CONTROL-ONLY. OBSERVERS SHIP TO TRADERS.
+Added 2026-08-19, operator's instruction.
+
+    ships to a box   analysis/ data/ execution/ strategy/ risk/ database/
+                     notifications/ utils/ warehouse/ shadow/ deploy/
+                     main.py config.py + install scripts
+    CONTROL ONLY     tests/ — every harness, probe and replay tool
+
+**Harnesses read banked tape and trade databases. They never run on a box
+mid-session**, and a t2.micro that has already been OOM-killed once (SPX, 419 MB)
+should not carry code it cannot use. **Observers are the exception and DO
+ship** — `shadow/` collects in-session, which is the data a future scorer is
+earned from.
+
+Enforced by **sparse checkout** in `install.sh`, not by a post-pull `rm`: the
+setting persists in the clone's config, so a box configured once stays correct
+through every later pull in a bake. **A cleanup step that must be remembered by
+every future deploy path never happens.**

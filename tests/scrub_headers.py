@@ -207,6 +207,20 @@ DESCRIPTIONS = {
     "pull_today_ohlc.sh": "Pulls the current session's OHLC from a box.",
     "eod_bot.sh": "End-of-day bot wrapper.",
     "stress_theta_bleed.py": "Stress harness for the theta-bleed exit.",
+    # --- ROUND 3: over-dropped structure providers, restored ---------------
+    # I dropped these on LOCATION AND NAME - they live in analysis/ and have
+    # "engine" in the title - rather than on what they COMPUTE. Neither is a
+    # regime engine.
+    # `volatility_engine` produces ATR, Bollinger bands, price_vs_bb, VWAP,
+    # price_vs_vwap and compression state. `trend_engine` produces ADX, the EMA
+    # stack and momentum. **The operator's successor list names ADX and VWAP
+    # explicitly** - both were sitting in modules I had cut.
+    # What actually failed is narrower: regime_confluence (the damper x
+    # corroborator grammar), conviction_integrator (confirmatory by
+    # construction), regime_axes (Cliff's delta +0.09), regime_classifier (the
+    # label and the conviction number).
+    "analysis/volatility_engine.py": "ATR, Bollinger bands, VWAP, price-vs-band, compression state.",
+    "analysis/trend_engine.py": "ADX, EMA stack and momentum per timeframe. DIRECTION VOTE IS DESCRIPTIVE ONLY.",
 }
 
 

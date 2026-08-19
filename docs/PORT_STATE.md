@@ -66,3 +66,44 @@ that reddens on day one teaches the operator to ignore a red run** (CV.1).
 
 ⚠️ **NOTHING TRADES UNTIL PHASE 2.** Every strategy is a shell with its trigger
 removed. Exits and collection are the proven parts and can run first.
+
+---
+
+## UPDATE — 2026-08-19, after the file-map work
+
+**`volatility_engine` and `trend_engine` were RESTORED.** They were dropped on
+LOCATION AND NAME — both live in `analysis/` with "engine" in the title — rather
+than on what they compute. Neither is a regime engine:
+· `volatility_engine` → ATR, Bollinger bands, **VWAP**, price-vs-band, compression
+· `trend_engine` → **ADX**, the EMA stack, momentum
+
+**The operator's successor list names ADX and VWAP explicitly.** Both were
+sitting in modules I had cut. What actually failed is narrower:
+`regime_confluence`, `conviction_integrator`, `regime_axes`, `regime_classifier`.
+
+⚠️ **`trend_engine` still needs splitting, and that is Phase 0.3 work.** Its ADX
+and EMAs are primitives v4 wants; its `direction` vote is the quantity measured
+at **34.2% accuracy on puts**. Same module, opposite verdicts — the vote stays
+DESCRIPTIVE and must not gate an entry.
+
+**`regime_classifier` is the remaining blocker**, and the shape of the cut is now
+clear: **eight of its nine importers want only `RegimeState` and `Regime` — the
+dataclass and the enum, not the classifier.** `RegimeState` carries ADX, ATR,
+BB width and trend direction as pass-throughs that v4 wants. `primary_regime`
+and `conviction` are the parts measured dead. **Keep the types, drop the
+scoring** — a far smaller change than deleting the module, and the file map is
+what showed it (fan-in 12, third highest in the codebase).
+
+**Harness relocation:** `rejection_ledger.py` and `eod_compare.py` moved to
+`tests/` — control-only per WA §34.
+
+### ⬜ BACKLOGGED — genuinely unwired in v3 as well as v4
+
+| module | why it is not wired now |
+|---|---|
+| `execution/fill_model.py` | `would_fill` / `walk_ladder`. Nothing calls it — **find where paper fills actually happen before wiring**, or the wiring invents a second lineage. |
+| `analysis/pitchfork_lifecycle.py` | 502 lines of `ForkTracker`, never wired in either repo. **Wiring it means deciding whether fork state is an entry input** — a Phase 1 question, not a plumbing one. |
+
+⚠️ **DO NOT WIRE THESE TO SATISFY A CHECKER.** Three of the five modules first
+reported as orphans were live code the checker could not see. Inventing a
+consumer to clear a report is how a codebase grows call sites nobody wanted.

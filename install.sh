@@ -42,13 +42,52 @@ echo ""
 sudo apt-get update -qq
 sudo apt-get install -y -qq git
 
-# Clone or update repo into deploy dir
+# ---------------------------------------------------------------------------
+# DEPLOYMENT BOUNDARY: a TRADER carries only what it needs to trade and collect.
+#
+#   ships to a box   analysis/ data/ execution/ strategy/ risk/ database/
+#                    notifications/ utils/ warehouse/ shadow/ deploy/ main.py
+#                    config.py + the install scripts
+#   CONTROL ONLY     tests/  - every harness, probe and replay tool
+#
+# WHY: harnesses read banked tape and trade databases. They never run on a box
+# mid-session, and a t2.micro that has already been OOM-KILLED once (SPX, 419 MB)
+# should not carry code it cannot use. Observers are the exception and DO ship:
+# `shadow/` collects in-session, which is the data a future scorer is earned
+# from.
+#
+# SPARSE CHECKOUT, not a post-pull `rm`. The setting persists in the clone's own
+# config, so a box configured once stays correct through every later `git pull`
+# in a bake. A cleanup step would have to be remembered by every future deploy
+# path - and a manual step that must be remembered never happens.
+# ---------------------------------------------------------------------------
+_sparse_trader() {
+    git -C "$1" sparse-checkout init --no-cone 2>/dev/null || return 1
+    git -C "$1" sparse-checkout set --no-cone '/*' '!/tests/' 2>/dev/null || return 1
+    return 0
+}
+
 if [ -d "$DEPLOY_DIR/.git" ]; then
     echo "  Updating existing repo..."
     cd "$DEPLOY_DIR" && git pull
 else
     echo "  Cloning repository..."
     git clone "$REPO" "$DEPLOY_DIR"
+fi
+
+if [ "${OT_ROLE:-trader}" = "trader" ]; then
+    if _sparse_trader "$DEPLOY_DIR"; then
+        echo "  Sparse checkout: tests/ excluded (trader role)."
+    else
+        # ⚠️ FAIL LOUD, NOT SILENT. A box that quietly keeps tests/ is only
+        # wasting disk - but a box whose sparse config half-applied may be
+        # MISSING RUNTIME PATHS, and that does not surface until it tries to
+        # trade. Say so at install time rather than at 09:30.
+        echo "  WARNING: sparse checkout FAILED - this box carries the full repo."
+        echo "           Verify runtime paths are present before it trades."
+    fi
+else
+    echo "  Role=${OT_ROLE}: full checkout (control keeps tests/)."
 fi
 
 echo "  Repository ready."
