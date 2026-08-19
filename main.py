@@ -775,52 +775,30 @@ _REGIME_ENGINE = os.environ.get("OT_REGIME_ENGINE", "L2").lower()   # "l2" | "v1
 assert _REGIME_ENGINE in ("l2", "v13"), (
     f"OT_REGIME_ENGINE={_REGIME_ENGINE!r} is neither 'l2' nor 'v13' — refusing to "
     f"start rather than silently running an unintended regime engine")
-try:
-    # RANGE_WINDOW_BARS is OWNED by regime_confluence (v1.3, line ~181). It was
-    # previously imported via conviction_integrator, which merely re-exported a
-    # tuple of regime-label constants — when the v1.3 excavation trimmed that
-    # tuple the import broke and every box silently dropped to the v1.3
-    # classifier for a full session (2026-07-29). Import symbols from the module
-    # that DEFINES them; a re-export is not a contract.
-    from analysis.regime_confluence import RegimeConfluenceScorer, RANGE_WINDOW_BARS
-    from analysis.conviction_integrator import ConvictionIntegrator, INTEGRATED_REGIMES
-    from analysis.regime_confluence import RANGING, COMPRESSION
-    _L2_OK = True
-except Exception as _l2e:                       # pragma: no cover
-    _L2_OK = False
-    # ERROR, not WARNING: this silently changes WHICH ENGINE produces every
-    # regime label and conviction value for the session. Trading survives; the
-    # session's conviction data is not calibration-grade. Page immediately.
-    logger.error("L2.5 UNAVAILABLE (%s) — falling back to v1.3 classifier; "
-                 "this session's conviction data is NOT calibration-grade", _l2e)
-    try:
-        from notifications.alert_manager import get_alert_manager as _gam
-        _gam().send_regime_engine_degraded_alert(
-            os.environ.get("OT_INSTRUMENT", "?"), str(_l2e))
-    except Exception:                           # pragma: no cover
-        pass                                    # never let the pager kill the bot
-
-_l2_mute     = {}          # v4.6 — last-reported reason L2 is not committing
+# ── v4.0 — THE LAYER-2 CONVICTION STACK IS GONE ─────────────────────────────
+# v3 imported RegimeConfluenceScorer and ConvictionIntegrator here, inside a
+# try/except that set _L2_OK. At the v4 split those modules were dropped and the
+# except branch became permanent: _L2_OK was ALWAYS False, so _l1_scorer and
+# _l2_integ were ALWAYS None and every block gated on them was dead code that
+# still had to be read and reasoned about by anyone touching this file.
+#
+# WHY THEY WENT. Measured 2026-08-19, tests/direction_skill.py, 715 closed
+# directional trades across 16 sessions with ORB and neutral structures
+# excluded: the label picked the correct SIDE on 44.9%, 95% CI [41.3%, 48.6%] -
+# ENTIRELY BELOW A COIN FLIP. Calls 48.7%; puts 34.2%. ContinuationStrategy,
+# which depended on it most, lost $5,872 across 660 trades.
+# Conviction was confirmatory by construction: a leaky integrator over argmax
+# agreement is only confident once winning has already persisted.
+#
+# ⚠️ DO NOT REINTRODUCE A CONVICTION GATE. `MarketState.conviction` still exists
+# so the remaining reads can be removed file by file with tests passing at each
+# step. It must not acquire a producer. See docs/INHERITED_FINDINGS.md.
+_l2_mute = {}          # retained: read by the log-throttling helpers below
 # v4.7 — state the active regime engine ONCE at import, at INFO. Until now the
 # only way to answer "which engine is running?" was to infer it from [L2]/[v13]
 # tags on regime-CHANGE lines — which is how a dead L2.5 block hid for weeks.
-logger.info("REGIME ENGINE: %s (L2 import %s) — OT_REGIME_ENGINE=%s",
-            _REGIME_ENGINE, "OK" if _L2_OK else "FAILED",
-            os.environ.get("OT_REGIME_ENGINE", "(unset, default L2)"))
-_l1_scorer   = RegimeConfluenceScorer() if _L2_OK else None
-_l2_integ    = ConvictionIntegrator() if _L2_OK else None
-# v5.5 — last (live, shadow) emission pair, so the A/B logs on CHANGE only.
-_l2_ab: dict = {}
-
-# v5.0 — the last label L2 actually committed, held across stale ticks so the bot
-# never swaps the smoother for the raw classifier mid-position. `since` is set on
-# the first stale tick of a stretch and cleared on recovery, purely so a long
-# hold is visible in the log — it gates nothing.
-_l2_held     = {"regime": None, "conviction": 0.0, "since": None}
-# RGM.6 — 0 restores the pre-RGM.6 ladder exactly (v13 straight after the hold).
-RGM6_L1_ARGMAX_FALLBACK = os.environ.get("OT_RGM6_L1_ARGMAX", "1") == "1"
-_L2_STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "data", "integrator_state.json")
+logger.info("REGIME ENGINE: v4 structural assembly (no L2, no conviction) - "
+            "labels INFORM, they never authorise")
 
 # v3.9 — signal journal (log-only). Guarded: the loop runs identically without it.
 try:
@@ -1153,293 +1131,70 @@ def run_analysis(state: BotState) -> dict:
     return ctx
 
 
-def run_regime_classification(ctx: dict, trigger: str, state: BotState) -> RegimeState:
-    """Classify current market regime and log transitions.
+def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeState:
+    """Gather structural facts into a MarketState. Classifies NOTHING.
 
-    L2.5: when OT_REGIME_ENGINE=L2 (default), the regime that gates trades is the
-    Layer-2 conviction integrator's COMMITTED label — computed from the Layer-1
-    confluence evidence vector — not the v1.3 boolean classifier's raw argmax.
-    The v1.3 classifier still runs (its rich fields — adx, structure, bb_width —
-    populate RegimeState and the logs), but its primary_regime is OVERRIDDEN by
-    the integrator's stable label, which never emits UNKNOWN and holds through
-    single-tick flicker. OT_REGIME_ENGINE=v13 restores the raw v1.3 label.
+    v4.0 replacement for `run_regime_classification`.
+
+    WHAT CHANGED AND WHY. v3 called `regime_classifier.classify()`, which
+    produced a six-way label and a conviction number, and Layer 2 then
+    OVERRODE the label with an integrated one. Measured 2026-08-19 across 715
+    closed directional trades: that label picked the correct SIDE 44.9% of the
+    time, 95% CI [41.3%, 48.6%] - entirely below a coin flip, and 34.2% on
+    puts. The scoring is gone.
+
+    WHAT REPLACES IT: nothing. This assembles the SAME structural facts the
+    classifier used to gather - adx, atr, bb width, trend direction, structure
+    sequence, sweep age, vix regime - into one object a consumer can read.
+    Those facts were always the useful part; the label was the part that
+    failed.
+
+    `primary_regime` stays UNKNOWN. A structure-first label is ROADMAP Phase
+    4.1, and until it exists an honest UNKNOWN is better than a number nobody
+    should trust. INFORMS, NEVER AUTHORISES - no setup may require one.
+
+    `conviction` is NOT SET HERE. It survives on the dataclass only so the 49
+    remaining reads can be removed file by file; nothing should produce it.
     """
-    regime = get_regime_classifier().classify(
-        vol_state  = ctx["vol"],
-        trend_state= ctx["trend"],
-        structure  = ctx["structure"],
-        liq_map    = ctx["liq_map"],
-        macro      = ctx["macro"],
-        trigger    = trigger
+    vol = ctx.get("vol")
+    trend = ctx.get("trend")
+    structure = ctx.get("structure")
+    liq = ctx.get("liq_map")
+    macro = ctx.get("macro")
+
+    regime = RegimeState(
+        primary_regime=Regime.UNKNOWN,
+        macro_context=getattr(macro, "vix_regime", "UNKNOWN") or "UNKNOWN",
+        adx=float(getattr(trend, "primary_adx", 0.0) or 0.0),
+        atr_normalized=float(getattr(vol, "atr_normalized", 0.0) or 0.0),
+        bb_width_pct=float(getattr(vol, "bb_width_pct", 0.5) or 0.5),
+        trend_direction=getattr(trend, "overall_direction", "NEUTRAL") or "NEUTRAL",
+        structure_sequence=getattr(structure, "structure_sequence", "NEUTRAL") or "NEUTRAL",
+        sweep_recent=bool(getattr(liq, "recent_sweep", None) is not None),
+        sweep_age_bars=int(getattr(liq, "sweep_age_bars", 999) or 999),
+        vix_regime=getattr(macro, "vix_regime", "UNKNOWN") or "UNKNOWN",
+        classified_at=now_utc().isoformat(),
+        trigger=trigger,
     )
+
+    # The flat angle is produced by the RANGING/COMPRESSION evaluation and lands
+    # in the L1 breakdown. NEGATIVE means NOT COMPUTED - zero degrees IS the
+    # flattest possible reading, so a 0.0 default is indistinguishable from a
+    # genuinely flat tape. That confusion made this column read as 100% ties on
+    # ONE unique value in v3 and be scored as a measured null when it was simply
+    # never written.
+    try:
+        _bd = (ctx.get("l1_breakdown") or {})
+        for _k in ("RANGING", "COMPRESSION"):
+            _a = (_bd.get(_k) or {}).get("angle")
+            if _a is not None:
+                regime.flat_angle_deg = float(_a)
+                break
+    except Exception:                                          # noqa: BLE001
+        pass
+
     state.last_regime_at = now_utc()
-
-    # ── L2.5 override: committed integrator label drives the gate ──────────────
-    l2_label = None
-    l2_conv  = None
-    _l1_fallback = False          # RGM.6 — did we resolve via the L1 argmax?
-    _l1_res = None                # RGM.6 — referenced by the fallback rung
-    if _REGIME_ENGINE == "l2" and _L2_OK:      # v4.7 — value is .lower()ed
-        try:
-            closes = None
-            df1m = ctx.get("df_1m")
-            if df1m is not None and len(df1m) >= RANGE_WINDOW_BARS:
-                closes = df1m["close"].tolist()[-RANGE_WINDOW_BARS:]
-            atr = getattr(ctx["vol"], "atr_current", None)
-            # v5.6 (SWP.1) — capture the FULL result, not just the vector.
-            # `evidence()` already called `score()` internally, so taking the
-            # result object costs nothing and gives dispatch the per-regime
-            # SETUP SCORES. The sweep gate reads SWEEP_REVERSAL from here
-            # instead of requiring that label to win the L2 argmax.
-            _l1_res  = _l1_scorer.score(ctx["vol"], ctx["trend"],
-                                        ctx["structure"], ctx["liq_map"],
-                                        closes=closes, atr=atr)
-            ctx["l1"] = _l1_res
-            evidence = _l1_res.evidence()
-
-            # ── STR.2 (2026-08-18) — CARRY THE ANGLE TO THE CONSUMER ─────────
-            # ⚠️ FIVE STRATEGIES ALREADY READ `regime.flat_angle_deg` and all
-            # five were taking the default, because RegimeState had no such
-            # attribute. `regime_confluence.flat_angle_deg()` computes it on
-            # every RANGING/COMPRESSION evaluation and drops it into the
-            # breakdown as {"angle": ...} — **computed, recorded in the
-            # evidence, never delivered.** Same shape as `direction_conf`.
-            # ⚠️ THE ANGLE IS A STRUCTURAL READ, not a magnitude one: it is the
-            # slope of the recent window in ATR units, which is the closest
-            # thing collected to "is price going anywhere or just rotating."
-            # That is the class the operator reads charts with and the class the
-            # separation probe has never been able to test.
-            try:
-                _bd_all = _l1_res.breakdown or {}
-                for _k in ("RANGING", "COMPRESSION"):
-                    _a = (_bd_all.get(_k) or {}).get("angle")
-                    if _a is not None:
-                        regime.flat_angle_deg = float(_a)
-                        break
-            except Exception:                                  # noqa: BLE001
-                pass          # telemetry must never break the regime path
-
-            st = _l2_integ.update(now_utc().timestamp(), evidence)
-            # persist the book so a mid-session restart doesn't reset conviction
-            try:
-                _l2_integ.save(_L2_STATE_PATH)
-            except Exception:
-                pass
-            # a warmed, committed label overrides v1.3; an unwarmed/cold book
-            # (stale, or empty label before first real evidence) leaves v1.3 in
-            # place so the open isn't driven by a zero-conviction argmax.
-            if st.regime and not st.stale:
-                l2_label, l2_conv = st.regime, st.conviction
-                regime.primary_regime = st.regime
-                regime.conviction     = st.conviction
-                # v5.0 — remember it, so a stale tick can HOLD rather than fall
-                # back to the un-smoothed classifier.
-                _l2_held["regime"] = st.regime
-                _l2_held["conviction"] = st.conviction
-                _l2_held["since"] = None
-                if _l2_mute.get("why"):          # v4.6 — announce recovery once
-                    logger.info("L2.5 COMMITTING again (%s c=%.2f) — was: %s",
-                                st.regime, st.conviction, _l2_mute["why"])
-                    _l2_mute.clear()
-                # v5.5 — LIVE A/B (RGM.1 F7). conviction_integrator v2.1 runs
-                # BOTH emission laws off the same conviction vector and reports
-                # what the other one would have emitted. Log only on a CHANGE of
-                # the divergence pair, never per tick — a per-tick line is spam,
-                # not observability (WORKING_AGREEMENT §17). Observational: the
-                # shadow gates nothing and is never read to trade.
-                mem_trace.tick(logger)   # MEM.2 — no-op unless OT_MEM_TRACE
-                _ab = (st.regime, st.shadow_regime)
-                if st.shadow_regime and _ab != _l2_ab.get("pair"):
-                    _l2_ab["pair"] = _ab
-                    if st.regime != st.shadow_regime:
-                        logger.info("L2 A/B DIVERGE live=%s shadow=%s "
-                                    "(switches live=%d shadow=%d, armed=%s)",
-                                    st.regime, st.shadow_regime,
-                                    st.switches, st.shadow_switches, st.armed)
-                    else:
-                        logger.info("L2 A/B agree=%s (switches live=%d "
-                                    "shadow=%d)", st.regime, st.switches,
-                                    st.shadow_switches)
-            # ── RGM.6 (2026-08-11) — RESOLVE TO A KNOWN LABEL ────────────────
-            # Operator: "unknown should be virtually eliminated by the time we
-            # freeze layer 1… there should be ways to extrapolate and resolve to
-            # a KNOWN label." The data says the answer is almost always already
-            # in hand: **L1 produces an all-zero tick only 2.4-3.0% of the time**
-            # (regime diary, every session since 07-15), while the v13 fallback
-            # emits UNKNOWN on ~18-19%. So we were discarding an available answer
-            # roughly seven times more often than we were genuinely blind.
-            # v5.0's hold covered STALE ticks only. The other fall-through —
-            # "empty committed label on a WARM book" — went to the v13
-            # classifier, which re-derives from scratch with NO MEMORY and
-            # returns UNKNOWN whenever nothing matches its ladder.
-            # THE LADDER NOW IS: committed L2 -> held incumbent -> L1 ARGMAX
-            # (a low-conviction KNOWN label) -> v13. UNKNOWN is reserved for the
-            # ~2.4% that are genuinely all-zero.
-            # ⚠️ CONVICTION IS CARRIED HONESTLY, NOT INVENTED. A held label
-            # keeps its own conviction; an L1-argmax label carries L1's raw
-            # score, which is BELOW theta_commit by construction — that is the
-            # point. Downstream gates that read conviction (continuation's
-            # floor, condor's plan) therefore see a weak label as weak.
-            # ⚠️ THE TAG CHANGES so this is legible in the logs and countable
-            # later: [L2 c=] committed, [L2-hold c=] incumbent, [L1 c=] argmax,
-            # [v13] the true fallback. Anyone counting [v13] to measure the
-            # fallback rate must know these are now four states, not two.
-            elif st.stale and _l2_held["regime"]:
-                # v5.0 — HOLD THE LAST COMMITTED LABEL. This branch is the whole
-                # fix. Falling through to v1.3 here swapped the SMOOTHER out for
-                # the RAW classifier at exactly the moment the smoother was
-                # unavailable — 436 committed switches vs 695 L1-argmax flips, so
-                # v1.3 is the churn L2 exists to remove. exit_engine checks
-                # regime-flip SECOND, before any price stop, so one wobbled tick
-                # closed the position: measured median hold on regime_flip exits
-                # was 0.8 min, p25 12 SECONDS, against 5-12 min for every other
-                # exit reason.
-                # And the trigger is routine — v4.6's own note: "a tick gap over
-                # dt_max=90s re-stales every tick."
-                # HOLDING IS NOT DECIDING ON UNKNOWN INFORMATION, it is declining
-                # to act on it. The position stays protected the entire time by
-                # everything that reads PRICE — 15:45 hard close, break-of-
-                # structure, trail, stop, max loss — none of which touch the
-                # label. No expiry: a label held for 30 stale minutes costs
-                # nothing, because regime-flip was never what kept the position
-                # safe, it was what closed it early.
-                if _l2_held["since"] is None:
-                    _l2_held["since"] = now_utc()
-                    logger.info("L2.5 STALE — HOLDING %s c=%.2f (was falling back "
-                                "to v1.3 raw argmax, the churn source)",
-                                _l2_held["regime"], _l2_held["conviction"])
-                l2_label = _l2_held["regime"]
-                l2_conv  = _l2_held["conviction"]
-                regime.primary_regime = l2_label
-                regime.conviction     = l2_conv
-            elif _l1_res is not None and RGM6_L1_ARGMAX_FALLBACK:
-                # RGM.6 — no committed label and nothing held: take L1's own
-                # argmax rather than re-deriving from scratch in v13. This is
-                # the "extrapolate to a KNOWN label" rung.
-                try:
-                    _sc = {k: v for k, v in (_l1_res.scores or {}).items()
-                           if isinstance(v, (int, float)) and v > 0.0}
-                except Exception:                      # noqa: BLE001
-                    _sc = {}
-                if _sc:
-                    _top = max(_sc, key=lambda k: _sc[k])
-                    l2_label = _top
-                    l2_conv  = float(_sc[_top])
-                    regime.primary_regime = _top
-                    regime.conviction     = l2_conv
-                    _l1_fallback = True
-                    if _l2_mute.get("why") != "l1-argmax":
-                        _l2_mute["why"] = "l1-argmax"
-                        logger.info(
-                            "L2 not committing — resolving to the L1 ARGMAX "
-                            "%s c=%.2f rather than UNKNOWN. L1 is all-zero on "
-                            "only ~2.4%% of ticks, so a known answer is almost "
-                            "always available.", _top, l2_conv)
-                else:
-                    _l1_fallback = False
-                    logger.info("L2 not committing and L1 is ALL-ZERO — this is "
-                                "the genuinely blind case (~2.4%% of ticks); "
-                                "falling back to v13.")
-
-            else:
-                # v4.6 — THE SILENT GATE, NOW AUDIBLE. Import can be fine and the
-                # integrator can run without raising, yet L2 still not commit,
-                # because `stale` only clears on a FULL evidence vector:
-                #     if all(evidence.get(r) is not None ...): self.stale = False
-                # One perpetually-None dimension therefore pins the book stale
-                # forever and every REGIME line prints [v13] with NOTHING logged.
-                # That is precisely why the 2026-07-29 question "did L2.5 land?"
-                # could not be answered from the logs. Report the REASON, and the
-                # exact dimensions that are missing, throttled so a long stale
-                # stretch is one line per change rather than one per tick.
-                _missing = [r for r in INTEGRATED_REGIMES if evidence.get(r) is None]
-                if st.stale:
-                    _why = ("stale: evidence dims None=" + ",".join(_missing)) if _missing \
-                           else "stale: awaiting a full evidence vector (or post-gap warm-up)"
-                else:
-                    _why = "empty committed label on a warm book"
-
-                # v4.8 — DECLARE THE OPENING GAP AS INTENTIONAL, NOT AS AN ERROR.
-                # RANGING and COMPRESSION are computed on a 25-bar 1-MINUTE window,
-                # and market_data deliberately scopes the 1m frame to the CURRENT
-                # SESSION (OT_FEED_INTRADAY_SCOPE=session) so that window can never
-                # bleed across the overnight gap and fabricate a slope. Therefore
-                # those two dims are legitimately unavailable for the first ~25
-                # minutes of every session — arithmetic, as market_data's own
-                # docstring says, not a fault. v4.6 announced it at WARNING with
-                # "NOT L2.5-grade", which is alarm language for designed behaviour
-                # and fired 13 times fleet-wide at 09:30 on 2026-07-30. A warning
-                # that cries wolf every morning is how real ones get ignored.
-                # The distinction: EXPECTED = only window-dependent dims missing,
-                # and the 1m frame is still filling. Anything else stays a WARNING.
-                _WINDOW_DIMS = {RANGING, COMPRESSION}
-                _bars = 0 if df1m is None else len(df1m)
-                _warming = (bool(_missing)
-                            and set(_missing) <= _WINDOW_DIMS
-                            and _bars < RANGE_WINDOW_BARS)
-                if _l2_mute.get("why") != _why:
-                    if _warming:
-                        logger.info(
-                            "L2.5 warming as designed — %s need a %d-bar 1m window "
-                            "and the frame holds %d (session-scoped by design, never "
-                            "padded across the overnight gap). v1.3 label in use "
-                            "until the window fills.",
-                            "+".join(sorted(_missing)), RANGE_WINDOW_BARS, _bars)
-                    else:
-                        logger.warning(
-                            "L2.5 NOT committing — %s; falling back to the v1.3 "
-                            "label. df_1m=%s. This is NOT the designed opening "
-                            "warm-up: conviction data logged while it persists is "
-                            "not L2.5-grade.", _why,
-                            "None" if df1m is None else _bars)
-                    _l2_mute["why"] = _why
-        except Exception as e:
-            logger.warning("L2.5 integrator step failed (%s) — using v1.3 label", e)
-
-    if regime.primary_regime != state.last_regime_name:
-        # RGM.6 — four states, not two. Anyone counting [v13] to measure the
-        # fallback rate must know that.
-        if l2_label and _l1_fallback:
-            engine_tag = f" [L1 c={l2_conv:.2f}]"
-        elif l2_label and _l2_held.get("since") is not None:
-            engine_tag = f" [L2-hold c={l2_conv:.2f}]"
-        elif l2_label:
-            engine_tag = f" [L2 c={l2_conv:.2f}]"
-        else:
-            engine_tag = " [v13]"
-        logger.info(
-            f"REGIME: {state.last_regime_name} → {regime.primary_regime} "
-            f"(conviction={regime.conviction:.2f} trigger={trigger}){engine_tag}"
-        )
-        get_alert_manager().send_regime_alert(
-            old_regime = state.last_regime_name,
-            new_regime = regime.primary_regime,
-            conviction = regime.conviction,
-            notes      = regime.notes
-        )
-        get_trade_logger().log_regime(
-            regime        = regime.primary_regime,
-            conviction    = regime.conviction,
-            macro_context = ctx["macro"].macro_context if ctx["macro"] else "NEUTRAL",
-            adx           = regime.adx,
-            trigger       = trigger,
-            # v4.8 — PROVENANCE IN THE ROW, not just in a bot.log tag. Which
-            # engine produced this label was previously recoverable only by
-            # grepping [L2 c=..]/[v13] out of the log, which is how "has L2.5
-            # ever committed?" became a 29-box, 138k-line archaeology exercise
-            # on 2026-07-30. It also makes the designed v1.3 opening window
-            # excludable from L2-conditioned fits by a WHERE clause.
-            engine        = "L2" if l2_label else "v13"
-        )
-
-    state.last_regime_name = regime.primary_regime
-    state.current_regime   = regime
     return regime
-
-
-# ── Entry snapshot (v5.1) — log-only capture, one place, both entry paths ─────
-_snapshot_warned: set = set()
-_contract_warned: set = set()   # reason -> logged once per process (§17 idiom)
 
 
 def _capture_entry_contract(ctx: dict, record: dict) -> bool:
@@ -2099,13 +1854,11 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
         ORB_FIRES_REGARDLESS_OF_REGIME and _orb_ctx is not None
         and getattr(_orb_ctx, "state", None) in (ORBState.OPEN_LONG,
                                                  ORBState.OPEN_SHORT))
-    if _l2_integ is not None and getattr(_l2_integ, "stale", False):
-        if not _orb_exempt:
-            logger.info("Entry blocked: regime book is STALE — waiting for a tick "
-                        "that resolves it. (Open positions keep being managed.)")
-            return
-        logger.info("STALE book, but ORB is CONFIRMED — proceeding. ORB reads no "
-                    "regime label (defect V); price is not stale, the book is.")
+    # v4.0: the stale-book entry guard is gone with the book. There is no
+    # integrator to go stale, so this can never fire. ORB was already exempt
+    # from it - it reads no regime label at all, which is why it kept trading
+    # through v3's stale-book stalls and is the one strategy with a positive
+    # record.
 
 
     # ── Fetch options chain (shared across strategies) ────────────────────────
@@ -2820,7 +2573,7 @@ def main_loop(state: BotState):
             # off-schedule reassessment tag for the logs.
             loss_reassess = get_risk_manager().consume_reassess_request()
             trigger = "loss_limit" if loss_reassess else "scheduled"
-            regime = run_regime_classification(ctx, trigger, state)
+            regime = assemble_market_state(ctx, trigger, state)
 
             if regime is None:
                 time.sleep(POLL_INTERVAL_SECONDS)
@@ -2908,8 +2661,8 @@ def main_loop(state: BotState):
                 # the existing "do not judge on regime" signal every one of
                 # those three branches already honours; price-based exits are
                 # untouched and keep protecting the position.
-                _rgm_stale = (_l2_integ is not None
-                              and getattr(_l2_integ, "stale", False))
+                # v4.0: no integrator, no book, never stale.
+                _rgm_stale = False
                 pos_mgr.manage_open_position(
                     chain=ctx.get("chain"),
                     df_1m=ctx.get("df_1m"),
@@ -3421,14 +3174,9 @@ def main():
     # lesson). If the snapshot is stale/absent, load() returns False and the
     # book stays cold — the first few ticks re-warm it, and stale=True keeps it
     # from driving the gate until warmed (see run_regime_classification).
-    if _REGIME_ENGINE == "l2" and _L2_OK:      # v4.7 — value is .lower()ed
-        try:
-            ok = _l2_integ.load(_L2_STATE_PATH, now_utc().timestamp())
-            logger.info("L2.5 integrator book %s (engine=%s)",
-                        "reloaded from snapshot" if ok else "cold-start",
-                        _REGIME_ENGINE)
-        except Exception as e:
-            logger.warning("L2.5 book load failed (%s) — cold-start", e)
+    # v4.0: no integrator book to reload at startup. v3 persisted conviction
+    # across restarts so a mid-session bake did not reset it; there is nothing
+    # to persist now.
 
     # Pre-fetch macro data
     logger.info("Fetching macro data...")

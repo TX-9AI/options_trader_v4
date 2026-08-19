@@ -146,3 +146,41 @@ reason. Remove when the last importer reads `MarketState` directly.
 - Split `trend_engine`: ADX and the EMA stack are primitives v4 wants; the
   `direction` vote measured **34.2% on puts** and must stay DESCRIPTIVE.
 - `main.py` deep clean — the regime gates in the dispatch path.
+
+---
+
+## UPDATE — 2026-08-19, Phase 0.3 part 2: the L2 stack is out of `main.py`
+
+**`run_regime_classification` → `assemble_market_state`.** 17,177 characters of
+classification and Layer-2 override replaced by a ~60-line assembler that
+**classifies nothing**: it gathers adx, atr, bb width, trend direction,
+structure sequence, sweep age, vix regime and flat angle into one `MarketState`.
+**Those facts were always the useful part; the label was the part that failed.**
+
+⚠️ **`main.py` IMPORTED CLEANLY WHILE BEING RUNTIME-BROKEN.** After the
+`regime_classifier` cut, line 757 imported the types from `market_state` while
+line 1167 still called `get_regime_classifier()` — a function that no longer
+existed anywhere. `import main` passed the entire time. **That is the `ctx`
+NameError of 2026-08-18 in a different costume**, and it is why WA §21 exists:
+tests must EXECUTE the path. `assemble_market_state` is now executed against a
+synthetic ctx, not merely imported.
+
+⚠️ **AND THE L2 BLOCK WAS ALREADY DEAD BEFORE IT WAS REMOVED.** The v3 import sat
+in a `try/except` setting `_L2_OK`; at the split the except branch became
+permanent, so `_l1_scorer` and `_l2_integ` were always `None` and every block
+gated on them was unreachable code that still had to be read and reasoned about.
+Four such sites are now cut: the entry stale-book guard, the `_rgm_stale`
+computation, the startup book reload, and the engine-announce line.
+
+**The five remaining mentions in `main.py` are comments explaining the removal.**
+No live code.
+
+**`primary_regime` is now honestly `UNKNOWN`** until a structure-first label
+exists (Phase 4.1). An honest UNKNOWN beats a number nobody should trust.
+
+### STILL TO DO IN PHASE 0.3
+- The remaining `conviction` reads outside `main.py` — strategies, setup_scorer,
+  shadow/observer.
+- Split `trend_engine`: ADX and the EMA stack stay; the `direction` vote
+  measured **34.2% on puts** and must remain DESCRIPTIVE.
+- `tests/check_imports.py` is now a tool the land gate can call by name (§19).
