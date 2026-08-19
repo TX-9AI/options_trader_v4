@@ -76,6 +76,15 @@ def _split_py(text):
             break
     if q is None:
         return [], lines
+    # A docstring may OPEN AND CARRY CONTENT ON THE SAME LINE:
+    #   """shadow/trading_day.py v1.0 - standalone trading-day check
+    # If the closing quote is also on that line it is a one-liner; otherwise the
+    # scan must start BELOW it. Starting at the opening line matched the opener
+    # itself, cut the header one line early, and left prose outside the
+    # docstring - two files stopped parsing. The write-verification caught it;
+    # nothing shipped.
+    if lines[i].count(q) >= 2:
+        return lines[:i + 1], lines[i + 1:]
     for k in range(i + 1, len(lines)):
         if q in lines[k]:
             return lines[:k + 1], lines[k + 1:]
@@ -172,6 +181,32 @@ DESCRIPTIONS = {
     "configure.sh": "Per-box configuration.",
     "harden_hosts.sh": "Host hardening for a fleet box.",
     "check_versions.sh": "Header/canary/parity verification before shipping.",
+    # --- ROUND 2: files omitted from the first manifest ------------------
+    # ⚠️ THE FIRST MANIFEST WAS BUILT FROM THE DESCRIPTIONS DICT, so anything
+    # not described simply did not port - silently, with nothing erroring.
+    # 25 files were missing including `main.py` and `config.py`: an entry point
+    # and every constant. The canary rebuild found it on its first look, which
+    # is the argument for building the canary before trusting the port.
+    "main.py": "Tick loop, context assembly, strategy dispatch. GATES STRIPPED - see ROADMAP Phase 2.",
+    "config.py": "Every constant, threshold and env override.",
+    "notifications/alert_manager.py": "Alert routing and de-duplication.",
+    "notifications/telegram_sender.py": "Telegram delivery.",
+    "shadow/observer.py": "Shadow observer: records primitives without trading them.",
+    "shadow/primitives.py": "Velocity and tick-stream primitives for the observer.",
+    "shadow/registry.py": "Registry of shadow primitives and their gates.",
+    "shadow/scorers.py": "Post-mortem scoring surface for observed entries.",
+    "shadow/eod_compare.py": "End-of-day comparison of shadow vs live.",
+    "shadow/trading_day.py": "Session-boundary helper for the observer.",
+    "query.py": "Ad-hoc trade and store queries.",
+    "status.py": "Box status summary.",
+    "debug_status.py": "Verbose diagnostic status dump.",
+    "eod_summary.py": "End-of-day per-box summary.",
+    "devtools.sh": "Control-side service menu.",
+    "snapshot.sh": "Snapshots a directory into a repo-ready tarball.",
+    "push.sh": "Pushes the control checkout to GitHub.",
+    "pull_today_ohlc.sh": "Pulls the current session's OHLC from a box.",
+    "eod_bot.sh": "End-of-day bot wrapper.",
+    "stress_theta_bleed.py": "Stress harness for the theta-bleed exit.",
 }
 
 
@@ -235,6 +270,16 @@ def _preserve_header(header, rel, is_py):
     for ln in header:
         raw = ln.strip().lstrip("#").strip()
         if not raw or raw in (TRIPLE_D, TRIPLE_S):
+            continue
+        # A preserved line may still CARRY its opening triple-quote:
+        #     """shadow/trading_day.py v1.0 - standalone trading-day check
+        # Kept verbatim it closes the new docstring early and dumps the rest of
+        # the doctrine into the module as bare prose - two files stopped
+        # parsing. Strip the quotes, keep the words.
+        for _q in (TRIPLE_D, TRIPLE_S):
+            raw = raw.replace(_q, "")
+            ln = ln.replace(_q, "")
+        if not raw.strip():
             continue
         if set(raw) <= set("=-_ "):
             continue
