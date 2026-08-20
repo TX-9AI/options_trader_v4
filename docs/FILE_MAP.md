@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-96 Python modules across 11 local packages.
+97 Python modules across 11 local packages.
 
 ## Fan-in leaderboard - widest blast radius
 
@@ -179,6 +179,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/limit_ladder.py`, `execution/order_confirm.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/setup_scorer.py`, `strategy/base_strategy.py`, `utils/time_utils.py`
 - **called by:** `main.py`
 
+### `execution/entry_ladder.py`
+- **calls:** `execution/tick_size.py`
+- **called by:** (nothing - orphan or leaf)
+
 ### `execution/exit_engine.py`
 - **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/limit_ladder.py`, `notifications/alert_manager.py`, `strategy/structure.py`, `utils/time_utils.py`
 - **called by:** `analysis/entry_snapshot.py`, `execution/position_manager.py`, `strategy/condor_roll.py`, `stress_theta_bleed.py`
@@ -201,7 +205,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/tick_size.py`
 - **calls:** `config.py`
-- **called by:** `data/options_chain.py`, `execution/limit_ladder.py`
+- **called by:** `data/options_chain.py`, `execution/entry_ladder.py`, `execution/limit_ladder.py`
 
 ### `main.py`
 - **calls:** `analysis/__init__.py`, `analysis/chain_snapshot.py`, `analysis/entry_snapshot.py`, `analysis/gap_measure.py`, `analysis/level_grade.py`, `analysis/liquidity_ledger.py`, `analysis/liquidity_mapper.py`, `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/pitchfork_observer.py`, `analysis/signal_journal.py`, `analysis/structure_analyzer.py`, `analysis/trade_readiness.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `config.py`, `data/data_cache.py`, `data/gex_data.py`, `data/macro_data.py`, `data/market_data.py`, `data/options_chain.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/limit_ladder.py`, `execution/order_confirm.py`, `execution/position_manager.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `risk/setup_scorer.py`, `strategy/base_strategy.py`, `strategy/butterfly_strategy.py`, `strategy/condor_roll.py`, `strategy/continuation_strategy.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `strategy/sweep_reversal_strategy.py`, `strategy/trend_credit_spread.py`, `utils/__init__.py`, `utils/blindness_latch.py`, `utils/mem_trace.py`, `utils/time_utils.py`

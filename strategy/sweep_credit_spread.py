@@ -66,6 +66,7 @@ sells a boundary that has already rejected price once.
 """
 
 import logging
+import math
 from typing import Optional
 
 import config
@@ -146,6 +147,44 @@ ATR_MAX_PCT = getattr(config, "SWEEP_CS_ATR_MAX_PCT", 0.20)
 # turned -$242.77 into -$8.43. A credit vertical is EARNING from decay; closing
 # it early buys back the theta it was opened to collect.
 MAX_LOSS_PCT = getattr(config, "SWEEP_CS_MAX_LOSS_PCT", 0.15)
+
+
+def pierced_strike(sweep_price: float, pool_price: float, ceiling: bool,
+                   increment: float) -> Optional[float]:
+    """The NEAREST STRIKE PRICE ACTUALLY PIERCED. Operator's rule, 2026-08-20.
+
+    Not the pool level - the nearest strike price traded THROUGH on the sweep.
+    Ceiling: pool 600, price ran to 601.20, retreated to 599.50 -> sell the 601.
+    Floor: mirrored downward.
+
+    WHY THIS AND NOT THE POOL. The pierce high is FURTHER from current price
+    than the pool is, so the short strike sits further out: less credit, more
+    room. **With a 15% stop that is the correct side to err on** - the position
+    is threatened only if price returns all the way to a level it already
+    visited and failed at, rather than merely back to the boundary.
+
+    ⚠️ ON A SHALLOW PIERCE THE STRIKE COLLAPSES TO THE POOL, and that is
+    correct rather than a special case: if price ran to 600.30 with $1 strikes,
+    the nearest strike it actually pierced IS the 600. The rule degrades to
+    "sell the boundary" exactly when the pierce was too small to clear another
+    strike, which is the same trade the boundary framing describes.
+
+    Returns None when the sweep cleared NO strike - price poked past the pool
+    without reaching a strike price. There is nothing to sell, and inventing a
+    strike here would sell a level that was never tested.
+    """
+    if not sweep_price or not pool_price or increment <= 0:
+        return None
+    if ceiling:
+        # highest strike at or below the sweep extreme, and at/above the pool
+        k = math.floor(sweep_price / increment) * increment
+        if k < pool_price:
+            return None
+        return round(k, 4)
+    k = math.ceil(sweep_price / increment) * increment
+    if k > pool_price:
+        return None
+    return round(k, 4)
 
 
 def boundary_from_sweep(kind: str) -> Optional[tuple]:
@@ -264,7 +303,15 @@ class SweepCreditSpreadStrategy:
         )
         # the swept pool IS the short strike anchor; strike selection resolves
         # it against the live chain increment.
-        sig.short_anchor = pool
+        # ⚠️ THE SHORT STRIKE IS THE NEAREST STRIKE PIERCED, NOT THE POOL.
+        # Falls back to the pool when the sweep cleared no further strike -
+        # which IS the pool on a shallow pierce, by construction.
+        _inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
+        _swept_px = float(getattr(sweep, "sweep_price", 0.0) or 0.0)
+        _ps = pierced_strike(_swept_px, pool, boundary == "ceiling", _inc)
+        sig.short_anchor = _ps if _ps is not None else pool
+        sig.pierced_strike = _ps
+        sig.pool_price = pool
         sig.boundary = boundary
         sig.swept_level_name = name
         sig.sweep_age_bars = age
@@ -272,7 +319,9 @@ class SweepCreditSpreadStrategy:
         sig.atr_pct_at_entry = atr_pct
         sig.max_loss_pct = MAX_LOSS_PCT      # 15%, tighter than the fleet 0.25
 
-        logger.info("[sweep_cs] FIRE  %s swept -> %s at %.2f  %s credit spread "
-                    "(age %d bars, rejection %.3f%%)",
-                    name, boundary, pool, side.upper(), age, rej * 100.0)
+        logger.info("[sweep_cs] FIRE  %s swept -> %s  short %.2f (pool %.2f, "
+                    "pierced to %.2f)  %s credit spread  age %d bars  "
+                    "rejection %.3f%%",
+                    name, boundary, sig.short_anchor, pool, _swept_px,
+                    side.upper(), age, rej * 100.0)
         return sig
