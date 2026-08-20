@@ -39,7 +39,35 @@ project has already been bitten by a stand-in that was never labelled as one:
 `oi_proxy = 1000 * gamma` made GEX a gamma-squared surface for the life of v3
 because nothing ever said "this is not real data".
 
-**2. IT RELAXES SELECTION, NEVER FEASIBILITY.**
+**2. THREE CATEGORIES OF GATE, AND THE TOGGLE ONLY EVER TOUCHES THE FIRST.**
+Operator, 2026-08-20: *"some of the parts of the setups are requirements and
+cannot be relaxed because they are foundational."* That is a THIRD category, not
+a synonym for feasibility, and collapsing them loses the distinction that makes
+this toggle safe:
+
+  **SELECTION**    - measured preferences. The window, the depth band, the age,
+                     the distance. Loosening these produces a WORSE example of
+                     the same trade, which is exactly what a debug session
+                     wants. **Relaxable.**
+  **FOUNDATIONAL** - the conditions that define the setup's IDENTITY. Relax one
+                     and it stops being this trade at all:
+                       · sweep spread - a NAMED pool, RECLAIMED, NOT invalidated,
+                         price already on the profitable side of the boundary
+                       · runaway      - the 50% TP level HELD
+                       · butterfly    - PINNING, with the apex ON the pin
+                     Relax the reclaim and you are selling into a level price is
+                     still through - not a loose version of the setup, **a
+                     different and much worse one.** **NEVER.**
+  **FEASIBILITY**  - the vetoes that make a trade unwinnable regardless of how
+                     good it looks. **NEVER.**
+
+⚠️ EVERY STRATEGY MUST DECLARE ALL THREE IN ITS HEADER. A reader - or an
+adversarial audit - should see which gate is which without reverse-engineering
+it from which ones happen to be wrapped in `relaxed.widen()`. A new strategy
+whose author has not made the distinction is a new strategy that will relax
+something foundational.
+
+**AND ON FEASIBILITY SPECIFICALLY:**
 Some gates say *"this setup is not ideal"*. Others say *"this trade CANNOT
 WIN"*. Only the first kind may be relaxed.
 ⚠️ THE ATR FLOOR IS NOT NEGOTIABLE. `tests/magnitude_estimator.py`, 52,949 bars:

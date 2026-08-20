@@ -68,6 +68,28 @@ across 85 trades is sixteen dollars.
 trail NEVER ENGAGED. Fleet-wide `max_loss_floor` was 76 trades and -$28,179.
 **Trails make money; floors lose it.** Anything that delays the trail arming is
 a defect, not a conservatism.
+
+════════════════════════════════════════════════════════════════════════════
+GATE CATEGORIES — required by WA §36. Only SELECTION is ever relaxed.
+════════════════════════════════════════════════════════════════════════════
+**FOUNDATIONAL — never relaxed.**
+  · the ORB ran to its 50% TP and **HELD** it - a 1m CLOSE beyond, still on the
+    right side at the next tick. **This is the entire premise: the move is in
+    EVIDENCE, not forecast.** Without it there is no runaway, only an ORB and a
+    guess - and a guess is what four independent searches found no basis for.
+  · direction comes from the ORB state, never from a prediction.
+
+**SELECTION — relaxed.**
+  · cutoff 11:30 -> 14:00. Later entries carry more theta risk on a 0DTE
+    contract but the setup is still the setup.
+
+**FEASIBILITY — never relaxed.**
+  · the ATR floor. Below **0.05% ATR the required move was reached on 0% of
+    5,517 measured bars** - not rarely, not once. A trade fired there cannot pay
+    regardless of entry quality, teaches nothing about stops, and only adds
+    noise to the log the relaxed mode exists to read.
+  · the ATR->delta map itself. A strike the tape cannot reach is not a cheaper
+    trade, it is a lottery ticket.
 """
 
 import logging
@@ -91,6 +113,22 @@ CUTOFF_ET = getattr(config, "RUNAWAY_CUTOFF_ET", "11:30")
 # reaches 0.20-0.35 on 60% of bars; at 0.20%+ it reaches 0.35-0.50 on 85%.
 DELTA_NEAR = getattr(config, "RUNAWAY_DELTA_NEAR", 0.25)
 DELTA_DEEP = getattr(config, "RUNAWAY_DELTA_DEEP", 0.40)
+
+# ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
+GATES = {
+    "CUTOFF_ET":          "SELECTION",
+    # FEASIBILITY - below 0.05% ATR the required move was reached on 0% of
+    # 5,517 measured bars. Not rarely. Not once.
+    "ATR_FLOOR_PCT":      "FEASIBILITY",
+    "ATR_HARD_VETO_PCT":  "FEASIBILITY",
+    "ATR_DEEP_PCT":       "FEASIBILITY",
+    "DELTA_NEAR":         "FEASIBILITY",
+    "DELTA_DEEP":         "FEASIBILITY",
+    # FOUNDATIONAL: the 50% TP HELD, and direction taken from the ORB state.
+    # ⚠️ A GATE CAN BE PERFECTLY WINNABLE AND STILL BE FOUNDATIONAL - relaxing
+    # the held TP would produce plenty of fills, every one an ORB plus a guess.
+    # Tested inline, with no knob.
+}
 
 
 def target_delta(atr_pct: float) -> Optional[float]:

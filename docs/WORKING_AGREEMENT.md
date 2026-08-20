@@ -659,3 +659,60 @@ the cheaper cost.
 **A GENESIS THAT ONLY LISTS SUCCESSES IS A MARKETING PAGE.** The corrections are
 the part with the knowledge in it, and they are the first thing that will
 quietly stop being maintained. They do not get dropped.
+
+## 36. EVERY STRATEGY DECLARES ITS GATES IN THREE CATEGORIES.
+Added 2026-08-20, operator's instruction.
+
+Every strategy header carries a **GATE CATEGORIES** block naming each of its
+conditions as one of:
+
+**SELECTION** — measured preferences. Window, depth band, age, distance.
+Loosening one produces a WORSE example of the same trade, which is exactly what
+a debug session wants. **Relaxable.**
+
+**FOUNDATIONAL** — the conditions that define the setup's IDENTITY. *"Some of
+the parts of the setups are requirements and cannot be relaxed because they are
+foundational."* Relax the sweep's reclaim and you are selling into a level price
+is still through — **not a loose version of the setup, a different and much
+worse one.** **NEVER RELAXED.**
+
+**FEASIBILITY** — the vetoes that make a trade unwinnable however good it looks.
+Below 0.05% ATR the required move was reached on **0% of 5,517 measured bars**.
+**NEVER RELAXED.**
+
+⚠️ **FOUNDATIONAL IS NOT A SYNONYM FOR FEASIBILITY AND COLLAPSING THEM LOSES THE
+POINT.** Feasibility says *"this cannot pay"*. Foundational says *"this is not
+that trade"*. A gate can be perfectly winnable and still be foundational — the
+runaway's held 50% TP would produce plenty of fills if relaxed, and every one of
+them would be an ORB plus a guess.
+
+⚠️ **THE DECLARATION IS FOR THE READER AND THE AUDIT, NOT FOR THE CODE.** Before
+this rule the relaxed behaviour could only be inferred from which gates happened
+to be wrapped in `relaxed.widen()` — scattered across three files with nothing
+stating the intent. **A new strategy whose author never made the distinction is
+a new strategy that will relax something foundational**, and it will look
+reasonable in review.
+
+**THE DECLARATION IS DATA, NOT PROSE.** Each strategy carries a module-level
+`GATES` dict mapping every gate constant to its category, and
+`tests/check_gates.py` reads the CODE: it refuses any `relaxed.widen()` or
+`relaxed.window()` call on a constant not marked SELECTION. Verified by
+deliberately relaxing a FEASIBILITY gate and watching it fail.
+
+⚠️ **A DOCSTRING CHECK WAS THE FIRST VERSION AND IT WAS THEATRE.** It asserted
+the WORDS appeared in a header — which proves somebody wrote the right words,
+not that the code respects them. It also asserted on exact source strings, the
+brittleness §21 warns about.
+
+⚠️ **AND IT IS A PLAIN SCRIPT WITH AN EXIT CODE, NOT A PYTEST FILE.** The first
+version broke the land command on the box — **not because the code was wrong but
+because the active venv had no pytest.** A verification that goes red on
+ENVIRONMENT rather than CONTENT teaches the operator to ignore reds, which is
+precisely the CV.1 failure. `check_imports.py` and `gen_file_map.py` run
+anywhere; this one was the odd one out and it was the one that broke.
+
+⚠️ **THE BEST FOUNDATIONAL GATE HAS NO KNOB AT ALL.** In all three strategies
+the foundational conditions — the named pool and its reclaim, the held 50% TP,
+PINNING with the apex on the pin — are tested inline against no constant. There
+is nothing to pass to `relaxed.widen()`, so they cannot be loosened even by
+mistake.

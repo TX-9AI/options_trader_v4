@@ -63,6 +63,29 @@ never win an argmax regardless of evidence.
 ⚠️ AND NO REGIME LABEL IS READ ANYWHERE. Four independent searches found no
 directional predictor in this data. This rule does not predict a direction; it
 sells a boundary that has already rejected price once.
+
+════════════════════════════════════════════════════════════════════════════
+GATE CATEGORIES — required by WA §36. Only SELECTION is ever relaxed.
+════════════════════════════════════════════════════════════════════════════
+**FOUNDATIONAL — never relaxed. Relax one and this stops being the trade.**
+  · the pool is NAMED. An unnamed swing high is not a liquidity pool; the name
+    is what makes it a level other participants are watching.
+  · it RECLAIMED - a bar CLOSED back inside. **A wick through a level is a
+    touch, not a decision.** Without the reclaim there is no boundary, only a
+    level price is currently through.
+  · it is NOT INVALIDATED. Reclaimed-then-accepted-through is a BREAKOUT, and
+    selling a boundary that has already given way is the worst version of this.
+  · price is ALREADY on the profitable side. Otherwise the spread opens tested.
+
+**SELECTION — relaxed, and each was measured on 2,169 sweep events.**
+  · window 13:00-15:00  -> 09:45-15:30   (39% survival vs 26% before 10:30)
+  · pierce ceiling 0.25% -> 0.75%        (33-34% survival vs 19-21% deeper)
+  · max age 6 bars      -> 18 bars       (age is measured from the RECLAIM)
+
+**FEASIBILITY — never relaxed.**
+  · ATR <= 0.20%. Above 0.20% the tape produced a 0.5% move on **92% of 90-bar
+    windows** - a boundary does not hold in that, so the trade cannot win no
+    matter how clean the setup looks.
 """
 
 import logging
@@ -148,6 +171,28 @@ ATR_MAX_PCT = getattr(config, "SWEEP_CS_ATR_MAX_PCT", 0.20)
 # turned -$242.77 into -$8.43. A credit vertical is EARNING from decay; closing
 # it early buys back the theta it was opened to collect.
 MAX_LOSS_PCT = getattr(config, "SWEEP_CS_MAX_LOSS_PCT", 0.15)
+
+# ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
+# ⚠️ CHECKED BY `tests/check_gates.py`, WHICH READS THE CODE. The prose block in
+# the header explains WHY each gate is what it is; this dict is what makes the
+# rule enforceable - the checker refuses any `relaxed.widen()` or
+# `relaxed.window()` call on a constant not marked SELECTION.
+GATES = {
+    # SELECTION - measured preferences. A looser one gives a WORSE example of
+    # the same trade, which is what a debug session wants.
+    "EARLIEST_ET":        "SELECTION",
+    "LATEST_ET":          "SELECTION",
+    "MAX_REJECTION_PCT":  "SELECTION",
+    "MAX_AGE_BARS":       "SELECTION",
+    "MIN_REJECTION_PCT":  "SELECTION",
+    # FEASIBILITY - above 0.20% ATR the tape produced a 0.5% move on 92% of
+    # 90-bar windows. A boundary does not hold in that.
+    "ATR_MAX_PCT":        "FEASIBILITY",
+    # FOUNDATIONAL conditions are not constants - they are the named pool, the
+    # reclaim, the non-invalidation and price being on the profitable side, all
+    # tested inline. **They have no knob to relax, which is the safest form a
+    # foundational gate can take.**
+}
 
 
 def pierced_strike(sweep_price: float, pool_price: float, ceiling: bool,

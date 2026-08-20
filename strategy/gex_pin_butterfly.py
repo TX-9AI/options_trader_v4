@@ -76,6 +76,48 @@ short-vol reasoning. This trade needs price to TRAVEL to the pin and then sit -
 closer to the runaway's requirement than to a short-vol one. The expected-move
 band already encodes reachability using the chain's own volatility estimate,
 which is a better instrument than an ATR proxy for the same question.
+
+════════════════════════════════════════════════════════════════════════════
+GATE CATEGORIES — required by WA §36. Only SELECTION is ever relaxed.
+════════════════════════════════════════════════════════════════════════════
+**FOUNDATIONAL — never relaxed.**
+  · `gex_environment == PINNING`. Without a pin there is no magnet and this is
+    an arbitrary OTM butterfly.
+  · the apex sits ON the pin. Centring anywhere else is a different trade -
+    v3's `butterfly_strategy` centres on SPOT, and that is the duplicate this
+    file exists to replace.
+  · the pin is OTM. An ATM apex is v4.0's mistake: it pays for a move that has
+    already happened and discards the asymmetry that justifies the structure.
+
+**SELECTION — relaxed.**
+  · pin concentration 0.25 -> 0.15 floor 0.10. ⚠️ RELAXED WITH RELUCTANCE: at
+    the far edge of the expected move the trade RELIES on the magnet pulling
+    price. **A weak pin far away is the worst cell in the matrix.** It is
+    selection rather than foundational only because a weak pin still IS a pin.
+  · window 11:00-15:00 -> 09:45-15:30.
+  · EM ceiling 1.00 -> 1.30.
+
+**FEASIBILITY — never relaxed.**
+  · no ATM IV means **no trade**, not a fallback. The whole distance band is
+    expressed in expected moves; guessing one would put the trade's central
+    gate on a number nobody measured.
+  · the EM floor at 0.30. Nearer than that the debit is expensive and the payoff
+    ratio poor - **the asymmetry IS the trade**, and without it there is no
+    reason to prefer this structure over anything else.
+
+⚠️ AND THIS STRATEGY IS RARE BY DESIGN, WHICH IS AN OPPORTUNITY-COST QUESTION
+RATHER THAN A DEFECT. It needs a strong pin far from spot - most likely near
+monthly expiration, when real positioning sits at a strike rather than a single
+day's worth. **It costs nothing while it waits**: no position slot, no capital,
+no competition with the other setups. The only real cost is maintenance
+attention, and a strategy that fires rarely is one whose plumbing is rarely
+exercised - which is what the relaxed toggle is for.
+⚠️ ITS EVIDENCE WILL BE STRUCTURAL, NOT STATISTICAL. A handful of fills a month
+will never accumulate what the sweep spread got from 2,169 events. The test is
+**"when it fires, does the payoff justify having kept it?"** - answerable on a
+small sample in a way a win rate is not. That is a weaker footing than the sweep
+spread has and it should be said before it goes live, not after a small sample
+looks encouraging.
 """
 
 import logging
@@ -99,6 +141,24 @@ EM_MIN_FRAC = getattr(config, "GEX_BFLY_EM_MIN_FRAC", 0.30)
 EM_MAX_FRAC = getattr(config, "GEX_BFLY_EM_MAX_FRAC", 1.00)
 EARLIEST_ET = getattr(config, "GEX_BFLY_EARLIEST_ET", "11:00")
 LATEST_ET = getattr(config, "GEX_BFLY_LATEST_ET", "15:00")
+
+# ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
+GATES = {
+    "EARLIEST_ET":   "SELECTION",
+    "LATEST_ET":     "SELECTION",
+    "EM_MAX_FRAC":   "SELECTION",
+    # ⚠️ SELECTION WITH RELUCTANCE. At the far edge of the expected move the
+    # trade RELIES on the magnet pulling price, so a weak pin far away is the
+    # worst cell in the matrix. It is selection only because a weak pin is
+    # still a pin.
+    "PIN_CONC_MIN":  "SELECTION",
+    # FEASIBILITY - nearer than this the debit is expensive and the payoff ratio
+    # poor. **The asymmetry IS the trade**; without it there is no reason to
+    # prefer this structure over anything else.
+    "EM_MIN_FRAC":   "FEASIBILITY",
+    # FOUNDATIONAL: PINNING, the apex ON the pin, and the pin OTM. Tested
+    # inline - no knob.
+}
 
 
 def expected_move(underlying: float, atm_iv: float, now=None) -> Optional[float]:
