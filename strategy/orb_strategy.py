@@ -127,7 +127,14 @@ class ORBStrategy(BaseOptionsStrategy):
             # ── ORB range boundaries for strategy-aware exit ──────────────────
             orb_range_high    = orb.orb_high,
             orb_range_low     = orb.orb_low,
-            regime            = regime.primary_regime,
+            # v4.0: PURE MECHANICAL. ORB never asked the regime for permission
+            # - which is exactly why it kept working while every gated strategy
+            # degraded, and why it is the one v3 strategy with a positive
+            # record (orb_trail_stop 96% / 85 trades / +$30,696, worst -$16).
+            # The label is no longer stamped: writing one the engine did not
+            # compute puts a fabricated field on the trade record where a
+            # reader will take it for an observation.
+            regime            = Regime.UNKNOWN,
             vix_at_signal     = macro.vix,
             is_fed_day        = macro.is_fed_day,
             stop_loss_pct     = MAX_LOSS_PCT,
@@ -151,9 +158,10 @@ class ORBStrategy(BaseOptionsStrategy):
         elif direction == "short" and vol_state.price_vs_vwap == "BELOW":
             self._add_confluence(signal, "Below VWAP — bearish bias")
 
-        if (direction == "long"  and regime.primary_regime == Regime.TRENDING_BULL) or \
-           (direction == "short" and regime.primary_regime == Regime.TRENDING_BEAR):
-            self._add_confluence(signal, f"Regime aligned ({regime.primary_regime})")
+        # v4.0: the regime-agreement confluence note is gone. It added no
+        # conviction and gated nothing, but `primary_regime` is permanently
+        # UNKNOWN so it could never fire - and a dead branch reads as a live
+        # one to anyone auditing this file.
 
         if liq_result["path_clear"]:
             self._add_confluence(signal, "Liquidity path clear to target")
@@ -176,7 +184,14 @@ class ORBStrategy(BaseOptionsStrategy):
             )
             signal.conviction += FED_DAY_ORB_BOOST
 
-        signal.conviction += regime.conviction * 0.7
+        # v4.0: `regime.conviction` is gone from the decision. It was
+        # confirmatory by construction - a leaky integrator over argmax
+        # agreement is only confident once winning has already persisted - and
+        # it is permanently 0.0 in v4, so this line added nothing while looking
+        # like it added something.
+        # ⚠️ THE REMAINING `signal.conviction` ADDITIONS ARE STRUCTURAL FACTS
+        # (a named level in the break, a Fed day), not a regime score. They
+        # describe the setup; they do not authorise it.
         signal.adx_at_signal = regime.adx
         signal.flat_angle_deg = getattr(regime, 'flat_angle_deg', 0.0) or 0.0
 

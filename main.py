@@ -824,7 +824,6 @@ if TYPE_CHECKING:                     # v4.9 — resolves the quoted annotation 
                                       # cost and lets the undefined-name gate
                                       # run at ZERO tolerance instead of one.
 from strategy.orb_strategy import ORBStrategy
-from strategy.sweep_reversal_strategy import SweepReversalStrategy
 from config import SWEEP_SETUP_FLOOR
 from utils import mem_trace          # MEM.2 — in-process tracemalloc, env-gated
 
@@ -834,10 +833,8 @@ from utils import mem_trace          # MEM.2 — in-process tracemalloc, env-gat
 # undefined-name gate caught exactly that on the first attempt.
 # No-op unless OT_MEM_TRACE is set; tracemalloc is not imported otherwise.
 mem_trace.start(logger)
-from strategy.butterfly_strategy import ButterflyStrategy
 from strategy.iron_condor_strategy import IronCondorStrategy
 from strategy.trend_credit_spread import TrendCreditSpread
-from strategy.continuation_strategy import ContinuationStrategy
 
 from risk.risk_manager import init_risk_manager, get_risk_manager
 from risk.setup_scorer import get_setup_scorer
@@ -855,15 +852,12 @@ from notifications.alert_manager import get_alert_manager
 
 # Strategy singletons
 _orb_strategy     = ORBStrategy()
-_sweep_strategy   = SweepReversalStrategy()
-_butterfly_strategy = ButterflyStrategy()
 _iron_condor_strategy = IronCondorStrategy()
 # TC.6 — trend credit spread. Sits with the other strategy instances and is
 # UNGUARDED on purpose: it imports only config + IronCondorStrategy, both
 # already hard dependencies here, so a guarded import would hide a real
 # breakage rather than tolerate an optional one.
 _trend_credit_strategy = TrendCreditSpread()
-_continuation_strategy = ContinuationStrategy()
 
 
 class BotState:
@@ -2032,28 +2026,22 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
         logger.info(f"[continuation] BLOCKED — regime {regime.primary_regime} is a "
                     f"premium regime; a continuation needs a trend to continue "
                     f"(runaway={_is_runaway}). Butterfly/Condor now get the slot.")
-    if signal is None and not _cont_blocked and not _afd_cont and (
-            _is_runaway
-            or regime.primary_regime in (Regime.TRENDING_BULL, Regime.TRENDING_BEAR,
-                                         Regime.BREAKOUT_VOLATILE)):
-        cont_sig = _safe_strategy("Continuation", lambda: _continuation_strategy.generate_signal(
-            regime        = regime,
-            vol_state     = ctx["vol"],
-            trend         = ctx["trend"],
-            chain         = chain,
-            current_price = ctx["price"],
-            is_handoff    = _is_runaway,   # runaway ORB -> looser handoff gate
-            handoff_direction = getattr(orb, "break_direction", "") if _is_runaway else "",
-            structure     = ctx.get("structure"),
-            df_1m         = ctx.get("df_1m"),
-            macro         = macro,
-        ))
-        if cont_sig:
-            if _is_runaway:
-                cont_sig.setup_type = cont_sig.setup_type or "trend_continuation_handoff"
-                logger.info("[continuation] ORB-runaway HANDOFF -> trend continuation")
-            signal = cont_sig
-
+    # ── v4.0: SUPERSEDED STRATEGY REMOVED ───────────────────────────────
+    # Continuation, SweepReversal and Butterfly dispatched here. All three
+    # were gated on `regime.primary_regime`, which v4 leaves permanently
+    # UNKNOWN - so they were DEAD CODE that still had to be read and
+    # reasoned about by anyone auditing this path.
+    # Their replacements are written and specced in docs/TRADES.md:
+    #   ContinuationStrategy  -> RunawayContinuation (observes a move in
+    #                            evidence rather than forecasting one)
+    #   SweepReversalStrategy -> SweepCreditSpread (a long reversal needs
+    #                            price to TRAVEL; 82% of directionally-
+    #                            correct entries never reached +25% MFE)
+    #   ButterflyStrategy     -> GEXPinButterfly (centres on the PIN, not
+    #                            spot - indistinguishable while GEX was
+    #                            gamma-squared, because the pin WAS spot)
+    # ⚠️ NOT YET WIRED. The new strategies exist and import; dispatch is a
+    # separate deliberate step, and Fable audits the plumbing first.
     # Priority 2.5 (was 2): Sweep Reversal.
     # After a runaway, sweep is the FALLBACK (continuation had no pullback setup)
     # and is gated to NAMED levels only — a runaway that then sweeps a real pool
@@ -2076,43 +2064,10 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     _l1r = ctx.get("l1")
     if _l1r is not None:
         _sweep_setup = (getattr(_l1r, "scores", {}) or {}).get("SWEEP_REVERSAL") or 0.0
-    if signal is None and not _afd_swp and _sweep_setup >= SWEEP_SETUP_FLOOR:
-        sweep_sig = _safe_strategy("SweepReversal", lambda: _sweep_strategy.generate_signal(
-            regime        = regime,
-            setup_score   = _sweep_setup,
-            vol_state     = ctx["vol"],
-            structure     = ctx["structure"],
-            liq_map       = ctx["liq_map"],
-            chain         = chain,
-            macro         = macro,
-            df_1m         = ctx.get("df_1m"),
-            current_price = ctx["price"]
-        ))
-        if sweep_sig is not None and _is_runaway and not getattr(sweep_sig, "swept_level_name", ""):
-            # post-runaway sweep on an UNNAMED (equal-H/L) level — refuse it.
-            logger.info("[sweep] post-runaway sweep on unnamed level — BLOCKED "
-                        "(runaway hands to continuation; sweep only on named levels)")
-            sweep_sig = None
-        signal = sweep_sig
-
     # Priority 3: Butterfly (Ranging/Compression — requires GEX PINNING)
     # Fed days allowed — bot reaction time is faster and more systematic
     # than manual trading on a volatile FOMC day. Fed day boosts ORB
     # conviction instead of blocking entries.
-    if (signal is None and
-            not DIRECTIONAL_ONLY and
-            regime.primary_regime in (Regime.RANGING, Regime.COMPRESSION) and
-            macro.butterfly_allowed):
-        signal = _safe_strategy("Butterfly", lambda: _butterfly_strategy.generate_signal(
-            regime        = regime,
-            vol_state     = ctx["vol"],
-            liq_map       = ctx["liq_map"],
-            chain         = chain,
-            macro         = macro,
-            current_price = ctx["price"],
-            gex           = ctx.get("gex")
-        ))
-
     # Priority 4: Iron Condor — legged entry, RANGING fallback when no GEX pin.
     if not _iron_condor_strategy.has_active_plan:
         # Try to make a condor plan if no other signal fired and regime is RANGING.

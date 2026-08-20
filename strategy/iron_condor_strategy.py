@@ -519,9 +519,18 @@ class IronCondorStrategy(BaseOptionsStrategy):
         if self._plan is not None:
             return None  # Already have an active plan this session
 
-        if regime.primary_regime != Regime.RANGING:
-            return None
-
+        # ── v4.0: THE RANGING LABEL IS GONE. THE FORK IS THE GATE. ──────────
+        # v3 required `primary_regime == RANGING` here. That label was measured
+        # picking the correct SIDE on 44.9% of 715 directional trades - worse
+        # than a coin - and v4's `assemble_market_state` classifies nothing, so
+        # `primary_regime` is permanently UNKNOWN. **This line refused EVERY
+        # condor, silently.**
+        # The replacement was already sitting directly below it: no fork, no
+        # plan. Operator: *"consider the condor off the table if we don't have
+        # guardrails. That is the insurance policy that eliminates a bad
+        # decision in an unpredictable session."* A fork that will not form IS
+        # the unpredictable session - the overlay refuses for the same reason
+        # the label was meant to.
         # ── PF.5 FORK GATE ───────────────────────────────────────────────────
         # Operator: "consider the condor off the table if we don't have
         # guardrails. That is the insurance policy that eliminates a bad
@@ -800,7 +809,8 @@ class IronCondorStrategy(BaseOptionsStrategy):
         """
         Called every tick when a condor plan is active.
         Returns an OptionsSignal if a leg should fire now, None otherwise.
-        Also cancels pending legs if regime has flipped away from RANGING.
+        Also cancels pending legs when the FORK is invalidated (v4.0 - the
+        RANGING label it used to read is gone; the overlay is the replacement).
         """
         plan = self._plan
         if plan is None:
@@ -835,38 +845,44 @@ class IronCondorStrategy(BaseOptionsStrategy):
         # short-premium NEUTRAL structure is most comfortable, not least. Only a
         # DIRECTIONAL regime breaks the neutral thesis. Leg 2 has held rather
         # than cancelled since v3.2; Leg 1 never got the same treatment.
-        _DIRECTIONAL = (Regime.TRENDING_BULL, Regime.TRENDING_BEAR,
-                        Regime.BREAKOUT_VOLATILE)
-        if regime.primary_regime != Regime.RANGING:
+        # ── v4.0: FORK INVALIDATION REPLACES THE REGIME FLIP ────────────────
+        # ⚠️ AND THE OPERATOR'S ACCEPTED RISK SAYS THE TWO ARE THE SAME EVENT:
+        # *"If it gets breached, then our fork may also become invalid & I can
+        # live with that, because we are accepting that risk for an asymmetric
+        # payoff if it holds."* **The structure and the overlay agree on when
+        # the thesis died instead of arguing about it** - which the regime label
+        # never did, because it was measuring something else entirely.
+        # A filled leg is NEVER cancelled: that rule is untouched.
+        _fork_dead = bool(getattr(regime, "fork_invalidated", False))
+        if _fork_dead:
+            # ⚠️ v4.0: NO SUB-CLASSIFICATION. v3 split this on whether the new
+            # regime was DIRECTIONAL - hold if merely non-RANGING, cancel if
+            # trending - because "not RANGING" covered everything from a genuine
+            # breakout to a label wobble. **Fork invalidation carries no such
+            # ambiguity: the guardrail is gone, so the plan is gone.**
+            # Operator's accepted risk, and it is why the two are the same
+            # event: *"If it gets breached, then our fork may also become
+            # invalid & I can live with that, because we are accepting that
+            # risk for an asymmetric payoff if it holds."*
             if plan.state == CondorState.DECIDED:
-                if regime.primary_regime not in _DIRECTIONAL:
-                    logger.debug(
-                        f"Condor Leg 1 HELD: regime {regime.primary_regime} is "
-                        f"non-directional — plan alive, awaiting trigger"
-                    )
-                    return None
-                # v3.9: report the APPROACH here too. This is the branch that
-                # actually fires — 23 of 23 deaths on 2026-08-04 — so reporting
-                # only the regime made the fleet's real behaviour unmeasurable.
                 _a = self._approach(plan, chain, current_price)
                 logger.info(
-                    "Condor CANCELLED before Leg 1: regime flipped to %s "
-                    "(directional) | %s",
-                    regime.primary_regime, self._approach_text(plan, _a)
+                    "Condor CANCELLED before Leg 1: fork invalidated | %s",
+                    self._approach_text(plan, _a)
                 )
-                self._journal_abandon(plan, _a, "regime_flip")
+                self._journal_abandon(plan, _a, "fork_invalidated")
                 plan.state = CondorState.CANCELLED
                 self._plan = None
                 return None
             elif plan.state == CondorState.LEG1_FILLED:
-                # v3.2 (2026-07-23): PAUSE, do not cancel. Leg 2 must not FILL
-                # into a trending regime, but the plan stays alive — if regime
-                # returns to RANGING and price is at the far band, Leg 2 fires.
-                # (Previously this set COMPLETE, permanently killing the
-                # structure on a single non-RANGING tick.)
+                # PAUSE, never cancel. **A filled leg is never cancelled** -
+                # that rule predates v4 and is untouched. Leg 1 manages itself
+                # as a standalone vertical (15% stop until leg 2 fills); if the
+                # fork re-forms and price reaches the far rail, Leg 2 still
+                # fires.
                 logger.debug(
-                    f"Condor Leg 2 PAUSED: regime {regime.primary_regime} "
-                    f"!= RANGING — plan held, Leg 1 remains open"
+                    "Condor Leg 2 PAUSED: fork invalidated - "
+                    "plan held, Leg 1 remains open and manages alone"
                 )
                 return None
 
@@ -1003,7 +1019,11 @@ class IronCondorStrategy(BaseOptionsStrategy):
             net_credit           = net_credit,
             max_loss_condor      = max_loss,
             underlying_entry     = plan.underlying_at_decision,
-            regime               = Regime.RANGING,
+            # v4.0: the signal no longer claims a regime it did not measure.
+            # Stamping RANGING here wrote a label onto the trade record that
+            # nothing computed - a fabricated field reading as observed data,
+            # which is the `oi_proxy` failure in miniature.
+            regime               = Regime.UNKNOWN,
             stop_loss_pct        = CONDOR_STOP_LOSS_PCT,
             tp_pct               = 0.0,   # No TP — hold to nickel or stop
             notes                = (
@@ -1013,7 +1033,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
             )
         )
 
-        self._add_confluence(signal, f"RANGING regime — condor leg {leg_num}")
+        self._add_confluence(signal, f"fork-anchored condor leg {leg_num}")
         self._add_confluence(
             signal,
             f"Price reached trigger ({plan.call_trigger_price if side == 'call' else plan.put_trigger_price:.0f}) — "
