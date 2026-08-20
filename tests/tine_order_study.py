@@ -95,20 +95,30 @@ def load(path):
     return rows
 
 
-def simple_channel(rows, upto):
-    """A regression channel over bars[:upto] - slope plus 2-sigma rails.
+def daily_channel(daily, lookback=20):
+    """A DAILY regression channel: slope per session, rails at N-sigma.
 
-    ⚠️ A STAND-IN FOR THE PITCHFORK, AND NAMED AS ONE. `analysis/pitchfork.py`
-    needs a pandas frame, ATR and its own pivot qualification; a regression
-    channel is not that and is not called one. **What it shares is the property
-    under test** - a slope and two parallel rails - which is enough to ask
-    whether slope predicts first contact. If the answer is interesting, the real
-    fork is the follow-up, not the conclusion.
+    ⚠️ THIS REPLACES AN INTRADAY FIT THAT WAS AN ARTIFACT GENERATOR. v4.0's
+    first version fitted a channel on the first 60 one-minute bars and then
+    projected its slope across the remaining ~330. **A one-hour slope
+    extrapolated over five and a half hours runs the channel off into space**,
+    so price ends up outside whichever rail the slope is moving away from and
+    the "prediction" is guaranteed by the arithmetic.
+    The tell was in the output and it should have stopped the read cold:
+    **breached = 100% on BOTH arms.** A measurement with a column reading 100%
+    on both sides of its own split is measuring its own construction.
+    It reported 81% predictive [78%, 84%] and a 73-point traverse gap. **Both
+    numbers were fabricated by the extrapolation and neither should be quoted.**
+
+    A DAILY fork is what the condor actually anchors to (`CONDOR_PITCHFORK_ANCHOR`,
+    daily only - operator: *"It's a guardrail, not the road."*). Fitted over
+    ~20 SESSIONS and projected across ONE, the slope moves the rails by a
+    fraction of their width - which is the geometry the spec describes.
     """
-    seg = rows[:upto]
-    if len(seg) < 40:
+    if len(daily) < lookback + 1:
         return None
-    cs = [r[4] for r in seg]
+    seg = daily[-(lookback + 1):-1]          # prior sessions only, never today
+    cs = [d["close"] for d in seg]
     n = len(cs)
     mx = (n - 1) / 2.0
     my = sum(cs) / n
@@ -116,15 +126,16 @@ def simple_channel(rows, upto):
     slope = sum((k - mx) * (cs[k] - my) for k in range(n)) / den
     resid = [cs[k] - (my + slope * (k - mx)) for k in range(n)]
     sd = (sum(r * r for r in resid) / n) ** 0.5 or 1e-9
-    return {"slope": slope, "sd": sd, "mid_at": lambda i: my + slope * (i - mx),
-            "n0": n}
+    # value at "today" = one session past the end of the fit window
+    mid_today = my + slope * (n - mx)
+    return {"slope": slope, "sd": sd, "mid": mid_today, "n": n}
 
 
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--ohlc", default=OHLC)
-    ap.add_argument("--decide-bar", type=int, default=60,
-                    help="bars into the session at which the fork is fitted")
+    ap.add_argument("--lookback", type=int, default=20,
+                    help="prior SESSIONS the daily channel is fitted over")
     ap.add_argument("--rail-sigma", type=float, default=2.0)
     ap.add_argument("--flat-eps", type=float, default=0.0,
                     help="|slope| below this counts as FLAT and is excluded")
@@ -135,6 +146,9 @@ def main(argv):
                   glob.glob(os.path.join(os.path.expanduser(a.ohlc), "*"))
                   if os.path.isdir(d))
     days = [d for d in days if d not in POLLUTED]
+
+    # ── build DAILY bars per symbol, in date order ─────────────────────────
+    by_sym = {}
     for day in days:
         for p in sorted(glob.glob(os.path.join(
                 os.path.expanduser(a.ohlc), day, "*_ohlc_*.csv"))):
@@ -143,44 +157,50 @@ def main(argv):
                 rows = [r for r in load(p) if "09:30" <= r[0] <= "16:00"]
             except Exception:                                  # noqa: BLE001
                 continue
-            if len(rows) < a.decide_bar + 60:
+            if len(rows) < 200:
                 continue
-            ch = simple_channel(rows, a.decide_bar)
+            by_sym.setdefault(sym, []).append({
+                "day": day, "rows": rows,
+                "high": max(r[2] for r in rows),
+                "low": min(r[3] for r in rows),
+                "close": rows[-1][4],
+            })
+
+    for sym, sessions in by_sym.items():
+        for i in range(len(sessions)):
+            ch = daily_channel(sessions[:i + 1], a.lookback)
             if not ch or abs(ch["slope"]) <= a.flat_eps:
+                continue
+            rows = sessions[i]["rows"]
+            up_rail = ch["mid"] + a.rail_sigma * ch["sd"]
+            lo_rail = ch["mid"] - a.rail_sigma * ch["sd"]
+            # ⚠️ price must START INSIDE the rails, or "first tap" is decided
+            # before the session opens.
+            if not (lo_rail < rows[0][4] < up_rail):
                 continue
 
             up_slope = ch["slope"] > 0
-            # ⚠️ THE PREDICTION: an UP-sloping channel means price travels
-            # lower rail -> upper rail, so it should tap the LOWER rail first.
             predicted = "lower" if up_slope else "upper"
-
-            first, first_i = None, None
-            traversed = False
-            breached = False
-            for i in range(a.decide_bar, len(rows)):
-                mid = ch["mid_at"](i)
-                up_rail = mid + a.rail_sigma * ch["sd"]
-                lo_rail = mid - a.rail_sigma * ch["sd"]
-                _, _, h, l, c = rows[i]
+            first, traversed, breached = None, False, False
+            for r in rows:
+                _, _, h, l, c = r
                 if first is None:
                     if h >= up_rail:
-                        first, first_i = "upper", i
+                        first = "upper"
                     elif l <= lo_rail:
-                        first, first_i = "lower", i
+                        first = "lower"
                 else:
-                    other = lo_rail if first == "upper" else up_rail
-                    if (first == "upper" and l <= other) or \
-                       (first == "lower" and h >= other):
+                    if (first == "upper" and l <= lo_rail) or \
+                       (first == "lower" and h >= up_rail):
                         traversed = True
-                    # decisive breach: a CLOSE beyond the rail by a further
-                    # half-sigma - a wick is a touch, a close is a decision
                     if c >= up_rail + 0.5 * ch["sd"] or \
                        c <= lo_rail - 0.5 * ch["sd"]:
                         breached = True
             if first is None:
                 continue
-            obs.append({"day": day, "sym": sym, "predicted": predicted,
-                        "first": first, "correct": first == predicted,
+            obs.append({"day": sessions[i]["day"], "sym": sym,
+                        "predicted": predicted, "first": first,
+                        "correct": first == predicted,
                         "traversed": traversed, "breached": breached,
                         "up_slope": up_slope})
 
@@ -196,7 +216,8 @@ def main(argv):
     print(f"  {n:,} (session, symbol) observations, "
           f"{len({o['day'] for o in obs})} dates, "
           f"{len({o['sym'] for o in obs})} symbols")
-    print(f"  channel fitted on the first {a.decide_bar} bars only - no lookahead")
+    print(f"  DAILY channel over {a.lookback} prior sessions - today is never "
+          f"in its own fit")
     print("=" * 80)
 
     print(f"\n  1. IS THE SLOPE PREDICTIVE AT ALL?")
@@ -238,7 +259,7 @@ def main(argv):
             print("     ❌ NEITHER GAP IS MATERIAL - a wrong-tine tap is not")
             print("        informative, and order is moot in both senses.")
 
-    print("\n  ⚠️ THIS USES A REGRESSION CHANNEL, NOT THE PITCHFORK. It shares the")
+    print("\n  ⚠️ THIS USES A DAILY REGRESSION CHANNEL, NOT THE PITCHFORK. It shares the")
     print("     property under test - a slope and two parallel rails - which is")
     print("     enough to ask whether slope predicts first contact. **If the")
     print("     answer is interesting, the real fork is the follow-up, not the")

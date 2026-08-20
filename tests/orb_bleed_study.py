@@ -107,18 +107,49 @@ def main(argv):
         print("no ORB trades found. ABSENT MEASUREMENT, not a null.")
         return 1
 
+    # ⚠️ THE JOIN REPORTS ITSELF. v4.0's first run printed "p50 = 0 bars" for a
+    # 1.00% excursion - half the winners supposedly moving a full percent on the
+    # entry bar, which is not credible. `bisect_left` returns 0 when the entry
+    # timestamp does not match the tape's format, so those trades were scanned
+    # **from the 09:30 open** and hit every level immediately.
+    # **A join that silently drops or mis-places rows produces a confident wrong
+    # answer**, which is this project's most repeated failure. Every drop is now
+    # counted and named, and the run REFUSES if most rows fail.
+    drops = {"no_tape": 0, "no_entry_time": 0, "ts_unmatched": 0,
+             "no_underlying_entry": 0, "too_late_in_session": 0}
     obs = []
     for day, t in trades:
         sym = str(t.get("symbol") or "").upper()
         tape = load_tape(os.path.expanduser(a.ohlc), day, sym)
         if not tape:
+            drops["no_tape"] += 1
             continue
         stamps = [x[0] for x in tape]
-        ts = str(t.get("entry_time") or "")[11:19]
-        if not ts:
+        _raw_ts = str(t.get("entry_time") or "")
+        if not _raw_ts:
+            drops["no_entry_time"] += 1
+            continue
+        # ⚠️ ACCEPT MORE THAN ONE SHAPE, AND SAY WHEN NONE MATCHES. A fixed
+        # [11:19] slice assumes `YYYY-MM-DDTHH:MM:SS`; anything else yields
+        # garbage that bisect quietly turns into index 0 - the session open.
+        ts = ""
+        if "T" in _raw_ts and len(_raw_ts) >= 19:
+            ts = _raw_ts[11:19]
+        elif " " in _raw_ts and len(_raw_ts) >= 19:
+            ts = _raw_ts[11:19]
+        elif len(_raw_ts) == 8 and _raw_ts[2] == ":":
+            ts = _raw_ts
+        if not ts or ts[2] != ":" or not ts[:2].isdigit():
+            drops["ts_unmatched"] += 1
             continue
         i = bisect.bisect_left(stamps, ts)
+        if i == 0 and ts > stamps[0]:
+            # the timestamp is after the first bar but landed at index 0 -
+            # the formats disagree. Refuse rather than scan from the open.
+            drops["ts_unmatched"] += 1
+            continue
         if i >= len(tape) - 10:
+            drops["too_late_in_session"] += 1
             continue
         entry = t.get("underlying_entry")
         try:
@@ -126,6 +157,7 @@ def main(argv):
         except Exception:                                      # noqa: BLE001
             continue
         if entry <= 0:
+            drops["no_underlying_entry"] += 1
             continue
         direction = str(t.get("direction") or "").lower()
         long_side = direction.startswith("l") or \
@@ -149,8 +181,18 @@ def main(argv):
         obs.append({"won": pnl > 0, "pnl": pnl, "marks": marks,
                     "best": best, "sym": sym, "day": day})
 
+    print(f"  {len(trades)} ORB trades found, {len(obs)} joined to tape")
+    if any(drops.values()):
+        print("  DROPPED: " + ", ".join(f"{k}={v}" for k, v in drops.items() if v))
     if not obs:
-        print("no ORB trades joined to tape. ABSENT MEASUREMENT, not a null.")
+        print("\n  no ORB trades joined to tape. **ABSENT MEASUREMENT, NOT A")
+        print("  NULL** - the drop counts above name which link failed.")
+        return 1
+    if len(obs) < 0.5 * len(trades):
+        print(f"\n  ⚠️ REFUSING: only {len(obs)}/{len(trades)} rows joined.")
+        print("  A study on a minority of its own population describes the")
+        print("  minority and says nothing about which minority. Fix the join")
+        print("  named above before reading any number below it.")
         return 1
 
     win = [o for o in obs if o["won"]]
