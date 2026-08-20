@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-101 Python modules across 11 local packages.
+102 Python modules across 11 local packages.
 
 ## Fan-in leaderboard - widest blast radius
 
@@ -356,6 +356,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/exit_record.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/fork_respect_study.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
