@@ -78,9 +78,57 @@ logger = logging.getLogger(__name__)
 # config-overridable. `tests/sweep_discriminator.py` is the tool that will
 # replace them with numbers.
 MAX_AGE_BARS = getattr(config, "SWEEP_CS_MAX_AGE_BARS", 6)
-MIN_REJECTION_PCT = getattr(config, "SWEEP_CS_MIN_REJECTION_PCT", 0.002)
-EARLIEST_ET = getattr(config, "SWEEP_CS_EARLIEST_ET", "10:00")
+# ⚠️ WAS 0.002 (0.20%) - A PRE-MEASUREMENT GUESS THE DATA CONTRADICTS. Combined
+# with the new 0.25% ceiling it left a 0.20-0.25% sliver and EXCLUDED the
+# shallow bucket that measured BEST: <0.10% pierces survived on 33%, and
+# 0.10-0.25% on 34%, both above the 30% base. The floor exists only to reject a
+# level that was never really touched, so it belongs far lower.
+MIN_REJECTION_PCT = getattr(config, "SWEEP_CS_MIN_REJECTION_PCT", 0.0002)
+
+# ── MEASURED 2026-08-20, tests/sweep_discriminator.py ──────────────────────
+# 2,169 PDH/PDL sweep-and-reclaim events across the banked tape, ONE outcome per
+# sweep. Outcome = the boundary held to the bell AND was never breached far
+# enough to have taken the 15% stop (adverse < 0.35% of the level).
+#
+#   BASE RATE, all sweeps:                    30% survived
+#
+#   BY TIME OF THE RECLAIM        n     survived   p50 adverse
+#     before 10:30              927        26%        0.84%   below base
+#     10:30 - 13:00             758        29%        0.58%   same as base
+#     13:00 - 14:30             223        39%        0.30%   BEATS base
+#     after 14:30               261        39%        0.32%   BEATS base
+#
+# **The afternoon nearly doubles survival and HALVES the adverse excursion.**
+# Window moved from 10:00-15:00 to 13:00-15:00.
+#
+# ⚠️ THE `SESSION TIME REMAINING` TABLE IS THE SAME FINDING, NOT A SECOND ONE.
+# "after 13:00" and "fewer than 150 bars left" select largely the same events;
+# less session remaining means less time for the boundary to be tested. Treating
+# them as independent confirmation would be double-counting one effect.
+EARLIEST_ET = getattr(config, "SWEEP_CS_EARLIEST_ET", "13:00")
 LATEST_ET = getattr(config, "SWEEP_CS_LATEST_ET", "15:00")
+
+# ── AND A CEILING ON THE PIERCE DEPTH ──────────────────────────────────────
+#   BY REJECTION DEPTH            n     survived   p50 adverse
+#     shallow < 0.10%           746        33%        0.46%   BEATS base
+#     0.10 - 0.25%              817        34%        0.53%   BEATS base
+#     0.25 - 0.50%              368        21%        0.75%   below base
+#     deep > 0.50%              238        19%        1.28%   below base
+#
+# ⚠️ THE MECHANISM IS IN THE ADVERSE COLUMN, and it is the opposite of the
+# intuition that a big rejection is a strong rejection. A DEEP pierce means the
+# level barely rejected at all - price was willing to go there, and it comes
+# back: 1.28% median adverse against 0.46% for a shallow pierce. **Depth of
+# pierce measures the level's WEAKNESS, not the strength of its defence.**
+MAX_REJECTION_PCT = getattr(config, "SWEEP_CS_MAX_REJECTION_PCT", 0.0025)
+
+# ⚠️ WHAT THIS DOES NOT ESTABLISH. The best cell is ~39-40% survival. A spread
+# that wins when the boundary holds and loses 15% when it does not needs the
+# CREDIT to exceed roughly 1.5x the loss to break even at that rate. **These are
+# entry conditions, not a profitability finding** - that depends on credit
+# received against the stop, which is a chain question and has not been asked.
+# ⚠️ AND POOL TYPE DID NOTHING: PDH 32%, PDL 28%, both at base. The stated grade
+# priors in level_grade.py get NO support from this measurement.
 ATR_MAX_PCT = getattr(config, "SWEEP_CS_ATR_MAX_PCT", 0.20)
 
 # ── EXITS: exactly two, and no others ──────────────────────────────────────
@@ -168,6 +216,14 @@ class SweepCreditSpreadStrategy:
         # ── 4. the rejection must be real ───────────────────────────────────
         rej = float(getattr(sweep, "rejection_pct", 0.0) or 0.0)
         if rej < MIN_REJECTION_PCT:
+            return None
+        # ⚠️ AND NOT TOO DEEP. A deep pierce is a WEAK level, not a strong
+        # rejection - measured: >0.50% pierces survived on 19% against 33-34%
+        # for shallow ones, with 1.28% median adverse against 0.46%.
+        if rej > MAX_REJECTION_PCT:
+            logger.debug("[sweep_cs] no trade: %s pierced %.3f%% - too deep, "
+                         "the level barely rejected (19%% survival measured)",
+                         name, rej * 100.0)
             return None
 
         # ── 5. which boundary did the pool become? ──────────────────────────
