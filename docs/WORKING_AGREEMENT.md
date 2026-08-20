@@ -554,7 +554,8 @@ graph — parsed, never executed, so a module that crashes on import still maps.
 **The generator runs INSIDE the land command**, between the verification gate
 and `git add`, so the commit always carries a current map:
 
-    extract → verify → REGENERATE MAP → git add -A → commit → push → cleanup
+    extract → verify → REGENERATE MAP → APPEND GENESIS → git add -A
+            → commit → push → cleanup
 
 If regeneration reports broken imports, or `--check` reports drift, **the gate
 fails and nothing stages.** Operator, 2026-08-19: *"I'm in favour of good
@@ -601,3 +602,36 @@ Enforced by **sparse checkout** in `install.sh`, not by a post-pull `rm`: the
 setting persists in the clone's config, so a box configured once stays correct
 through every later pull in a bake. **A cleanup step that must be remembered by
 every future deploy path never happens.**
+
+## 35. EVERY SHIPPED REVISION GETS A GENESIS LINE, IN THE SAME COMMAND.
+Added 2026-08-20.
+
+`docs/GENESIS.md` carries one line per tarball, in order, from r1. It is not
+`git log`: git records WHAT changed, this records **WHY**, and the reasoning is
+not derivable from the diff. *"ADX measured flat across every band, so strike
+selection moved to ATR"* is the sentence that saves a future engineer a day; the
+file list is not.
+
+**It is appended INSIDE the land command**, between the map regeneration and
+`git add`. ⚠️ **This one cannot be enforced mechanically and that is exactly why
+the timing matters.** No checker can tell whether a line is truthful or whether
+an entry is missing — the file map fails the gate on drift, Genesis cannot. It
+stays honest only by being written before anyone has moved on to the next thing.
+
+⚠️ **IF A REVISION EXISTS TO FIX A PROBLEM, SAY SO PLAINLY AND SAY WHAT THE
+PROBLEM WAS.** Operator, 2026-08-20: *"if a package was created to fix a problem
+absolutely state that."* **Six of the first twenty-five revisions exist because
+an earlier one was wrong**, and the pattern across them is worth more than any
+single entry: in every case **the measuring instrument failed before the code
+did**, and every one of them printed something plausible while doing it —
+· a manifest built from a description list, silently missing 20 files
+· an orphan report flagging 12 modules of which only 2 were real, three of them
+  live code the resolver could not see
+· a measure that contained its own predictor
+· a grouping key carrying a per-trade value, hiding 107 trades as nothing
+· a proxy never labelled unavailable, indistinguishable from data for years
+· a threshold set before the measurement that contradicted it
+
+**A GENESIS THAT ONLY LISTS SUCCESSES IS A MARKETING PAGE.** The corrections are
+the part with the knowledge in it, and they are the first thing that will
+quietly stop being maintained. They do not get dropped.
