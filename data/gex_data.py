@@ -104,6 +104,21 @@ class GEXSnapshot:
 
     # Environment classification
     gex_environment:    str = "NEUTRAL"   # "PINNING", "TRENDING", "NEUTRAL"
+
+    # ── v4.0: PIN STRENGTH IS A NUMBER, NOT JUST A LABEL ────────────────────
+    # `pin_conc` and `net_ratio` were computed here, used to decide the
+    # PINNING/TRENDING/NEUTRAL label, and then DISCARDED as locals. A consumer
+    # could ask "is it pinning?" but never "HOW STRONGLY?" - and for a butterfly
+    # that is the whole question, because the wings only pay if price STAYS.
+    # A pin strike holding 40% of gross |GEX| is one dominant magnet; one
+    # holding 8% is gamma smeared across many strikes with nothing actually
+    # pinned - and BOTH read "PINNING" once past the 0.15 threshold.
+    # ⚠️ This is the same defect class as v3's `flat_angle_deg` (computed every
+    # tick, landed in a dict, never attached to the object a consumer read) and
+    # `direction_conf` (separated on the live book, journaled nowhere).
+    # COMPUTED AND DISCARDED is the recurring failure of this codebase.
+    pin_concentration:  float = 0.0   # |pin net GEX| / gross |GEX|, 0..1
+    net_gex_ratio:      float = 0.0   # net/gross, signed: + pins, - trends
     orb_bias:           str = "NEUTRAL"   # "DAMPENING", "AMPLIFYING", "NEUTRAL"
 
     # Meta
@@ -226,6 +241,10 @@ def compute_gex(chain: OptionsChain, spot_price: float) -> GEXSnapshot:
     net_ratio = snapshot.net_gex / gross
     pin_sg = max(snapshot.strikes, key=lambda s: abs(s.net_gex), default=None)
     pin_conc = (abs(pin_sg.net_gex) / gross) if pin_sg is not None else 0.0
+
+    # v4.0: deliver the strength, do not merely decide on it
+    snapshot.pin_concentration = round(pin_conc, 4)
+    snapshot.net_gex_ratio = round(net_ratio, 4)
 
     if net_ratio > GEX_SIGN_RATIO and pin_conc >= GEX_PIN_CONCENTRATION:
         snapshot.gex_environment = "PINNING"
