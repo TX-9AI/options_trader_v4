@@ -652,6 +652,21 @@ commit AFTER the one it describes and every entry is permanently off by one.
 That ordering is why the description cannot be derived FROM the commit message:
 the message does not exist yet.
 
+⚠️ **AND `GENESIS.md` IS NEVER IN A TARBALL.** It is append-only on the box, so
+a shipped copy is always stale by however many revisions landed since the sandbox
+last synced — and `cp -r` runs BEFORE the gate, so it clobbers the good file even
+when the gate then fails. That happened twice on 2026-08-20: rows went 32 → 28,
+the gate correctly refused, and the recovery was `git checkout docs/GENESIS.md`.
+**A failed gate does not leave a clean working tree.**
+
+⚠️ **ONE RECORD, NOT TWO.** A `docs/SHIPPING_LOG.md` was drafted in the same
+session as GENESIS, abandoned at r26, and rode into the repo inside r26's
+tarball — tracked for seven revisions while describing itself as *"one entry per
+tarball shipped"*. **Two documents claiming the same job is the exact failure
+this repo keeps finding in its own code**, and whichever gets updated becomes
+the truth while the other rots. Deleted; its `date` and `bake` columns were
+better and were adopted.
+
 ⚠️ **WRITE IT GENESIS-STYLE, NOT COMMIT-STYLE.** A terse subject loses exactly
 the reasoning that makes this document worth keeping. A long commit subject is
 the cheaper cost.

@@ -824,6 +824,9 @@ if TYPE_CHECKING:                     # v4.9 — resolves the quoted annotation 
                                       # cost and lets the undefined-name gate
                                       # run at ZERO tolerance instead of one.
 from strategy.orb_strategy import ORBStrategy
+from strategy.runaway_continuation import RunawayContinuationStrategy
+from strategy.sweep_credit_spread import SweepCreditSpreadStrategy
+from strategy.gex_pin_butterfly import GEXPinButterflyStrategy
 from config import SWEEP_SETUP_FLOOR
 from utils import mem_trace          # MEM.2 — in-process tracemalloc, env-gated
 
@@ -852,6 +855,9 @@ from notifications.alert_manager import get_alert_manager
 
 # Strategy singletons
 _orb_strategy     = ORBStrategy()
+_runaway_strategy = RunawayContinuationStrategy()
+_sweep_cs_strategy = SweepCreditSpreadStrategy()
+_gex_bfly_strategy = GEXPinButterflyStrategy()
 _iron_condor_strategy = IronCondorStrategy()
 # TC.6 — trend credit spread. Sits with the other strategy instances and is
 # UNGUARDED on purpose: it imports only config + IronCondorStrategy, both
@@ -1992,6 +1998,86 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # (PDH/PDL/session) — a reversal off a weak equal-H/L at the end of a strong
     # push is exactly the low-quality sweep that bled last week.
     _is_runaway = getattr(orb, "invalidation_reason", "") == "runaway"
+
+    # ═══ v4.0 DISPATCH ═══════════════════════════════════════════════════════
+    # ⚠️ ORDER IS LOAD-BEARING. RunawayContinuation must get first refusal after
+    # ORB, because it fires on ORB's OWN state - the range ran to its 50% TP and
+    # HELD - and firing DISARMS the retest. If anything else claimed the signal
+    # first, the retest arm would stay live waiting for a pullback the tape has
+    # already declined to give.
+    _now_et_hhmm = _now_disp.strftime("%H:%M") if _now_disp else ""
+    _atr_pct = 0.0
+    try:
+        _atr_pct = float(getattr(ctx["vol"], "atr_normalized", 0.0) or 0.0)
+    except Exception:                                          # noqa: BLE001
+        _atr_pct = 0.0
+
+    # ── Priority 2: RUNAWAY CONTINUATION ────────────────────────────────────
+    if signal is None and _is_runaway:
+        _prev_close = None
+        try:
+            _df1 = ctx.get("df_1m")
+            if _df1 is not None and len(_df1) >= 2:
+                _prev_close = float(_df1["close"].iloc[-2])
+        except Exception:                                      # noqa: BLE001
+            _prev_close = None
+        rc_sig = _safe_strategy("RunawayContinuation",
+                                lambda: _runaway_strategy.generate_signal(
+                                    orb           = orb,
+                                    atr_pct       = _atr_pct,
+                                    price_now     = ctx["price"],
+                                    prev_close    = _prev_close,
+                                    now_et        = _now_et_hhmm,
+                                    chain         = chain,
+                                ))
+        if rc_sig:
+            signal = rc_sig
+            # ⚠️ THE RETEST IS DISARMED BY THE FIRING ITSELF. The runaway IS the
+            # evidence price never came back for it, so leaving the arm live
+            # would queue a second position on a pullback that is not coming.
+            try:
+                get_orb_engine().mark_triggered()
+            except Exception:                                  # noqa: BLE001
+                pass
+
+    # ── Priority 3: SWEEP CREDIT SPREAD ─────────────────────────────────────
+    # Sells the boundary a swept named pool just became. It runs AFTER the
+    # runaway because a runaway proved directional force, and fading a level
+    # into that force is the low-quality reversal that bled in v3.
+    if signal is None:
+        sc_sig = _safe_strategy("SweepCreditSpread",
+                                lambda: _sweep_cs_strategy.generate_signal(
+                                    liq_map       = ctx["liq_map"],
+                                    price_now     = ctx["price"],
+                                    now_et        = _now_et_hhmm,
+                                    atr_pct       = _atr_pct,
+                                    chain         = chain,
+                                ))
+        if sc_sig:
+            signal = sc_sig
+
+    # ── Priority 4: GEX PIN BUTTERFLY ───────────────────────────────────────
+    # ⚠️ PARKED - `ENABLED` is False and generate_signal returns None on the
+    # first line. Wired anyway so the plumbing is exercised and audited NOW
+    # rather than on the day it is unparked, ~2 weeks after real open interest
+    # starts accumulating (2026-08-19).
+    if signal is None:
+        _atm_iv = None
+        try:
+            _atm_iv = float(getattr(chain, "atm_iv", 0.0) or 0.0) or None
+        except Exception:                                      # noqa: BLE001
+            _atm_iv = None
+        bf_sig = _safe_strategy("GEXPinButterfly",
+                                lambda: _gex_bfly_strategy.generate_signal(
+                                    gex           = ctx.get("gex"),
+                                    price_now     = ctx["price"],
+                                    now_et        = _now_et_hhmm,
+                                    atm_iv        = _atm_iv,
+                                    chain         = chain,
+                                ))
+        if bf_sig:
+            signal = bf_sig
+
 
     # Priority 2 (was sweep): Trend Continuation.
     # The runaway proved directional force, so it gets FIRST refusal on the
