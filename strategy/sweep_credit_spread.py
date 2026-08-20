@@ -1,0 +1,205 @@
+"""
+strategy/sweep_credit_spread.py  v4.0
+A named pool was swept and rejected. Sell the boundary it just became.
+
+v4.0  2026-08-19  Built at the OTV4 split. The second v4 entry rule.
+
+INHERITED DOCTRINE
+MEASUREMENTS AND CONSTRAINTS CARRIED FROM v3 - NOT A CHANGELOG.
+WORKING_AGREEMENT 32 requires this block be read before the file is edited.
+
+════════════════════════════════════════════════════════════════════════════
+THE STRUCTURE, AND WHY IT IS A CREDIT SPREAD AND NOT A LONG CONTRACT
+════════════════════════════════════════════════════════════════════════════
+    sweep UP into a pool, rejected   -> that pool is now a CEILING
+                                     -> CALL credit spread, short at/beyond it
+                                     -> price must stay BELOW the ceiling
+    sweep DOWN into a pool, rejected -> that pool is now a FLOOR
+                                     -> PUT credit spread, short at/beyond it
+                                     -> price must stay ABOVE the floor
+
+**The sweep direction decides which kind of boundary the pool became**, and the
+spread follows from that. `LiquiditySweep.kind` already records it -
+`high_sweep` means highs were taken and rejected DOWN, so the pool is a ceiling.
+Nothing needs inferring.
+
+⚠️ WHY CREDIT AND NOT LONG - THIS IS THE POINT OF THE WHOLE STRUCTURE.
+A long reversal contract needs price to TRAVEL. `tests/entry_profile.py`
+measured that **155 of 190 directionally-CORRECT ContinuationStrategy entries -
+82% - never reached +25% MFE.** The read was right and the position did not pay.
+`tests/chain_feasibility.py` explains it from the other side: a 0.30-0.60 delta
+0DTE contract needs a **0.90% underlying move** to pay +25% after the round-trip
+spread, and the tape delivers that in a specified direction on **22%** of
+90-bar windows.
+
+**A credit spread does not need magnitude. It needs the level to hold.** That is
+a far weaker ask, and the tape agrees: the base rate for a 0.5% move in 90
+minutes is only **24-35%**, so roughly two thirds of windows stay put.
+**The swept pool is the natural short strike because it is the level that just
+FAILED to hold price** - it rejected once, in evidence, not in forecast.
+
+════════════════════════════════════════════════════════════════════════════
+WHY v3's SWEEP NEVER FIRED, AND WHAT WAS FIXED
+════════════════════════════════════════════════════════════════════════════
+`tests/sweep_term_census.py`, 269,027 named-pool rows across 27 sessions:
+  · **95.9% HARD-VETOED to 0.000** before scoring - 67% of those by
+    `veto_accept`, the `closes_beyond >= 2` rule. Of 25,792 vetoed ticks
+    post-08-11, **100% were RECLAIMED and 0% were genuine acceptance**: the veto
+    window and the confirmation window were the SAME WINDOW, so the sweep bar's
+    own close counted as acceptance. SWP.11 fixed it.
+  · Of the 4.1% that survived, `age_decay` median **0.062** - about **12 bars,
+    ~60 MINUTES** - while `trend_opp` sat at 1.000. Age was the sole binding
+    damper, and it counted from the SWEEP bar rather than the RECLAIM, charging
+    the signal for confirmation latency it could not act inside. SWP.10 fixed it.
+  · Median surviving score ~0.031 against a 0.05 dispatch floor: **the survivors
+    did not clear their own gate.**
+
+⚠️ THIS FILE READS NEITHER. No `age_decay`, no multiplicative damper chain, no
+setup score. The sweep either reclaimed and is young, or it is not a setup.
+v3's grammar - a product of two soft-necessaries and a weighted corroborator sum
+- capped SWEEP at 0.171 out of 1.0 while TRENDING pinned at 1.00, so it could
+never win an argmax regardless of evidence.
+
+⚠️ AND NO REGIME LABEL IS READ ANYWHERE. Four independent searches found no
+directional predictor in this data. This rule does not predict a direction; it
+sells a boundary that has already rejected price once.
+"""
+
+import logging
+from typing import Optional
+
+import config
+from strategy.base_strategy import OptionsSignal as Signal
+
+logger = logging.getLogger(__name__)
+
+# ⚠️ STATED PRIORS AWAITING MEASUREMENT. v3's sweep book is 34 trades - far too
+# thin to fit anything - so these are reasoned, not calibrated, and are
+# config-overridable. `tests/sweep_discriminator.py` is the tool that will
+# replace them with numbers.
+MAX_AGE_BARS = getattr(config, "SWEEP_CS_MAX_AGE_BARS", 6)
+MIN_REJECTION_PCT = getattr(config, "SWEEP_CS_MIN_REJECTION_PCT", 0.002)
+EARLIEST_ET = getattr(config, "SWEEP_CS_EARLIEST_ET", "10:00")
+LATEST_ET = getattr(config, "SWEEP_CS_LATEST_ET", "15:00")
+ATR_MAX_PCT = getattr(config, "SWEEP_CS_ATR_MAX_PCT", 0.20)
+
+
+def boundary_from_sweep(kind: str) -> Optional[tuple]:
+    """(boundary, option_side) from the sweep direction.
+
+    `high_sweep` - highs taken and rejected DOWN - makes the pool a CEILING, so
+    the trade is a CALL credit spread and price must stay below it.
+    `low_sweep` makes it a FLOOR: a PUT credit spread, price stays above.
+    """
+    k = (kind or "").lower()
+    if k.startswith("high"):
+        return ("ceiling", "call")
+    if k.startswith("low"):
+        return ("floor", "put")
+    return None
+
+
+class SweepCreditSpreadStrategy:
+    """Sell the boundary a swept pool just became.
+
+    ⚠️ THE ORDER OF THE GATES IS THE CHEAPEST-FIRST ORDER, and the first two are
+    the ones v3 got wrong in opposite directions: it vetoed on acceptance
+    measured DURING the rejection, and it aged the signal from the sweep rather
+    than the reclaim.
+    """
+
+    name = "SweepCreditSpread"
+
+    def generate_signal(self, *, liq_map, price_now: float, now_et: str,
+                        atr_pct: float = None, chain=None,
+                        **_ignored) -> Optional[Signal]:
+        sweep = getattr(liq_map, "recent_sweep", None)
+        if not sweep or not price_now:
+            return None
+
+        # ── 1. it must be a NAMED pool ───────────────────────────────────────
+        # An unnamed swing high is not a liquidity pool. The name is what makes
+        # the level a place other participants are watching - PDH/PDL, overnight
+        # high/low, session extremes - and `level_grade` ranks them by type.
+        name = str(getattr(sweep, "swept_named_level", "") or "")
+        if not name:
+            return None
+
+        # ── 2. it must have RECLAIMED and NOT been accepted through ─────────
+        # ⚠️ BOTH CONDITIONS, AND THEY ARE NOT THE SAME. `reclaimed` says price
+        # closed back inside. `invalidated` says price has SINCE accepted beyond
+        # - the level failed after all. A reclaimed-then-invalidated sweep is a
+        # BREAKOUT, and selling a boundary that has already given way is the
+        # worst version of this trade.
+        if not getattr(sweep, "reclaimed", False):
+            return None
+        if getattr(sweep, "invalidated", False):
+            logger.debug("[sweep_cs] no trade: %s reclaimed then INVALIDATED - "
+                         "price accepted through; that is a breakout", name)
+            return None
+
+        # ── 3. it must be YOUNG - measured from the RECLAIM ─────────────────
+        # SWP.10: `bars_ago` now counts from the reclaim bar, not the sweep bar.
+        # Under v3 it counted from the sweep, so the signal was charged for the
+        # 5-20 minutes of confirmation latency the pipeline itself imposed, and
+        # the median scored sweep was an HOUR old.
+        age = int(getattr(sweep, "bars_ago", 999) or 999)
+        if age > MAX_AGE_BARS:
+            logger.debug("[sweep_cs] no trade: %s reclaimed %d bars ago "
+                         "(max %d)", name, age, MAX_AGE_BARS)
+            return None
+
+        # ── 4. the rejection must be real ───────────────────────────────────
+        rej = float(getattr(sweep, "rejection_pct", 0.0) or 0.0)
+        if rej < MIN_REJECTION_PCT:
+            return None
+
+        # ── 5. which boundary did the pool become? ──────────────────────────
+        b = boundary_from_sweep(getattr(sweep, "kind", ""))
+        if not b:
+            return None
+        boundary, side = b
+        pool = float(getattr(sweep, "pool_price", 0.0) or 0.0)
+        if pool <= 0:
+            return None
+
+        # ⚠️ PRICE MUST ALREADY BE ON THE PROFITABLE SIDE OF THE BOUNDARY. If it
+        # is not, the reclaim has not actually happened from this strategy's
+        # point of view and the spread would be opened already tested.
+        if boundary == "ceiling" and price_now >= pool:
+            return None
+        if boundary == "floor" and price_now <= pool:
+            return None
+
+        # ── 6. window and volatility ────────────────────────────────────────
+        if now_et and not (EARLIEST_ET <= now_et <= LATEST_ET):
+            return None
+        # ⚠️ SHORT-VOL CONDITION, inverted from the runaway trade. A credit
+        # spread needs the level to HOLD. From tests/magnitude_estimator.py:
+        # above 0.20% ATR the tape produced a 0.5% move on 92% of 90-bar
+        # windows - a boundary does not survive that.
+        if atr_pct is not None and atr_pct > ATR_MAX_PCT:
+            logger.debug("[sweep_cs] no trade: ATR %.3f%% too hot for a "
+                         "boundary to hold", atr_pct)
+            return None
+
+        sig = Signal(
+            strategy_name=self.name,
+            setup_type="sweep_credit_spread",
+            direction="short" if side == "call" else "long",
+            option_side=side,
+            underlying_entry=price_now,
+        )
+        # the swept pool IS the short strike anchor; strike selection resolves
+        # it against the live chain increment.
+        sig.short_anchor = pool
+        sig.boundary = boundary
+        sig.swept_level_name = name
+        sig.sweep_age_bars = age
+        sig.rejection_pct = rej
+        sig.atr_pct_at_entry = atr_pct
+
+        logger.info("[sweep_cs] FIRE  %s swept -> %s at %.2f  %s credit spread "
+                    "(age %d bars, rejection %.3f%%)",
+                    name, boundary, pool, side.upper(), age, rej * 100.0)
+        return sig
