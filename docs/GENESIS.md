@@ -28,7 +28,36 @@ between.** Full evidence in `docs/INHERITED_FINDINGS.md`.
 
 ---
 
+---
+
+## What the corrections say
+
+Six of these twenty-five exist because an earlier one was wrong, and the pattern
+is consistent enough to name: **the measuring instrument failed before the code
+did.**
+
+· r3 — a manifest built from a description list, missing 20 files silently
+· r4 — an orphan report that flagged 12 modules, of which **only 2 were real**;
+  three were live code the resolver could not see, and one had traded four
+  times the day before
+· r10 — a measure that contained its own predictor
+· r16 — a grouping key carrying a per-trade value, hiding 107 trades as nothing
+· r19 — a proxy that was never labelled as unavailable, so it became
+  indistinguishable from data for the life of a project
+· r24 — a threshold set before the measurement that contradicted it
+
+**Every one of them printed something plausible.** That is why WA §33 fails the
+land command on drift rather than warning, and why an absent measurement is
+reported as absent rather than as zero.
+
+---
+
 ## Revisions
+
+⚠️ **THIS TABLE IS THE LAST THING IN THE FILE, DELIBERATELY.** The land command
+appends with `>>`, so the append point must BE the end of the document. When the
+prose sat below the table, r26 and r27 landed underneath it and the two sections
+interleaved. Nothing after this table.
 
 | rev | what it did |
 |---|---|
@@ -57,27 +86,6 @@ between.** Full evidence in `docs/INHERITED_FINDINGS.md`.
 | **r23** | `tests/sweep_discriminator.py` — which swept pools **held**, from the tape (2,169 events) rather than 34 trades chosen by a gate that could not fire. |
 | **r24** | Adopted the measured conditions: window **13:00–15:00** (39% survival vs 26% before 10:30) and a **0.25% pierce ceiling** (33–34% vs 19–21% deeper). ⚠️ **A deep pierce means a WEAK level, not a strong rejection** — 1.28% median adverse against 0.46%. Also corrected a pre-measurement floor that had excluded the best-measuring bucket. |
 | **r25** | Sell the **nearest pierced strike**, not the pool. Entry ladder rebuilt: 25% start, **one venue increment per rung**, ratcheting so a refused price never returns, and never worse than mark. |
-
----
-
-## What the corrections say
-
-Six of these twenty-five exist because an earlier one was wrong, and the pattern
-is consistent enough to name: **the measuring instrument failed before the code
-did.**
-
-· r3 — a manifest built from a description list, missing 20 files silently
-· r4 — an orphan report that flagged 12 modules, of which **only 2 were real**;
-  three were live code the resolver could not see, and one had traded four
-  times the day before
-· r10 — a measure that contained its own predictor
-· r16 — a grouping key carrying a per-trade value, hiding 107 trades as nothing
-· r19 — a proxy that was never labelled as unavailable, so it became
-  indistinguishable from data for the life of a project
-· r24 — a threshold set before the measurement that contradicted it
-
-**Every one of them printed something plausible.** That is why WA §33 fails the
-land command on drift rather than warning, and why an absent measurement is
-reported as absent rather than as zero.
 | **r26** | GENESIS.md: one line per revision from r1, with the corrections kept. WA 35 appends it inside the land command, because no checker can tell whether a line is missing. |
 | **r27** | Canonical land header: REV and DESC set once, the same string becomes both the Genesis line and the commit subject, appended before git add so it ships inside the commit it describes. |
+| **r28** | GENESIS restructured so the revisions table is the LAST thing in the file - the land command appends with `>>`, so r26 and r27 had landed underneath the closing prose and the sections interleaved. |
