@@ -94,6 +94,38 @@ placement. ⬜
 
 ---
 
+## ⬜ NEXT ACTIONS — in order, 2026-08-20
+
+**FRI 08-21 — THE FIRE DRILL.** Paper, so a bad day costs information not money.
+1. ⬜ Start ONE box, verify, then the other 14. A catastrophic fault gets
+   diagnosed once instead of fifteen times.
+2. ⬜ **The line that matters most: `ExitEngine.evaluate` reached with a live
+   position.** Every exit path was dead code for seven revisions (F0) and the
+   fix has only ever been proven by mutation. **The first real stop firing is
+   the actual verification.**
+3. ⬜ Watch the first chain fetch at 09:30 — the only thing the LLY repoint test
+   could not prove.
+4. ⬜ Confirm `open_interest` is NON-ZERO in the log. OI.1 landed on v3 and
+   collects toward the butterfly's two-week clock; **v4's copy has never run.**
+5. ⬜ Watch the first EOD cycle — the v4 pusher is untested.
+
+**MON 08-24 — the session that matters.** Clean, no fires.
+
+**THEN, in rough priority:**
+6. ⬜ Relaxed entry on one box, one session. Volume enough to read the logs.
+7. ⬜ `orb_bleed_study` against v4 data once `mfe_bars` has values — **the
+   grinder stop is the last undefined exit** and a few sessions answer it.
+8. ⬜ Trade-frequency measurement → position sizing. ⚠️ **Sizing, never gating:**
+   a fleet concurrency gate would censor the sample by arrival order, and WA §29
+   makes box independence a feature.
+9. ⬜ ~2 weeks of real OI, then `pin_strength.py`, then unpark the butterfly.
+   **Its evidence will be structural, not statistical** — it may fire twice a
+   month.
+10. ⬜ Retire `butterfly_strategy`'s replacement question: while GEX was
+    gamma-squared the pin **was** spot, so the two centred identically.
+11. ⬜ Measure the real `build_fork_contained`, not the regression stand-in.
+    Owed work — the 5%-respected result is why the condor is a nice-to-have.
+
 ## STANDING OPERATIONAL WORK
 
 **S.1 Conductor becomes a VERIFIER, not a collector.** Completing the S3 move is

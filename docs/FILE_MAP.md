@@ -6,6 +6,37 @@ the canary fails on drift (WORKING_AGREEMENT 33).
 
 106 Python modules across 12 local packages.
 
+## How to read this repo - orientation
+
+**The one-way flow:** `data/` fetches -> `analysis/` describes ->
+`strategy/` decides -> `execution/` acts -> `database/` records.
+**Nothing flows backwards**, and that is what let v3's defects be
+isolated rather than being everywhere at once.
+
+**Where the decisions live:**
+
+- `main.py::attempt_new_entry` - the dispatch chain. ORB, then
+  runaway (it reads ORB's own state, and firing DISARMS the
+  retest), then sweep, then the parked butterfly. **Order is
+  load-bearing.**
+- `strategy/<name>.py` - one file per setup, each with a `GATES`
+  dict naming every constant SELECTION / FOUNDATIONAL /
+  FEASIBILITY. **Foundational conditions are tested inline
+  against no constant** - the safest form, since there is nothing
+  to relax even by mistake.
+- `execution/exit_engine.py` - 37 methods on `ExitEngine`.
+  ⚠️ **F0: a function inserted at column 0 above a method bisected
+  this class and every intraday exit became dead code for seven
+  revisions behind a green board.** `check_exit_executes.py`
+  exists so it cannot happen silently again.
+- `analysis/market_state.py` - replaced `regime_classifier`.
+  **Carries the vocabulary, classifies nothing.**
+
+**Where the evidence lives:** `tests/` holds the eight standing
+checks plus the studies that produced every threshold in
+`docs/TRADES.md`. **A number in a strategy file should be
+traceable to a tool in here.**
+
 ## Fan-in leaderboard - widest blast radius
 
 Change these with the most care; a break here reaches everything downstream.
