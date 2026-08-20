@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_condor_spec.py  v4.0
+tests/check_condor_spec.py  v4.1
+
+v4.1  2026-08-20  AUDIT F5: the ladder section asserted a stub of its own
+      making — it could not fail, and it was green while the 15%%-unhedged
+      stop was unimplemented. Now executes _evaluate_condor_leg in both
+      hedge states with a pinned clock. A checker proves the code, or it
+      proves nothing.
 The condor's spec, checked against the code. Plain script, exit code.
 
 v4.0  2026-08-20  Built at the OTV4 split. Verifies docs/TRADES.md section 4.
@@ -149,21 +155,46 @@ def main(argv):
           f"{len(live_ranging)} line(s) still read it - fork invalidation is "
           "the replacement")
 
-    # ── the management ladder (docs/TRADES.md 4) ───────────────────────────
-    def leg1_stop(leg2_filled: bool) -> float:
-        """15% while unhedged, and the roll takes over once formed.
-
-        ⚠️ THE GEOMETRY: the traverse that completes the condor is the same move
-        that makes leg 1 profitable, so **a losing leg 1 is a condor that will
-        never form.** The wider stop was calibrated for a complete structure
-        collecting credit on both sides.
-        """
-        return 0.25 if leg2_filled else 0.15
-
-    check("leg 1 alone stops at 15%, like the sweep credit spread",
-          abs(leg1_stop(False) - 0.15) < 1e-9)
-    check("the stop only widens once there is offsetting credit",
-          leg1_stop(True) > leg1_stop(False))
+    # ── the management ladder (docs/TRADES.md 4) — EXECUTED, not stubbed ───
+    # ⚠️ AUDIT F5 (2026-08-20): this section used to define `leg1_stop` as a
+    # LOCAL FUNCTION and assert arithmetic about it — `0.25 if leg2_filled
+    # else 0.15` followed by `check(leg1_stop(False) == 0.15)` proves that
+    # 0.15 equals 0.15. It was the third checker that could not fail, and it
+    # was green while exit_engine ran a FLAT 25% on a lone leg — the exact
+    # rule it existed to guard (fixed as AUDIT F6). The check now DRIVES the
+    # real `_evaluate_condor_leg` at −16% and −26% in both hedge states, with
+    # the wall clock pinned inside the entry window so the hard-close branch
+    # cannot mask the stop.
+    import datetime as _dt
+    import execution.exit_engine as XE
+    from utils.time_utils import ET as _ET
+    _real_dt = XE.datetime
+    class _FrozenDT(_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return _real_dt(2026, 8, 20, 13, 0, tzinfo=_ET)
+    XE.datetime = _FrozenDT
+    try:
+        eng = XE.ExitEngine()
+        def _leg(hedged):
+            rec = {"trade_id": "spec-check", "strategy": "IronCondorStrategy",
+                   "setup_type": "condor_leg_put", "is_condor_leg": 1,
+                   "condor_leg_num": 1, "entry_premium": 1.00, "contracts": 1,
+                   "status": "open", "direction": "neutral",
+                   "underlying_stop": 0.0}
+            eng._condor_sibling_open = lambda r, default=True: hedged
+            return rec
+        d_16_alone  = eng._evaluate_condor_leg(_leg(False), 1.16)
+        d_16_hedged = eng._evaluate_condor_leg(_leg(True), 1.16)
+        d_26_hedged = eng._evaluate_condor_leg(_leg(True), 1.26)
+        check("leg 1 alone stops at 15%, like the sweep credit spread "
+              "(EXECUTED: -16%% on a lone leg exits)",
+              d_16_alone.should_exit and "condor_stop" in d_16_alone.exit_reason)
+        check("the stop only widens once there is offsetting credit "
+              "(EXECUTED: -16%% hedged holds, -26%% hedged exits)",
+              (not d_16_hedged.should_exit) and d_26_hedged.should_exit)
+    finally:
+        XE.datetime = _real_dt
 
     def ladder(roll_clears: bool, can_invert: bool) -> str:
         """Roll first, invert second, stop-and-page last."""

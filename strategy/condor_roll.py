@@ -1,7 +1,10 @@
 """
-strategy/condor_roll.py  v4.0
+strategy/condor_roll.py  v4.1
 Condor roll handling.
 
+v4.1  2026-08-20  AUDIT F8: a light-filled roll no longer wears the risk-free
+      label - on shortfall the ladder stays ARMED and is_broken_wing is NOT
+      set; the alert states both.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
@@ -374,12 +377,27 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
         actual_total_credit = (plan.total_credit_after
                                - plan.roll_credit + roll_credit_fill)
         if actual_total_credit < plan.tested_width:
+            # ⚠️ AUDIT F8 (2026-08-20): this used to alert "NOT fully
+            # risk-free" and then FALL THROUGH — flagging is_broken_wing=1 and
+            # announcing "RISK-FREE ... FINAL FORM" from PLAN numbers the fills
+            # did not pay for. is_broken_wing stands the roll ladder down
+            # (any(is_broken_wing) → no further rolls), so a light fill parked
+            # residual risk (width − actual credit) with the primary risk
+            # response disarmed and a green label on it. On a shortfall the
+            # ladder now stays ARMED — a further smallest-roll can close the
+            # gap — and nothing is labelled final.
             get_alert_manager()._send(
                 f"\u26A0\uFE0F [{mode}] ROLL FILLED LIGHT: actual credit "
                 f"${actual_total_credit:.2f} < tested width "
-                f"${plan.tested_width:.2f} — structure is NOT fully risk-free")
+                f"${plan.tested_width:.2f} — NOT risk-free; ladder stays "
+                f"ARMED, no broken-wing flag set")
+            logger.warning(
+                f"[{mode}] roll filled light "
+                f"(${actual_total_credit:.2f} < ${plan.tested_width:.2f}); "
+                f"is_broken_wing NOT set — further rolls remain available")
+            return True
 
-        # ── 3. Flag the TESTED (now risk-free) vertical a broken wing too ─────
+        # ── 3. Flag the TESTED (now genuinely risk-free) vertical ────────────
         tl.update_fields(tested["trade_id"], is_broken_wing=1)
         tested["is_broken_wing"] = 1
 

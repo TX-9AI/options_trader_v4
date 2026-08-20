@@ -1,7 +1,20 @@
 """
-execution/exit_engine.py  v4.0
+execution/exit_engine.py  v4.1
 Exit decisions: trails, structure stops, theta bleed, time.
 
+v4.1  2026-08-20  AUDIT F0/F6/F7/F10. F0: the class was BISECTED - r38 landed
+      _track_excursion at column 0 inside the class region, so evaluate and
+      all 33 evaluators were nested locals of a telemetry function and EVERY
+      intraday exit was dead code (AttributeError into the loop catch-all,
+      every tick, every open position). Relocated below the class; the
+      doctrine block above it carries the full mechanism. F6: the condor leg
+      stop derives from hedge state - 15% unhedged / 25% hedged (TRADES.md 5,
+      condor_stop 16 trades 19% win -$1,156 calibrated for a complete
+      structure). F7: *_bars columns received 15s TICK counts; now poll-
+      derived minutes - still COUNTED not timed, only the unit is honest.
+      F10: RunawayContinuation routed to the ORB exit family its spec cites;
+      the else-branch names its default out loud instead of absorbing
+      strategies silently.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
@@ -779,45 +792,6 @@ class ExitEngine:
             )
 
 
-def _track_excursion(record, current_premium: float) -> None:
-    """Record the best and worst mark this position has seen, and WHEN.
-
-    v4.0. ⚠️ THE DATA EXISTED AND WAS THROWN AWAY. `TrailState.peak_close`
-    updates every tick to drive the trailing stop and dies with the process, so
-    the book could not answer **"how long until a winner declared itself"** -
-    which is the number the sideways-grinder stop is made of. Same defect as
-    `pin_concentration` and `flat_angle_deg`: computed every tick, used for a
-    decision, never recorded.
-
-    ⚠️ AND IT IS NOT `max_profit`. That column is written ONCE at entry from
-    `signal.max_profit` - the THEORETICAL maximum of a defined-risk structure,
-    not a realized excursion. Reading it as MFE reads a plan as an outcome.
-
-    ⚠️ BARS ARE COUNTED, NOT TIMED. A wall-clock delta would be wrong across a
-    halt or a feed gap; the tick count is what the position actually saw.
-    Failure here must never reach the exit decision - a telemetry write is not
-    worth a missed stop - so everything is guarded.
-    """
-    try:
-        # ⚠️ A NaN MARK BECAME THE PEAK. `px > best` is False for NaN, but the
-        # FIRST call has no best, so `best is None` admitted it unconditionally
-        # and mfe_premium was recorded as nan for the life of the position.
-        from utils.math_utils import safe_float
-        px = safe_float(current_premium)
-        if px is None or px <= 0 or px > 1e6:
-            return
-        n = int(record.get("excursion_ticks") or 0) + 1
-        record["excursion_ticks"] = n
-        best = record.get("mfe_premium")
-        if best is None or px > float(best):
-            record["mfe_premium"] = round(px, 4)
-            record["mfe_bars"] = n
-        worst = record.get("mae_premium")
-        if worst is None or px < float(worst):
-            record["mae_premium"] = round(px, 4)
-            record["mae_bars"] = n
-    except Exception:                                          # noqa: BLE001
-        return
 
 
     def evaluate(self,
@@ -864,8 +838,27 @@ def _track_excursion(record, current_premium: float) -> None:
             return self._evaluate_continuation(record, current_premium, df_1m,
                                                df_5m=df_5m, regime=regime,
                                                vol_state=vol_state, trend=trend)
+        elif strategy == "RunawayContinuation":
+            # ⚠️ AUDIT F10 (2026-08-20): the flagship fell into the else below —
+            # a fall-through whose comment still named SweepReversal, DELETED at
+            # r33. The runaway's spec (TRADES.md §1, r17) cites orb_trail_stop
+            # 96%/85/+$30,696 as its exit; the sweep evaluator is a cousin, not
+            # the measured family. It routes to the ORB evaluator: hard close,
+            # −25% floor, theta bleed, the trail. The structure stop reads
+            # `underlying_stop`, which the runaway does not set — the ORB path
+            # already treats 0.0 as INERT and refuses to let an inert stop look
+            # like a passing check.
+            return self._evaluate_orb(record, current_premium, df_1m, df_5m)
         else:
-            # SweepReversal and any other directional strategies
+            # Unknown directional strategies take the sweep rules (25% stop,
+            # hard close — survivable defaults), but NEVER silently: an
+            # unrouted strategy is a routing decision nobody made (F10's whole
+            # mechanism). Once per trade.
+            if not record.get("_unrouted_said"):
+                record["_unrouted_said"] = 1
+                logger.warning("[exit] strategy %r has no exit route — "
+                               "defaulting to sweep rules. Add a branch.",
+                               strategy)
             return self._evaluate_sweep(record, current_premium, df_1m, df_5m)
 
     # \u2500\u2500\u2500 ORB Exit \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -1457,7 +1450,7 @@ def _track_excursion(record, current_premium: float) -> None:
 
     # \u2500\u2500\u2500 Shared Helpers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
-    def _condor_sibling_open(self, record) -> bool:
+    def _condor_sibling_open(self, record, default: bool = True) -> bool:
         """True if the OPPOSITE side of this symbol's condor is also open.
 
         The user's deconfliction rule used as a STATE CHECK: one leg open =
@@ -1637,7 +1630,20 @@ def _track_excursion(record, current_premium: float) -> None:
         # Nothing existed between entry and the $0.05 nickel close to keep any
         # of it. This moves the STOP and never closes the leg, so the position
         # stays alive to reach the far band and complete the structure.
-        base_stop  = entry_prem * (1 + CONDOR_STOP_LOSS_PCT)
+        # ⚠️ AUDIT F6 (2026-08-20): the stop was FLAT 25% from birth. TRADES.md
+        # §5 is explicit — "BEFORE LEG 2 FILLS — leg 1 manages exactly like the
+        # sweep credit spread: a 15% stop" — and names the 25% as "never
+        # validated... calibrated for a complete structure collecting credit on
+        # both sides — not for one naked leg" (condor_stop measured 16 trades,
+        # 19% win, −$1,156). check_condor_spec stayed green because it asserted
+        # a stub of its own (see its v4.1 entry). The threshold is derived at
+        # EVALUATE time from hedge state; stop_premium in the row remains the
+        # widest bound and is not rewritten. Fail direction: sibling probe
+        # error → default False → the TIGHTER stop on a lone leg — less loss,
+        # stated per AUDIT.md 5.2.
+        _hedged    = self._condor_sibling_open(record, default=False)
+        _stop_mult = CONDOR_STOP_LOSS_PCT if _hedged else 0.15
+        base_stop  = entry_prem * (1 + _stop_mult)
         stop_level = base_stop
         tier = ""
         if pnl_pct >= CONDOR_RATCHET_LOCK_AT:
@@ -1695,7 +1701,8 @@ def _track_excursion(record, current_premium: float) -> None:
 
         if current_premium >= stop_level:
             decision.should_exit = True
-            decision.exit_reason = f"condor_stop pnl={pnl_pct:.1%}{tier}"
+            decision.exit_reason = (f"condor_stop pnl={pnl_pct:.1%}{tier}"
+                                    + ("" if _hedged else " (unhedged 15%)"))
             return decision
 
         # ── TIME-GATED TAKE PROFIT (v4.1) ─────────────────────────────────
@@ -2780,6 +2787,73 @@ def _track_excursion(record, current_premium: float) -> None:
 
 # Singleton
 _exit_engine: Optional[ExitEngine] = None
+
+
+# ⚠️ AUDIT F0 (2026-08-20) — THE CLASS WAS CUT IN HALF AND EVERY EXIT WAS DEAD.
+# r38 landed `_track_excursion` as a module-level function PHYSICALLY INSIDE the
+# class body region (column 0 at what was line 782). Python read it as the end
+# of `class ExitEngine`; the ~2,000 lines below it — `evaluate` and all 33
+# exit evaluators, indented as methods — silently became NESTED LOCAL FUNCTIONS
+# of `_track_excursion`, created and discarded on each call, bound to nothing.
+# The file compiled. `import main` passed. check_imports passed. Every checker
+# passed, because NO CHECK EXECUTED AN EXIT. At runtime, the first
+# `exit_eng.evaluate(...)` on any open position raised AttributeError into the
+# loop's catch-all, every tick: no premium stop, no trail, no theta bleed, no
+# nickel close, no condor ladder could ever fire — only the independent 15:45
+# flatten_all() stood between an open position and the close. Found by the
+# rewritten check_condor_spec (AUDIT F5), whose EXECUTING replacement raised
+# the AttributeError its stub predecessor could never see. This function now
+# lives where a module-level function belongs: BELOW the class it must not
+# bisect. tests/check_exit_executes.py drives evaluate() so this class cannot
+# fall apart silently again.
+def _track_excursion(record, current_premium: float) -> None:
+    """Record the best and worst mark this position has seen, and WHEN.
+
+    v4.0. ⚠️ THE DATA EXISTED AND WAS THROWN AWAY. `TrailState.peak_close`
+    updates every tick to drive the trailing stop and dies with the process, so
+    the book could not answer **"how long until a winner declared itself"** -
+    which is the number the sideways-grinder stop is made of. Same defect as
+    `pin_concentration` and `flat_angle_deg`: computed every tick, used for a
+    decision, never recorded.
+
+    ⚠️ AND IT IS NOT `max_profit`. That column is written ONCE at entry from
+    `signal.max_profit` - the THEORETICAL maximum of a defined-risk structure,
+    not a realized excursion. Reading it as MFE reads a plan as an outcome.
+
+    ⚠️ BARS ARE COUNTED, NOT TIMED. A wall-clock delta would be wrong across a
+    halt or a feed gap; the tick count is what the position actually saw.
+    Failure here must never reach the exit decision - a telemetry write is not
+    worth a missed stop - so everything is guarded.
+    """
+    try:
+        # ⚠️ A NaN MARK BECAME THE PEAK. `px > best` is False for NaN, but the
+        # FIRST call has no best, so `best is None` admitted it unconditionally
+        # and mfe_premium was recorded as nan for the life of the position.
+        from utils.math_utils import safe_float
+        px = safe_float(current_premium)
+        if px is None or px <= 0 or px > 1e6:
+            return
+        n = int(record.get("excursion_ticks") or 0) + 1
+        record["excursion_ticks"] = n
+        # ⚠️ AUDIT F7 (2026-08-20): `n` is a 15-second TICK count and it was
+        # being written into columns named *_bars — every consumer reading
+        # "bars from entry to that peak" (the column's own comment) would have
+        # mis-timed r38's question ("how long until a winner declares itself")
+        # by 4×. A wrong number is worse than a crash. Bars ≈ minutes derived
+        # from the poll cadence; tick-vs-wall drift on slow ticks is bounded
+        # and preferable to a silent unit lie.
+        from config import POLL_INTERVAL_SECONDS as _POLL_S
+        bars = max(1, int(round(n * _POLL_S / 60.0)))
+        best = record.get("mfe_premium")
+        if best is None or px > float(best):
+            record["mfe_premium"] = round(px, 4)
+            record["mfe_bars"] = bars
+        worst = record.get("mae_premium")
+        if worst is None or px < float(worst):
+            record["mae_premium"] = round(px, 4)
+            record["mae_bars"] = bars
+    except Exception:                                          # noqa: BLE001
+        return
 
 
 def get_exit_engine(paper_trading: bool = PAPER_TRADING) -> ExitEngine:

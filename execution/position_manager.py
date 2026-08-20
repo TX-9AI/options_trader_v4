@@ -1,7 +1,10 @@
 """
-execution/position_manager.py  v4.0
+execution/position_manager.py  v4.1
 Open-position tracking, pricing and lifecycle.
 
+v4.1  2026-08-20  AUDIT F9: mark filters gain a 1e6 ceiling - NaN was already
+      excluded (NaN > 0 is False) but a finite-absurd mark closed positions
+      on phantom prints. Fail direction: None -> tick skipped.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
@@ -297,6 +300,14 @@ class PositionManager:
         Uses chain if available — even in paper mode for accurate P&L display.
         Butterfly mark = lower + upper - 2×center.
         Falls back to entry premium in paper mode if chain unavailable.
+        
+        AUDIT F9 (2026-08-20): the filters were `mark > 0` — NaN was
+        excluded (NaN > 0 is False) but 1e12 sailed through, and a
+        finite-absurd mark CLOSES a live position on a phantom print
+        (stop or target, either way a booked exit nobody chose). The
+        excursion tracker already rejects > 1e6; the DECISION path now
+        applies the same ceiling. Fail direction: None → tick skipped →
+        no decision on garbage.
         """
         is_butterfly = bool(record.get("is_butterfly", False))
 
@@ -311,23 +322,23 @@ class PositionManager:
                 if _is_credit_vertical(record):
                     short_s = record.get("short_strike", 0)
                     long_s  = record.get("long_strike",  0)
-                    short_m = next((c.mark for c in contracts_list if c.strike == short_s and c.mark > 0), None)
-                    long_m  = next((c.mark for c in contracts_list if c.strike == long_s  and c.mark > 0), None)
+                    short_m = next((c.mark for c in contracts_list if c.strike == short_s and 0 < c.mark < 1e6), None)
+                    long_m  = next((c.mark for c in contracts_list if c.strike == long_s  and 0 < c.mark < 1e6), None)
                     if short_m is not None and long_m is not None:
                         return short_m - long_m   # current spread value (credit basis)
                 elif is_butterfly:
                     lower_s  = record.get("lower_strike",  0)
                     center_s = record.get("center_strike", 0)
                     upper_s  = record.get("upper_strike",  0)
-                    lower_m  = next((c.mark for c in contracts_list if c.strike == lower_s  and c.mark > 0), None)
-                    center_m = next((c.mark for c in contracts_list if c.strike == center_s and c.mark > 0), None)
-                    upper_m  = next((c.mark for c in contracts_list if c.strike == upper_s  and c.mark > 0), None)
+                    lower_m  = next((c.mark for c in contracts_list if c.strike == lower_s  and 0 < c.mark < 1e6), None)
+                    center_m = next((c.mark for c in contracts_list if c.strike == center_s and 0 < c.mark < 1e6), None)
+                    upper_m  = next((c.mark for c in contracts_list if c.strike == upper_s  and 0 < c.mark < 1e6), None)
                     if None not in (lower_m, center_m, upper_m):
                         return lower_m + upper_m - 2 * center_m
                 else:
                     strike = record.get("strike", 0)
                     match  = next(
-                        (c for c in contracts_list if c.strike == strike and c.mark > 0),
+                        (c for c in contracts_list if c.strike == strike and 0 < c.mark < 1e6),
                         None
                     )
                     if match:

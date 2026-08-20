@@ -1,7 +1,10 @@
 """
-execution/entry_engine.py  v4.0
+execution/entry_engine.py  v4.1
 Entry dispatch and slot assignment.
 
+v4.1  2026-08-20  AUDIT F4: relaxed_entry copied signal -> record. Without it
+      the column was DEFAULT 0 on every row while the schema claimed the
+      relaxed population was separable.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
@@ -185,6 +188,15 @@ class EntryEngine:
             is_fed_day        = signal.is_fed_day,
             order_id          = order_id,
             paper_trade       = 1 if self.paper_trading else 0,
+            # ⚠️ AUDIT F4 (2026-08-20): relaxed.tag() sets this on the SIGNAL
+            # and this kwarg list is the only bridge to the row — without the
+            # line below, `relaxed_entry` was DEFAULT 0 on every trade ever
+            # written while the schema, the migration and the doctrine all
+            # claimed the population was separable. Exactly the failure the
+            # audit handoff predicted: tag set on the signal, dropped before
+            # the insert. The `_relaxed` setup suffix survived only by riding
+            # setup_type. Copy the tag, always.
+            relaxed_entry     = int(getattr(signal, "relaxed_entry", 0) or 0),
             status            = "open",
             notes             = signal.notes,
         )

@@ -1,7 +1,9 @@
 """
-main.py  v4.0
+main.py  v4.1
 Tick loop, context assembly, strategy dispatch. GATES STRIPPED - see ROADMAP Phase 2.
 
+v4.1  2026-08-20  AUDIT F4: relaxed_entry copied onto the condor-leg record -
+      the tag was set on the signal and dropped before the insert.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
@@ -1537,6 +1539,7 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         option_symbol    = getattr(short_contract, "symbol", ""),
         order_id         = order_id,
         paper_trade      = 1 if state.paper_trading else 0,
+        relaxed_entry    = int(getattr(signal, 'relaxed_entry', 0) or 0),   # AUDIT F4 — same drop as entry_engine
         status           = "open",
     )
     get_trade_logger().log_entry(record)

@@ -1,7 +1,10 @@
 """
-config.py  v4.0
+config.py  v4.1
 Every constant, threshold and env override.
 
+v4.1  2026-08-20  AUDIT F2: TREND_CREDIT_ACTIVE default OFF - the sixth
+      strategy traded live on the 34.2%-measured trend vote while its own
+      doctrine said NOT DISPATCHED. See the block at the constant.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
@@ -365,7 +368,16 @@ TCS_NICKEL_REF              = float(os.environ.get("OT_TCS_NICKEL_REF", "0.05"))
 TCS_WING_WIDTH_SPX          = float(os.environ.get("OT_TCS_WING_SPX", "5"))
 TCS_WING_WIDTH_QQQ          = float(os.environ.get("OT_TCS_WING_QQQ", "5"))
 
-TREND_CREDIT_ACTIVE         = os.environ.get("OT_TCS_ACTIVE", "1") == "1"
+# ⚠️ AUDIT F2 (2026-08-20): DEFAULT WAS "1" — a LIVE sixth strategy. TCS's own
+# GATES block says "NOT SPECCED, DELIBERATELY, AND NOT DISPATCHED... 21 trades,
+# 28.6% direction accuracy", TRADES.md specs five strategies without it, and
+# check_dispatch does not cover it — yet main.py dispatched it on every
+# afternoon tick with direction from the trend vote (measured 34.2% on puts,
+# the quantity v4 exists to retire). Five guards missed it because each read a
+# different document. Default now matches the stated design: OFF. Turning it
+# on requires the env var AND a v4 spec in TRADES.md — the flag is not the gap;
+# the missing spec is.
+TREND_CREDIT_ACTIVE         = os.environ.get("OT_TCS_ACTIVE", "0") == "1"
 # ── TC.6 ENTRY GATES (2026-08-14 HOTFIX — it rapid-fired the whole fleet) ─────
 # Observed 10:02 ET on 08-14: NVDA sold a $5-wide for $0.06, PLTR a $6-wide for
 # $0.08, and every box re-entered seconds after a nickel close.

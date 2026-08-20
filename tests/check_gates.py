@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-tests/check_gates.py  v4.0
+tests/check_gates.py  v4.1
+
+v4.1  2026-08-20  AUDIT F1: import-resolving detector. See _relaxed_bindings.
 Every strategy declares its gates, and the code cannot relax a FOUNDATIONAL one.
 
 v4.0  2026-08-20  Built at the OTV4 split. WA 36.
@@ -76,21 +78,70 @@ def declared_gates(tree):
     return None
 
 
-def relaxed_names(tree):
-    """Constants passed as the first argument to relaxed.widen / relaxed.window."""
-    found = set()
+def _relaxed_bindings(tree):
+    """Every local name bound to strategy.relaxed or its functions.
+
+    ⚠️ AUDIT F1 (2026-08-20): the old detector matched the SPELLING
+    `relaxed.widen(NAME)` and the literal import string. A mutation with
+    `from strategy import relaxed as rx` + `rx.widen(FOUNDATIONAL_X, 99)` ran
+    GREEN — two compounding escape hatches, and the aliased import was also
+    treated as "not relaxable" and skipped entirely. Same shape as the scope
+    hole this file already documents: an exemption that is the default for
+    any spelling but one. Imports are resolved now; the module is matched,
+    not the word.
+    """
+    mods, funcs = set(), {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name in ("strategy.relaxed",):
+                    mods.add(a.asname or "strategy")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "strategy":
+                for a in node.names:
+                    if a.name == "relaxed":
+                        mods.add(a.asname or "relaxed")
+            elif node.module == "strategy.relaxed":
+                for a in node.names:
+                    if a.name in RELAX_CALLS or a.name == "tag":
+                        funcs[a.asname or a.name] = a.name
+    return mods, funcs
+
+
+def relaxed_calls(tree):
+    """(constant_name | None, callsite_lineno) for every resolved relax call.
+    None means the argument was not a plain Name — a widened value nobody can
+    categorize, which is itself refused."""
+    mods, funcs = _relaxed_bindings(tree)
+    out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
-        if not (isinstance(fn, ast.Attribute) and fn.attr in RELAX_CALLS):
+        hit = False
+        if isinstance(fn, ast.Attribute) and fn.attr in RELAX_CALLS:
+            v = fn.value
+            if isinstance(v, ast.Name) and v.id in (mods | {"relaxed"}):
+                hit = True
+            elif (isinstance(v, ast.Attribute) and v.attr == "relaxed"
+                  and isinstance(v.value, ast.Name)):
+                hit = True                      # strategy.relaxed.widen(...)
+        elif isinstance(fn, ast.Name) and funcs.get(fn.id) in RELAX_CALLS:
+            hit = True                          # from strategy.relaxed import widen
+        if not hit:
             continue
-        if not (isinstance(fn.value, ast.Name) and fn.value.id == "relaxed"):
-            continue
-        for a in node.args:
-            if isinstance(a, ast.Name):
-                found.add(a.id)
-    return found
+        # EVERY Name in the call is a gate constant to categorize — the
+        # window() signature mixes literals (values) with constants (gates),
+        # e.g. relaxed.window("00:00", CUTOFF_ET, "00:00", "14:00"). A call
+        # with NO Name at all is opaque and refused: nothing to categorize.
+        names = [a.id for a in node.args if isinstance(a, ast.Name)]
+        names += [k.value.id for k in node.keywords
+                  if isinstance(k.value, ast.Name)]
+        if names:
+            out.extend((n, node.lineno) for n in names)
+        else:
+            out.append((None, node.lineno))
+    return out
 
 
 def main(argv):
@@ -98,7 +149,6 @@ def main(argv):
     checked = 0
     for name, path in strategies():
         src = open(path, encoding="utf-8").read()
-        relaxable = "from strategy import relaxed" in src
         # ⚠️ SCOPE HOLE CLOSED 2026-08-20. This used to skip any strategy that
         # did not import `relaxed` - so **ORB, the one strategy with a positive
         # record, was invisible to the checker simply by not importing it.**
@@ -123,9 +173,15 @@ def main(argv):
                             f"(expected one of {sorted(CATEGORIES)})")
 
         # ⚠️ THE CHECK THAT MATTERS. Prose can say anything; this reads the code.
-        if not relaxable:
-            continue          # nothing to relax; the declaration alone suffices
-        for n in relaxed_names(tree):
+        # Every strategy is walked — "relaxable" is no longer a spelling test
+        # a file can fail its way out of (AUDIT F1). Zero relax calls is fine.
+        for n, ln in relaxed_calls(tree):
+            if n is None:
+                problems.append(
+                    f"{name}:{ln}: a relaxed.* call whose argument is not a "
+                    "plain constant Name - it cannot be categorized, so it is "
+                    "refused. Name the gate.")
+                continue
             cat = gates.get(n)
             if cat is None:
                 problems.append(
