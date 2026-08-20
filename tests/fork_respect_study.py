@@ -135,9 +135,16 @@ def contained_channel(bars, tol_frac=0.0):
     far as price stayed inside it, so the SPAN is an output rather than a
     parameter. If the answer is interesting, the real fork is the follow-up.
     """
+    # ⚠️ OFF BY ONE, AND IT RETURNED None ON EVERY CALL. `range(n-4, -1, -1)`
+    # with n=3 is `range(-1,-1,-1)` - EMPTY - so `best` never bound and the
+    # study reported "no qualifying hourly forks" against the whole archive.
+    # **An absent measurement caused by the tool, wearing the costume of a
+    # null.** It printed the honest-looking message and was wrong.
     best = None
     n = len(bars)
-    for start in range(n - 4, -1, -1):
+    if n < 3:
+        return None
+    for start in range(n - 3, -1, -1):
         seg = bars[start:]
         cs = [b[4] for b in seg]
         m = len(cs)
@@ -164,6 +171,7 @@ def main(argv):
     a = ap.parse_args(argv[1:])
 
     obs = []
+    hourly_by_sym = {}          # carries the fork back across sessions
     days = sorted(os.path.basename(d) for d in
                   glob.glob(os.path.join(os.path.expanduser(a.ohlc), "*"))
                   if os.path.isdir(d))
@@ -178,11 +186,19 @@ def main(argv):
                 continue
             if len(rows) < 200:
                 continue
+            # ⚠️ AN HOURLY FORK SPANS MULTIPLE SESSIONS. v4.0's first version
+            # fitted inside ONE session - 3 hourly bars, which is not a channel.
+            # `pitchfork.py`'s own header records measured hourly spans of
+            # **NVDA 12 bars, SPX 32, SMCI 139**: all of them reach back past
+            # the open. A fork that cannot see yesterday is not the instrument
+            # the condor anchors to.
             hourly = to_hourly(rows)
             if len(hourly) < a.decide_hour + 2:
                 continue
-            fit = hourly[:a.decide_hour + 1]
-            if len(fit) < 3:
+            prior = hourly_by_sym.get(sym, [])
+            fit = prior + hourly[:a.decide_hour + 1]
+            hourly_by_sym[sym] = (prior + hourly)[-120:]
+            if len(fit) < 6:
                 continue
             ch = contained_channel(fit)
             if not ch:
