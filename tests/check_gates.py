@@ -98,15 +98,21 @@ def main(argv):
     checked = 0
     for name, path in strategies():
         src = open(path, encoding="utf-8").read()
-        if "from strategy import relaxed" not in src:
-            continue                      # cannot be relaxed, nothing to declare
+        relaxable = "from strategy import relaxed" in src
+        # ⚠️ SCOPE HOLE CLOSED 2026-08-20. This used to skip any strategy that
+        # did not import `relaxed` - so **ORB, the one strategy with a positive
+        # record, was invisible to the checker simply by not importing it.**
+        # A checker a file can escape by omission is a checker with a growing
+        # blind spot, and the escape hatch is the DEFAULT for a new strategy.
+        # Every strategy declares GATES; only a relaxable one is checked for
+        # relaxing the wrong category.
         checked += 1
         tree = ast.parse(src)
         gates = declared_gates(tree)
 
         if gates is None:
             problems.append(
-                f"{name}: imports `relaxed` but declares no GATES dict. "
+                f"{name}: declares no GATES dict. "
                 "Name every gate constant and its category - SELECTION, "
                 "FOUNDATIONAL or FEASIBILITY. See WA 36.")
             continue
@@ -117,6 +123,8 @@ def main(argv):
                             f"(expected one of {sorted(CATEGORIES)})")
 
         # ⚠️ THE CHECK THAT MATTERS. Prose can say anything; this reads the code.
+        if not relaxable:
+            continue          # nothing to relax; the declaration alone suffices
         for n in relaxed_names(tree):
             cat = gates.get(n)
             if cat is None:

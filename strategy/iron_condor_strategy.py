@@ -217,6 +217,32 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
+# ⚠️ THE SPEC IS IN docs/TRADES.md §5 AND THE TRIGGER IS NOT YET IMPLEMENTED.
+# `generate_signal` is a 2-statement stub; the plan/state machine below carries
+# the v3 legging logic. **Deferred deliberately** - it is the most intricate
+# spec in the book, it fires rarely by design, and three simpler strategies
+# needed to reach tape first.
+# The gates below are named from the spec so the categories exist before the
+# code does, and so an audit reads intent rather than inferring it.
+GATES = {
+    # SELECTION - the approach distance, the entry window, the wing width.
+    "CONDOR_TRIGGER_APPROACH": "SELECTION",
+    "CONDOR_WING_WIDTH_SPX":   "SELECTION",
+    "CONDOR_WING_WIDTH_QQQ":   "SELECTION",
+    # FEASIBILITY - a rail sitting on spot must not produce a strike with no
+    # breathing room, and there must be a liquid strike beyond the floor.
+    "CONDOR_EM_FLOOR_FRAC":    "FEASIBILITY",
+    "CONDOR_EXPECTED_MOVE_GUARDRAIL_MULT": "FEASIBILITY",
+    # FOUNDATIONAL, none of which is a constant - and that is the safest form:
+    #   a DAILY FORK EXISTS. "No fork, no plan." No anchor, no leg order, no
+    #     expected path. Operator: *"It's a guardrail, not the road."*
+    #   short strikes sit OUTSIDE the rails
+    #   the strike has NOT BEEN EXCEEDED today - a strike price has already
+    #     traded through is one the market has PROVEN it can reach
+    #   leg 2 requires leg 1 FILLED
+}
 ET = ZoneInfo("US/Eastern")
 
 

@@ -46,6 +46,7 @@ v-namelevels (2026-07-28) — the liquidity gate NAMES the levels it blocks on.
 """
 
 import logging
+import config
 from typing import Optional, List, Tuple
 
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
@@ -59,6 +60,26 @@ from data.macro_data import MacroSnapshot
 from config import FED_DAY_ORB_BOOST, INSTRUMENT, MAX_LOSS_PCT
 
 logger = logging.getLogger(__name__)
+
+# ⚠️ FEASIBILITY FLOOR. Below this ATR the target is unreachable - measured, not
+# chosen. Config-overridable because it was measured on 28 sessions in ONE
+# market regime and will drift.
+ORB_ATR_FLOOR_PCT = getattr(config, "ORB_ATR_FLOOR_PCT", 0.05)
+
+# ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
+# ⚠️ ORB HAS NO SELECTION GATES AND THEREFORE NOTHING TO RELAX. Every condition
+# is either the setup itself or a veto. That is why it does not import
+# `relaxed` - and why the relaxed toggle cannot loosen the one strategy with a
+# positive record. **The break and retest are the trade; there is no worse
+# version of them to fire on.**
+GATES = {
+    "ORB_ATR_FLOOR_PCT": "FEASIBILITY",
+    # FOUNDATIONAL, all tested inline with no knob:
+    #   the ORB engine armed (a break AND a retest: wick back inside the range,
+    #     body still outside - `low < orb_high and body_low >= orb_high`)
+    #   direction from the ORB state
+    #   the liquidity path to target not blocked by a named level
+}
 
 BREAK_LEVEL_PROXIMITY_PCT   = 0.0015
 NAMED_IN_PATH_ORB_WIDTHS    = 1.5
@@ -195,9 +216,14 @@ class ORBStrategy(BaseOptionsStrategy):
         signal.adx_at_signal = regime.adx
         signal.flat_angle_deg = getattr(regime, 'flat_angle_deg', 0.0) or 0.0
 
-        if len(signal.confluence_factors) < 2:
-            logger.info("ORB: insufficient confluence — no signal")
-            return None
+        # ⚠️ v4.0: THE CONFLUENCE GATE IS GONE, AND IT COULD NEVER FAIL.
+        # Two factors were required; two are added UNCONDITIONALLY above ("ORB
+        # break confirmed" and "Break+retest pattern"), so the bar was met
+        # before any optional factor was considered. **A gate that cannot
+        # refuse is a gate in name only** - it reads as a safeguard to anyone
+        # auditing the file and provides none.
+        # Confluence was also the scoring model v4 abandoned: conditions are
+        # structural now, and they either hold or they do not.
 
         # ── Strike selection ──────────────────────────────────────────────────
         target_strike = orb.target_strike
@@ -218,8 +244,28 @@ class ORBStrategy(BaseOptionsStrategy):
         signal.entry_premium = contract.mark
         signal.contract      = contract
 
+        # ── v4.0: REACHABILITY, NOT `premium > 0` ───────────────────────────
+        # A zero-premium check only catches a contract with no quote. The real
+        # question is whether the TAPE CAN REACH THE TARGET, which is what the
+        # ATR map answers for RunawayContinuation and which ORB had no
+        # equivalent of.
+        # `tests/magnitude_estimator.py`, 52,949 bars over 28 dates: below
+        # **0.05% ATR the required move was reached on 0% of 5,517 bars** - not
+        # rarely, not once. `tests/chain_feasibility.py`, 110,162 contract
+        # observations, sets what "required" means: a 0.20-0.35 delta 0DTE
+        # contract needs ~0.75% including the round-trip spread.
+        # ⚠️ FEASIBILITY, NOT SELECTION - it says the trade CANNOT PAY, however
+        # clean the break and retest were.
         if signal.entry_premium <= 0:
-            logger.warning("ORB: option has zero premium — skipping")
+            logger.warning("ORB: option has zero premium - skipping")
+            return None
+        _atr_pct = float(getattr(vol_state, "atr_normalized", 0.0) or 0.0)
+        if _atr_pct and _atr_pct < ORB_ATR_FLOOR_PCT:
+            logger.info(
+                "ORB: NO TRADE - ATR %.3f%% is below the reachable floor "
+                "(%.2f%%). Measured: below 0.05%% no strike was reached on any "
+                "of 5,517 bars, so the target cannot pay regardless of setup "
+                "quality.", _atr_pct, ORB_ATR_FLOOR_PCT)
             return None
 
         logger.info(

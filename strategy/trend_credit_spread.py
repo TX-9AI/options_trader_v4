@@ -125,6 +125,21 @@ from config import (
 from strategy import credit_vertical as cv
 
 logger = logging.getLogger(__name__)
+
+# ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
+# ⚠️ NOT SPECCED, DELIBERATELY, AND NOT DISPATCHED. TC.6 is absent from v4's
+# dispatch chain and has no v4 trigger. The record: **21 trades, 28.6%
+# direction accuracy.**
+# The reasoning, from docs/TRADES.md: the sweep credit spread sells a boundary
+# that PROVED ITSELF - price went there, failed, came back. **The ORB edge has
+# proven nothing except that the first fifteen minutes had a high and a low.**
+# It is also redundant against the runaway: one trades the ORB *breaking and
+# holding*, the other the ORB *holding*. Between them they cover every outcome,
+# **which is not coverage.**
+# An empty declaration is the honest one - there are no gates because there is
+# no trigger. If ORB-boundary credit is worth having, the sweep
+# discriminator's method measures it first and the spec comes after.
+GATES = {}
 ET = pytz.timezone("US/Eastern")
 
 
