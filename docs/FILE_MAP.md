@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-92 Python modules across 11 local packages.
+93 Python modules across 11 local packages.
 
 ## Fan-in leaderboard - widest blast radius
 
@@ -139,8 +139,12 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `config.py`, `data/candle_feed.py`, `data/tasty_client.py`, `utils/time_utils.py`
 - **called by:** `analysis/get_orb_range.py`, `data/data_cache.py`, `data/macro_data.py`, `main.py`, `query.py`
 
+### `data/open_interest.py`
+- **calls:** (none)
+- **called by:** `data/options_chain.py`
+
 ### `data/options_chain.py`
-- **calls:** `analysis/tenor_publish.py`, `config.py`, `data/tasty_client.py`, `execution/tick_size.py`, `utils/math_utils.py`
+- **calls:** `analysis/tenor_publish.py`, `config.py`, `data/open_interest.py`, `data/tasty_client.py`, `execution/tick_size.py`, `utils/math_utils.py`
 - **called by:** `analysis/trade_readiness.py`, `data/gex_data.py`, `main.py`, `strategy/base_strategy.py`, `strategy/butterfly_strategy.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `strategy/sweep_reversal_strategy.py`
 
 ### `data/tasty_client.py`

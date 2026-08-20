@@ -251,6 +251,32 @@ class OptionsChainFetcher:
                 if oc.streamer_symbol
             ]
 
+            # ── v4.0: REAL OPEN INTEREST ────────────────────────────────────
+            # `open_interest` was declared on OptionContract and NEVER ASSIGNED,
+            # so it defaulted to 0 on every contract for the life of v3. gex_data
+            # then fell through to `oi_proxy = 1000 * gamma` and multiplied by
+            # gamma AGAIN, making GEX a gamma-SQUARED surface rather than dealer
+            # positioning - which is why the "pin" always landed at the money
+            # (gamma peaks there) and why it churned 12.4M -> 0.1M -> 2.0M in
+            # three minutes on SPX 2026-08-19.
+            # ⚠️ REST, NOT A SUBSCRIPTION. OI updates ONCE A DAY; a Summary
+            # stream would cost one subscription PER CONTRACT against the ~40
+            # concurrent-session cap the fleet already runs close to. That cost
+            # is the likeliest reason this was never wired.
+            # ⚠️ FAILURE LEAVES OI AT 0 AND SAYS SO. It does not substitute.
+            try:
+                from data.open_interest import fetch_open_interest
+                _occ = [oc.symbol for oc in calls_raw + puts_raw if oc.symbol]
+                _oi = fetch_open_interest(session, _occ)
+                if _oi:
+                    for oc in calls_raw + puts_raw:
+                        v = _oi.get(oc.symbol)
+                        if v is not None:
+                            oc.open_interest = int(v)
+            except Exception as _oie:                          # noqa: BLE001
+                logger.warning("OI wiring failed (%s) - GEX runs WITHOUT open "
+                               "interest this cycle", _oie)
+
             if streamer_syms:
                 greeks_map, quote_map = self._fetch_greeks_and_quotes(
                     session, streamer_syms, expiry=today_str
