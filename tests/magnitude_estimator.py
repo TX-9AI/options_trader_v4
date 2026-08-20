@@ -187,7 +187,34 @@ def main(argv):
               + ("" if mono else "  (a non-monotone estimator is not usable "
                                  "for strike selection)"))
 
-    print("\n  STRIKE REACHABILITY BY ADX BAND")
+    # ── ATR is the estimator; ADX measured FLAT and cannot drive this ───────
+    # ⚠️ MEASURED 2026-08-19 on 52,949 bars: ADX bands 0-15 through 40-100 all
+    # produced the SAME median excursion - 0.69% to 0.74%. **ADX 45 reaches no
+    # further than ADX 12.** The reachability table was flat across every row,
+    # which is the same non-result ADX gave for DIRECTION, now for MAGNITUDE.
+    # ATR over the same bars: 0.19% -> 0.28% -> 0.43% -> 0.60% -> 1.07%,
+    # monotone, a 5.6x spread. **The rule reads ATR.**
+    print("\n  STRIKE REACHABILITY BY ATR BAND  <- THE USABLE MAP")
+    print("     For each ATR band: what fraction of bars produced an excursion")
+    print("     big enough to pay +10% on each delta band, spread included.")
+    hdr2 = "".join(f"{lbl:>12}" for lbl, _ in STRIKE_BAR)
+    print(f"    {'ATR %':10}{'n':>8}{hdr2}")
+    print("    " + "-" * (18 + 12 * len(STRIKE_BAR)))
+    for lo, hi in [(0, .03), (.03, .05), (.05, .08), (.08, .12), (.12, .20),
+                   (.20, 9)]:
+        sel = [o for o in obs if lo <= o[1] < hi]
+        if len(sel) < 200:
+            continue
+        cells = ""
+        for _lbl, need in STRIKE_BAR:
+            hit = sum(1 for o in sel if o[2] >= need) / len(sel)
+            cells += f"{hit:>11.0%} "
+        print(f"    {f'{lo}-{hi}':10}{len(sel):>8,}{cells}")
+    print("     -> pick the DEEPEST band the tape reaches often enough to be")
+    print("        worth buying. A band reached 20% of the time is a lottery")
+    print("        ticket, not a strike.")
+
+    print("\n  STRIKE REACHABILITY BY ADX BAND  (kept to show it is FLAT)")
     print("     For each ADX band: what fraction of bars produced an excursion")
     print("     big enough to pay +10% on each delta band, spread included.")
     hdr = "".join(f"{lbl:>12}" for lbl, _ in STRIKE_BAR)
