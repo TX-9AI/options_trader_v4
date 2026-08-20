@@ -1,260 +1,47 @@
 """
-data/candle_feed.py  v4.0
-DXLink candle feed, store, maintenance window, extended hours.
+data/candle_feed.py  v4.1
+v4.1  2026-08-20  FEED.2 — EVERY 1h CANDLE ROUTED TO THE WRONG SYMBOL FOR SIX
+    DAYS, FLEET-WIDE. Ported verbatim from the v3/SMC fix (v3.16); the body
+    below the header was BYTE-IDENTICAL across all three repos, so this is one
+    defect with one fix in three places.
 
-v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
+    `symbol_map` was keyed on (dx_symbol, interval), and FEED.2 subscribes the
+    SAME symbol at the SAME interval TWICE — RTH and extended. The second
+    registration overwrote the first, so **the RTH 1h route was destroyed at
+    construction** and every 1h bar landed under the EXT store symbol. Measured
+    2026-08-20: plain QQQ and SPX 1h frozen at 2026-08-14 while *_EXT 1h was
+    current.
 
-INHERITED DOCTRINE
-MEASUREMENTS AND CONSTRAINTS CARRIED FROM v3 - NOT A CHANGELOG.
-Dated release framing and trivia are stripped; what remains is the
-reasoning behind the thresholds, the design guarantees, and the
-defects that recur when forgotten. WORKING_AGREEMENT 32 requires
-this block be read before the file is edited.
+    ⚠️ NOTHING RAISED. BARS_STALE warned every five minutes with
+    `refused=False` and the bots traded on 08-14 bars regardless. **Six days of
+    stale higher-timeframe structure** fed structure_analyzer's swings and S/R,
+    the pitchfork and its observer, and entry_snapshot.
 
-data/candle_feed.py  addendum v3.15 (see below); original header follows.
-TERM.1: read_chain_subs UNIONS AUXILIARY TENORS.
-        Every chain snapshot to date carries a SINGLE expiry equal to the
-        session date, so TERM STRUCTURE - the one thing options data says about
-        WHEN the market expects movement rather than how much - is not
-        computable. It also cannot be backfilled.
-        `chain_subs` is CHECK (id = 1), a single row BY DESIGN, so extra
-        expiries ride in a separate `chain_subs_aux` table and are unioned here.
-        The returned `expiry` string still names the FRONT expiry only: every
-        existing caller reads it that way and none of them changes.
-        FAILS OPEN, DELIBERATELY. THIS FUNCTION DECIDES WHAT A LIVE TRADING BOX
-        SUBSCRIBES TO. Missing, stale (>6h), malformed, or dropped mid-run, the
-        front expiry comes back exactly as before - verified against real
-        SQLite in tests/test_tenor_capture.py. Archival enrichment must never
-        cost the bot its own chain.
-        STALENESS BOUND because the session cap is real: v3.1 measured
-        TastyTrade's unpublished limit near ~40 concurrent, and last week's
-        strikes would burn budget for contracts nothing reads.
-FEED.3: PRUNING IS OFF. `PRUNE_KEEP_ROWS=0` by default.
-        THE BOUND WAS SIZED FOR THE LIVE LOOP and kept silently constraining
-        analytical consumers that arrived later. Twice now: PF.2 found the boxes
-        held 84 daily bars while the engine was handed 10 ("the history was
-        never missing - the frame was"), and LIQ.6's 10-day section lookback
-        landed on exactly the 240-row 1h ceiling with ZERO margin.
-        AND IT WAS NEVER BUYING ANYTHING. Measured: a FULL YEAR of every
-        interval with extended hours is **54 MB per box**, on an 8 GB root. Ten
-        days is 1.5 MB. The pruner was tidiness, not capacity.
-        The local store keeps what it collects; S3 is the archive and weekend
-        reporting reads the bucket, so the box is no longer the deep copy of
-        anything. OT_PRUNE_KEEP_ROWS=<n> re-enables a flat cap - kept as a
-        mechanism rather than deleted so reversing it is one env var.
-        THE POISON PURGE IS UNTOUCHED and must stay: it deletes BAD rows
-        (non-positive prices, 2038-stamped DXFeed rollover junk), not OLD ones.
-        ALSO FIXED HERE: the prune loop still unpacked a 3-TUPLE after FEED.2
-        widened `self.subs` to four. It would have raised at runtime after
-        PRUNE_EVERY_S inside the flush path, on a box in production - `--once`
-        exits before the first prune and no test touched it. A test now asserts
-        every consumer matches the declared arity.
-FEED.2: THE OVERNIGHT TAPE WAS NEVER UNAVAILABLE - WE WERE
-        ASKING DXFEED TO EXCLUDE IT. `subscribe_candle` takes
-        `extended_trading_hours: bool = False`, and on False the SDK appends
-        **`tho=true`** (trading-hours-only) to the symbol: `QQQ{=1h,tho=true}`.
-        Every subscription this feed has ever made carried it, by default.
-        THAT ONE DEFAULT produced every symptom chased on 08-15: ext=0 on 28 of
-        29 boxes, a 1h store of 252 bars (36 sessions x 7 = RTH only), and
-        LIQ.6's Asia and London sections with nothing to build from. NOT the
-        session guard, NOT the warm lead, NOT S3, NOT an entitlement tier.
-        A SEPARATE STREAM, NOT A FLAG ON `1h`. Plain 1h is read by
-        structure_analyzer (swings + S/R), pitchfork + its observer, and
-        entry_snapshot; flipping it in place would rebuild all of them on 24h
-        bars with nothing announcing it. The extended stream lands under its own
-        store symbol `<SYM>_EXT`, so NO existing consumer moves.
-        NO SEPARATE COLLECTOR IS NEEDED. fromTime is now-16d and DXFeed streams
-        HISTORY from there, so last night arrives on the 09:10 warm-lead
-        connection that already happens - no 08:15 wake, no batches of five, no
-        conductor change, no extra instance-hours.
-        RETENTION IS EXACTLY AT THE EDGE: the pruner keeps 240 1h rows = 10.0
-        days of 24h tape against SECTION_LOOKBACK_DAYS=10. Zero margin - a
-        missed night eats straight into the ladder.
-        OT_EXT_1H=0 disables the stream.
-FEED.1: THE THIRD PURPOSE - a MAINTENANCE window.
-        `_idle_outside_session` already said "THE DISTINCTION IS PURPOSE, NOT
-        TIME" but had only TWO purposes, so `--once` was allowed at ANY hour.
-        That is right for the EOD pull and wrong for what v3.9 actually
-        protects against: a maintenance wake putting all 29 boxes on the wire
-        for work needing no market data. **It cannot be a clock rule** - the
-        08:15 overnight capture pass and a maintenance window fall on the same
-        hours and want opposite behaviour.
-        MODES: service (default, unchanged) | capture (gates as service; the
-        name makes a capture wake distinguishable in the logs and gives a
-        future window argument somewhere to live) | maintenance (HARD OFF,
-        `--once` included).
-        A SENTINEL FILE, not only env: `Environment=` is read once at import,
-        so flipping a RUNNING feed would need a restart - and that restart
-        window is exactly when the box is on the wire during the maintenance it
-        should be excused from. `data/FEED_MAINTENANCE` is checked on every
-        gate evaluation; touch to enter, rm to leave, nothing restarts.
-        FAILS OPEN TO service on an unreadable flag - the one place in this
-        repo that deliberately does. A stray socket is recoverable in seconds;
-        a missed session is PERMANENT (DXFeed history is same-evening only,
-        which is how 08-03 and 08-04 were lost).
-        AND IT ANNOUNCES ITSELF AT WARNING, naming the mode and saying the tape
-        is NOT being collected - the 08-03 loss was this gate firing silently
-        at INFO and writing fourteen 38-byte header-only CSVs.
-ONE PREDICATE, `_idle_outside_session(once)`, called from
-        both the reconnect gate and the RTH-over break. v3.9 wrote the condition
-        inline twice and v3.10 had to patch both; a fourth caller would have had
-        to remember a fourth time, and the whole incident was three independent
-        clock checks in a chain, two of which blocked the same operation. Pure
-        refactor — the decision is identical at both sites and service mode is
-        byte-equivalent to v3.10.
-        WHAT IT ENCODES: the gate exists to stop a box HOLDING a live
-        subscription with no session to serve. Reports and backfills hold
-        nothing, so they run outside RTH; the fleet-maintenance wake that
-        prompted v3.9 is still blocked, because that runs in SERVICE mode.
-`--once` IS EXEMPT FROM BOTH RTH GATES. v3.9's gate never
-        asked whether the run was a one-shot backfill, and neither did the
-        RTH-over break inside the stream loop. A one-shot outside RTH therefore
-        slept 60s at a time in the outer loop until `timeout 200` killed it,
-        having subscribed to nothing and written nothing.
-        WHAT IT COST: `pull_today_ohlc.sh` — the ONLY path the EOD candle
-        retrieval has — calls exactly `candle_feed --once`. From 2026-08-03 every
-        SAT-OUT box that eod_backfill woke produced a HEADER-ONLY csv: fourteen
-        38-byte files on 08-04, the same signature on 08-03. **DXFeed history is
-        same-evening only, so both sessions' sat-out tape is permanent loss.**
-        Nothing raised. The log read `Feed idle — outside RTH` at INFO, four
-        times, and then `0 bars`.
-        BOTH SITES HAD TO MOVE TOGETHER. The inner break sits ABOVE the --once
-        drain-exit, so fixing only the outer gate produces the identical hang one
-        layer down with the backfill still undrained.
-        WHY THE EXEMPTION IS RIGHT RATHER THAN A LOOPHOLE: v3.9 exists so a box
-        does not HOLD a live socket when no session needs one. `--once` connects,
-        pulls HISTORY from 09:30, flushes and exits — it holds nothing. The
-        service path is untouched, so the maintenance-wake problem v3.9 solved
-        stays solved.
-RTH GATE on the reconnect loop. The feed had NO time gate
-        (Restart=always, no timer), so while a box was up it held a DXLink socket
-        continuously. Invisible on a normal day — phase_report stops the
-        instances at EOD — but every MAINTENANCE wake put 29 boxes back on the
-        wire for work needing no market data. Now sleeps outside RTH and holds no
-        subscriptions at all.
-        SAFE FOR CHAIN ARCHIVAL, which is what made this look risky: Greeks and
-        Quote ride this same socket, so idling also stops draining chain_marks —
-        but chain_snapshot.snapshot() takes the chain as an ARGUMENT and runs
-        inside main.py's tick loop, which already returns early on not is_rth()
-        (main.py:1268). Archival only ever happens during RTH.
-        Connects OT_FEED_WARM_LEAD_S (default 1200s = 20 min) BEFORE the open,
-        covering the 09:15 fleet wake, because fetch_candles refuses on a stale
-        heartbeat and a feed connecting at exactly 09:30 serves nothing for its
-        first cycles.
-        BOTH EDGES, not just the start. The top-of-loop gate decides whether to
-        CONNECT; a second check on the existing flush cadence DISCONNECTS when
-        the session ends, so a box left up overnight releases its subscriptions
-        instead of streaming until something drops it. Buffered bars are flushed
-        immediately before the break, so nothing is lost.
-SUBSCRIPTION FAULT-ISOLATION + EXCEPTIONGROUP UNWRAP.
-        Each candle subscribe is now independent: one failing (symbol,tf)
-        (e.g. an entitlement gap) is logged with its REAL cause and skipped
-        instead of killing the whole stream. And the reconnect handler now
-        unwraps asyncio's ExceptionGroup so the actual DXFeed error is
-        logged, not 'unhandled errors in a TaskGroup'. This is what left XOM
-        (and any entitlement-gapped symbol) dark and undiagnosable for two
-        days. Additive to v3.7 (parser) / v3.5 (chunked chain) — no other
-        behaviour changed.
-CHUNKED chain subscribes (75 symbols/frame). SPX/QQQ-sized
-        0DTE chains in a single subscribe frame risk a websocket 1009
-        (message too long) close that would bounce the whole socket, candles
-        included — untested exposure until now because SPX never won a session
-        slot during the v3.1 trial. No other change.
-CHAIN MARKS ON THE SAME SOCKET (Option 1b — session-cap fix).
-        2026-07-13 proved TastyTrade's unpublished concurrent-session cap sits
-        near ~40: 29 candle-feeds + per-box chain streamers (options_chain
-        v3.1) could not all connect (~6-11 admitted, rest locked out). This
-        release finishes the v3.0 doctrine — ONE producer, many readers — by
-        carrying the options-chain Greeks/Quote subscriptions on the feed's
-        EXISTING DXLink socket. Fleet steady state: 29 sessions total, the
-        number proven safe for weeks. Mechanics:
-        • options_chain (v3.2) writes the desired streamer-symbol set + expiry
-          to a new chain_subs row in the store; the feed reconciles
-          subscriptions every flush cycle (subscribe deltas; expiry rollover
-          unsubscribes all Greeks/Quote and clears chain_marks).
-        • Greeks/Quote events drain non-blocking each loop pass into
-          latest-value buffers, flushed to a new chain_marks table on the
-          existing 2 s flush cadence. Candle handling is UNCHANGED.
-        • On socket reconnect, chain subscription state resets and
-          re-reconciles automatically (same path as candle resubscribe).
-        The bot process now opens ZERO DXLink connections.
-options_trader_v3/data/candle_feed.py — THE single candle-feed producer. v3.0
-initial release (Yahoo-Finance purge; single shared TastyTrade
-        candle feed / data stream mapping optimization). This service owns the
-        ONLY DXLinkStreamer subscription on the box. Every other process (the
-        trading bot, the shadow observer, the candle logger, query tools) reads
-        the shared SQLite store this service maintains. One producer, many
-        readers — it is FORBIDDEN for any consumer to open its own DXFeed
-        stream.
-POISON-CANDLE GUARD (producer side). Reject at ingest any
-        candle whose timestamp falls outside a sane window (kills the DXFeed
-        signed-32-bit rollover bar: ts=2147483648xxx ms => year 2038) or whose
-        OHLC contains a non-positive price. Observed live on GOOGL 2026-07-13:
-        the junk bar entered the store, won the "latest bar" query in
-        fetch_quote(), returned 0.0, and killed the bot's tick loop every tick
-        while the unit still reported ACTIVE. Also adds FeedStore.purge_poison(),
-        run at startup, so a box whose store was already poisoned self-heals on
-        restart with no manual sqlite surgery across the fleet.
-CROSS-THREAD SQLITE FIX. FeedStore's connection is built on
-        the MAIN thread but every write (_flush -> upsert_candles / heartbeat /
-        commit / prune) is driven from the asyncio event-loop thread created by
-        get_loop(). Python's sqlite3 rejects that by default, so candle-feed
-        died on its FIRST flush on every start ("SQLite objects created in a
-        thread can only be used in that same thread") and systemd's
-        Restart=on-failure turned it into a crash-loop — which in turn piled up
-        DXLink sessions until TastyTrade returned "The number of user sessions
-        has exceeded the configured limit" (GOOGL, 2026-07-13). Connection now
-        uses check_same_thread=False with an explicit threading.Lock
-        serializing every write; still a single writer, so WAL semantics are
-        unchanged.
-Architecture (Mandate 2 of the Yahoo-Finance purge):
-  - Runs as its own systemd unit: candle-feed.service (Before=optionsbot).
-  - Reuses data.tasty_client.get_session() and get_loop() — one login, one
-    background event loop, no duplication.
-  - Subscribes ONCE to this box's symbol (config.INSTRUMENT) across every
-    interval in config.TIMEFRAMES (1m, 5m, 15m, 1h, 1d) plus VIX (1m + 1d),
-    with per-interval backfill start times deep enough to satisfy
-    TIMEFRAMES[tf]["candles"] with margin (entitlement permitting — see
-    FIRST-RUN CHECKLIST below).
-  - Maintains a rolling in-memory buffer, last-write-wins per int(candle.time)
-    (DXFeed re-sends/corrects bars — same mechanics proven in
-    candle_logger._collect v1.x, consolidated here as a PERSISTENT
-    subscription instead of a one-shot drain).
-  - Flushes the buffer to an on-box SQLite store in WAL mode (one writer, many
-    concurrent readers, atomic, survives consumer restarts):
-        candles(symbol, interval, ts_epoch_ms, open, high, low, close, volume)
-        feed_meta(symbol, interval, last_write_epoch)   -- staleness detection
-    plus a global heartbeat row feed_meta('__feed__','heartbeat') updated on
-    every flush cycle so readers can detect a dead feed even when no new bars
-    are arriving (e.g. the forming 1d bar).
-  - Keeps a bounded history per (symbol, interval): PRUNE_FACTOR x the largest
-    configured count, pruned periodically.
-  - Reconnects with backoff if the streamer drops; re-backfills from session
-    open so corrected bars are re-applied.
-Store location (producer and every consumer must resolve identically):
-  $OT_FEED_DB if set, else <repo>/data/feed_store.db  (self-locating, same
-  pattern as candle_logger's OHLC dir — no /var/lib permission trap).
-DXFeed symbology:
-  Equities/ETFs use the plain ticker. Index boxes may need a DXFeed-specific
-  symbol — set OT_DXFEED_SYMBOL to override (e.g. OT_DXFEED_SYMBOL=SPX).
-  VIX subscribes as $OT_DXFEED_VIX (default "VIX").
-  Candle events arrive as 'QQQ{=1m}' — base symbol = split on '{'. Bars are
-  stored under the BOT's symbol name (config.INSTRUMENT / "VIX"), not the
-  DXFeed alias, so readers never need the mapping.
-FIRST-RUN CHECKLIST (one box, before fleet deploy — mirrors candle_logger v1.x):
-  1. History depth / entitlement: journalctl -u candle-feed | grep "backfill"
-     — every interval must report >= its configured count (1h needs ~10
-     trading days, 1d needs ~3 weeks). Thin entitlement on 1h/1d will surface
-     here, NOT as a silent short window downstream. The persistent buffer
-     accumulates over the session, so intraday depth grows on its own.
-  2. VIX entitlement: grep "VIX" — if DXFeed lacks VIX on your entitlement,
-     macro falls back stale->default-20 (fail-loud WARNING). See
-     data/macro_data.py v3.0 header for the flagged alternative.
-  3. Index symbology: SPX box — set OT_DXFEED_SYMBOL and confirm bars land.
-Usage:
-    python -m data.candle_feed                 # foreground (systemd runs this)
-    python -m data.candle_feed --once          # single backfill+flush, then exit
-                                               # (smoke test / pre-open warm)
+    ⚠️ AND IT LANDS ON WORK DONE THIS WEEK. r183 raised TIMEFRAMES["1h"] from
+    50 to 80 because trend_engine needs EMA_SLOW+5=55, and that diagnosis —
+    "the 1h vote never fired" — was correct about the DEPTH and blind to the
+    STORE BEING FROZEN. **I tuned an instrument's configuration without
+    checking whether its input was arriving**, which is the same failure as
+    `oi_proxy`, `max_liq` and `vix_at_entry`: a plausible silence, fixed at the
+    wrong layer.
+
+    ⚠️ WHAT IS *NOT* AFFECTED: every study run on 2026-08-20 —
+    fork_respect_study, tine_order_study, sweep_discriminator,
+    magnitude_estimator, chain_feasibility — builds its own bars from the 1m
+    OHLC CSVs and never reads the candle store. **Those numbers stand.**
+
+    FIX: the map key carries the extended-hours flag, and the ingest router
+    reads `tho=true` off the echoed symbol — the attribute `_interval_of`
+    deliberately discards is exactly the one the router needed.
+    GUARD: the feed REFUSES TO START if two subscriptions share a route key, if
+    a subscription has no route, or if two subscriptions write the same
+    (store_symbol, interval). **The defect was not a typo; it was a route table
+    that could silently lose an entry, and that must be impossible rather than
+    merely fixed.**
+
+    ⚠️ EXISTING ROWS ARE NOT REPAIRED. Plain-symbol 1h history between 08-14 and
+    the deploy is simply absent, and DXFeed history is use-it-or-lose-it.
+    Backfill on restart refills what the API still serves.
 """
 import argparse
 import asyncio
@@ -685,10 +472,14 @@ class CandleFeed:
         self.subs: List[Tuple[str, str, datetime, bool]] = []
         for tf in TIMEFRAMES.keys():
             self.subs.append((self.dx_symbol, tf, _backfill_start(tf), False))
-            self.symbol_map[(self.dx_symbol, tf)] = INSTRUMENT
+            # v3.16 — the key now carries the EXTENDED-HOURS FLAG, because
+            # (dx_symbol, interval) is NOT unique: FEED.2 subscribes the same
+            # symbol+interval twice and the second registration used to
+            # overwrite the first. Three-tuple, one entry per subscription.
+            self.symbol_map[(self.dx_symbol, tf, False)] = INSTRUMENT
         for tf in VIX_INTERVALS:
             self.subs.append((VIX_SYMBOL, tf, _backfill_start(tf), False))
-            self.symbol_map[(VIX_SYMBOL, tf)] = "VIX"
+            self.symbol_map[(VIX_SYMBOL, tf, False)] = "VIX"
 
         # ── FEED.2 (2026-08-15) — THE OVERNIGHT STREAM ───────────────────────
         # ⚠️ THE TAPE WAS NEVER UNAVAILABLE. WE WERE ASKING DXFEED TO EXCLUDE IT.
@@ -712,7 +503,45 @@ class CandleFeed:
         if EXT_1H_ENABLED:
             self.subs.append((self.dx_symbol, EXT_INTERVAL,
                               _backfill_start(EXT_INTERVAL), True))
-            self.symbol_map[(self.dx_symbol, EXT_INTERVAL)] = EXT_STORE_SYMBOL
+            self.symbol_map[(self.dx_symbol, EXT_INTERVAL, True)] = EXT_STORE_SYMBOL
+        # ── v3.16 — COLLISION GUARD. REFUSE TO START ON A DUPLICATE ROUTE ───
+        # The FEED.2 defect was not that someone wrote a wrong key; it was that
+        # TWO subscriptions could legally resolve to the SAME store target and
+        # nothing said so. Six days of stale 1h structure followed, fleet-wide,
+        # with no error. A route table that can silently lose an entry must not
+        # be allowed to start.
+        # Two invariants, both cheap and both checked before a socket opens:
+        #   1. no two SUBSCRIPTIONS share a map key (one would overwrite the
+        #      other, which is exactly what happened)
+        #   2. no two map keys point at the SAME (store_symbol, interval) —
+        #      two live streams writing one table is a silent merge
+        _seen_keys, _seen_targets = set(), {}
+        for (_ds, _tf, _st, _ex) in self.subs:
+            _k = (_ds, _tf, bool(_ex))
+            if _k in _seen_keys:
+                raise RuntimeError(
+                    f"candle_feed: DUPLICATE SUBSCRIPTION KEY {_k} — two "
+                    f"subscriptions resolve to one route and one would "
+                    f"silently overwrite the other (the FEED.2 defect, "
+                    f"2026-08-14..20). Refusing to start.")
+            _seen_keys.add(_k)
+            _tgt = (self.symbol_map.get(_k), _tf)
+            if _tgt[0] is None:
+                raise RuntimeError(
+                    f"candle_feed: SUBSCRIPTION {_k} HAS NO ROUTE in "
+                    f"symbol_map — its candles would be dropped. Refusing "
+                    f"to start.")
+            if _tgt in _seen_targets:
+                raise RuntimeError(
+                    f"candle_feed: TWO SUBSCRIPTIONS WRITE {_tgt} — "
+                    f"{_seen_targets[_tgt]} and {_k}. One stream would "
+                    f"silently merge into the other's table. Refusing to "
+                    f"start.")
+            _seen_targets[_tgt] = _k
+        logger.info("candle_feed routes verified: %d subscription(s), "
+                    "%d distinct store target(s)",
+                    len(_seen_keys), len(_seen_targets))
+
         # buffer[(store_symbol, interval)][ts_ms] = row tuple
         self.buffer: Dict[Tuple[str, str], Dict[int, Tuple]] = {}
         self._unmapped_seen: set = set()   # v3.7: warn-once on unmapped candles
@@ -747,22 +576,48 @@ class CandleFeed:
         token = token.split(",", 1)[0].strip()      # drop ',tho=true' etc.
         return {"m": "1m", "h": "1h", "d": "1d", "s": "1s"}.get(token, token)
 
+    @staticmethod
+    def _is_ext_of(event_symbol: str) -> bool:
+        """v3.16 — IS THIS ECHO FROM THE EXTENDED-HOURS SUBSCRIPTION?
+
+        🔴 THE BUG THIS EXISTS FOR. FEED.2 subscribes the SAME dx symbol at the
+        SAME interval twice — once RTH-only, once with extended_trading_hours —
+        and registered both in `symbol_map` under `(dx_symbol, interval)`. The
+        keys are identical, so the second assignment silently overwrote the
+        first and EVERY 1h candle was routed to the EXT store symbol. Measured
+        2026-08-20 across the fleet: plain `QQQ`/`SPX` 1h frozen at 2026-08-14
+        while `*_EXT` 1h was current — SIX DAYS of stale higher-timeframe
+        structure feeding structure_analyzer's swings and S/R, the pitchfork
+        and its observer, and entry_snapshot. Nothing raised; BARS_STALE warned
+        every five minutes with `refused=False` and the bots kept trading on
+        08-14 bars.
+        `tho=true` is the ONLY thing that distinguishes the two echoes, and
+        `_interval_of` deliberately discards it. So read it here instead: the
+        attribute the parser drops is exactly the attribute the router needs.
+        """
+        if "{=" not in (event_symbol or ""):
+            return False
+        attrs = event_symbol.split("{=", 1)[1].rstrip("}")
+        return "tho=true" in attrs.replace(" ", "").lower()
+
     def _on_candle(self, c: Candle):
         ev_sym = getattr(c, "event_symbol", "")
         base = _base_symbol(ev_sym)
         interval = self._interval_of(ev_sym) or ""
-        key_sym = self.symbol_map.get((base, interval))
+        is_ext = self._is_ext_of(ev_sym)
+        key_sym = self.symbol_map.get((base, interval, is_ext))
         if key_sym is None:
             # v3.7: NEVER drop a candle silently. This branch swallowed the whole
             # feed on 07-13/14/15 (unparsed interval) with no log anywhere. Warn
             # once per distinct unmapped key so a future echo-format change is
             # visible within one line instead of a wasted session.
-            if ev_sym and (base, interval) not in self._unmapped_seen:
-                self._unmapped_seen.add((base, interval))
+            if ev_sym and (base, interval, is_ext) not in self._unmapped_seen:
+                self._unmapped_seen.add((base, interval, is_ext))
                 logger.warning(
-                    "DROPPING candles: event_symbol=%r -> (base=%r, interval=%r) "
-                    "NOT in symbol_map %r — storing nothing for it",
-                    ev_sym, base, interval, sorted(self.symbol_map.keys()))
+                    "DROPPING candles: event_symbol=%r -> (base=%r, interval=%r, "
+                    "ext=%r) NOT in symbol_map %r — storing nothing for it",
+                    ev_sym, base, interval, is_ext,
+                    sorted(self.symbol_map.keys()))
             return
         if c.time is None or c.open is None:
             return
@@ -875,7 +730,7 @@ class CandleFeed:
         """One-time per (symbol, interval): report depth vs required count so
         entitlement gaps surface in the journal (FIRST-RUN CHECKLIST #1)."""
         for (dx_sym, tf, _start, _ext) in self.subs:
-            sym = self.symbol_map[(dx_sym, tf)]
+            sym = self.symbol_map[(dx_sym, tf, bool(_ext))]
             if self.backfill_logged.get((sym, tf)):
                 continue
             n = self.store.bar_count(sym, tf)
@@ -1099,7 +954,7 @@ class CandleFeed:
                         # different purpose.
                         if PRUNE_KEEP_ROWS and _time.time() - last_prune >= PRUNE_EVERY_S:
                             for (dx_sym, tf, _s, _e) in self.subs:
-                                sym = self.symbol_map[(dx_sym, tf)]
+                                sym = self.symbol_map[(dx_sym, tf, bool(_e))]
                                 self.store.prune(sym, tf, PRUNE_KEEP_ROWS)
                             self.store.commit()
                             last_prune = _time.time()
