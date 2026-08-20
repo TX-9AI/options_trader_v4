@@ -632,6 +632,30 @@ did**, and every one of them printed something plausible while doing it —
 · a proxy never labelled unavailable, indistinguishable from data for years
 · a threshold set before the measurement that contradicted it
 
+### THE CANONICAL LAND HEADER — one string, used twice
+
+Every land command opens with two variables, and the SAME description becomes
+both the Genesis line and the commit subject:
+
+    REV="r27"; DESC="what it did and why, in a full sentence"
+    ...
+    printf '| **%s** | %s |\n' "$REV" "$DESC" >> docs/GENESIS.md
+    ...
+    git commit -m "OTV4 $REV: $DESC"
+
+⚠️ **ONE SOURCE, SO THEY CANNOT DIVERGE.** Written by hand in two places they
+drift, or one gets forgotten — and a Genesis line that disagrees with its own
+commit is worse than a missing one, because it reads as authoritative.
+
+⚠️ **AND THE APPEND MUST COME BEFORE `git add`**, or the line ships in the
+commit AFTER the one it describes and every entry is permanently off by one.
+That ordering is why the description cannot be derived FROM the commit message:
+the message does not exist yet.
+
+⚠️ **WRITE IT GENESIS-STYLE, NOT COMMIT-STYLE.** A terse subject loses exactly
+the reasoning that makes this document worth keeping. A long commit subject is
+the cheaper cost.
+
 **A GENESIS THAT ONLY LISTS SUCCESSES IS A MARKETING PAGE.** The corrections are
 the part with the knowledge in it, and they are the first thing that will
 quietly stop being maintained. They do not get dropped.

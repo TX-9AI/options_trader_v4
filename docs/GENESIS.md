@@ -79,4 +79,5 @@ did.**
 **Every one of them printed something plausible.** That is why WA §33 fails the
 land command on drift rather than warning, and why an absent measurement is
 reported as absent rather than as zero.
-| **r26** | GENESIS.md: one line per revision from r1, with the corrections kept. WA §35 appends it inside the land command, because no checker can tell whether a line is missing. |
+| **r26** | GENESIS.md: one line per revision from r1, with the corrections kept. WA 35 appends it inside the land command, because no checker can tell whether a line is missing. |
+| **r27** | Canonical land header: REV and DESC set once, the same string becomes both the Genesis line and the commit subject, appended before git add so it ships inside the commit it describes. |
