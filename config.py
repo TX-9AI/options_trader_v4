@@ -602,9 +602,31 @@ ORB_NO_ENTRY_AFTER_ET       = (11, 0)   # ORB-SCOPED: ORB entries valid until 11
 # NOTHING fires. That window belongs to the trend credit spread (TC.6), which is
 # NOT BUILT. Until it is, a trending afternoon is dark ON PURPOSE — which is the
 # point: the measured cost of that window is negative.
+# ── LONG-DEBIT CUTOFF (v4.0) ───────────────────────────────────────────────
+# Operator, 2026-08-13: *"The only other Long that can fire is either part of a
+# butterfly or an iron condor vertical spread from 11 o'clock onwards."*
+# Extended to 11:30 on 2026-08-20 to resolve a contradiction: ORB armed until
+# 11:00 while RunawayContinuation - which fires on ORB's OWN state - ran to
+# 11:30, so the engine stopped producing the state half an hour before the
+# trade depending on it stopped firing.
 DEBIT_DIRECTIONAL_CUTOFF_ET = tuple(int(x) for x in
-                                    os.environ.get("OT_DEBIT_CUTOFF_ET", "11:00").split(":"))
-DEBIT_DIRECTIONAL_STRATEGIES = {"ORBStrategy", "ContinuationStrategy", "SweepReversal"}
+    os.environ.get("OT_DEBIT_CUTOFF_ET", "11:30").split(":"))
+
+# ⚠️ KEYED ON STRUCTURE, NOT ON A NAME LIST. The v3 version held
+# {"ORBStrategy", "ContinuationStrategy", "SweepReversal"} - and by 2026-08-20
+# TWO OF THOSE THREE HAD BEEN DELETED while a new long-debit strategy
+# (RunawayContinuation) was NOT in the list and would have been silently
+# EXEMPT. **An allow-list of names is a policy that rots every time a strategy
+# is added or removed, and it rots in the permissive direction.**
+# A strategy declares what it BUILDS; the cutoff decides from that.
+#   "long_debit"  pays premium and is directional -> BLOCKED after the cutoff
+#   "vertical"    credit spread or condor leg     -> always permitted
+#   "butterfly"   defined-risk debit              -> the operator's exception,
+#                 and it covers BOTH the GEX pin butterfly and the synthetic
+#                 butterfly that arises from an aggressive condor roll, which
+#                 is a MANAGEMENT step on a live position rather than a new
+#                 entry at all
+DEBIT_BLOCKED_STRUCTURES = {"long_debit"}
 DEBIT_BLOCK_ACTIVE          = os.environ.get("OT_DEBIT_BLOCK_ACTIVE", "1") == "1"
 
 GLOBAL_NO_ENTRY_ET          = (14, 0)   # GLOBAL: no new 0DTE entries after 14:00 ET,

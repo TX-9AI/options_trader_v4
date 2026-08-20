@@ -705,9 +705,10 @@ from config import (
     PAPER_TRADING, RISK_PER_TRADE_USD, DAILY_LOSS_LIMIT_USD,
     CONT_BLOCK_PREMIUM_REGIMES,                 # CNT.6
     REGIME_REASSESS_MINUTES, INSTRUMENT, SessionConfig, DIRECTIONAL_ONLY,
+    DEBIT_BLOCKED_STRUCTURES,
     ORB_NO_ENTRY_AFTER_ET, BROKER_RECONCILE_ENABLED, ORB_FIRES_REGARDLESS_OF_REGIME,
     ORB_BLOCK_RANGING,
-    DEBIT_DIRECTIONAL_CUTOFF_ET, DEBIT_DIRECTIONAL_STRATEGIES, DEBIT_BLOCK_ACTIVE,
+    DEBIT_DIRECTIONAL_CUTOFF_ET, DEBIT_BLOCK_ACTIVE,
     CONDOR_PF_TIMEFRAME,                        # PF.5
     RTH_OPEN_ET, ORB_WINDOW_MINUTES,            # TC.6 v2.1 — range from tape
     BROKER_RECONCILE_INTERVAL_MIN
@@ -1722,25 +1723,62 @@ def _condor_rails(ctx: dict):
         return None
 
 
-def _afternoon_debit_blocked(strategy_name: str, now) -> bool:
-    """True when a LONG-PREMIUM DIRECTIONAL entry is refused by the afternoon
-    cutoff. Operator, 2026-08-13: "The only other Long that can fire is either
-    part of a butterfly or an iron condor vertical spread from 11 o'clock
-    onwards."
+def _afternoon_debit_blocked(strategy_or_signal, now) -> bool:
+    """True when a LONG-PREMIUM DIRECTIONAL entry is refused by the cutoff.
 
-    A FUNCTION rather than an inline condition so it can be tested without
-    standing up the whole entry path, and so the rule has ONE definition. The
-    butterfly and the condor are NOT listed here: the butterfly is the
-    operator's named exception, and condor legs never reach this gate at all
-    (they route through `_execute_condor_leg` earlier in attempt_new_entry), so
-    the credit path is exempt BY CONSTRUCTION rather than by a list entry that
-    could rot.
+    Operator, 2026-08-13: *"The only other Long that can fire is either part of
+    a butterfly or an iron condor vertical spread from 11 o'clock onwards."*
+    Cutoff extended to **11:30** on 2026-08-20 to resolve a contradiction: ORB
+    armed until 11:00 while RunawayContinuation - which fires on ORB's OWN
+    state - ran to 11:30, so the engine stopped producing the state half an
+    hour before the trade depending on it stopped firing.
+
+    ⚠️ KEYED ON STRUCTURE, NOT ON A NAME LIST, AND THAT CHANGE FIXED A LIVE
+    HOLE. v3 held {"ORBStrategy", "ContinuationStrategy", "SweepReversal"};
+    by 2026-08-20 **two of those three had been deleted** while the new
+    long-debit strategy - RunawayContinuation - was NOT in the list and would
+    have been **silently EXEMPT from the cutoff**. An allow-list of names rots
+    every time a strategy is added or removed, **and it rots permissively.**
+
+    A strategy declares `STRUCTURE`; this decides from that:
+      long_debit  pays premium, directional        -> blocked after the cutoff
+      vertical    credit spread or condor leg      -> always permitted
+      butterfly   defined-risk debit               -> the named exception, and
+                  it covers BOTH the GEX pin butterfly and the synthetic
+                  butterfly from an aggressive condor roll - the latter being a
+                  MANAGEMENT step on a live position, not a new entry
+
+    ⚠️ UNKNOWN IS TREATED AS `long_debit` - FAIL CLOSED. A strategy that forgets
+    to declare gets the most restrictive reading, which is the opposite of the
+    v3 behaviour that let an undeclared strategy through.
     """
     if not DEBIT_BLOCK_ACTIVE:
         return False
-    if strategy_name not in DEBIT_DIRECTIONAL_STRATEGIES:
+    struct = None
+    if isinstance(strategy_or_signal, str):
+        struct = _STRUCTURE_BY_NAME.get(strategy_or_signal)
+    else:
+        struct = getattr(strategy_or_signal, "structure", None) or \
+                 _STRUCTURE_BY_NAME.get(
+                     getattr(strategy_or_signal, "strategy_name", ""))
+    if struct is None:
+        struct = "long_debit"          # fail closed
+    if struct not in DEBIT_BLOCKED_STRUCTURES:
         return False
     return (now.hour, now.minute) >= tuple(DEBIT_DIRECTIONAL_CUTOFF_ET)
+
+
+# What each strategy BUILDS. The cutoff reads this, not a name allow-list.
+# ⚠️ A NEW STRATEGY MISSING FROM HERE IS TREATED AS `long_debit` AND BLOCKED
+# after the cutoff - deliberately the restrictive default.
+_STRUCTURE_BY_NAME = {
+    "ORBStrategy":          "long_debit",
+    "ORB":                  "long_debit",
+    "RunawayContinuation":  "long_debit",
+    "SweepCreditSpread":    "vertical",
+    "GEXPinButterfly":      "butterfly",
+    "IronCondorStrategy":   "vertical",
+}
 
 
 def _condor_leg_open_without_plan() -> bool:
@@ -1909,14 +1947,20 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # through, and it catches a future strategy added to
     # DEBIT_DIRECTIONAL_STRATEGIES that forgets this pre-gate.
     _now_disp = now_et()
-    _afd_orb  = _afternoon_debit_blocked("ORBStrategy", _now_disp)
-    _afd_cont = _afternoon_debit_blocked("ContinuationStrategy", _now_disp)
-    _afd_swp  = _afternoon_debit_blocked("SweepReversal", _now_disp)
-    if _afd_orb or _afd_cont or _afd_swp:
-        logger.info("[afd] pre-dispatch: debit directional blocked past the "
-                    "cutoff (orb=%s cont=%s sweep=%s) — the afternoon slot "
-                    "belongs to the credit structures",
-                    _afd_orb, _afd_cont, _afd_swp)
+    # ⚠️ THE PRE-GATE NOW COVERS BOTH LONG-DEBIT STRATEGIES. v3 checked three
+    # names, two of which were deleted on 2026-08-20 - and `_afd_cont` /
+    # `_afd_swp` survived here as USES with no assignment, which is a runtime
+    # NameError on the first tick and invisible to `import main`. Caught by
+    # `tests/check_dispatch.py`, which is the third time this exact class has
+    # appeared: the `ctx` P0, `_rc_bar` in the sweep mapper, and now this.
+    _afd_orb = _afternoon_debit_blocked("ORBStrategy", _now_disp)
+    _afd_run = _afternoon_debit_blocked("RunawayContinuation", _now_disp)
+    if _afd_orb or _afd_run:
+        logger.info("[afd] pre-dispatch: long-debit blocked past %02d:%02d "
+                    "(orb=%s runaway=%s) - the afternoon belongs to the credit "
+                    "structures and the butterflies",
+                    DEBIT_DIRECTIONAL_CUTOFF_ET[0],
+                    DEBIT_DIRECTIONAL_CUTOFF_ET[1], _afd_orb, _afd_run)
         # ── AUDIT F8 (2026-08-15) — THE REFUSAL JOURNAL MOVED WITH THE GATE ──
         # Moving AFD.1 to pre-dispatch made the POST-SELECTION journal at the
         # bottom of this function STRUCTURALLY UNREACHABLE for these three
@@ -1931,8 +1975,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
         if _sigj is not None:
             try:
                 for _nm, _hit in (("ORBStrategy", _afd_orb),
-                                  ("ContinuationStrategy", _afd_cont),
-                                  ("SweepReversal", _afd_swp)):
+                                  ("RunawayContinuation", _afd_run)):
                     if _hit:
                         _sigj.journal("disposition",
                                       outcome="gate_block:afternoon_debit",
