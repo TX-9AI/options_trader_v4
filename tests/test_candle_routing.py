@@ -124,6 +124,20 @@ def main():
                      ("QQQ{=15m}", "QQQ"), ("QQQ{=d}", "QQQ")):
         check(f"D {ev} still routes to {want}", route(ev) == want, str(route(ev)))
 
+    # ── E. the RTH guard SEGREGATES rather than drops ─────────────────────
+    # The distinction is the whole point: EXT_INTERVAL is 1h only, so an
+    # overnight 5m/15m/1m bar has no other home and DXFeed history is
+    # use-it-or-lose-it. A guard that dropped them would trade one
+    # irreversible loss for another.
+    check("E1 the write guard exists", "_within_rth(" in src)
+    check("E2 it SEGREGATES — reassigns the route, never returns early",
+          "key_sym = alt" in src and "SEGREGATING to" in src)
+    check("E3 it does NOT drop", "RTH GUARD: dropping" not in src)
+    check("E4 *_EXT routes are exempt (overnight is their purpose)",
+          "not _is_ext_route(key_sym)" in src)
+    check("E5 daily and coarser are never RTH-filtered",
+          "1d, 1w, anything coarser" in src or "_RTH_BY_INTERVAL.get(interval)" in src)
+
     # ── C. the guard exists and refuses each collision shape ──────────────
     check("C1 the feed refuses a DUPLICATE SUBSCRIPTION KEY",
           "DUPLICATE SUBSCRIPTION KEY" in src)
@@ -134,13 +148,14 @@ def main():
     check("C4 the guard RAISES rather than warning",
           src.count("raise RuntimeError(\n                    f\"candle_feed:") >= 1
           or "raise RuntimeError(" in src)
-    # ⚠️ C5 WAS A CAN'T-FAIL CHECK AND THIS REPLACES IT. v4.1, 2026-08-20.
+    # ⚠️ C5 WAS A CAN'T-FAIL CHECK AND THIS REPLACES IT. Restored on top of
+    # v3.17, 2026-08-20 - the upstream test file still carries the grep form and
+    # copying it over reverted this fix once already.
     # It grepped for the literal `self.symbol_map[(dx_sym, tf)]` while the real
     # code writes `self.symbol_map[(self.dx_symbol, tf)]` - **a different
-    # variable name, so the guard never matched the code it guarded.**
-    # Proven by mutation: reverting BOTH registrations to the original 2-tuple
-    # key - the exact FEED.2 defect - left this test reporting ALL PASS.
-    # A string search for source it cannot name is not a check.
+    # variable name, so the guard never matched the code it guarded.** Proven by
+    # mutation: reverting BOTH registrations to the original 2-tuple key - the
+    # exact FEED.2 defect - left this test reporting ALL PASS.
     # Now PARSED: every subscript and .get() on `symbol_map` must carry three
     # elements, whatever the identifiers are called.
     import ast as _ast
@@ -166,7 +181,7 @@ def main():
         return 1
     print("candle_routing: ALL PASS (A echo distinguishable · B both "
           "directions route · C guard refuses all three collisions · "
-          "D other intervals unmoved)")
+          "D other intervals unmoved · E RTH guard segregates, never drops)")
     return 0
 
 
