@@ -443,11 +443,19 @@ class PositionManager:
             pnl_per_share = fill_price - entry_prem
         pnl_usd       = pnl_per_share * contracts * CONTRACT_MULTIPLIER
 
+        # v4.0: carry the excursion through to the book. `_track_excursion`
+        # fills these on the record every tick inside `exit_engine.evaluate`;
+        # a parameter nothing passes is a column nothing fills, which is the
+        # `open_interest` failure exactly - a declared field with no producer.
+        _exc = {k: record.get(k) for k in
+                ("mfe_premium", "mfe_bars", "mae_premium", "mae_bars")
+                if record.get(k) is not None} if isinstance(record, dict) else None
         self._trade_logger.log_exit(
             trade_id    = trade_id,
             exit_price  = fill_price,
             pnl_usd     = pnl_usd,
             exit_reason = decision.exit_reason,
+            excursion   = _exc or None,
         )
 
         risk_mgr = get_risk_manager()

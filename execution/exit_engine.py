@@ -778,6 +778,44 @@ class ExitEngine:
                 f"Trail recovered from DB: {trade_id[:8]} trail=${persisted:.2f}"
             )
 
+
+def _track_excursion(record, current_premium: float) -> None:
+    """Record the best and worst mark this position has seen, and WHEN.
+
+    v4.0. ⚠️ THE DATA EXISTED AND WAS THROWN AWAY. `TrailState.peak_close`
+    updates every tick to drive the trailing stop and dies with the process, so
+    the book could not answer **"how long until a winner declared itself"** -
+    which is the number the sideways-grinder stop is made of. Same defect as
+    `pin_concentration` and `flat_angle_deg`: computed every tick, used for a
+    decision, never recorded.
+
+    ⚠️ AND IT IS NOT `max_profit`. That column is written ONCE at entry from
+    `signal.max_profit` - the THEORETICAL maximum of a defined-risk structure,
+    not a realized excursion. Reading it as MFE reads a plan as an outcome.
+
+    ⚠️ BARS ARE COUNTED, NOT TIMED. A wall-clock delta would be wrong across a
+    halt or a feed gap; the tick count is what the position actually saw.
+    Failure here must never reach the exit decision - a telemetry write is not
+    worth a missed stop - so everything is guarded.
+    """
+    try:
+        px = float(current_premium or 0.0)
+        if px <= 0:
+            return
+        n = int(record.get("excursion_ticks") or 0) + 1
+        record["excursion_ticks"] = n
+        best = record.get("mfe_premium")
+        if best is None or px > float(best):
+            record["mfe_premium"] = round(px, 4)
+            record["mfe_bars"] = n
+        worst = record.get("mae_premium")
+        if worst is None or px < float(worst):
+            record["mae_premium"] = round(px, 4)
+            record["mae_bars"] = n
+    except Exception:                                          # noqa: BLE001
+        return
+
+
     def evaluate(self,
                  record: TradeRecord,
                  current_premium: float,
@@ -800,6 +838,7 @@ class ExitEngine:
         # Without this seed, a mid-trail restart would forget the locked level
         # until the trail re-armed on its own.
         self._seed_trail_from_record(record)
+        _track_excursion(record, current_premium)
 
         if record.get("is_butterfly"):
             return self._evaluate_butterfly(record, current_premium, regime=regime)

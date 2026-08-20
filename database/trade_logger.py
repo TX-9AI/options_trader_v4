@@ -265,6 +265,27 @@ class TradeLogger:
         -- than no threshold. Defaults 0 - and unlike v3's numeric defaults this
         -- one is unambiguous, because "not relaxed" IS the meaningful zero.
         relaxed_entry     INTEGER DEFAULT 0,
+        -- ── v4.0: THE EXCURSION, AND WHEN IT HAPPENED ──────────────────────
+        -- ⚠️ `max_profit` IS NOT MFE. It is written ONCE at entry from
+        -- `signal.max_profit`, which for a defined-risk structure is the
+        -- THEORETICAL maximum (wing width minus debit). Anyone reading it as
+        -- realized favourable excursion - as this project nearly did on
+        -- 2026-08-20 - is reading a plan as an outcome.
+        -- The real excursion WAS tracked: `exit_engine`'s `peak_close` updates
+        -- every tick to drive the trailing stop, and is **discarded when the
+        -- position closes.** Same defect as `pin_concentration` and
+        -- `flat_angle_deg`: computed every tick, used for a decision, never
+        -- recorded - so a question that needed it could not be asked of the
+        -- book at all.
+        -- WHAT THEY ARE FOR: the sideways-grinder stop. Operator, 2026-08-20:
+        -- *"we just need one more to protect sideways grinders and bleeders."*
+        -- A time stop and a decay stop behave very differently, and the number
+        -- should be measured. `mfe_bars` is the question - **how long until a
+        -- winner declared itself** - and nothing in the v3 book could answer it.
+        mfe_premium       REAL,      -- best mark seen while the position lived
+        mfe_bars          INTEGER,   -- bars from entry to that peak
+        mae_premium       REAL,      -- worst mark seen
+        mae_bars          INTEGER,
         swept_level_name  TEXT DEFAULT '',
         level_strength    REAL DEFAULT 0.0,
         entry_snapshot    TEXT,
@@ -351,6 +372,10 @@ class TradeLogger:
             ("flat_angle_deg",    "REAL DEFAULT 0.0"),
             ("gap_pct",           "REAL"),          # A2.6b
             ("relaxed_entry",     "INTEGER DEFAULT 0"),   # v4.0
+            ("mfe_premium",       "REAL"),          # v4.0
+            ("mfe_bars",          "INTEGER"),       # v4.0
+            ("mae_premium",       "REAL"),          # v4.0
+            ("mae_bars",          "INTEGER"),       # v4.0
             ("swept_level_name",  "TEXT DEFAULT ''"),   # v-obs: swept level kind (sweep postmortems)
             ("level_strength",    "REAL DEFAULT 0.0"),
             # v3.10 — entry-time FVG/structure picture as JSON. NO DEFAULT and
@@ -483,7 +508,7 @@ class TradeLogger:
         logger.info(f"Trade logged: {record.get('trade_id', '')[:8]} entry")
 
     def log_exit(self, trade_id: str, exit_price: float,
-                  pnl_usd: float, exit_reason: str):
+                  pnl_usd: float, exit_reason: str, excursion: Optional[dict] = None):
         """Update an open trade with exit details."""
         entry_prem = self._get_field(trade_id, "entry_premium") or 0
         pnl_pct    = (exit_price - entry_prem) / entry_prem if entry_prem > 0 else 0
@@ -496,10 +521,26 @@ class TradeLogger:
                     pnl_usd      = ?,
                     pnl_pct      = ?,
                     exit_reason  = ?,
-                    exit_time    = ?
+                    exit_time    = ?,
+                    -- v4.0: PERSIST THE EXCURSION. `_track_excursion` fills
+                    -- these on the in-memory record every tick; without them
+                    -- here they die at close and the book still cannot answer
+                    -- "how long until a winner declared itself" - which is the
+                    -- exact defect the columns were added to fix, reproduced
+                    -- one layer down. COALESCE keeps any earlier value if the
+                    -- caller passes nothing.
+                    mfe_premium  = COALESCE(?, mfe_premium),
+                    mfe_bars     = COALESCE(?, mfe_bars),
+                    mae_premium  = COALESCE(?, mae_premium),
+                    mae_bars     = COALESCE(?, mae_bars)
                 WHERE trade_id = ?
             """, (exit_price, pnl_usd, pnl_pct,
-                  exit_reason, ts_for_db(), trade_id))
+                  exit_reason, ts_for_db(),
+                  (excursion or {}).get("mfe_premium"),
+                  (excursion or {}).get("mfe_bars"),
+                  (excursion or {}).get("mae_premium"),
+                  (excursion or {}).get("mae_bars"),
+                  trade_id))
         logger.info(
             f"Trade closed: {trade_id[:8]} "
             f"exit=${exit_price:.2f} pnl=${pnl_usd:+.2f}"
