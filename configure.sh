@@ -252,6 +252,42 @@ change_risk() {
     done
 }
 
+change_relaxed() {
+    # ── RELAXED ENTRY CRITERIA (v4.0) ───────────────────────────────────────
+    # Loosens SELECTION gates so trades actually fire: the sequence can be
+    # watched, plumbing errors surfaced, and the stops exercised on deliberately
+    # mediocre entries.
+    #
+    # ⚠️ IT DOES NOT LOOSEN FEASIBILITY VETOES. Below 0.05% ATR the required
+    # move was reached on 0% of 5,517 measured bars - relaxing that would only
+    # produce trades that cannot pay, which teaches nothing about stops and adds
+    # noise to the very log this mode exists to read.
+    # ⚠️ PAPER ONLY. strategy/relaxed.py refuses on a live box whatever this
+    # says, and it requires OT_PAPER_TRADING to be asserted EXPLICITLY - a
+    # config default is not an assertion.
+    # ⚠️ EVERY relaxed trade is tagged `relaxed_entry=1` and its setup_type gets
+    # a `_relaxed` suffix, so the population stays separable forever. **Data
+    # collected here must never validate a tight threshold.**
+    local current
+    current=$(get_env "OT_RELAXED_ENTRY")
+    echo ""
+    echo "  Relaxed entry criteria: ${current:-0}  (1 = on, paper only)"
+    echo ""
+    echo "  ON  - trades fire on looser SELECTION gates so the sequence,"
+    echo "        the logs and the stops can be watched. Every trade is"
+    echo "        tagged relaxed_entry=1."
+    echo "  OFF - measured criteria only. This is the trading setting."
+    echo ""
+    if confirm "  Enable relaxed entry criteria?"; then
+        set_env "OT_RELAXED_ENTRY" "1"
+        echo "  RELAXED ENTRY ON - paper only, and every trade is tagged."
+    else
+        set_env "OT_RELAXED_ENTRY" "0"
+        echo "  Relaxed entry OFF."
+    fi
+}
+
+
 change_daily_loss() {
     local current risk
     current=$(get_env "OT_DAILY_LOSS_LIMIT")
@@ -438,9 +474,10 @@ while true; do
     echo -e "  ${BOLD}4.${RESET}  Telegram alerts     (chat: $(get_env TELEGRAM_CHAT_ID))"
     echo -e "  ${BOLD}5.${RESET}  TastyTrade credentials"
     echo -e "  ${BOLD}6.${RESET}  Daily loss cap      (currently: \$$(dll=$(get_env OT_DAILY_LOSS_LIMIT); echo ${dll:-$(get_env OT_RISK_USD)}))"
-    echo -e "  ${BOLD}7.${RESET}  Done"
+    echo -e "  ${BOLD}7.${RESET}  Relaxed entry       (currently: $([ "$(get_env OT_RELAXED_ENTRY)" = "1" ] && echo "ON - paper only" || echo "off"))"
+    echo -e "  ${BOLD}8.${RESET}  Done"
     echo ""
-    read -p "    Select [1-7]: " menu_choice
+    read -p "    Select [1-8]: " menu_choice
 
     case "$menu_choice" in
         1) change_instrument; CHANGED=true ;;
@@ -449,7 +486,8 @@ while true; do
         4) change_telegram;       CHANGED=true ;;
         5) change_tt_credentials; CHANGED=true ;;
         6) change_daily_loss;     CHANGED=true ;;
-        7) break ;;
+        7) change_relaxed;        CHANGED=true ;;
+        8) break ;;
         *) print_warn "Please enter a number between 1 and 7." ;;
     esac
     echo ""

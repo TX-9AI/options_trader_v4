@@ -70,6 +70,7 @@ import math
 from typing import Optional
 
 import config
+from strategy import relaxed
 from strategy.base_strategy import OptionsSignal as Signal
 
 logger = logging.getLogger(__name__)
@@ -247,7 +248,7 @@ class SweepCreditSpreadStrategy:
         # 5-20 minutes of confirmation latency the pipeline itself imposed, and
         # the median scored sweep was an HOUR old.
         age = int(getattr(sweep, "bars_ago", 999) or 999)
-        if age > MAX_AGE_BARS:
+        if age > relaxed.widen(MAX_AGE_BARS, 3.0, name="max_age_bars"):
             logger.debug("[sweep_cs] no trade: %s reclaimed %d bars ago "
                          "(max %d)", name, age, MAX_AGE_BARS)
             return None
@@ -259,7 +260,7 @@ class SweepCreditSpreadStrategy:
         # ⚠️ AND NOT TOO DEEP. A deep pierce is a WEAK level, not a strong
         # rejection - measured: >0.50% pierces survived on 19% against 33-34%
         # for shallow ones, with 1.28% median adverse against 0.46%.
-        if rej > MAX_REJECTION_PCT:
+        if rej > relaxed.widen(MAX_REJECTION_PCT, 3.0, name="pierce_ceiling"):
             logger.debug("[sweep_cs] no trade: %s pierced %.3f%% - too deep, "
                          "the level barely rejected (19%% survival measured)",
                          name, rej * 100.0)
@@ -283,7 +284,12 @@ class SweepCreditSpreadStrategy:
             return None
 
         # ── 6. window and volatility ────────────────────────────────────────
-        if now_et and not (EARLIEST_ET <= now_et <= LATEST_ET):
+        # ⚠️ RELAXED WIDENS THE WINDOW AND THE DEPTH BAND - SELECTION gates,
+        # measured to favour the afternoon and a shallow pierce. It does NOT
+        # widen the ATR ceiling below: that is a FEASIBILITY veto and a boundary
+        # does not hold in tape that moved 0.5% on 92% of 90-bar windows.
+        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET)
+        if now_et and not (_early <= now_et <= _late):
             return None
         # ⚠️ SHORT-VOL CONDITION, inverted from the runaway trade. A credit
         # spread needs the level to HOLD. From tests/magnitude_estimator.py:
@@ -319,6 +325,7 @@ class SweepCreditSpreadStrategy:
         sig.atr_pct_at_entry = atr_pct
         sig.max_loss_pct = MAX_LOSS_PCT      # 15%, tighter than the fleet 0.25
 
+        relaxed.tag(sig)
         logger.info("[sweep_cs] FIRE  %s swept -> %s  short %.2f (pool %.2f, "
                     "pierced to %.2f)  %s credit spread  age %d bars  "
                     "rejection %.3f%%",

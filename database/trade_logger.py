@@ -258,6 +258,13 @@ class TradeLogger:
         -- That confusion is what made flat_angle_deg, level_strength and
         -- vix_at_entry look like measured nulls rather than empty columns.
         gap_pct           REAL,
+        -- v4.0: 1 when the trade was admitted under RELAXED entry criteria.
+        -- ⚠️ THE POPULATION MUST STAY SEPARABLE FOREVER. Relaxed trades exist
+        -- to exercise plumbing and stops on deliberately mediocre entries; a
+        -- threshold fitted to a book half of which was knowingly junk is worse
+        -- than no threshold. Defaults 0 - and unlike v3's numeric defaults this
+        -- one is unambiguous, because "not relaxed" IS the meaningful zero.
+        relaxed_entry     INTEGER DEFAULT 0,
         swept_level_name  TEXT DEFAULT '',
         level_strength    REAL DEFAULT 0.0,
         entry_snapshot    TEXT,
@@ -343,6 +350,7 @@ class TradeLogger:
             ("regime_conviction", "REAL DEFAULT 0.0"),
             ("flat_angle_deg",    "REAL DEFAULT 0.0"),
             ("gap_pct",           "REAL"),          # A2.6b
+            ("relaxed_entry",     "INTEGER DEFAULT 0"),   # v4.0
             ("swept_level_name",  "TEXT DEFAULT ''"),   # v-obs: swept level kind (sweep postmortems)
             ("level_strength",    "REAL DEFAULT 0.0"),
             # v3.10 — entry-time FVG/structure picture as JSON. NO DEFAULT and

@@ -74,6 +74,7 @@ import logging
 from typing import Optional
 
 import config
+from strategy import relaxed
 from strategy.base_strategy import OptionsSignal as Signal
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,12 @@ class RunawayContinuationStrategy:
         # ── 1. window ────────────────────────────────────────────────────────
         # A runaway confirmed at 11:29 still fires; theta is survivable that
         # early and the move is in evidence. After the cutoff it is not.
-        if now_et and now_et >= CUTOFF_ET:
+        # ⚠️ RELAXED EXTENDS THE CUTOFF ONLY. The ATR gate below is NOT
+        # relaxed: below 0.05% ATR the required move was reached on 0% of 5,517
+        # bars. A trade that cannot pay teaches nothing about stops and only
+        # adds noise to the log this mode exists to read.
+        _cut = relaxed.window("00:00", CUTOFF_ET, "00:00", "14:00")[1]
+        if now_et and now_et >= _cut:
             return None
 
         # ── 2. the ATR gate, BEFORE anything else ────────────────────────────
@@ -188,6 +194,7 @@ class RunawayContinuationStrategy:
         sig.atr_pct_at_entry = atr_pct
         sig.disarms_retest = True
 
+        relaxed.tag(sig)
         logger.info(
             "[runaway] FIRE %s %s  ATR=%.3f%% -> target delta %.2f  "
             "(retest DISARMED - price never came back for it)",
