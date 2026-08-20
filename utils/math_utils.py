@@ -1,3 +1,4 @@
+import math
 """
 utils/math_utils.py  v4.0
 Shared numeric helpers.
@@ -266,3 +267,33 @@ def find_swing_lows(prices: list, lookback: int = 10):
         window = prices[i - lookback: i + lookback + 1]
         if prices[i] == min(window):
             yield i, prices[i]
+
+def safe_float(v, default=None):
+    """A FINITE float, or `default`. The guard every numeric gate needs.
+
+    v4.0, 2026-08-20, from the stress test.
+
+    ⚠️ NaN IS THE DANGEROUS INPUT AND IT INVERTS VETOES SILENTLY. **Every
+    comparison against NaN is False**, so a gate written as
+        `if atr < FLOOR: return None`
+    does NOT refuse on NaN - it falls through and trades. The stress test found
+    `target_delta(nan)` returning a strike in exactly the tape the floor exists
+    to exclude: below 0.05% ATR the required move was reached on **0% of 5,517
+    measured bars.** The comment above that function warned about this failure
+    and the code had it anyway.
+
+    ⚠️ AND +/-inf IS NOT SAFE EITHER: it passes `< floor` and `> ceiling` tests
+    in whichever direction happens to suit, and arithmetic on it produces NaN
+    one step later.
+
+    ⚠️ A STRING RAISES ON COMPARISON, and `_safe_strategy` catches the raise and
+    logs "no signal" - **so a crashing strategy is indistinguishable from a
+    quiet one.** Coercing here turns a hidden crash into an explicit refusal.
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(f):
+        return default
+    return f

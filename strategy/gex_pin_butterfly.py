@@ -128,6 +128,7 @@ from typing import Optional
 import config
 from strategy import relaxed
 from strategy.base_strategy import OptionsSignal as Signal
+from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,9 @@ def expected_move(underlying: float, atm_iv: float, now=None) -> Optional[float]
     where a first-order one is sitting right there.
     The sqrt-of-time scaling is carried from v3 unchanged: it was sound.
     """
-    if not underlying or not atm_iv or atm_iv <= 0:
+    underlying = safe_float(underlying)
+    atm_iv = safe_float(atm_iv)
+    if not underlying or not atm_iv or atm_iv <= 0 or underlying <= 0:
         return None
     try:
         from utils.time_utils import ET
@@ -203,7 +206,8 @@ class GEXPinButterflyStrategy:
         # not trustworthy - enabling it now would trade a gamma-squared artifact.
         if not ENABLED:
             return None
-        if not gex or not price_now:
+        price_now = safe_float(price_now)
+        if not gex or not price_now or price_now <= 0:
             return None
 
         env = str(getattr(gex, "gex_environment", "") or "")

@@ -451,6 +451,23 @@ class IronCondorStrategy(BaseOptionsStrategy):
 
     @staticmethod
     def _leg_order_from_slope(slope: float, flat_eps: float):
+        """⚠️ NO CALLER. Kept as telemetry, not as logic - v4.0, 2026-08-20.
+
+        PF.5 derived the leg order from the fork's slope: an up-sloping fork
+        should tap the LOWER rail first, filling the PUT side first.
+        **`v-indep-legs` (2026-07-28) superseded that.** Both sides are
+        independent, each firing on its own price trigger every tick, so
+        whichever tine price actually strikes first fills first - **there is no
+        "wrong" tine to guard against.**
+        And the slope is not predictive: `tests/tine_order_study.py` on a daily
+        channel called the first rail on **9/15, a coin**, interval spanning
+        50%. Too small to settle, large enough not to build on.
+        **Independent legs observe where a slope-derived order predicts** -
+        which is the change v4 made everywhere else too.
+        Not deleted because knowing whether the fork CALLED the session
+        correctly is worth journaling on a trade this rare; nothing decides on
+        it.
+        """
         return cv.leg_order_from_slope(slope, flat_eps)
 
     def _select_beyond_rail(self, contracts, side: str, rail: float,

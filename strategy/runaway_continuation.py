@@ -97,6 +97,7 @@ from typing import Optional
 
 import config
 from strategy import relaxed
+from utils.math_utils import safe_float
 from strategy.base_strategy import OptionsSignal as Signal
 
 logger = logging.getLogger(__name__)
@@ -139,9 +140,18 @@ def target_delta(atr_pct: float) -> Optional[float]:
     v3 had no such concept and fired into 0.03% ATR sessions where the required
     move occurred on 0% of bars.
     """
-    if atr_pct is None or atr_pct < ATR_HARD_VETO_PCT:
+    # ⚠️ COERCE FIRST. A NaN falls through EVERY `<` test - the stress test
+    # found this returning 0.25 on `target_delta(nan)`, i.e. the feasibility
+    # veto INVERTING and admitting a trade into tape where 0 of 5,517 bars
+    # reached the required move.
+    atr_pct = safe_float(atr_pct)
+    # ⚠️ FINITE IS NOT SANE. 1e12 passes every type guard and is an absurd
+    # claim about the tape. The measured ATR range across 52,949 bars was
+    # 0.02%-0.60%; anything past a few percent is a data fault, not a
+    # volatile session, and must not select a strike.
+    if atr_pct is None or atr_pct <= 0 or atr_pct > 25.0:
         return None
-    if atr_pct < ATR_FLOOR_PCT:
+    if atr_pct < ATR_HARD_VETO_PCT or atr_pct < ATR_FLOOR_PCT:
         return None
     return DELTA_DEEP if atr_pct >= ATR_DEEP_PCT else DELTA_NEAR
 
@@ -195,6 +205,10 @@ class RunawayContinuationStrategy:
         # ── 2. the ATR gate, BEFORE anything else ────────────────────────────
         # Checked first deliberately: if the tape cannot pay, nothing about the
         # setup's quality matters and the rest of the evaluation is wasted.
+        price_now = safe_float(price_now)
+        prev_close = safe_float(prev_close)
+        if not price_now or price_now <= 0 or price_now > 1e7:
+            return None
         delta = target_delta(atr_pct)
         if delta is None:
             logger.debug(

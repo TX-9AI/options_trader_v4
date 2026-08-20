@@ -799,8 +799,12 @@ def _track_excursion(record, current_premium: float) -> None:
     worth a missed stop - so everything is guarded.
     """
     try:
-        px = float(current_premium or 0.0)
-        if px <= 0:
+        # ⚠️ A NaN MARK BECAME THE PEAK. `px > best` is False for NaN, but the
+        # FIRST call has no best, so `best is None` admitted it unconditionally
+        # and mfe_premium was recorded as nan for the life of the position.
+        from utils.math_utils import safe_float
+        px = safe_float(current_premium)
+        if px is None or px <= 0 or px > 1e6:
             return
         n = int(record.get("excursion_ticks") or 0) + 1
         record["excursion_ticks"] = n

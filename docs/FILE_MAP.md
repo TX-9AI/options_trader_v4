@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-102 Python modules across 11 local packages.
+103 Python modules across 11 local packages.
 
 ## Fan-in leaderboard - widest blast radius
 
@@ -14,13 +14,13 @@ Change these with the most care; a break here reaches everything downstream.
 |---|---|---|
 | `config.py` | 43 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
 | `utils/time_utils.py` | 17 | alert_manager.py, broker_reconcile.py, candle_feed.py, condor_roll.py |
+| `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
 | `strategy/base_strategy.py` | 9 | entry_engine.py, gex_pin_butterfly.py, iron_condor_strategy.py, main.py |
-| `utils/math_utils.py` | 9 | liquidity_mapper.py, options_chain.py, orb_engine.py, orb_strategy.py |
 | `data/tasty_client.py` | 8 | candle_feed.py, condor_roll.py, entry_engine.py, exit_engine.py |
 | `notifications/alert_manager.py` | 7 | condor_roll.py, entry_engine.py, eod_summary.py, exit_engine.py |
+| `strategy/__init__.py` | 7 | check_condor_spec.py, gex_pin_butterfly.py, iron_condor_strategy.py, runaway_continuation.py |
 | `data/options_chain.py` | 6 | base_strategy.py, gex_data.py, iron_condor_strategy.py, main.py |
 | `database/trade_logger.py` | 6 | condor_roll.py, entry_engine.py, exit_engine.py, main.py |
-| `strategy/__init__.py` | 6 | check_condor_spec.py, gex_pin_butterfly.py, iron_condor_strategy.py, runaway_continuation.py |
 | `analysis/market_state.py` | 5 | iron_condor_strategy.py, main.py, observer.py, orb_strategy.py |
 | `analysis/volatility_engine.py` | 5 | iron_condor_strategy.py, main.py, observer.py, orb_strategy.py |
 | `data/macro_data.py` | 5 | iron_condor_strategy.py, main.py, orb_strategy.py, session_guard.py |
@@ -180,12 +180,12 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `main.py`
 
 ### `execution/entry_ladder.py`
-- **calls:** `execution/tick_size.py`
-- **called by:** (nothing - orphan or leaf)
+- **calls:** `execution/tick_size.py`, `utils/math_utils.py`
+- **called by:** `tests/stress_entry_path.py`
 
 ### `execution/exit_engine.py`
-- **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/limit_ladder.py`, `notifications/alert_manager.py`, `strategy/structure.py`, `utils/time_utils.py`
-- **called by:** `analysis/entry_snapshot.py`, `execution/position_manager.py`, `strategy/condor_roll.py`, `stress_theta_bleed.py`
+- **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/limit_ladder.py`, `notifications/alert_manager.py`, `strategy/structure.py`, `utils/math_utils.py`, `utils/time_utils.py`
+- **called by:** `analysis/entry_snapshot.py`, `execution/position_manager.py`, `strategy/condor_roll.py`, `stress_theta_bleed.py`, `tests/stress_entry_path.py`
 
 ### `execution/fill_model.py`
 - **calls:** (none)
@@ -209,7 +209,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `main.py`
 - **calls:** `analysis/__init__.py`, `analysis/chain_snapshot.py`, `analysis/entry_snapshot.py`, `analysis/gap_measure.py`, `analysis/level_grade.py`, `analysis/liquidity_ledger.py`, `analysis/liquidity_mapper.py`, `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/pitchfork_observer.py`, `analysis/signal_journal.py`, `analysis/structure_analyzer.py`, `analysis/trade_readiness.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `config.py`, `data/data_cache.py`, `data/gex_data.py`, `data/macro_data.py`, `data/market_data.py`, `data/options_chain.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/limit_ladder.py`, `execution/order_confirm.py`, `execution/position_manager.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `risk/setup_scorer.py`, `strategy/base_strategy.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `utils/__init__.py`, `utils/blindness_latch.py`, `utils/mem_trace.py`, `utils/time_utils.py`
-- **called by:** (entry point)
+- **called by:** `tests/stress_entry_path.py`
 
 ### `notifications/__init__.py`
 - **calls:** (none)
@@ -273,7 +273,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/__init__.py`
 - **calls:** (none)
-- **called by:** `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_condor_spec.py`
+- **called by:** `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_condor_spec.py`, `tests/stress_entry_path.py`
 
 ### `strategy/base_strategy.py`
 - **calls:** `analysis/orb_engine.py`, `data/options_chain.py`
@@ -288,8 +288,8 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `strategy/iron_condor_strategy.py`, `strategy/trend_credit_spread.py`
 
 ### `strategy/gex_pin_butterfly.py`
-- **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_dispatch.py`
+- **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`, `utils/time_utils.py`
+- **called by:** `main.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/iron_condor_strategy.py`
 - **calls:** `analysis/market_state.py`, `analysis/signal_journal.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`
@@ -301,19 +301,19 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/relaxed.py`
 - **calls:** `config.py`
-- **called by:** `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
+- **called by:** `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `tests/stress_entry_path.py`
 
 ### `strategy/runaway_continuation.py`
-- **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`
-- **called by:** `main.py`, `tests/check_dispatch.py`
+- **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`
+- **called by:** `main.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/structure.py`
 - **calls:** (none)
 - **called by:** `execution/exit_engine.py`, `execution/position_manager.py`
 
 ### `strategy/sweep_credit_spread.py`
-- **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`
-- **called by:** `main.py`, `tests/check_dispatch.py`
+- **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`
+- **called by:** `main.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/trend_credit_spread.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`
@@ -391,6 +391,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/stress_entry_path.py`
+- **calls:** `execution/entry_ladder.py`, `execution/exit_engine.py`, `main.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/relaxed.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/sweep_discriminator.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
@@ -417,7 +421,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/math_utils.py`
 - **calls:** (none)
-- **called by:** `analysis/liquidity_mapper.py`, `analysis/orb_engine.py`, `analysis/pitchfork.py`, `analysis/structure_analyzer.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `data/options_chain.py`, `risk/risk_manager.py`, `strategy/orb_strategy.py`
+- **called by:** `analysis/liquidity_mapper.py`, `analysis/orb_engine.py`, `analysis/pitchfork.py`, `analysis/structure_analyzer.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `data/options_chain.py`, `execution/entry_ladder.py`, `execution/exit_engine.py`, `risk/risk_manager.py`, `strategy/gex_pin_butterfly.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
 
 ### `utils/mem_trace.py`
 - **calls:** (none)

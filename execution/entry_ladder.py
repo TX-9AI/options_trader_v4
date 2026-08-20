@@ -120,11 +120,12 @@ def rungs(bid: float, ask: float, side: str, symbol: str = "") -> list:
     Returns [] on an unusable quote - crossed, zero or missing. **An empty
     ladder means the caller posts at mark**, never at a guess.
     """
-    try:
-        b, a = float(bid), float(ask)
-    except (TypeError, ValueError):
-        return []
-    if b <= 0 or a <= 0 or a < b:
+    # ⚠️ float() ACCEPTS NaN AND inf. The stress test crashed here with
+    # "cannot convert float NaN to integer" inside the snap - a raise that
+    # `_safe_strategy` would have logged as "no signal", hiding it entirely.
+    from utils.math_utils import safe_float
+    b, a = safe_float(bid), safe_float(ask)
+    if b is None or a is None or b <= 0 or a <= 0 or a < b:
         return []
 
     mark = (a + b) / 2.0

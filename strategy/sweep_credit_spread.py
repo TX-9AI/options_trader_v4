@@ -95,6 +95,7 @@ from typing import Optional
 import config
 from strategy import relaxed
 from strategy.base_strategy import OptionsSignal as Signal
+from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,13 @@ def pierced_strike(sweep_price: float, pool_price: float, ceiling: bool,
     without reaching a strike price. There is nothing to sell, and inventing a
     strike here would sell a level that was never tested.
     """
-    if not sweep_price or not pool_price or increment <= 0:
+    # ⚠️ math.floor(nan) RAISES "cannot convert float NaN to integer". The
+    # truthiness test above passes a NaN happily - `not nan` is False - so the
+    # guard read as present and was not.
+    sweep_price = safe_float(sweep_price)
+    pool_price = safe_float(pool_price)
+    increment = safe_float(increment)
+    if not sweep_price or not pool_price or not increment or increment <= 0:
         return None
     if ceiling:
         # highest strike at or below the sweep extreme, and at/above the pool
@@ -263,7 +270,11 @@ class SweepCreditSpreadStrategy:
                         atr_pct: float = None, chain=None,
                         **_ignored) -> Optional[Signal]:
         sweep = getattr(liq_map, "recent_sweep", None)
-        if not sweep or not price_now:
+        # ⚠️ COERCE BEFORE ANY COMPARISON. A NaN price passed `price_now >= pool`
+        # (False) and then `price_now <= pool` (also False), so BOTH side checks
+        # let it through and the strategy fired on nan, -1.0 and -inf.
+        price_now = safe_float(price_now)
+        if not sweep or not price_now or price_now <= 0 or price_now > 1e7:
             return None
 
         # ── 1. it must be a NAMED pool ───────────────────────────────────────
@@ -340,7 +351,12 @@ class SweepCreditSpreadStrategy:
         # spread needs the level to HOLD. From tests/magnitude_estimator.py:
         # above 0.20% ATR the tape produced a 0.5% move on 92% of 90-bar
         # windows - a boundary does not survive that.
-        if atr_pct is not None and atr_pct > ATR_MAX_PCT:
+        # ⚠️ A NaN ATR does NOT satisfy `> MAX`, so the ceiling did not refuse.
+        # Unknown ATR is permitted (the gate is optional); NON-FINITE is not.
+        _atr = safe_float(atr_pct)
+        if atr_pct is not None and _atr is None:
+            return None
+        if _atr is not None and _atr > ATR_MAX_PCT:
             logger.debug("[sweep_cs] no trade: ATR %.3f%% too hot for a "
                          "boundary to hold", atr_pct)
             return None

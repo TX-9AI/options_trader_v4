@@ -175,6 +175,53 @@ authorise it.
 **The most intricate spec in the book, and the one where the overlay and the
 structure agree on when the thesis died.**
 
+### Status, 2026-08-20: a NICE-TO-HAVE anchored to a rare premise
+
+Operator: *"Anchor to the rare fork premise and if it gets us a surprise fill
+now and then we can study it."*
+
+**The condor is not load-bearing.** It stays wired, specced and enabled; it fires
+when a fork genuinely qualifies, which is seldom. **Rarity costs nothing while it
+waits** - no position slot, no capital, no competition with the sweep spread -
+and the same opportunity-cost logic as the GEX butterfly applies.
+
+⚠️ **THE RIDDLE, STATED PLAINLY, BECAUSE IT IS WHY THIS TRADE IS HARD.**
+Operator: *"We want to execute separate vertical spreads at a time and place
+where they are premium rich & we expect price to respect them AND fire a
+corresponding rich premium second leg we expect to hold & IF it doesn't, we
+collected enough up front to get one leg for free."*
+**Rich premium and respected boundaries are in direct opposition.** Premium is
+rich exactly where the market prices a real chance of price arriving. A level
+price genuinely respects earns little, because it is not in doubt. The trade
+needs **a strike the chain thinks is reachable and the tape says is not** - and
+that gap is the entire edge.
+
+⚠️ **WHICH IS WHY A SIGMA BAND CANNOT BE THE ANCHOR.** A regression channel
+prices dispersion the same way implied vol does, so its rails sit AT fair value
+rather than off it - **no edge, because it is the chain's own estimate wearing a
+different hat.** Measured, `tests/fork_respect_study.py`, 738 (session, symbol)
+observations: a rail was touched on 57% of sessions and **RESPECTED on 5%**
+[3%, 8%] while **54% closed beyond it.** It did not improve with span: 7%, 5%,
+4% across short, medium and long-lived channels.
+**A statistical envelope is not a structural level.** Named pools work as
+boundaries because participants defend them; a sigma band has nobody standing
+at it - and a named pool is information the option chain is not using, which is
+where an edge can live at all. The sweep credit spread (§2) is that trade, and
+it is the afternoon premium earner this one was hoped to be.
+
+⚠️ **AND THE "FREE LEG" IS NOT A DESIGN GOAL.** It requires two opposite-sided
+qualifying sweeps in one symbol-session inside the window. Operator's own
+estimate: *"eclipse rare."* **A structure cannot be built around a
+co-occurrence that happens twice a year** - if it materialises it is a bonus to
+be studied, not a leg to plan and wait for.
+
+⚠️ ONE HONEST LIMIT ON THE ABOVE: the respect study used a REGRESSION CHANNEL,
+not `build_fork_contained`. The refinements - qualified pivots, the
+modified-Schiff origin, the ATR significance test - are not tested by it.
+**Regression is what worked and the pitchfork is its formalisation**, so the
+result is hard to dismiss, but the real fork deserves the same measurement
+before it is written off. That is owed work, not a blocker.
+
 ### The anchor — the daily pitchfork
 
 Operator, verbatim: *"It's a guardrail, not the road."* → **daily fork only.**
@@ -183,7 +230,25 @@ Operator, verbatim: *"It's a guardrail, not the road."* → **daily fork only.**
 
 Short **call** rides the **upper rail**, short **put** the **lower rail**.
 
-### Leg order falls out of the slope
+### Leg order does NOT fall out of the slope — corrected 2026-08-20
+
+⚠️ **THIS DOCUMENT PREVIOUSLY DESCRIBED THE SUPERSEDED PF.5 DESIGN.**
+`v-indep-legs` (2026-07-28) made both sides INDEPENDENT: each fires on its own
+price trigger, checked every tick, and if both hit on the same tick the tie
+breaks on which is exceeded further. **Whichever tine price actually strikes
+first fills first - there is no "wrong" tine to guard against.**
+`_leg_order_from_slope` survives as a helper **with no caller.**
+
+And the slope is not predictive anyway: `tests/tine_order_study.py`, daily
+channel, called the first rail on **9/15 - a coin**, with the interval spanning
+50%. The sample is too small to say more, and it is recorded as suggestive
+rather than settled.
+
+**Independent legs is the better design for the same reason everything else in
+v4 got better: it observes rather than predicts.** A slope-derived order has to
+be RIGHT about the path; independent triggers do not care.
+
+### What the slope was for
 
 **The slope predicts which rail ranging or condensing price taps first.**
 An **up-sloping** fork means price travels lower rail → upper rail across the
