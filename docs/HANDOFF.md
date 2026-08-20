@@ -68,8 +68,24 @@ or a box shell. That shapes everything:
 · **Menu-ready means no outer single quotes** — option 14 takes the line
   verbatim.
 · **Every command carries its own `cd`.** Downloads land in `~`.
+· **ARCHIVE NAMING — the operator values this, so get it right.** Format is
+  `otv4_<short-descriptor>_r<N>.tar.gz`, where **N is the revision number and
+  the sequence NEVER resets or repeats.** A re-issue of the same revision gets
+  a letter suffix — `otv4_gates_r31b.tar.gz` — never the same name twice in a
+  session.
+  ⚠️ **WHY, learned the hard way:** a second download of the same filename has
+  nowhere to land, so `tar xf` silently re-extracts the FIRST archive and the
+  fix appears not to have shipped. I insisted twice that the operator had not
+  extracted the latest file when the tarball was correct and my delivery was at
+  fault.
+  ⚠️ **AND THE REVISION NUMBER IS PER-REPO.** `options_trader_v4` is at r51;
+  `day_trader_pro` has its own sequence. Do not continue one repo's count into
+  another — I did this and was corrected.
 · Archives: build `.tar.gz`, the `.gz` is stripped in transit, extract with
   `tar xf` — **never `tar xzf`**. Quote the filename; spaces appear.
+· **Ship CHANGED FILES ONLY**, rooted at `otv4/`. Never the whole tree, never
+  `docs/GENESIS.md`, never `docs/FILE_MAP.md` (regenerate it), never a
+  MANIFEST or any install scaffolding.
 
 **They are a 20-year discretionary trader.** When they push back on an
 analysis, they are usually right — the panel correlation argument, the condor
