@@ -89,4 +89,4 @@ interleaved. Nothing after this table.
 | **r26** | GENESIS.md: one line per revision from r1, with the corrections kept. WA 35 appends it inside the land command, because no checker can tell whether a line is missing. |
 | **r27** | Canonical land header: REV and DESC set once, the same string becomes both the Genesis line and the commit subject, appended before git add so it ships inside the commit it describes. |
 | **r28** | GENESIS restructured so the revisions table is the LAST thing in the file - the land command appends with `>>`, so r26 and r27 had landed underneath the closing prose and the sections interleaved. |
-| **r29** | Universal relaxed-entry toggle: configure.sh option 7, paper-only and guarded, loosens SELECTION gates but never a feasibility veto, and tags every trade relaxed_entry=1 so the population stays separable. |
+| **r30** | GEX pin butterfly v4.1 - apex OTM on the pin with DISTANCE AS THE EDGE, gated on a 30-100% expected-move band from the chain's ATM IV rather than VIX. v4.0 built an ATM butterfly requiring price near the pin and vetoed high ATR - both backwards. |
