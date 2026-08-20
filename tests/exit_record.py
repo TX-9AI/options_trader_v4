@@ -82,7 +82,18 @@ def main(argv):
             r = dict(r)
             if a.strategy and str(r.get("strategy") or "") != a.strategy:
                 continue
+            # ⚠️ NORMALISE BEFORE GROUPING. v3 writes the trade's OWN P&L into
+            # the reason string - `bos_exit pnl=-0.7%`, `regime_flip (RANGING)`
+            # - so EVERY DISTINCT PERCENTAGE BECAME ITS OWN EXIT REASON. The
+            # first run of this tool showed 415 reasons collapsed under n<5 and
+            # **ORBStrategy's entire 107-trade record was invisible**: nothing
+            # printed at all. A grouping key that carries a per-trade value is
+            # not a key, and the failure looks exactly like "no data".
             reason = str(r.get("exit_reason") or "").strip() or "(none)"
+            reason = re.sub(r"\s*pnl=-?[\d.]+%?", "", reason)
+            reason = re.sub(r"\s*[\d.]+%", "", reason)
+            reason = re.sub(r"_\d+pct", "_Npct", reason)
+            reason = re.sub(r"\s+", " ", reason).strip() or "(none)"
             try:
                 pnl = float(r.get("pnl_usd") or 0.0)
             except Exception:                                  # noqa: BLE001
