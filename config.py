@@ -508,6 +508,26 @@ DAILY_LOSS_LIMIT_USD = float(os.environ.get("OT_DAILY_LOSS_LIMIT", str(RISK_PER_
 # One floored $1000 position now costs ~$250 (was ~$400) — revisit
 # OT_DAILY_LOSS_LIMIT with that in mind.
 MAX_LOSS_PCT        = float(os.environ.get("OT_MAX_LOSS_PCT", "0.25"))
+
+# ── SWEEP CREDIT SPREAD (v4.0) ─────────────────────────────────────────────
+# Operator's spec, 2026-08-20: *"The only 2 ways I want out of this trade is a
+# 15% loss (thesis invalidated) or a session hard close."*
+# TIGHTER than the fleet's 0.25, and strategy-scoped rather than a fleet change.
+# The thesis is that the swept pool HOLDS as a boundary; a 15% loss on the
+# spread means it did not, and there is nothing further to wait for.
+SWEEP_CS_MAX_LOSS_PCT = float(os.environ.get("OT_SWEEP_CS_MAX_LOSS_PCT", "0.15"))
+
+# ⚠️ NO PROFIT TARGET, DELIBERATELY, AND THIS IS MEASURED. v3's condor
+# backtest: on 18 standalone legs a TP@25% turned -$242.77 into -$8.43, and on
+# 28 condor legs a TP was WORSE AT EVERY LEVEL. A credit vertical is EARNING
+# from decay - closing it early buys back the theta you were paid to hold.
+# The exits for this strategy are exactly two: the 15% stop, and 15:45.
+SWEEP_CS_TAKE_PROFIT_PCT = None
+
+# ⚠️ AND IT HOLDS TO 15:45, exempt from the 15:40 flatten ladder like every
+# credit vertical - `strategy/structure.py` classifies it TREND_PARTICIPATION so
+# that routing happens by DERIVATION from persisted columns, not a flag.
+# Debit positions keep the ladder because they decay; verticals do not.
 BUTTERFLY_STOP_LOSS_PCT = 0.25   # pin plays keep the tight floor (see above)
 # Max-loss stop applied to an ADOPTED position (one discovered open at the
 # broker on a LIVE restart with no DB plan). Defaults to the same threshold

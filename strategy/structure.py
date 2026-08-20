@@ -87,6 +87,19 @@ def of(record: Optional[Mapping[str, Any]]) -> Structure:
     if "trendcredit" in strat.replace("_", "") or setup.startswith("trend_credit"):
         return Structure.TREND_PARTICIPATION
 
+    # SWEEP CREDIT SPREAD (v4.0) - a credit vertical sold against the boundary
+    # a swept named pool just became. It IS a credit structure and must be
+    # recognised as one, or it falls through to DIRECTIONAL and gets laddered
+    # out at 15:40 with the debit positions - giving away the last twenty
+    # minutes of the theta it was opened to collect. Credit verticals hold to
+    # VERTICAL_HOLD_TO_ET (15:45); debits keep the ladder, because they decay
+    # and verticals do not.
+    # ⚠️ KEYED ON PERSISTED COLUMNS ONLY, like every rule here. `is_trend_credit`
+    # was written onto the record as a flag with NO COLUMN and crash-looped
+    # NFLX every 15 seconds; §22 PREFER DERIVING exists because of it.
+    if "sweepcredit" in strat.replace("_", "") or setup.startswith("sweep_credit"):
+        return Structure.TREND_PARTICIPATION
+
     if "ironcondor" in strat.replace("_", ""):
         return Structure.CONDOR_LEG
 

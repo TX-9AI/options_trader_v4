@@ -83,6 +83,22 @@ EARLIEST_ET = getattr(config, "SWEEP_CS_EARLIEST_ET", "10:00")
 LATEST_ET = getattr(config, "SWEEP_CS_LATEST_ET", "15:00")
 ATR_MAX_PCT = getattr(config, "SWEEP_CS_ATR_MAX_PCT", 0.20)
 
+# ── EXITS: exactly two, and no others ──────────────────────────────────────
+# Operator, 2026-08-20: *"The only 2 ways I want out of this trade is a 15% loss
+# (thesis invalidated) or a session hard close."*
+#   · 15% stop - the thesis is that the swept pool HOLDS as a boundary. A 15%
+#     loss says it did not, and there is nothing further to wait for.
+#   · 15:45 hard close - held to the bell, EXEMPT from the 15:40 flatten
+#     ladder like every credit vertical. `strategy/structure.py` routes it there
+#     by DERIVING from persisted columns (strategy / setup_type), never a flag:
+#     `is_trend_credit` was written as a field with NO COLUMN and crash-looped
+#     NFLX every 15 seconds.
+# ⚠️ NO TRAIL AND NO PROFIT TARGET. Measured: v3's condor backtest found a TP
+# was WORSE AT EVERY LEVEL on 28 condor legs, and on 18 standalone legs TP@25%
+# turned -$242.77 into -$8.43. A credit vertical is EARNING from decay; closing
+# it early buys back the theta it was opened to collect.
+MAX_LOSS_PCT = getattr(config, "SWEEP_CS_MAX_LOSS_PCT", 0.15)
+
 
 def boundary_from_sweep(kind: str) -> Optional[tuple]:
     """(boundary, option_side) from the sweep direction.
@@ -198,6 +214,7 @@ class SweepCreditSpreadStrategy:
         sig.sweep_age_bars = age
         sig.rejection_pct = rej
         sig.atr_pct_at_entry = atr_pct
+        sig.max_loss_pct = MAX_LOSS_PCT      # 15%, tighter than the fleet 0.25
 
         logger.info("[sweep_cs] FIRE  %s swept -> %s at %.2f  %s credit spread "
                     "(age %d bars, rejection %.3f%%)",
