@@ -85,14 +85,22 @@ def main():
         return 1
 
     # ── A. the echo is distinguishable ────────────────────────────────────
+    # 🔴 v4.1 (2026-08-21) — THIS TABLE WAS INVERTED AND CERTIFIED THE DEFECT.
+    # It asserted `tho=true` => extended. `tho` is TRADING-HOURS-ONLY, so
+    # `tho=true` is the RTH echo and its ABSENCE is the extended one. Written
+    # from the same wrong belief as the parser it was checking, this test went
+    # green on the bug for six days and was the reason nobody looked again.
+    # ⚠️ A CHECK WRITTEN FROM THE IMPLEMENTATION'S ASSUMPTION CANNOT FALSIFY IT.
+    # These strings are now copied from the DXFeed journal on NVDA 2026-08-21,
+    # not reasoned about.
     cases = [
-        ("QQQ{=h}", "1h", False),
-        ("QQQ{=h,tho=true}", "1h", True),
-        ("QQQ{=1h,tho=true}", "1h", True),
-        ("QQQ{=5m}", "5m", False),
-        ("QQQ{=5m,tho=true}", "5m", True),
-        ("QQQ{=m}", "1m", False),
-        ("QQQ{=d}", "1d", False),
+        ("QQQ{=h}", "1h", True),
+        ("QQQ{=h,tho=true}", "1h", False),
+        ("QQQ{=1h,tho=true}", "1h", False),
+        ("QQQ{=5m}", "5m", True),
+        ("QQQ{=5m,tho=true}", "5m", False),
+        ("QQQ{=m}", "1m", True),
+        ("QQQ{=d}", "1d", True),
     ]
     for ev, want_tf, want_ext in cases:
         got_tf, got_ext = interval_of(ev), is_ext_of(ev)
@@ -113,15 +121,18 @@ def main():
         return smap.get(("QQQ", tf) if two_part else ("QQQ", tf, ext))
 
     check("B1 an RTH 1h echo routes to the PLAIN symbol",
-          route("QQQ{=h}") == "QQQ", str(route("QQQ{=h}")))
+          route("QQQ{=h,tho=true}") == "QQQ", str(route("QQQ{=h,tho=true}")))
     check("B2 an EXTENDED 1h echo routes to *_EXT",
-          route("QQQ{=h,tho=true}") == "QQQ_EXT", str(route("QQQ{=h,tho=true}")))
+          route("QQQ{=h}") == "QQQ_EXT", str(route("QQQ{=h}")))
     check("B3 the two 1h streams do NOT share a destination",
           route("QQQ{=h}") != route("QQQ{=h,tho=true}"))
 
     # ── D. nothing else moved ─────────────────────────────────────────────
-    for ev, want in (("QQQ{=m}", "QQQ"), ("QQQ{=5m}", "QQQ"),
-                     ("QQQ{=15m}", "QQQ"), ("QQQ{=d}", "QQQ")):
+    # v4.1 — the RTH echoes carry tho=true. THIS is the block that would have
+    # caught the outage: with the inverted parser these four resolve to no
+    # route at all and every intraday bar is dropped.
+    for ev, want in (("QQQ{=m,tho=true}", "QQQ"), ("QQQ{=5m,tho=true}", "QQQ"),
+                     ("QQQ{=15m,tho=true}", "QQQ"), ("QQQ{=d,tho=true}", "QQQ")):
         check(f"D {ev} still routes to {want}", route(ev) == want, str(route(ev)))
 
     # ── E. the RTH guard SEGREGATES rather than drops ─────────────────────

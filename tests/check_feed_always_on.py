@@ -115,7 +115,13 @@ def main() -> int:
             self.open = self.high = self.low = self.close = 100.0
             self.volume = 1.0
 
-    _ECHO = {"1m": "m", "5m": "5m", "15m": "15m", "1h": "h", "1d": "d"}
+    # v4.1 — the echoes now carry `tho=true`, because that is what the PLAIN
+    # (RTH) subscription actually receives. The first draft omitted it and
+    # therefore drove the EXTENDED route while claiming to test the plain one —
+    # a fixture written from the same inverted assumption as the parser it sat
+    # next to. Copied from the journal, NVDA 2026-08-21.
+    _ECHO = {"1m": "m,tho=true", "5m": "5m,tho=true", "15m": "15m,tho=true",
+             "1h": "h,tho=true", "1d": "d,tho=true"}
 
     def _fire(interval: str, ts: int) -> str:
         """Push one PLAIN-route bar through the handler; return where it landed."""

@@ -1,5 +1,9 @@
 """
-data/candle_feed.py  v4.3
+data/candle_feed.py  v4.4
+v4.4  2026-08-21  `_is_ext_of` polarity INVERTED and fixed. `tho=true` marks the
+    RTH echo, not the extended one. 1m/5m/15m/1d were dropped outright (no
+    (sym,tf,True) key exists for them) and the two 1h streams were swapped.
+    Live fleet-wide outage of the entire intraday tape on the first v4 session.
 v4.3  2026-08-20  THE RTH FEED GATE IS REMOVED. Subscriptions are held whenever
     the box is up; MAINTENANCE (OT_FEED_MODE) is the only stand-down left and it
     is now UNCONDITIONAL — the old block slept only until the next open and
@@ -674,7 +678,30 @@ class CandleFeed:
         if "{=" not in (event_symbol or ""):
             return False
         attrs = event_symbol.split("{=", 1)[1].rstrip("}")
-        return "tho=true" in attrs.replace(" ", "").lower()
+        # 🔴 v4.4 (2026-08-21) — THE POLARITY WAS BACKWARDS. This read
+        #     return "tho=true" in attrs
+        # but `tho` is TRADING-HOURS-ONLY: `tho=true` marks the RTH echo, and
+        # its ABSENCE marks the extended one. v3.16 named the right attribute
+        # and inverted its meaning.
+        #
+        # WHAT IT COST, measured live 2026-08-21 09:31-09:52:
+        # · 1m/5m/15m/1d register ONLY (sym, tf, False). Every RTH echo looked
+        #   up True, missed, and was DROPPED — the whole intraday tape, fleet
+        #   wide, for a full session. The bots priced off the previous day's
+        #   close because fetch_quote reads the newest 1m bar.
+        # · 1h registers BOTH keys, so nothing missed — the two streams simply
+        #   SWAPPED. Plain `SYM` 1h received the EXTENDED tape and `SYM_EXT`
+        #   received RTH. Both looked current. That is why 1h alone appeared
+        #   healthy and hid the rest.
+        #
+        # ⚠️ THE WRITE GUARD PARTLY MASKED IT, which is why it survived a day.
+        # v3.17 re-segregates non-RTH bars off the plain route, so the misrouted
+        # extended 1h bars were caught and moved — leaving plain 1h roughly
+        # right BY ACCIDENT while the log said "RTH GUARD ... SEGREGATING" every
+        # session and was read as the guard doing its job. A correct-looking
+        # output produced by two errors cancelling is this project's failure
+        # class in its purest form.
+        return "tho=true" not in attrs.replace(" ", "").lower()
 
     def _on_candle(self, c: Candle):
         ev_sym = getattr(c, "event_symbol", "")
