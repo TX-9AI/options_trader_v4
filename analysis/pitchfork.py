@@ -1,5 +1,9 @@
 """
-analysis/pitchfork.py  v4.0
+analysis/pitchfork.py  v4.1
+v4.1  2026-08-21  _epoch_triple no longer proposes a P2 inside the last k
+      bars - it was selecting the tail RUNNING EXTREME, which the 4.4
+      confirmation-lag guard was then obliged to reject. Contained-fork build
+      rate 23/40 -> 28/40 on synthetic daily frames.
 Andrews pitchfork / containment envelope construction.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -490,8 +494,42 @@ def _epoch_triple(df: pd.DataFrame, start: int, k: int):
     if len(lo) < 3 * k + 3:
         return None
     ilo, ihi = int(lo.argmin()), int(hi.argmax())
+    # ── 🔴 v4.1 (2026-08-21) — P2 IS SEARCHED ONLY WHERE IT CAN BE CONFIRMED ──
+    # P2 was `argmin/argmax` over the WHOLE tail after P1 — a RUNNING EXTREME,
+    # not a confirmed fractal. On any frame still making new lows/highs into
+    # the close (which is most of them) that lands on or within k of the final
+    # bar. `build_fork_contained` then rejected the window at
+    #     if p2.idx + k > n - 1:   # §4.4 confirmation lag not yet served
+    # ...and did so for EVERY window, because the same tail extreme is returned
+    # regardless of `start`.
+    #
+    # MEASURED 2026-08-21, and stated precisely because the first draft of this
+    # note over-claimed: the effect is DATA-DEPENDENT, not universal. Across 40
+    # synthetic 90-bar daily frames a contained fork built on **23/40 before
+    # this fix and 28/40 after** — the loss is the frames whose post-P1 extreme
+    # is younger than k, where EVERY candidate window gets discarded. On one
+    # such frame (seed 7): 19 windows produced a triple, p2.idx was the final
+    # bar in all 19, and zero containment shares were ever computed.
+    #
+    # ⚠️ THE CONDOR'S TOTAL OUTAGE WAS THE OTHER DEFECT, not this one — a
+    # timeframe-key mismatch in pitchfork_observer meant rails were never
+    # fetched at all. This fix raises the fork's build rate; that one was the
+    # reason "no usable daily pitchfork (rails=absent)" printed on every box.
+    #
+    # ⚠️ TWO INDIVIDUALLY-CORRECT RULES, JOINTLY FATAL. The selector was not
+    # wrong to want the tail's extreme and §4.4 was not wrong to refuse an
+    # unconfirmed pivot. The defect is that the selector proposed a candidate
+    # the validator was obliged to reject. The fix serves §4.4's INTENT — do
+    # not use a pivot that is not yet knowable — by not proposing one, rather
+    # than by discarding the whole window afterwards.
+    #
+    # ⚠️ THIS CHANGES THE FORK'S GEOMETRY and the pitchfork is a v4.0 milestone,
+    # so it is stated plainly: P2 may now sit further back than the tail's true
+    # extreme when that extreme is younger than k bars. That is the same
+    # constraint every other confirmed pivot in this file already obeys.
+    _tail_end = len(lo) - k          # exclusive: the last k bars cannot confirm
     if ilo < ihi:
-        seg = lo[ihi:]
+        seg = lo[ihi:_tail_end]
         if len(seg) < k + 1:
             return None
         j = ihi + int(seg.argmin())
@@ -505,7 +543,7 @@ def _epoch_triple(df: pd.DataFrame, start: int, k: int):
             return None
         direction = "bullish"
     else:
-        seg = hi[ilo:]
+        seg = hi[ilo:_tail_end]          # v4.1 — mirror of the long side
         if len(seg) < k + 1:
             return None
         j = ilo + int(seg.argmax())

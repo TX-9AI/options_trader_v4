@@ -829,7 +829,12 @@ CONDOR_NICKEL_CLOSE         = 0.05   # Close leg when spread value decays to $0.
 # getting the condor if the fork isn't there."
 CONDOR_PITCHFORK_ANCHOR     = os.environ.get("OT_CONDOR_PF_ANCHOR", "1") == "1"
 CONDOR_REQUIRE_FORK         = os.environ.get("OT_CONDOR_REQUIRE_FORK", "1") == "1"
-CONDOR_PF_TIMEFRAME         = os.environ.get("OT_CONDOR_PF_TF", "daily")
+# v4.1 (2026-08-21) — default was "daily", but the fork cache is keyed on the
+# FRAME names "1d"/"1h". `rails_for` got None for every lookup and the condor
+# stood down on every box, every session, reading as the guardrail policy
+# working. Default is now the frame key; legacy spellings are normalised in
+# pitchfork_observer._norm_tf so a stale env var cannot re-break it.
+CONDOR_PF_TIMEFRAME         = os.environ.get("OT_CONDOR_PF_TF", "1d")
 # Slope magnitude (fraction of price per bar) below which the fork is treated as
 # FLAT and leg order falls back to proximity. A sign alone is not a slope: a
 # fork drifting 0.001% a bar is noise, and ordering legs off its sign would be

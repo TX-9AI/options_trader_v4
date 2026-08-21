@@ -1,5 +1,9 @@
 """
-analysis/pitchfork_observer.py  v4.0
+analysis/pitchfork_observer.py  v4.1
+v4.1  2026-08-21  rails_for normalises the timeframe spelling. The cache is
+      keyed "1d"/"1h" while CONDOR_PF_TIMEFRAME defaulted to "daily", so the
+      condor never once received rails and stood down on every box, every
+      session, reading as the guardrail policy working.
 Records fork state per tick for later analysis.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -146,7 +150,22 @@ def _state(entry: Dict[str, Any], price: float) -> Optional[Dict[str, Any]]:
         return None
 
 
-def rails_for(ctx: dict, symbol: str, tf: str = "daily"):
+_TF_ALIASES = {"daily": "1d", "day": "1d", "d": "1d", "1day": "1d",
+               "hourly": "1h", "hour": "1h", "h": "1h", "60m": "1h"}
+
+
+def _norm_tf(tf: str) -> str:
+    """Frame key for a timeframe, accepting the legacy spellings.
+
+    The cache is keyed on ctx["data"]'s own keys ("1d"/"1h"); everything else
+    is an alias. Unknown values pass through unchanged so a genuine typo still
+    returns None rather than being silently coerced to a frame nobody asked
+    for — an alias table that guesses is worse than one that refuses.
+    """
+    return _TF_ALIASES.get((tf or "").strip().lower(), tf)
+
+
+def rails_for(ctx: dict, symbol: str, tf: str = "1d"):
     """Rails + SLOPE for one timeframe, or None. The condor's only entry point.
 
     Returns {"upper","median","lower","slope","tf","pos_pct"} where `slope` is
@@ -166,7 +185,17 @@ def rails_for(ctx: dict, symbol: str, tf: str = "daily"):
         return None
     try:
         forks = refresh(ctx, symbol)
-        entry = (forks or {}).get(tf)
+        # ── 🔴 v4.1 (2026-08-21) — NORMALISE THE TIMEFRAME SPELLING ──────────
+        # `refresh()` caches under the FRAME keys "1d"/"1h" (they come straight
+        # from ctx["data"]), but `config.CONDOR_PF_TIMEFRAME` defaulted to
+        # **"daily"**. So the condor's only entry point did `forks.get("daily")`,
+        # got nothing, returned None — and `CONDOR_REQUIRE_FORK` reads None as
+        # "no guardrail, stand down". Two vocabularies for one frame, and the
+        # mismatch presented as the insurance policy working correctly.
+        # ⚠️ NORMALISED RATHER THAN JUST RE-DEFAULTED, because a stale
+        # OT_CONDOR_PF_TF=daily in any box .env would otherwise silently
+        # re-disable the condor with no error anywhere.
+        entry = (forks or {}).get(_norm_tf(tf))
         if not entry:
             return None
         f = entry.get("contained")
