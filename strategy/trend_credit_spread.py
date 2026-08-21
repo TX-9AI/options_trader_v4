@@ -1,5 +1,8 @@
 """
-strategy/trend_credit_spread.py  v4.0
+strategy/trend_credit_spread.py  vv4.1
+
+v4.1  2026-08-21  r60: reads TCS_ENTRY_END_ET (inert while parked) - the
+      global cutoff it used to read is deleted.
 ORB-bounded credit spread. TRIGGER REBUILT IN PHASE 2.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -116,7 +119,7 @@ from config import (
     TCS_WING_WIDTH_SPX, TCS_WING_WIDTH_QQQ,
     TREND_CREDIT_ACTIVE, TCS_START_ET, TCS_MIN_CREDIT_NICKEL_MULT,
     TCS_LOSS_GIVEN_BREACH, CONT_BREAKOUT_MIN_ADX,
-    GLOBAL_NO_ENTRY_ET, INSTRUMENT, HARD_CLOSE_ET,
+    TCS_ENTRY_END_ET, INSTRUMENT, HARD_CLOSE_ET,
 )
 # ⚠️ NOT `from strategy.iron_condor_strategy import IronCondorStrategy`.
 # TC.6 previously instantiated the condor to borrow five of its methods. The
@@ -176,7 +179,7 @@ class TrendCreditSpread:
         for a whole session without leaving a line is how 2026-08-14's afternoon
         was spent guessing:
           1. active flag
-          2. inside the 11:00 -> GLOBAL_NO_ENTRY_ET window
+          2. inside the 11:00 -> TCS_ENTRY_END_ET window (provisional value)
           3. no active condor plan (it holds the slot; a third credit spread on
              one underlying is unmanaged risk)
           5. a directional trend vote clearing CONT_BREAKOUT_MIN_ADX
@@ -190,7 +193,7 @@ class TrendCreditSpread:
             if not TREND_CREDIT_ACTIVE:
                 return None
             now = now_et or datetime.now(ET)
-            if (now.hour, now.minute) >= GLOBAL_NO_ENTRY_ET:
+            if (now.hour, now.minute) >= TCS_ENTRY_END_ET:   # r60: own constant, flagged provisional
                 return None
             if (now.hour, now.minute) < TCS_START_ET:
                 return None

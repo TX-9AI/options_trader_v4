@@ -1,5 +1,9 @@
 """
-config.py  v4.1
+config.py  v4.2
+
+v4.2  2026-08-21  r60: GLOBAL_NO_ENTRY_ET deleted (unauthorized 14:00
+      all-strategy cutoff - see the block at its former site); TCS_ENTRY_END_ET
+      added as an inert, flagged placeholder for the parked TC.6.
 Every constant, threshold and env override.
 
 v4.1  2026-08-20  AUDIT F2: TREND_CREDIT_ACTIVE default OFF - the sixth
@@ -641,8 +645,23 @@ DEBIT_DIRECTIONAL_CUTOFF_ET = tuple(int(x) for x in
 DEBIT_BLOCKED_STRUCTURES = {"long_debit"}
 DEBIT_BLOCK_ACTIVE          = os.environ.get("OT_DEBIT_BLOCK_ACTIVE", "1") == "1"
 
-GLOBAL_NO_ENTRY_ET          = (14, 0)   # GLOBAL: no new 0DTE entries after 14:00 ET,
-                                        #   ANY strategy. Read by utils/time_utils.
+# ⚠️ r60 (2026-08-21): GLOBAL_NO_ENTRY_ET IS DELETED — AN ENCODING NOBODY
+# CHOSE. It began as a bare dtime(14, 0) hardcoded in v3's utils/time_utils,
+# was promoted to a named constant by the "cutoff disambiguation" pass whose
+# own changelog says "NOT a behaviour change", and was ported to v4 intact. It
+# vetoed EVERY strategy's entries after 14:00 ET — including the afternoon
+# credit window TC.6 exists for — logging only at DEBUG. On 2026-08-21 it was
+# one of four stacked locks behind a 15-box zero-trade session. Operator,
+# verbatim: "I did not spec any hard 1400 blocks ever." Each structure's own
+# operator-set window (ORB 11:00, butterfly cutoff, TCS below, the
+# 15:40/15:45 flatten ladder) bounds the day; a redundant global veto is the
+# guard-outlives-decision shape this repo keeps finding.
+TCS_ENTRY_END_ET            = (14, 0)   # ⚠️ PROVISIONAL, INERT: TC.6's window
+                                        #   end, inherited verbatim from the
+                                        #   deleted global cutoff so behaviour
+                                        #   is unchanged while TCS is OFF.
+                                        #   Operator specs TC.6's real v4
+                                        #   window before any activation.
 BUTTERFLY_ENTRY_CUTOFF_ET   = (14, 0)   # was 15:00 and unreachable (see v3.1 header)
 BUTTERFLY_ENTRY_START_ET    = (12, 0)   # No butterfly entries before noon
 ORB_WINDOW_MINUTES          = 5

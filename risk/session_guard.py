@@ -1,5 +1,8 @@
 """
-risk/session_guard.py  v4.0
+risk/session_guard.py  v4.1
+
+v4.1  2026-08-21  r60: the unauthorized global 14:00 entry cutoff deleted;
+      butterfly keeps its own reviewed cutoff. See the doctrine at the site.
 RTH gating and session boundaries.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -50,7 +53,7 @@ from typing import Optional
 from datetime import datetime, time as dtime
 
 from utils.time_utils import (
-    is_rth, is_orb_complete, is_hard_close_time, is_past_entry_cutoff,
+    is_rth, is_orb_complete, is_hard_close_time,
     now_et, fmt_et_short, seconds_until_rth_open
 )
 from data.macro_data import MacroSnapshot
@@ -100,11 +103,14 @@ class SessionGuard:
             return False, "past 15:45 ET hard close — no new entries"
 
         # ── Entry cutoff ──────────────────────────────────────────────────────
-        if is_past_entry_cutoff():
-            if not is_butterfly:
-                return False, "past 14:00 ET entry cutoff — no new 0DTE entries"
-            if now_et().time() >= _BUTTERFLY_CUTOFF:
-                return False, f"past {_BUTTERFLY_CUTOFF.strftime('%H:%M')} ET butterfly cutoff"
+        # r60 (2026-08-21): the GLOBAL 14:00 block is DELETED — an unauthorized
+        # v3 hardcode (full provenance in config.py) that silently vetoed every
+        # strategy's afternoon, logged only at DEBUG, and helped produce the
+        # 15-box zero-trade session of 2026-08-21. Each structure's own
+        # operator-set window bounds entries now, as designed. The butterfly's
+        # cutoff below is ITS OWN reviewed constant and stays.
+        if is_butterfly and now_et().time() >= _BUTTERFLY_CUTOFF:
+            return False, f"past {_BUTTERFLY_CUTOFF.strftime('%H:%M')} ET butterfly cutoff"
 
         # ── Macro gates ───────────────────────────────────────────────────────
         if macro and not macro.new_entries_allowed:

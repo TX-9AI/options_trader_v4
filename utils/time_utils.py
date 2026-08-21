@@ -1,5 +1,8 @@
 """
-utils/time_utils.py  v4.0
+utils/time_utils.py  v4.1
+
+v4.1  2026-08-21  r60: is_past_entry_cutoff + NO_ENTRY deleted with the
+      unauthorized global cutoff.
 Timezone, RTH session helpers, market-clock utilities.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -15,8 +18,8 @@ utils/time_utils.py — Timezone, RTH session helpers, and time utilities.
 All bot logic operates in US/Eastern time to match market hours.
 NO_ENTRY is READ FROM CONFIG (defect H). It was hardcoded
         as dtime(14, 0), so editing config could not move the global cutoff.
-        It now derives from config.GLOBAL_NO_ENTRY_ET.
-        NOT a behaviour change: GLOBAL_NO_ENTRY_ET is (14, 0), the same value
+        It now derives from config.ORB_NO_ENTRY_AFTER_ET.
+        NOT a behaviour change: ORB_NO_ENTRY_AFTER_ET is (14, 0), the same value
         that was hardcoded. Note the config constant this does NOT read is
         ORB_NO_ENTRY_AFTER_ET (11:00) — that is the ORB-scoped cutoff, a
         different rule. Wiring NO_ENTRY to it would silently move the global
@@ -32,7 +35,7 @@ from datetime import datetime, timezone, timedelta, time as dtime
 from typing import Optional, Tuple
 import pytz
 
-from config import GLOBAL_NO_ENTRY_ET
+from config import ORB_NO_ENTRY_AFTER_ET
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,6 @@ ET = pytz.timezone("US/Eastern")
 RTH_OPEN    = dtime(9, 30)
 RTH_CLOSE   = dtime(16, 0)
 HARD_CLOSE  = dtime(15, 45)
-NO_ENTRY    = dtime(*GLOBAL_NO_ENTRY_ET)   # global 0DTE cutoff — from config
 ORB_END     = dtime(9, 35)   # ORB defined by 9:30–9:35 candle
 
 
@@ -109,10 +111,11 @@ def is_hard_close_time() -> bool:
     return now.time() >= FLATTEN_WINDOW_OPEN
 
 
-def is_past_entry_cutoff() -> bool:
-    """True if it's past 2:00 PM ET — no new 0DTE entries after this."""
-    now = now_et()
-    return now.time() >= NO_ENTRY
+# r60 (2026-08-21): is_past_entry_cutoff() DELETED with ORB_NO_ENTRY_AFTER_ET —
+# the 14:00 number was never an operator decision (provenance in config.py).
+# Callers rerouted: session_guard's global block is deleted outright;
+# orb_engine's re-arm check now reads ORB's OWN specced cutoff (11:00), which
+# is what actually bounds an ORB re-entry and always did.
 
 
 def is_orb_window() -> bool:

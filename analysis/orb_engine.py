@@ -1,5 +1,8 @@
 """
-analysis/orb_engine.py  v4.0
+analysis/orb_engine.py  v4.1
+
+v4.1  2026-08-21  r60: re-arm check reads ORB_NO_ENTRY_AFTER_ET, not the
+      deleted global cutoff.
 v4.1  2026-08-21  REGIME PURGE PHASE A. The two SWEEP_REVERSAL deferrals
       deleted - doubly dead (label never assigned, and the constant that
       negated them is gone).
@@ -233,7 +236,9 @@ from typing import Optional
 from datetime import datetime
 import pandas as pd
 
-from utils.time_utils import now_et, is_past_entry_cutoff
+from utils.time_utils import now_et
+from datetime import time as _dtime
+from config import ORB_NO_ENTRY_AFTER_ET as _ORB_CUT
 from utils.math_utils import orb_strike_selection
 from config import (
     ORB_MAX_RETEST_BARS, STRIKE_INCREMENT, INSTRUMENT,
@@ -443,7 +448,10 @@ class ORBEngine:
     def notify_position_closed(self):
         d = self._data
         if d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT):
-            if is_past_entry_cutoff():
+            # r60: the re-arm window is ORB's OWN 11:00 cutoff — re-arming
+            # after it was always futile (entries are refused there), and the
+            # old 14:00 read was the deleted unauthorized global.
+            if now_et().time() >= _dtime(*_ORB_CUT):
                 d.state = ORBState.EXPIRED
             else:
                 logger.info("ORB position closed — re-arming for next attempt")
