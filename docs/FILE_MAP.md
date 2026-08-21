@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-107 Python modules across 12 local packages.
+108 Python modules across 12 local packages.
 
 ## How to read this repo - orientation
 
@@ -360,6 +360,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_condor_spec.py`
 - **calls:** `analysis/pitchfork.py`, `execution/exit_engine.py`, `strategy/__init__.py`, `strategy/condor_roll.py`, `utils/time_utils.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_configure_relaxed.py`
+- **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_dispatch.py`

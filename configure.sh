@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# configure.sh  v4.0
+# configure.sh  v4.1
 # Per-box configuration.
+#
+# v4.1  2026-08-20  Option 7 (relaxed entry) called an undefined `confirm`,
+#       so it always took the else branch: it could never be switched ON, and
+#       opening the item wrote OT_RELAXED_ENTRY=0. Now calls ask_yn, the
+#       helper the rest of the file uses. Both branches are executed by
+#       tests/check_configure_relaxed.py, which also traps
+#       command-not-found so a future undefined helper cannot fail quietly.
 #
 # v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 #
@@ -278,7 +285,16 @@ change_relaxed() {
     echo "        tagged relaxed_entry=1."
     echo "  OFF - measured criteria only. This is the trading setting."
     echo ""
-    if confirm "  Enable relaxed entry criteria?"; then
+    # v4.1 — `confirm` DOES NOT EXIST IN THIS REPO. The helper is `ask_yn`
+    # (line ~69), and the only other yes/no caller in the file uses it. The
+    # undefined name meant bash printed "confirm: command not found", returned
+    # 127, and the `if` took the ELSE branch — so option 7 could never turn
+    # relaxed entry ON, and MERELY OPENING IT WROTE `OT_RELAXED_ENTRY=0`.
+    # ⚠️ IT FAILED IN THE SAFE DIRECTION, WHICH IS WHY IT SURVIVED. A
+    # command-not-found in an `if` is indistinguishable from an honest "no":
+    # the menu printed a plausible "Relaxed entry OFF." and carried on. Found
+    # 2026-08-20 on the AMD box the night before the first v4 session.
+    if ask_yn "Enable relaxed entry criteria?"; then
         set_env "OT_RELAXED_ENTRY" "1"
         echo "  RELAXED ENTRY ON - paper only, and every trade is tagged."
     else
