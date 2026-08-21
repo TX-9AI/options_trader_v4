@@ -1,7 +1,12 @@
 """
-main.py  v4.1
+main.py  v4.2
 Tick loop, context assembly, strategy dispatch. GATES STRIPPED - see ROADMAP Phase 2.
 
+v4.2  2026-08-20  `_REGIME_ENGINE` and its startup assert DELETED. Nothing read
+      the variable - v4 removed both engines it used to choose between - so the
+      assert was a gate with no consumer that could only ever refuse to start.
+      It crash-looped the QQQ box, which carried OT_REGIME_ENGINE=smc from the
+      SMC fork's unit file. A guard outlives the thing it guarded.
 v4.1  2026-08-20  AUDIT F4: relaxed_entry copied onto the condor-leg record -
       the tag was set on the signal and dropped before the insert.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -771,13 +776,27 @@ from analysis.orb_engine import get_orb_engine, ORBState
 # a low conviction number on a best-fit label, not a seventh label. Gates run
 # WIDE OPEN this week (conviction logged, not gated — L3 tunes the bars later);
 # paper P&L is the de-facto arbiter of L1+L2 quality. Rollback: OT_REGIME_ENGINE=v13.
-# v4.7 — the value is LOWERCASED here, so every comparison against it must be
-# lowercase too. It was compared to "L2" at both gate sites, which can never
-# match "l2" — L2.5 was unreachable dead code from the moment v4.0 wired it.
-_REGIME_ENGINE = os.environ.get("OT_REGIME_ENGINE", "L2").lower()   # "l2" | "v13"
-assert _REGIME_ENGINE in ("l2", "v13"), (
-    f"OT_REGIME_ENGINE={_REGIME_ENGINE!r} is neither 'l2' nor 'v13' — refusing to "
-    f"start rather than silently running an unintended regime engine")
+# ── v4.10 (2026-08-20) — `_REGIME_ENGINE` AND ITS STARTUP ASSERT ARE DELETED ──
+# The variable was read by NOTHING. v3 used it to choose between the L2.5 stack
+# and the v1.3 classifier; v4 removed both, and the log line below already
+# states the answer unconditionally. What survived the port was an assert with
+# no consumer — a gate that could only ever REFUSE TO START, never change
+# behaviour.
+#
+# 🔴 IT COST A BOX. The QQQ instance carried `Environment=OT_REGIME_ENGINE=smc`
+# from the SMC fork. On v4 that value matched neither "l2" nor "v13", so the
+# assert fired at import and systemd crash-looped it — restart counter at 4,
+# `activating (auto-restart)`, on a box that had nothing wrong with its code.
+# The guard was doing exactly what it was written to do, for a decision that no
+# longer exists.
+#
+# ⚠️ THE GENERAL RULE, worth more than this instance: A GUARD OUTLIVES THE
+# THING IT GUARDED. When a feature is removed, its validation is not neutral
+# leftovers — it is a live veto over a value nothing consumes, and stale
+# environment on a repointed box is exactly how it gets triggered. Deleting the
+# consumer without deleting the assert is how a clean box refuses to boot.
+# `OT_REGIME_ENGINE` is now INERT: set it to anything, or leave it set from a
+# previous fork, and v4 neither reads it nor cares.
 # ── v4.0 — THE LAYER-2 CONVICTION STACK IS GONE ─────────────────────────────
 # v3 imported RegimeConfluenceScorer and ConvictionIntegrator here, inside a
 # try/except that set _L2_OK. At the v4 split those modules were dropped and the

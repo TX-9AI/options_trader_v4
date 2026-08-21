@@ -497,7 +497,11 @@ check "analysis/orb_engine.py"           "bars_since_break"             "v3.9 ti
 check "status.py"                        "get_runtime_env"              "v1.12 loss-limit read via runtime env (false \$200 HALT fix)"
 
 # main v4.0 / L2.5 (2026-07-21) — the Layer-2 label drives live trading
-check "main.py"                          "OT_REGIME_ENGINE"             "v4.0 L2 committed label drives regime (+v13 rollback)"
+# REMOVED 2026-08-20 with main.py v4.2: this canary asserted the PRESENCE of
+# OT_REGIME_ENGINE, and main no longer reads it. A canary that demands a
+# deleted feature still exists is a red that can never be cleared - the
+# WORKING_AGREEMENT 24 trap. Deleted with the thing it guarded, in the same
+# commit, per WORKING_AGREEMENT 23 (ship coupled changes together).
 check "main.py"                          "ConvictionIntegrator"         "v4.0 integrator wired into the live loop"
 check "main.py"                          "integrator_state.json"        "v4.0 conviction book persisted per box"
 
