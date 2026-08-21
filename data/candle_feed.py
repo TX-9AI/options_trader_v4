@@ -1,5 +1,15 @@
 """
-data/candle_feed.py  v4.2
+data/candle_feed.py  v4.3
+v4.3  2026-08-20  THE RTH FEED GATE IS REMOVED. Subscriptions are held whenever
+    the box is up; MAINTENANCE (OT_FEED_MODE) is the only stand-down left and it
+    is now UNCONDITIONAL — the old block slept only until the next open and
+    seconds_until_rth_open() returns 0 during RTH, so a maintenance window
+    declared inside the session was silently defeated. The gate existed to stop
+    a maintenance wake putting 29 boxes on the wire at once; the fleet is now
+    15, the same 15 daily, and a normal session already carried ~20 without
+    strain. Operator's call, 2026-08-20. The v4.2 write guard below is what
+    makes this safe: every non-RTH bar still routes to <SYM>_EXT, for EVERY
+    interval, so the plain series stays RTH-pure while the box streams 24h.
 v4.2  2026-08-20  RTH GUARD AT THE WRITE — ported from the SMC thread's v3.17.
     The FEED.2 fix corrected STREAMING routes, and the restart's BACKFILL then
     wrote 24-HOUR bars into the plain series anyway. Measured on the fleet
@@ -128,16 +138,16 @@ AUX_MAX_AGE_S     = 6 * 3600
 PRUNE_EVERY_S     = 300
 RECONNECT_MIN_S   = 3
 
-# Seconds BEFORE the RTH open at which the feed connects, so candle frames are
-# warm when the bot's first tick asks for them. 20 min covers the 09:15 fleet
-# wake. OT_FEED_WARM_LEAD_S=0 makes the gate exact-open; a large value
-# effectively restores the old always-on behaviour.
-from utils.time_utils import is_rth, seconds_until_rth_open   # RTH gate, 2026-08-01
-
-FEED_WARM_LEAD_S = float(os.environ.get("OT_FEED_WARM_LEAD_S", "1200"))
+# v4.3 — FEED_WARM_LEAD_S and the is_rth/seconds_until_rth_open imports are
+# GONE with the RTH gate. There is no longer an open to warm up to: the feed
+# holds its subscriptions continuously while the box is up, so the frames are
+# never cold. `OT_FEED_WARM_LEAD_S` is now INERT — if it is still set in a
+# box .env it does nothing, which is stated here so a future reader does not
+# spend an evening looking for the code that reads it.
 
 # ── FEED MODE (FEED.1, 2026-08-15) — THE THIRD PURPOSE ───────────────────────
-# `_idle_outside_session` already says the right thing: **"THE DISTINCTION IS
+# `_feed_stood_down` (v4.3, formerly `_idle_outside_session`) already says the
+# right thing: **"THE DISTINCTION IS
 # PURPOSE, NOT TIME."** It only had TWO purposes — service (hold a socket for a
 # live session) and one-shot (`--once`, pull history and exit). A `--once` run
 # is therefore allowed at ANY hour, which is correct for the EOD pull and wrong
@@ -846,8 +856,8 @@ class CandleFeed:
             self.backfill_logged[(sym, tf)] = True
 
     @staticmethod
-    def _idle_outside_session(once: bool) -> bool:
-        """Should this run stand down because no session needs serving?
+    def _feed_stood_down() -> bool:
+        """Should this run stand down? v4.3: MAINTENANCE, and nothing else.
 
         ONE predicate, TWO call sites (the reconnect gate and the RTH-over
         break). v3.9 wrote the same condition inline in both places and v3.10
@@ -882,69 +892,85 @@ class CandleFeed:
         if _maintenance_now():
             if not getattr(CandleFeed, "_maint_said", False):
                 CandleFeed._maint_said = True
+                # v4.3 — the trailing "%s" arg used to read
+                # `"including this --once run" if once else "service mode"`.
+                # `once` is no longer a parameter, so that line raised
+                # NameError the first time maintenance was declared — and
+                # `import candle_feed` could not see it, because the name is
+                # only resolved when this branch RUNS. Found by
+                # tests/check_feed_always_on.py driving the predicate, which is
+                # the whole argument for executing checks rather than reading
+                # source (WORKING_AGREEMENT 21).
                 logger.warning(
-                    "[feed-mode] MAINTENANCE - standing down completely, "
-                    "%s. NO candles will be collected on this box until "
-                    "OT_FEED_MODE is cleared. This is DELIBERATE, not a fetch "
-                    "failure; if you expected tape, the mode is wrong.",
-                    "including this --once run" if once else "service mode")
+                    "[feed-mode] MAINTENANCE - standing down completely. NO "
+                    "candles will be collected on this box until OT_FEED_MODE "
+                    "is cleared. This is DELIBERATE, not a fetch failure; if "
+                    "you expected tape, the mode is wrong.")
             return True
-        return not is_rth() and not once
+        # v4.3 — THE RTH CLAUSE IS GONE. It used to read
+        #     `return not is_rth() and not once`
+        # and its own rationale above is what retired it: the gate existed so a
+        # MAINTENANCE wake could not put 29 BOXES on the wire at once. The fleet
+        # is 15 and they are the same 15 every day; a normal session already
+        # carried ~20 boxes on this feed without strain, so the crowd the gate
+        # was sized for no longer exists. Operator, 2026-08-20: boxes subscribe
+        # whenever they are up.
+        #
+        # ⚠️ MAINTENANCE SURVIVES, AND IT IS NOW THE ONLY REASON TO STAND DOWN.
+        # It was never the clock rule — it is the window where the fleet can be
+        # up with nothing on the wire, and it must stay expressible.
+        # ⚠️ `once` IS NO LONGER A PARAMETER. It existed to exempt the one-shot
+        # EOD pull from a CLOCK rule; with no clock rule there is nothing to be
+        # exempt from, and maintenance overrode it anyway. A parameter that can
+        # no longer change the answer is a parameter that misleads the reader.
+        return False
 
     async def run(self, once: bool = False):
         session = get_session()
         backoff = RECONNECT_MIN_S
         while True:
-            # ── RTH GATE (2026-08-01) ─────────────────────────────────────────
-            # Do not hold a DXLink socket when there is no session to serve it.
+            # ── FEED STAND-DOWN GATE ─────────────────────────────────────────
+            # HISTORY, kept because it is the reasoning and not the rule.
+            # 2026-08-01 this became an RTH gate: the loop had no time gate at
+            # all (`Restart=always`, no timer), so while a box was UP the feed
+            # subscribed continuously — invisible on a normal day because
+            # phase_report stopped the instances at EOD, but it meant every
+            # MAINTENANCE wake put 29 boxes back on the wire at once for work
+            # needing no market data. FEED.1 then added maintenance as a third
+            # purpose, and v3.9/v3.10 had to exempt `--once` from the clock rule
+            # after two sessions of tape were lost to header-only CSVs.
             #
-            # WHY: this loop had no time gate at all — `Restart=always`, no timer
-            # — so while a box was UP the feed subscribed continuously. That is
-            # invisible on a normal day (phase_report stops the instances at EOD,
-            # so nothing is running), but it means every MAINTENANCE wake put 29
-            # boxes back on the wire at once for work that needs no market data.
+            # v4.3 (2026-08-20) RETIRES THE CLOCK RULE ENTIRELY. The crowd it
+            # was sized for is gone: 15 boxes, the same 15 daily. What remains
+            # is MAINTENANCE — a purpose, not a time — which is exactly what
+            # `_feed_stood_down`'s own doctrine said the distinction always was.
             #
-            # WHY THIS IS SAFE FOR CHAIN ARCHIVAL — the thing that made this
-            # look risky. Greeks/Quote for the option chain ride this same
-            # socket ("one producer, many readers"), so idling here also stops
-            # draining chain_marks. But `analysis.chain_snapshot.snapshot()`
-            # takes the chain as an ARGUMENT and is called from inside main.py's
-            # tick loop — which ALREADY returns early on `not is_rth()`
-            # (main.py:1268). Chain archival therefore only ever happens during
-            # RTH. Gating here cannot cost a snapshot.
+            # ⚠️ WHAT HOLDING THE SOCKET 24h DOES AND DOES NOT DO.
+            # It does NOT contaminate the RTH series: the v4.2 write guard
+            # routes every non-RTH bar to <SYM>_EXT, for EVERY interval, so
+            # overnight 1m/5m/15m are stored and segregated rather than dropped
+            # or merged. It does NOT add chain snapshots outside RTH:
+            # `analysis.chain_snapshot.snapshot()` takes the chain as an
+            # ARGUMENT and is called from main.py's tick loop, which returns
+            # early on `not is_rth()` — so chain archival is still RTH-only and
+            # this change cannot alter it in either direction.
+            # ⚠️ SPX HAS NO OVERNIGHT SESSION. An index producing nothing
+            # between 16:00 and 09:30 is correct, not a fetch failure — it is
+            # the same control that proved the v4.2 contamination was real.
+            # v4.3 — MAINTENANCE ONLY. The sleep-until-open block that lived
+            # here is deleted rather than left dead: a branch that can no longer
+            # run still reads as live to anyone auditing the file.
             #
-            # The bot has had exactly this sleep-and-continue since it was
-            # written; the feed simply never got the same treatment.
-            #
-            # LEAD-IN, not a hard 09:30: the bot's fetch_candles refuses on a
-            # stale heartbeat, so a feed that connects exactly at the open serves
-            # nothing for its first cycles. Connect FEED_WARM_LEAD_S early
-            # (default 20 min, covering the 09:15 fleet wake) so the frames are
-            # warm when the first tick asks.
-            # v3.9 — `--once` IS EXEMPT. The gate below is about not HOLDING a
-            # live socket when no session needs one. A one-shot backfill is the
-            # opposite operation: it connects, pulls HISTORY from 09:30, flushes
-            # and exits. History does not stop existing at 16:00, and this is the
-            # only path the EOD candle retrieval has.
-            # WHAT IT COST: the gate landed 2026-08-01 and `--once` was never
-            # excluded, so from 08-03 every sat-out box woken by eod_backfill
-            # entered this branch, slept 60s at a time until `timeout 200` killed
-            # it, and wrote a HEADER-ONLY csv. Two sessions of sat-out tape, and
-            # DXFeed history is same-evening only — permanent at midnight.
-            # It logged INFO the whole time and nothing raised.
-            if self._idle_outside_session(once):
-                _until = seconds_until_rth_open()
-                if _until > FEED_WARM_LEAD_S:
-                    _nap = min(60.0, _until - FEED_WARM_LEAD_S)
-                    logger.info(
-                        f"Feed idle — outside RTH, no subscriptions held. "
-                        f"Open in {_until/60:.0f} min (connecting "
-                        f"{FEED_WARM_LEAD_S/60:.0f} min early). Sleeping "
-                        f"{_nap:.0f}s."
-                    )
-                    await asyncio.sleep(_nap)
-                    continue
-                # inside the lead-in window: fall through and connect warm
+            # ⚠️ AND IT FIXES A LATENT DEFECT ON THE WAY OUT, stated because it
+            # is a behaviour change and not merely a deletion. The old block
+            # slept only while `seconds_until_rth_open() > FEED_WARM_LEAD_S`,
+            # and that function RETURNS 0 DURING RTH — so maintenance declared
+            # inside the session fell straight through and connected anyway.
+            # The hard-off was silently defeated in exactly the hours a fleet
+            # update is most disruptive. Standing down is now unconditional.
+            if self._feed_stood_down():
+                await asyncio.sleep(60)
+                continue
             try:
                 async with DXLinkStreamer(session) as streamer:
                     # v3.4: fresh socket — chain subscriptions must be rebuilt
@@ -1024,11 +1050,16 @@ class CandleFeed:
                             # again and sleep — the same hang, one layer down,
                             # with the backfill still undrained. Both sites had
                             # to move together or neither works.
-                            if self._idle_outside_session(once):
-                                logger.info(
-                                    "RTH over — closing DXLink socket and "
-                                    "releasing all subscriptions until the next "
-                                    "session."
+                            # v4.3 — no longer an "RTH over" break: the socket
+                            # is held through the close. This fires only when
+                            # MAINTENANCE is declared mid-run, which must take
+                            # effect without waiting for a restart.
+                            if self._feed_stood_down():
+                                logger.warning(
+                                    "MAINTENANCE declared — closing DXLink "
+                                    "socket and releasing all subscriptions. "
+                                    "NO candles collected until OT_FEED_MODE "
+                                    "is cleared."
                                 )
                                 break
                             self._log_backfill_depth()

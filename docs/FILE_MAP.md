@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-106 Python modules across 12 local packages.
+107 Python modules across 12 local packages.
 
 ## How to read this repo - orientation
 
@@ -44,7 +44,7 @@ Change these with the most care; a break here reaches everything downstream.
 | module | imported by | some of the importers |
 |---|---|---|
 | `config.py` | 43 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
-| `utils/time_utils.py` | 19 | alert_manager.py, broker_reconcile.py, candle_feed.py, check_condor_spec.py |
+| `utils/time_utils.py` | 18 | alert_manager.py, broker_reconcile.py, check_condor_spec.py, check_exit_executes.py |
 | `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
 | `strategy/base_strategy.py` | 9 | entry_engine.py, gex_pin_butterfly.py, iron_condor_strategy.py, main.py |
 | `data/tasty_client.py` | 8 | candle_feed.py, condor_roll.py, entry_engine.py, exit_engine.py |
@@ -144,11 +144,11 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/__init__.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** `tests/check_feed_always_on.py`
 
 ### `data/candle_feed.py`
-- **calls:** `config.py`, `data/tasty_client.py`, `utils/time_utils.py`
-- **called by:** `data/candle_logger.py`, `data/market_data.py`
+- **calls:** `config.py`, `data/tasty_client.py`
+- **called by:** `data/candle_logger.py`, `data/market_data.py`, `tests/check_feed_always_on.py`
 
 ### `data/candle_logger.py`
 - **calls:** `config.py`, `data/candle_feed.py`
@@ -370,6 +370,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `execution/exit_engine.py`, `utils/time_utils.py`
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/check_feed_always_on.py`
+- **calls:** `data/__init__.py`, `data/candle_feed.py`
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/check_gates.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
@@ -472,7 +476,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/time_utils.py`
 - **calls:** `config.py`
-- **called by:** `analysis/entry_snapshot.py`, `analysis/orb_engine.py`, `analysis/trade_readiness.py`, `analysis/trend_engine.py`, `data/candle_feed.py`, `data/market_data.py`, `database/trade_logger.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `main.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `risk/setup_scorer.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `tests/check_condor_spec.py`, `tests/check_exit_executes.py`
+- **called by:** `analysis/entry_snapshot.py`, `analysis/orb_engine.py`, `analysis/trade_readiness.py`, `analysis/trend_engine.py`, `data/market_data.py`, `database/trade_logger.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `main.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `risk/setup_scorer.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `tests/check_condor_spec.py`, `tests/check_exit_executes.py`
 
 ### `warehouse/__init__.py`
 - **calls:** (none)
