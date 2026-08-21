@@ -7,7 +7,9 @@ configure.sh option 7 can actually turn relaxed entry ON.
 v4.0  2026-08-20  Written with configure.sh v4.1, after option 7 was found
       calling an undefined `confirm` on the AMD box. C5 added the same day:
       the exec bit is asserted in the GIT INDEX, because that is the only
-      place it survives a clone (r50) and a tarball cannot supply it.
+      place it survives a clone (r50) and a tarball cannot supply it. C6
+      added the same evening: a set_env write with no daemon-reload leaves
+      systemd restarting from its cached unit.
 
 WHAT HAPPENED, because the shape matters more than the typo. `confirm` is not a
 function in this repo — the helper is `ask_yn`. Bash printed
@@ -89,10 +91,15 @@ def _drive(answer: str, start_value: str) -> tuple[str, str, int]:
 command_not_found_handle() {{ echo "MISSING_COMMAND: $1" >&2; exit 42; }}
 RESET=""; BOLD=""; GREEN=""; YELLOW=""; CYAN=""
 source "{funcs}"
-# Stub only the two env accessors; everything else is the real code.
+# Stub the two env accessors and the daemon reload; everything else is the
+# real code. reload_daemon is stubbed because it shells out to `sudo
+# systemctl`, which does not exist in every checkout — and a check that goes
+# red on ENVIRONMENT rather than CONTENT teaches an operator to ignore reds.
+# It still ANNOUNCES itself, so the call is asserted rather than assumed.
 get_env() {{ sed -n "s/^$1=//p" "{envfile}"; }}
 set_env() {{ grep -v "^$1=" "{envfile}" > "{envfile}.t" 2>/dev/null;
              mv "{envfile}.t" "{envfile}"; echo "$1=$2" >> "{envfile}"; }}
+reload_daemon() {{ echo "RELOAD_CALLED" >&2; }}
 change_relaxed
 """
         proc = subprocess.run(["bash", "-c", harness], input=f"{answer}\n",
@@ -113,11 +120,16 @@ def main() -> int:
     val, err, rc = _drive("y", "0")
     check("C1 answering 'y' sets OT_RELAXED_ENTRY=1", val == "1",
           f"answering 'y' left OT_RELAXED_ENTRY={val!r} (rc={rc})")
+    check("C1 the ON branch reloads the daemon", "RELOAD_CALLED" in err,
+          "set_env wrote the unit file and systemd was never told - the "
+          "restart would come back on the OLD value")
 
     # ── C2 the other direction still works ───────────────────────────────
-    val_n, _err_n, _rc_n = _drive("n", "1")
+    val_n, err_n, _rc_n = _drive("n", "1")
     check("C2 answering 'n' sets OT_RELAXED_ENTRY=0", val_n == "0",
           f"answering 'n' left OT_RELAXED_ENTRY={val_n!r}")
+    check("C2 the OFF branch reloads the daemon", "RELOAD_CALLED" in err_n,
+          "the else branch writes the unit file too, and it must reload")
 
     # ── C3 no undefined helper anywhere on the path ──────────────────────
     check("C3 no command-not-found on the relaxed path",
@@ -163,6 +175,32 @@ def main() -> int:
         check("C5 every root .sh is 100755 in the git index", not nonexec,
               f"not executable in the index: {nonexec} — a fresh clone or a "
               f"repoint gets Permission denied on these")
+
+    # ── C6 a unit-file write must be followed by a daemon-reload ─────────
+    # `set_env` edits the systemd UNIT FILE. Without `reload_daemon`, systemd
+    # restarts from its CACHED unit, so the bot comes back on the OLD value
+    # while configure.sh and the menu both report the NEW one — the setting
+    # looks applied and is not. change_relaxed shipped that way (v4.1 -> v4.2).
+    # ⚠️ EXACT, NOT HEURISTIC: this parses column-0 function blocks and asks
+    # "does this body call set_env at all, and if so does it also reload?".
+    # One reload after a batch of writes is correct and is what the other six
+    # do, so the assertion is presence-per-function, not a count match.
+    blocks, cur, fname = {}, [], None
+    for line in src.splitlines():
+        m = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\(\)\s*\{", line)
+        if m:
+            fname, cur = m.group(1), []
+        if fname is not None:
+            cur.append(line)
+            if line == "}":
+                blocks[fname] = "\n".join(cur)
+                fname = None
+    no_reload = sorted(n for n, b in blocks.items()
+                       if n != "set_env" and "set_env" in b
+                       and "reload_daemon" not in b)
+    check("C6 every set_env caller also reloads the daemon", not no_reload,
+          f"writes the unit file without reloading: {no_reload} — systemd "
+          f"restarts from its cached unit and the bot runs the OLD value")
 
     print("=" * 68)
     if PROBLEMS:

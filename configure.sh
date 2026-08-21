@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# configure.sh  v4.1
+# configure.sh  v4.2
 # Per-box configuration.
+#
+# v4.2  2026-08-20  change_relaxed now calls reload_daemon after set_env, like
+#       every other change_*. set_env edits the UNIT FILE; without the reload
+#       systemd restarts from its cached copy, so the bot runs the OLD value
+#       while the menu reports the new one. Pinned by check_configure_relaxed
+#       C6: any function that calls set_env must also call reload_daemon.
 #
 # v4.1  2026-08-20  Option 7 (relaxed entry) called an undefined `confirm`,
 #       so it always took the else branch: it could never be switched ON, and
@@ -296,11 +302,24 @@ change_relaxed() {
     # 2026-08-20 on the AMD box the night before the first v4 session.
     if ask_yn "Enable relaxed entry criteria?"; then
         set_env "OT_RELAXED_ENTRY" "1"
+        reload_daemon
         echo "  RELAXED ENTRY ON - paper only, and every trade is tagged."
     else
         set_env "OT_RELAXED_ENTRY" "0"
+        reload_daemon
         echo "  Relaxed entry OFF."
     fi
+    # v4.2 — `set_env` EDITS THE UNIT FILE, so systemd must be told. Every
+    # other change_* already reloads after writing (change_instrument,
+    # change_risk, change_mode, change_daily_loss, change_telegram,
+    # change_tt_credentials); this one never did, which is why the restart
+    # printed "The unit file ... changed on disk. Run 'systemctl
+    # daemon-reload'".
+    # ⚠️ IT IS NOT COSMETIC. Without the reload systemd restarts from its
+    # CACHED copy of the unit, so the bot comes back up on the OLD
+    # OT_RELAXED_ENTRY while configure.sh and the menu both report the NEW
+    # one. The setting appears applied and is not — this project's named
+    # failure class, one layer below the code.
 }
 
 
