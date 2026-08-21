@@ -117,3 +117,104 @@ operator's, not mine.
 this stayed green. Extending it tree-wide is what makes the purge stick — and
 it must be extended BEFORE the deletions, so it goes red on exactly the list
 above and green only when the list is empty.
+
+---
+
+# PHASE B — executed 2026-08-21, ships as r58
+**otv4 @ 03196c3 → r58 · every claim below verified by EXECUTION**
+
+**Definition of done, met:** `check_no_regime` reports **zero carries across 70
+files**, the `PHASE_B` / `PHASE_B_FILES` dicts are **empty**, and — hardened
+during this phase — **a carry is now a RED, not a warning** (see The Checker,
+below). All eleven checks green, file map current, `import main` clean under a
+hostile env.
+
+## B1 — the reroutes, and two things that were already broken
+
+| carrier | destination | verified |
+|---|---|---|
+| `.adx` → `adx_at_entry` | unchanged path; `MarketState.adx` still sourced from `trend.primary_adx` | EXECUTED: synthetic ctx → `assemble_market_state` → `.adx == 27.3` → `adx_at_signal` lands non-zero |
+| prior-tick direction (gap measure) | **`BotState.prev_trend_direction`**, committed at the END of each analysis pass | EXECUTED: BULLISH → prior_dir 1 |
+| `.conviction` | **write dropped** (`regime_conviction` column stops being written; column stays — B3) | field deleted from the type; nothing produces it |
+| chain_snapshot `regime=` | kwarg no longer passed; `snapshot()` keeps the default-None param so the schema question stays B3's | field writes None from r58 |
+| position_manager `regime=` | passes None; the exit label arms went with it | see exit_engine v4.2 |
+| `vix_regime` | **`vix_band`** everywhere (macro_data, setup_scorer ×4, signal_journal, main ×2, market_state) — SessionGuard's crisis lockout reads the renamed field | grep-clean; EXECUTED through assemble |
+
+🔴 **DISCOVERY 1 — the gap measure was already blind.** `state.current_regime`
+was **assigned NOWHERE** in the tree. The 1106 read — whose own comment warns
+that a silent constant is "exactly the failure this whole week has been
+about" — has returned None on every tick since the split: `prior_dir` was a
+silent 0 and `gap_class` permanently UNDIRECTED. The rehoming does not
+preserve behaviour; it **creates** the behaviour the comment claimed existed.
+
+🔴 **DISCOVERY 2 — the sweep score was a guard over nothing.** `ctx["l1"]` is
+set nowhere in v4 — the L1 scorer was never ported — so `_sweep_setup` has
+been a silent 0.0 and the "PLTR protection" the block's doctrine describes
+**does not exist in this repo**. The read is deleted with that stated; if the
+protection is wanted, it must be REBUILT from structure, not resurrected by
+name. Same discovery, third scale: r55 (engine assert), r57 (label gates),
+r58 (score read) — a guard outliving its producer each time.
+
+Consequence of 2: `regime_ctx()` had been journalling `label=UNKNOWN` plus
+axes decomposed from that same never-set source — **every section it ever
+wrote in v4 was an empty vocabulary**. Helper deleted, 7 call sites removed;
+`journal()` takes sections generically, so no schema change.
+
+## B2 — trade_readiness rebuilt on measured inputs
+
+Every label arm either now reads a **measurement** or is an **honest
+constant**: direction/trending from `trend.overall_direction` (descriptive
+feed — the module gates nothing, per main's own doctrine); sweep-ness from
+`liq_map.recent_sweep`; `ranging`/`coil_val` are 0.0 — which is the value the
+dead arms produced on every tick anyway, now stated instead of implied.
+**Structural flatness/squeeze inputs are OWED** (operator scope — a threshold
+here would be an invented number). The journal read at ~1115 uses the written
+`dir` factor, uniform across eras (pre-r58 rows computed it from the label at
+write time). The `__main__` harness feeds the VOTE, not labels. Note for any
+R-series study: **R's value changes at r58** — direction was previously always
+empty; window-tag accordingly.
+
+## B3 — persistence: the options, presented not taken
+
+What r58 already does (forced by the countdown): **nothing writes a label
+anywhere** — trades get `""` (Phase A precedent), condor rolls get `""`,
+chain snapshots get None, shadow rows drop the two dead keys (pre-r58 rows
+carry `UNKNOWN`/0.0; absent keys mean r58+), TCS signals get `""`.
+
+Still yours, untouched by r58:
+1. **Drop `trades.regime` + `trades.regime_conviction` + the `regime_log`
+   table** — the word leaves history; rewrites every existing row's shape.
+2. **Keep the columns** — history intact; the word survives in every row and
+   in S3 forever, value `""`/0 from r58 on.
+3. **Middle (my recommendation): keep columns, drop `regime_log` from
+   `warehouse/s3_push.py`'s stream list** — it can never gain another row, so
+   pushing it nightly ships a fossil. `s3_push.py` is untouched in r58.
+`eod_summary.py` / `query.py` / `status.py` display-only reads follow
+whichever call you make (E-class, unchanged).
+
+## B4 — vix_band
+
+Renamed at the source and every reader; the checker exemption is **removed**.
+The value set (LOW/NORMAL/ELEVATED/CRISIS), the classifier and the crisis
+lockout are byte-identical — only the word changed.
+
+## THE CHECKER (v4.2) — and the bug I planted in it
+
+Emptying the dicts exposed a shape flaw: **carries printed a warning and
+exited 0.** I planted `getattr(None, "vix_regime", "")` in a scanned file and
+the board stayed green — a report, not a guard. Post-Phase-B a carry is a
+REGRESSION, so carries now **fail**. Replanted: red. Removed: green. (The
+handoff's plant-the-bug rule caught its own checker; that is the rule working.)
+
+## OWED / NOT DONE, stated
+
+- `_evaluate_continuation` in exit_engine is **dead-routed wholesale** (no v4
+  writer of "ContinuationStrategy") — its label arms are gone (v4.2) but the
+  function's deletion is a separate decision.
+- `RegimeState` the ALIAS survives as the type-hint spelling across ~50
+  annotations; it aliases `MarketState`, which no longer carries a label,
+  conviction, or the old name's meaning. Retiring the alias is mechanical and
+  owed, not risky.
+- Structural `ranging`/`coil` inputs for readiness (B2, above).
+- The B3 schema call, and whether the `regime` **column name** itself is an
+  artifact under the operator's phrase rule.

@@ -1,5 +1,9 @@
 """
-analysis/market_state.py  v4.0
+analysis/market_state.py  v4.1
+
+v4.1  2026-08-21  PHASE B (r58): label members deleted from Regime (UNKNOWN
+      stays as the honest write), primary_regime and conviction fields deleted
+      from the dataclass (nothing computes either), vix_regime -> vix_band.
 Structural market state and the regime vocabulary. No scoring, no gating.
 
 v4.0  2026-08-19  Built at the OTV4 split, replacing analysis/regime_classifier.py.
@@ -30,7 +34,7 @@ WHAT SURVIVES AND WHY.
 Most of `RegimeState` was never a regime at all - it was a CARRIER for
 structural facts computed elsewhere: adx, atr_normalized, bb_width_pct,
 trend_direction, structure_sequence, sweep_recent, flat_angle_deg,
-sweep_age_bars, vix_regime, timeframe_alignment. Those are exactly the inputs
+sweep_age_bars, vix_band, timeframe_alignment. Those are exactly the inputs
 v4 is built on and they pass through untouched.
 
 `Regime` - the six-label vocabulary - survives DELIBERATELY. Operator, 2026-08-19:
@@ -61,16 +65,16 @@ class Regime:
     catalogued in docs/INHERITED_FINDINGS.md. v4 derives them from structure
     (ROADMAP Phase 4.1).
     """
-    TRENDING_BULL = "TRENDING_BULL"
-    TRENDING_BEAR = "TRENDING_BEAR"
-    RANGING = "RANGING"
-    BREAKOUT_VOLATILE = "BREAKOUT_VOLATILE"
-    COMPRESSION = "COMPRESSION"
-    SWEEP_REVERSAL = "SWEEP_REVERSAL"
+    # PHASE B (r58): the five classifier labels are DELETED. They were the
+    # vocabulary of a scorer measured at 44.9% side accuracy; nothing in v4
+    # computes them and r57 removed every gate that read them. Historical
+    # rows keep their strings — reading old data needs no enum. Per the
+    # operator: a revived concept must wear a DIFFERENT phrase.
     UNKNOWN = "UNKNOWN"
 
-    ALL = (TRENDING_BULL, TRENDING_BEAR, RANGING, BREAKOUT_VOLATILE,
-           COMPRESSION, SWEEP_REVERSAL, UNKNOWN)
+    # PHASE B (r58): ALL is gone with the members — nothing iterates a dead
+    # vocabulary. UNKNOWN is the only writable value.
+    ALL = (UNKNOWN,)
 
 
 @dataclass
@@ -88,13 +92,11 @@ class MarketState:
     # ⚠️ INFORMS, NEVER AUTHORISES. A setup may read this. No setup may require
     # it. In v3 this label gated entries and picked the wrong side 55% of the
     # time.
-    primary_regime: str = Regime.UNKNOWN
 
     # ⚠️ ON ITS WAY OUT - DO NOT ADD NEW READS. Retained only so the 49 existing
     # reads can be removed file by file with tests passing at each step. It was
     # confirmatory by construction: a leaky integrator over argmax agreement is
     # only confident once winning has already persisted.
-    conviction: float = 0.0
     trend_conviction: float = 0.0
 
     # ── structural facts, computed elsewhere and carried here ────────────────
@@ -106,7 +108,9 @@ class MarketState:
     structure_sequence: str = "NEUTRAL"
     sweep_recent: bool = False
     sweep_age_bars: int = 999
-    vix_regime: str = "UNKNOWN"
+    vix_band: str = "UNKNOWN"   # PHASE B: renamed from vix_regime — a live
+                                # VIX-band measurement that only carried the
+                                # poisoned word
     timeframe_alignment: Dict[str, str] = field(default_factory=dict)
 
     # ⚠️ NEGATIVE MEANS "NOT COMPUTED", NOT "FLAT". Zero degrees IS the flattest

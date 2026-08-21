@@ -1,5 +1,8 @@
 """
-analysis/signal_journal.py  v4.0
+analysis/signal_journal.py  v4.1
+
+v4.1  2026-08-21  PHASE B (r58): regime_ctx deleted (label was hardcoded
+      UNKNOWN, scores source never wired); vix_regime -> vix_band.
 Structured event journal for every decision and refusal.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -206,59 +209,11 @@ def signal_ctx(signal) -> dict:
         return None
 
 
-def regime_ctx(regime, l1_scores=None) -> dict:
-    """The regime context stamped onto every journalled event.
-
-    ⚠️ AX.3's UNBUILT HALF (2026-08-07 → built 2026-08-17). Until now this
-    carried ONLY the INTEGRATED label and conviction — and both are measured
-    dead as entry-side quantities: `RGCV.nf` **1.00** vs `.ok` **0.34** in
-    RANGING (an ANTI-signal), 1.00 vs 1.00 in trend.
-
-    The RAW Layer-1 direction axis DOES separate: **nf 0.628 → ok 0.885, gap
-    +0.257 on n=753 across 17 sessions** (P0.1, 2026-08-17), up from AX.2's
-    +0.188 on n=571 — **it grew on more data.** `regime_axes.py`'s own header
-    reached the conclusion first: *"The RAW score separates where the INTEGRATED
-    conviction does not, which points at Layer-2 integration as a possible
-    destroyer of signal."*
-
-    **It was journaled NOWHERE.** A measured separator that drives nothing and
-    is not even recorded cannot be confirmed forward. This emits it.
-
-    ⚠️ LOG-ONLY. Gates nothing, sizes nothing, changes no trading behaviour.
-    Emission is the PRECONDITION for testing it forward under the same
-    pre-registered criterion, not a decision to use it.
-    ⚠️ `volatility_conf` rides along — AX.2 measured it separating too (+0.065,
-    n=571) and P0.1 never tested it, because it was not being emitted either.
-    ⚠️ `pair_conf` is NOT emitted. It is MEASURED DEAD (+0.001) and the failure
-    is structural, not tunable — `min()` over a sparse axis collapses to zero.
-    Emitting it would invite exactly the re-litigation its own note forbids.
-    """
-    if regime is None:
-        return None
-    try:
-        out = {
-            "label":      str(getattr(regime, "primary_regime", "")),
-            "conviction": _round(getattr(regime, "conviction", 0.0), 4),
-        }
-        if l1_scores:
-            try:
-                from analysis.regime_axes import decompose
-                ax = decompose(l1_scores)
-                out["direction"]        = ax.get("direction")
-                out["direction_conf"]   = ax.get("direction_conf")
-                out["direction_margin"] = ax.get("direction_margin")
-                out["volatility"]       = ax.get("volatility")
-                out["volatility_conf"]  = ax.get("volatility_conf")
-            except Exception:                                  # noqa: BLE001
-                # ⚠️ NEVER let a telemetry decomposition break a journal write.
-                # The event still carries label+conviction; the axes are simply
-                # absent, and absent is distinguishable from zero downstream.
-                pass
-        return out
-    except Exception:
-        return None
-
-
+# PHASE B (r58): `regime_ctx` is DELETED. It journalled label=UNKNOWN (the
+# hardcode) plus L1 axes decomposed from `ctx["l1"].scores` — which NOTHING in
+# v4 sets, so every section it ever wrote here carried an empty vocabulary of
+# a retired concept. The call sites are gone with it; journal() takes dict
+# sections generically, so no schema change was needed to stop.
 def vol_ctx(vol_state) -> dict:
     if vol_state is None:
         return None
@@ -279,7 +234,7 @@ def macro_ctx(macro) -> dict:
     try:
         return {
             "vix":        _round(getattr(macro, "vix", 0.0), 2),
-            "vix_regime": getattr(macro, "vix_regime", ""),
+            "vix_band": getattr(macro, "vix_band", ""),
             "is_fed_day": bool(getattr(macro, "is_fed_day", False)),
         }
     except Exception:

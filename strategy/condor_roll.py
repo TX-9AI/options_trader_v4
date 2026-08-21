@@ -1,5 +1,7 @@
 """
-strategy/condor_roll.py  v4.1
+strategy/condor_roll.py  v4.2
+
+v4.2  2026-08-21  PHASE B (r58): the rolled record no longer wears RANGING.
 Condor roll handling.
 
 v4.1  2026-08-20  AUDIT F8: a light-filled roll no longer wears the risk-free
@@ -356,7 +358,8 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
             max_loss        = new_maxloss,
             stop_premium    = roll_credit_fill * (1 + CONDOR_STOP_LOSS_PCT),
             target_premium  = CONDOR_NICKEL_CLOSE,
-            regime          = "RANGING",
+            regime          = "",   # PHASE B (r58): a label nothing measured;
+                                    # "" is the honest value (Phase A precedent)
             is_condor_leg   = 1,
             is_broken_wing  = 1,                       # FINAL FORM
             short_symbol    = plan.new_short_symbol,

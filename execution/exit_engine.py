@@ -1,5 +1,9 @@
 """
-execution/exit_engine.py  v4.1
+execution/exit_engine.py  v4.2
+
+v4.2  2026-08-21  PHASE B (r58): still_trending label arms deleted — dead by
+      construction since the split; the trend vote alone decides, per the
+      block's own doctrine.
 v4.1  2026-08-21  REGIME PURGE PHASE A. The butterfly regime-flip exit and
       the condor-leg adverse exit DELETED - both tested trending LABELS v4
       never assigns, so neither had run once since the port. Two more exits
@@ -1928,12 +1932,14 @@ class ExitEngine:
         _vote = str(getattr(trend, "overall_direction", "") or "").upper()
         _vote_agrees = ((direction == "long" and _vote == "BULLISH")
                         or (direction == "short" and _vote == "BEARISH"))
-        still_trending = (
-            (direction == "long"  and "TRENDING_BULL" in rgm) or
-            (direction == "short" and "TRENDING_BEAR" in rgm) or
-            # ANY continuation survives a breakout that is still going ITS WAY.
-            ("BREAKOUT_VOLATILE" in rgm and _vote_agrees)
-        )
+        # PHASE B (r58): the three LABEL arms are deleted. `rgm` derives from
+        # a label v4 never computes, so every arm was permanently False and
+        # this exit could only ever fire through `regime is not None` with a
+        # dead still_trending — the vote already carried the only live
+        # evidence, exactly as the doctrine above says. NOTE: this evaluator's
+        # router branch ("ContinuationStrategy") has no v4 writer — the whole
+        # function is dead-routed and its wholesale deletion is owed (audit).
+        still_trending = _vote_agrees
         if regime is not None and not still_trending:
             decision.should_exit = True
             decision.exit_reason = f"regime_flip ({regime})"

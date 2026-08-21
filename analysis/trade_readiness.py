@@ -1,5 +1,12 @@
 """
-analysis/trade_readiness.py  v4.0
+analysis/trade_readiness.py  v4.1
+
+v4.1  2026-08-21  PHASE B (r58): every label arm rebuilt on MEASURED inputs or
+      made honestly constant. The arms all took else on every tick since the
+      split (labels are never computed), so R was silently wrong exactly as the
+      Phase B handoff records. Direction now reads the trend vote (descriptive
+      feed; this module gates nothing), sweep-ness reads the liquidity map, and
+      ranging/coil are 0.0 with the structural replacements named as owed.
 Pre-trigger confluence logging and arming state.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -497,11 +504,14 @@ class TradeReadinessEngine:
 
     def _continuation(self, ctx, regime) -> Tuple[float, dict]:
         """Trend pullback: trending label, conviction, midline proximity, resumption."""
-        label = getattr(regime, "primary_regime", "") or ""
-        conv  = float(getattr(regime, "conviction", 0.0) or 0.0)
+        # PHASE B (r58): label/conviction retired — nothing computes either.
+        label, conv = "", 0.0
         vol   = ctx.get("vol"); trend = ctx.get("trend")
         px    = float(ctx.get("price") or 0.0)
-        trending = 1.0 if str(label).upper().endswith(("TRENDING_BULL", "TRENDING_BEAR")) else 0.0
+        # PHASE B (r58): trending-ness from the MEASURED vote (descriptive
+        # feed; this module gates nothing) — the label arm was dead.
+        _v = str(getattr(trend, "overall_direction", "") or "").upper()
+        trending = 1.0 if _v in ("BULLISH", "BEARISH") else 0.0
         mid = float(getattr(vol, "bb_middle", 0.0) or 0.0) if vol else 0.0
         atr = float(getattr(vol, "atr_current", 0.0) or 0.0) if vol else 0.0
         # proximity: 1.0 at the midline, fading to 0 at 3x the entry tolerance
@@ -525,8 +535,10 @@ class TradeReadinessEngine:
         # derives it below, so the journal cannot disagree with the picker.
         # Outside a trending label the track is hard-vetoed to r=0 and has no
         # intended side, which is "" — an honest absence, not a guess.
-        _dir = ("long" if str(label).upper().endswith("TRENDING_BULL")
-                else ("short" if str(label).upper().endswith("TRENDING_BEAR") else ""))
+        # PHASE B (r58): direction from the MEASURED trend vote, not a label
+        # v4 never computes (the old arms took else on every tick).
+        _v = str(getattr(ctx.get("trend"), "overall_direction", "") or "").upper()
+        _dir = "long" if _v == "BULLISH" else ("short" if _v == "BEARISH" else "")
         return r, {"label": label, "dir": _dir,
                    "conv": round(conv, 3), "conv_val": round(conv_val, 3),
                    "dist_atr": (None if not (mid > 0 and atr > 0 and px > 0)
@@ -535,10 +547,10 @@ class TradeReadinessEngine:
 
     def _sweep(self, ctx, regime) -> Tuple[float, dict]:
         """Exhaustion reversal: sweep label conviction, freshness, trend spent."""
-        label = str(getattr(regime, "primary_regime", "") or "")
-        conv  = float(getattr(regime, "conviction", 0.0) or 0.0)
+        label, conv = "", 0.0   # PHASE B (r58): retired fields
         liq   = ctx.get("liq_map"); trend = ctx.get("trend")
-        is_sweep = 1.0 if label.upper().endswith("SWEEP_REVERSAL") else 0.0
+        # PHASE B (r58): sweep-ness is a measured fact on the liquidity map.
+        is_sweep = 1.0 if (liq is not None and getattr(liq, "recent_sweep", None) is not None) else 0.0
         age = float(getattr(liq, "sweep_age_bars", 999) or 999) if liq else 999.0
         fresh_val = 0.5 ** (age / max(TR_FRESH_HALFLIFE_B, 1e-6))
         mom = getattr(trend, "primary_momentum", "") if trend else ""
@@ -622,10 +634,12 @@ class TradeReadinessEngine:
         KEPT graded. Band edges proxy the short strikes (readiness runs before
         strike selection; the real trigger still uses the selected strikes).
         """
-        label = str(getattr(regime, "primary_regime", "") or "")
-        conv  = float(getattr(regime, "conviction", 0.0) or 0.0)
+        label, conv = "", 0.0   # PHASE B (r58): retired fields
         vol   = ctx.get("vol"); px = float(ctx.get("price") or 0.0)
-        ranging = 1.0 if label.upper().endswith("RANGING") else 0.0
+        # PHASE B (r58): the label arm always took else, so this has been 0.0
+        # on every tick since the split. Now it is 0.0 HONESTLY: a structural
+        # flatness input is owed (operator scope), not invented here.
+        ranging = 0.0
         mid = float(getattr(vol, "bb_middle", 0.0) or 0.0) if vol else 0.0
         up  = float(getattr(vol, "bb_upper", 0.0) or 0.0) if vol else 0.0
         lo  = float(getattr(vol, "bb_lower", 0.0) or 0.0) if vol else 0.0
@@ -669,8 +683,7 @@ class TradeReadinessEngine:
 
     def _butterfly(self, ctx, regime) -> Tuple[float, dict]:
         """Compression play: coil conviction, squeeze, narrowness degree."""
-        label = str(getattr(regime, "primary_regime", "") or "")
-        conv  = float(getattr(regime, "conviction", 0.0) or 0.0)
+        label, conv = "", 0.0   # PHASE B (r58): retired fields
         vol   = ctx.get("vol")
         sqz_val = 1.0 if (getattr(vol, "bb_state", "") == "SQUEEZE" if vol else False) else 0.0
         width = float(getattr(vol, "bb_width_pct", 0.5) or 0.5) if vol else 0.5
@@ -739,8 +752,9 @@ class TradeReadinessEngine:
         # COIL stays, DEMOTED from hard veto to corroborator. A coiling tape is
         # supporting evidence for a pin holding; it was never the trade itself,
         # and as a veto it made the score a switch on the label.
-        coil_val = 1.0 if label.upper().endswith("COMPRESSION") else (
-            0.5 if label.upper().endswith("RANGING") else 0.0)
+        # PHASE B (r58): same as `ranging` above — always-else since the
+        # split; honest 0.0 pending a measured squeeze input.
+        coil_val = 0.0
 
         r = _combine(hard_vetoes=[], soft_necessary=[gex_val, win_val],
                      corroborators=[(W_BFLY_PIN, pin_val),
@@ -861,15 +875,18 @@ class TradeReadinessEngine:
                      the impulse floor, momentum-live
         damper     : parabolic over-extension (exhaustion -> snapback risk)
         """
-        label = str(getattr(regime, "primary_regime", "") or "").upper()
+        label = ""   # PHASE B (r58): retired field — the vote below decides
         conv  = float(getattr(regime, "conviction", 0.0) or 0.0)
         vol   = ctx.get("vol"); trend = ctx.get("trend")
         px    = float(ctx.get("price") or 0.0)
         df_1m = ctx.get("df_1m")
 
-        if label.endswith("TRENDING_BULL"):
+        # PHASE B (r58): direction from the trend vote (descriptive feed —
+        # readiness gates nothing); the label arms were dead.
+        _v = str(getattr(ctx.get("trend"), "overall_direction", "") or "").upper()
+        if _v == "BULLISH":
             direction, veto = "long", 1.0
-        elif label.endswith("TRENDING_BEAR"):
+        elif _v == "BEARISH":
             direction, veto = "short", 1.0
         else:
             direction, veto = "", 0.0
@@ -1111,8 +1128,10 @@ class TradeReadinessEngine:
                 except Exception:
                     target = 0.20
             else:  # continuation: with the trend
-                label = str(tr.factors.get("label", "") or "")
-                direction = "long" if label.upper().endswith("TRENDING_BULL") else                             ("short" if label.upper().endswith("TRENDING_BEAR") else "")
+                # PHASE B (r58): the writer emits "dir" directly (measured
+                # vote); rows before r58 computed the same field from the
+                # label at write time, so this read is uniform across eras.
+                direction = str(tr.factors.get("dir", "") or "")
                 if not direction:
                     return
                 target = TR_CONT_TARGET_DELTA
@@ -1152,7 +1171,8 @@ if __name__ == "__main__":                        # pragma: no cover
         eng._t += dt
         trend.primary_momentum = mom
         ctx = {"vol": vol, "trend": trend, "liq_map": None, "price": px}
-        regime = NS(primary_regime="TRENDING_BULL", conviction=conv)
+        # PHASE B (r58): the harness feeds the VOTE, not a label
+        regime = NS(primary_regime="", conviction=conv)
         eng.assess_all(ctx, regime)
         return eng.tracks["continuation"]
 
@@ -1218,7 +1238,7 @@ if __name__ == "__main__":                        # pragma: no cover
         df = _mkdf(target_sd)
         ctx = {"vol": vol2, "trend": trend2, "liq_map": None,
                "price": 100.5, "df_1m": df}
-        regime = NS(primary_regime="TRENDING_BULL", conviction=conv)
+        regime = NS(primary_regime="", conviction=conv)   # PHASE B (r58)
         r, f = eng2._trend_credit_spread(ctx, regime)
         return r, f
 
@@ -1248,9 +1268,9 @@ if __name__ == "__main__":                        # pragma: no cover
     df = _mkdf(2.80)
     r_v, f_v = eng2._trend_credit_spread(
         {"vol": vol2, "trend": trend2, "liq_map": None, "price": 100.5, "df_1m": df},
-        NS(primary_regime="RANGING", conviction=0.7))
-    assert r_v == 0.0, "non-trending label must veto the trend credit spread to 0"
-    print(f"  veto(RANGING)    R={r_v:.3f}  (correctly stood down)")
+        NS(primary_regime="", conviction=0.0))
+    assert r_v == 0.0, "a NEUTRAL trend vote must veto the trend credit spread to 0"
+    print(f"  veto(neutral)    R={r_v:.3f}  (correctly stood down)")
 
     # extension damper: parabolic price crushes an otherwise-screaming setup
     eng2._t += 15.0
@@ -1258,7 +1278,7 @@ if __name__ == "__main__":                        # pragma: no cover
     r_ext, f_ext = eng2._trend_credit_spread(
         {"vol": vol2, "trend": trend2, "liq_map": None,
          "price": 99.5 + 5.0 * 1.0, "df_1m": df},   # 5 ATR above midline = parabolic
-        NS(primary_regime="TRENDING_BULL", conviction=0.7))
+        NS(primary_regime="", conviction=0.7))   # PHASE B (r58)
     print(f"  parabolic(5ATR)  ext_damp={f_ext['ext_damp']:.2f} R={r_ext:.3f} "
           f"(damped vs screaming R={r_scream:.3f})")
     assert r_ext < r_scream, "parabolic over-extension must damp readiness (snapback risk)"

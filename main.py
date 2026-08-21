@@ -1,5 +1,17 @@
 """
-main.py  v4.3
+main.py  v4.4
+v4.4  2026-08-21  PHASE B (r58): the regime carriers are out. The gap
+      measure's prior direction moves to BotState.prev_trend_direction,
+      committed at the end of each analysis pass — the old carrier
+      (state.current_regime) was NEVER ASSIGNED anywhere, so prior_dir had
+      been a silent 0 and gap_class permanently UNDIRECTED since the split.
+      The L1 sweep-score read is deleted for the same reason one level up:
+      ctx["l1"] is set nowhere in v4, so the score was a silent 0.0 and the
+      PLTR protection it claimed to carry did not exist here. regime_ctx
+      journal sections (7 sites), the chain_snapshot label pass, the
+      position_manager label pass, the consumerless _orb_ok_regimes tuple and
+      two _L1_BREAKDOWN_FOR rows are removed; heartbeat and NO TRADE lines
+      state measured facts (adx/dir/seq); vix_regime reads become vix_band.
 v4.3  2026-08-21  REGIME PURGE PHASE A. The dispatch HARD GATE deleted - it
       tested primary_regime, which v4 hardcodes to UNKNOWN, so it returned
       before dispatch on EVERY tick and the fleet traded NOTHING on its first
@@ -896,6 +908,7 @@ class BotState:
     def __init__(self):
         self.last_regime_at:   Optional[datetime] = None
         self.current_regime:   Optional[RegimeState] = None
+        self.prev_trend_direction: str = ""   # PHASE B: prior tick, for the gap measure
         self.last_regime_name: str = "UNKNOWN"
         self.tick_count:       int = 0
         self.errors_this_hour: int = 0
@@ -1103,8 +1116,13 @@ def run_analysis(state: BotState) -> dict:
         # A silent constant is exactly the failure this whole week has been
         # about, so the prior tick's committed direction is used instead: it is
         # yesterday's trend at the open, which is precisely what CONT/REV means.
-        _prev = getattr(state, "current_regime", None)
-        _dir = getattr(_prev, "trend_direction", "") if _prev else ""
+        # PHASE B (r58): the prior direction now lives on BotState directly.
+        # The old read went through state.current_regime — WHICH NOTHING EVER
+        # ASSIGNED, so _pd was a silent 0 and gap_class was permanently
+        # UNDIRECTED since the split: the exact failure the comment above
+        # warns about, one attribute over. prev_trend_direction is committed
+        # at the END of each analysis pass, so this tick reads the PRIOR one.
+        _dir = getattr(state, "prev_trend_direction", "") or ""
         _pd = 1 if _dir == "BULLISH" else (-1 if _dir == "BEARISH" else 0)
         ctx["gap"] = measure_gap(df_5m, prior_dir=_pd)
     except Exception:                                          # noqa: BLE001
@@ -1157,6 +1175,12 @@ def run_analysis(state: BotState) -> dict:
     # v6.18 — ctx was bound above; add the last two members and return it.
     ctx["macro"] = macro
     ctx["orb"]   = orb
+    # PHASE B (r58): commit THIS tick's direction for the NEXT tick's gap
+    # measure — the old carrier (state.current_regime) was never assigned.
+    try:
+        state.prev_trend_direction = getattr(ctx.get("trend"), "overall_direction", "") or ""
+    except Exception:                                          # noqa: BLE001
+        pass
     return ctx
 
 
@@ -1192,8 +1216,7 @@ def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeSta
     macro = ctx.get("macro")
 
     regime = RegimeState(
-        primary_regime=Regime.UNKNOWN,
-        macro_context=getattr(macro, "vix_regime", "UNKNOWN") or "UNKNOWN",
+        macro_context=getattr(macro, "vix_band", "UNKNOWN") or "UNKNOWN",
         adx=float(getattr(trend, "primary_adx", 0.0) or 0.0),
         atr_normalized=float(getattr(vol, "atr_normalized", 0.0) or 0.0),
         bb_width_pct=float(getattr(vol, "bb_width_pct", 0.5) or 0.5),
@@ -1201,7 +1224,7 @@ def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeSta
         structure_sequence=getattr(structure, "structure_sequence", "NEUTRAL") or "NEUTRAL",
         sweep_recent=bool(getattr(liq, "recent_sweep", None) is not None),
         sweep_age_bars=int(getattr(liq, "sweep_age_bars", 999) or 999),
-        vix_regime=getattr(macro, "vix_regime", "UNKNOWN") or "UNKNOWN",
+        vix_band=getattr(macro, "vix_band", "UNKNOWN") or "UNKNOWN",
         classified_at=now_utc().isoformat(),
         trigger=trigger,
     )
@@ -1214,8 +1237,10 @@ def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeSta
     # never written.
     try:
         _bd = (ctx.get("l1_breakdown") or {})
-        for _k in ("RANGING", "COMPRESSION"):
-            _a = (_bd.get(_k) or {}).get("angle")
+        # PHASE B: keyless — only the two flat-family scorers emit an angle,
+        # so the first non-None wins without naming a label.
+        for _v in _bd.values():
+            _a = (_v or {}).get("angle")
             if _a is not None:
                 regime.flat_angle_deg = float(_a)
                 break
@@ -2038,7 +2063,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
                                       outcome="gate_block:afternoon_debit",
                                       signal={"strategy": _nm,
                                               "stage": "pre_dispatch"},
-                                      regime=_sigj.regime_ctx(regime, _l1_scores(ctx)))
+                                      )
             except Exception:                                  # noqa: BLE001
                 pass
 
@@ -2047,10 +2072,9 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # UNKNOWN and SWEEP_REVERSAL (ORB beats sweep — the engine no longer defers
     # its OPEN under a sweep label; see orb_engine v3.2). The break+retest is the
     # edge; the label is not consulted for go/no-go, only for scoring.
-    _orb_ok_regimes = (
-        Regime.TRENDING_BULL, Regime.TRENDING_BEAR,
-        Regime.BREAKOUT_VOLATILE, Regime.RANGING, Regime.COMPRESSION
-    )
+    # PHASE B (r58): the _orb_ok_regimes tuple is DELETED — its membership
+    # test went at r57 and the tuple sat consumerless: a guard's corpse one
+    # level down. The v4.3 note below records the test's deletion.
     # v6.19 (2026-08-19) — ORB IS BLOCKED UNDER RANGING (operator direction:
     # that cell is the conclusive loss leader). Mirrored from
     # options_trader_smc the same day so the two arms remain comparable.
@@ -2235,9 +2259,13 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # the scorer, never in this gate — which is why gating on the score keeps it
     # and gating on anything else would have lost it.
     _sweep_setup = 0.0
-    _l1r = ctx.get("l1")
-    if _l1r is not None:
-        _sweep_setup = (getattr(_l1r, "scores", {}) or {}).get("SWEEP_REVERSAL") or 0.0
+    # PHASE B (r58): the L1 read is DELETED. `ctx["l1"]` is set NOWHERE in
+    # v4 — the scorer was never ported — so _sweep_setup has been a silent
+    # 0.0 since the split and this block was a guard over a value nothing
+    # computes (the r55/r57 lesson at score scale). The PLTR protection the
+    # comment above describes lives in the v3 scorer, not here; if it is
+    # wanted in v4 it must be REBUILT from structure, not resurrected by
+    # name. _sweep_setup stays 0.0 — honest about what is measured: nothing.
     # Priority 3: Butterfly (Ranging/Compression — requires GEX PINNING)
     # Fed days allowed — bot reaction time is faster and more systematic
     # than manual trading on a volatile FOMC day. Fed day boosts ORB
@@ -2281,7 +2309,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
                 if _sigj is not None:
                     try:
                         _sigj.journal("condor_plan",
-                                      regime=_sigj.regime_ctx(regime, _l1_scores(ctx)),
                                       plan={"leg1_side": plan.leg1_side,
                                             "call_trigger": round(plan.call_trigger_price, 2),
                                             "put_trigger": round(plan.put_trigger_price, 2),
@@ -2303,7 +2330,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
             if _sigj is not None:
                 try:
                     _sigj.journal("condor_leg",
-                                  regime=_sigj.regime_ctx(regime, _l1_scores(ctx)),
                                   leg={"underlying": round(ctx["price"], 2)})
                 except Exception:
                     pass
@@ -2341,7 +2367,8 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
             return
 
     if signal is None:
-        logger.info(f"STRATEGY: NO TRADE — regime={regime.primary_regime}")
+        logger.info(f"STRATEGY: NO TRADE — adx={regime.adx:.0f} "
+                f"dir={regime.trend_direction} seq={regime.structure_sequence}")
         return
 
     # ── AFTERNOON DEBIT BLOCK (2026-08-13) ────────────────────────────────────
@@ -2371,7 +2398,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
                     _sigj.journal("disposition",
                                   outcome="gate_block:afternoon_debit",
                                   signal=_sigj.signal_ctx(signal),
-                                  regime=_sigj.regime_ctx(regime, _l1_scores(ctx)))
+                                  )
                 except Exception:                              # noqa: BLE001
                     pass
             return
@@ -2382,7 +2409,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
             try:
                 _sigj.journal("disposition", outcome="invalid_signal",
                               signal=_sigj.signal_ctx(signal),
-                              regime=_sigj.regime_ctx(regime, _l1_scores(ctx)))
+                              )
             except Exception:
                 pass
         return
@@ -2418,7 +2445,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
                 _sigj.journal("disposition", outcome="sizing_rejected",
                               reason=str(sizing.reject_reason),
                               signal=_sigj.signal_ctx(signal),
-                              regime=_sigj.regime_ctx(regime, _l1_scores(ctx)),
                               score={"grade": score.grade,
                                      "total": score.score})
             except Exception:
@@ -2482,7 +2508,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
                     _l1_ctx = None
                 _sigj.journal("disposition", outcome="fired",
                               signal=_sigj.signal_ctx(signal),
-                              regime=_sigj.regime_ctx(regime, _l1_scores(ctx)),
                               l1=_l1_ctx,
                               score={"grade": score.grade,
                                      "total": score.score},
@@ -2509,11 +2534,13 @@ def _rnd4(v):
 # breakdown to it would imply a dependency the engine does not have. An unmapped
 # strategy records the score vector and NO breakdown, never a wrong one.
 _L1_BREAKDOWN_FOR = {
-    "SweepReversal":          "SWEEP_REVERSAL",
     "ContinuationStrategy":   "TRENDING",   # score() files BOTH trend scorers'
                                             # shared breakdown under this key,
                                             # not under the BULL/BEAR labels
-    "IronCondorStrategy":     "RANGING",
+    # PHASE B (r58): SweepReversal and IronCondor rows removed — the first
+    # names a strategy deleted at r33; the second filed a label-keyed
+    # breakdown nothing computes. An unmapped strategy records NO breakdown,
+    # never a wrong one — the map's own rule.
 }
 
 
@@ -2751,8 +2778,11 @@ def main_loop(state: BotState):
                         _chain_snap(
                             _gex_chain,
                             underlying_price=ctx.get("price"),
-                            regime=getattr(_r, "primary_regime", None)
-                                   if _r is not None else None,
+                            # PHASE B (r58): the regime kwarg is no longer
+                            # passed — the label was permanently UNKNOWN.
+                            # snapshot() keeps the parameter (default None)
+                            # so the field stops being WRITTEN while the
+                            # schema question stays the operator's (B3).
                         )
                     except Exception:
                         pass          # never let archival touch the loop
@@ -2797,8 +2827,8 @@ def main_loop(state: BotState):
                 pos_mgr.manage_open_position(
                     chain=ctx.get("chain"),
                     df_1m=ctx.get("df_1m"),
-                    regime=(None if _rgm_stale
-                            else (regime.primary_regime if regime else None)),
+                    regime=None,   # PHASE B (r58): label retired; the exit
+                                   # engine's label arms are deleted with it
                     df_5m=ctx.get("df_5m"),   # v3.8: 5m FVG trail anchor
                     vol_state=ctx.get("vol"),
                     trend=ctx.get("trend"),   # continuation exhaustion exit
@@ -2841,7 +2871,7 @@ def main_loop(state: BotState):
                     f"Tick #{state.tick_count} | "
                     f"{fmt_et_short()} | "
                     f"price=${ctx['price']:,.2f} | "
-                    f"regime={regime.primary_regime} ({regime.conviction:.0%}) | "
+                    f"adx={regime.adx:.0f} dir={regime.trend_direction} | "
                     f"orb={ctx['orb'].state} | "
                     f"session: {summary.get('wins',0)}W/"
                     f"{summary.get('losses',0)}L "

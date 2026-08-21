@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_no_regime.py  v4.1
+tests/check_no_regime.py  v4.2
+
+v4.2  2026-08-21  PHASE B (r58) COMPLETE: countdown dicts emptied, macro_data
+      exemption removed after the vix_band rename, and CARRIES NOW FAIL — a
+      carry after the purge is a regression, not pending work. Verified by
+      planting a vix_regime getattr and watching red. Zero carries tree-wide.
 NOTHING IN THE TREE reads a regime label to decide anything. Plain script.
 
 v4.1  2026-08-21  SCOPE WIDENED from `strategy/` to the whole tree, after the
@@ -67,14 +72,11 @@ SCAN_ROOT_FILES = ("main.py", "config.py", "status.py", "query.py",
 
 # Files whose regime references are NOT the retired classifier. Each needs a
 # stated reason; an exemption without one is how a blind spot grows.
-EXEMPT = {
-    # `vix_regime` is a LIVE VIX-band measurement (LOW/NORMAL/ELEVATED/CRISIS)
-    # computed from the VIX itself, read by setup_scorer and by SessionGuard's
-    # crisis lockout. It works. It merely carries the poisoned word, and is
-    # slated for RENAME (-> vix_band), not deletion. Removing this exemption is
-    # the last step of that rename, not a bug.
-    "data/macro_data.py": "vix_regime — live VIX band, rename pending",
-}
+# PHASE B (r58): the exemption list is EMPTY, deliberately. macro_data's
+# entry is gone because vix_regime is now vix_band — the live measurement no
+# longer wears the word, so nothing needs excusing. An exemption that outlives
+# its reason is a blind spot with a receipt.
+EXEMPT = {}
 
 # ── PHASE B HANDOFF LIST (2026-08-21) ────────────────────────────────────────
 # Sites that PASS a regime value as an argument rather than gating on it. They
@@ -93,26 +95,23 @@ EXEMPT = {
 # tick, so its graded readiness is quietly wrong — a real defect, but an
 # OBSERVABILITY one. Listing it here keeps the severity honest instead of
 # calling a log line a veto.
-PHASE_B_FILES = {
-    "analysis/trade_readiness.py": "LOG-ONLY readiness telemetry - labels "
-                                   "always take the else branch, so R is "
-                                   "silently wrong. Purge with Phase B.",
-}
+# PHASE B (r58): COMPLETE. trade_readiness's label arms were rebuilt on
+# measured inputs (see its v4.1 entry); the file is scanned like any other.
+PHASE_B_FILES = {}
 
 # ⚠️ KEYED ON THE SOURCE LINE'S TEXT, NOT ITS NUMBER. The first draft used
 # (file, lineno) and every entry went stale the instant a deletion above it
 # shifted the file - the board went red on three sites that had not changed,
 # naming line numbers that no longer meant anything. A countdown list that
 # breaks when you make progress is worse than none.
-PHASE_B = {
-    'getattr(state, "current_regime", None)':
-        "main.py - prior-tick trend_direction for the gap measure -> carry "
-        "last direction outside RegimeState",
-    'regime=getattr(_r, "primary_regime", None)':
-        "main.py - label passed into chain_snapshot -> drop the field",
-    'else (regime.primary_regime if regime else None)':
-        "main.py - label passed into position_manager -> drop the param",
-}
+# PHASE B (r58): COMPLETE — the countdown reached zero and the dicts stay
+# EMPTY as the proof the handoff defined. The three pinned sites: the gap
+# measure reads BotState.prev_trend_direction (committed each tick — the old
+# carrier was NEVER ASSIGNED, so prior_dir had been a silent 0 since the
+# split); chain_snapshot no longer receives the label; position_manager
+# receives regime=None and the exit label arms are deleted.
+PHASE_B = {}
+
 
 # ⚠️ NO EXEMPTIONS, AND THAT IS DELIBERATE. There was briefly a list of three
 # "inert shells" excused from this check - butterfly, continuation and
@@ -317,7 +316,14 @@ def main(argv):
         return 1
     print("  no regime label GATES anything in the tree")
     if carries:
-        print("  (carries remain - see PHASE B PENDING above)")
+        # PHASE B COMPLETE (r58): a carry is no longer pending work - it is a
+        # REGRESSION. The countdown reached zero; anything that reappears was
+        # added after the purge and fails the board. Found by planting a
+        # getattr(..., "vix_regime") read and watching this checker stay GREEN:
+        # carries printed a warning but exited 0, which is a report, not a
+        # guard. A checker that cannot fail is the audit's oldest finding.
+        print("  (REGRESSION - carries reappeared after Phase B)")
+        return 1
     return 0
 
 

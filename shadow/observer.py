@@ -1,5 +1,7 @@
 """
-shadow/observer.py  v4.0
+shadow/observer.py  v4.1
+
+v4.1  2026-08-21  PHASE B (r58): dead regime fields dropped from the record.
 Shadow observer: records primitives without trading them.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -146,7 +148,9 @@ def one_tick(symbol: str, acc: TickAccumulator, scorers: list) -> dict:
     rec = {
         "ts": prim.ts_et, "symbol": symbol, "stage": STAGE,
         "price": price,
-        "regime": regime.primary_regime, "regime_conviction": round(regime.conviction, 3),
+        # PHASE B (r58): regime/regime_conviction fields removed — the label
+        # was hardcoded UNKNOWN and conviction is not computed in v4. Rows
+        # before r58 carry "UNKNOWN"/0.0; absent keys after r58 mean r58+.
         "primitives": _prim_fields(prim),
         "scores": [],
     }

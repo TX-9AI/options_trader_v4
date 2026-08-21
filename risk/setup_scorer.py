@@ -1,5 +1,7 @@
 """
-risk/setup_scorer.py  v4.0
+risk/setup_scorer.py  v4.1
+
+v4.1  2026-08-21  PHASE B (r58): reads vix_band (renamed from vix_regime).
 Journaling and gate plumbing. FACTOR SET REMOVED - see VISION.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -341,13 +343,13 @@ class SetupScorer:
         if macro:
             if macro.is_fed_day and name == "ORBStrategy":
                 macro_score = 1.0   # Fed day boosts ORB
-            elif macro.vix_regime == "LOW":
+            elif macro.vix_band == "LOW":
                 macro_score = 0.8
-            elif macro.vix_regime == "ELEVATED":
+            elif macro.vix_band == "ELEVATED":
                 macro_score = 0.3
-            elif macro.vix_regime == "CRISIS":
+            elif macro.vix_band == "CRISIS":
                 macro_score = 0.0
-            elif macro.vix_regime == "NORMAL":
+            elif macro.vix_band == "NORMAL":
                 macro_score = 0.6
         breakdown["macro_context"] = round(macro_score, 3)
 

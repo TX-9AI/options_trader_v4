@@ -427,7 +427,7 @@ class TrendCreditSpread:
             # THE INVALIDATION LEVEL, and the exit. A close beyond the broken
             # boundary is thesis death — the same event orb_structure_stop names.
             underlying_stop=boundary,
-            regime=str(getattr(regime, "primary_regime", "")),
+            regime="",   # PHASE B (r58): the label field is not written
         )
         sig.is_credit_vertical = True         # credit-spread math, not debit
         sig.is_trend_credit = True            # exit_engine: breach-or-nickel ONLY

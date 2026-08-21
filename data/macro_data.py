@@ -1,5 +1,8 @@
 """
-data/macro_data.py  v4.0
+data/macro_data.py  v4.1
+
+v4.1  2026-08-21  PHASE B (r58): vix_regime -> vix_band. Same values, same
+      logic; the word goes so a live measurement stops dressing as an artifact.
 VIX and macro context snapshot.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -51,7 +54,11 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MacroSnapshot:
     vix:            float = 0.0
-    vix_regime:     str   = "UNKNOWN"   # LOW / NORMAL / ELEVATED / CRISIS
+    vix_band:       str   = "UNKNOWN"   # LOW / NORMAL / ELEVATED / CRISIS
+    # PHASE B (r58): renamed from vix_regime. This is a LIVE VIX-band
+    # measurement computed from the VIX itself — it never touched the retired
+    # classifier and only carried the poisoned word. SessionGuard's crisis
+    # lockout and setup_scorer read it; the rename touches every reader.
     iv_rank:        float = 0.0         # 0–100
     is_fed_day:     bool  = False
     fed_event_name: str   = ""
@@ -87,7 +94,7 @@ class MacroManager:
 
         # ── VIX ───────────────────────────────────────────────────────────────
         snap.vix = self._fetch_vix()
-        snap.vix_regime = self._classify_vix(snap.vix)
+        snap.vix_band = self._classify_vix(snap.vix)
 
         # Derive gates from VIX
         if snap.vix >= VIX_NO_ENTRY_THRESHOLD:
@@ -119,7 +126,7 @@ class MacroManager:
             logger.info(f"FED DAY detected: {event_name} — butterfly disabled")
 
         logger.info(
-            f"Macro snapshot: VIX={snap.vix:.1f} [{snap.vix_regime}] "
+            f"Macro snapshot: VIX={snap.vix:.1f} [{snap.vix_band}] "
             f"butterfly={'YES' if snap.butterfly_allowed else 'NO'} "
             f"fed_day={snap.is_fed_day} "
             f"entries={'YES' if snap.new_entries_allowed else 'NO'}"
