@@ -1,5 +1,8 @@
 """
 analysis/orb_engine.py  v4.0
+v4.1  2026-08-21  REGIME PURGE PHASE A. The two SWEEP_REVERSAL deferrals
+      deleted - doubly dead (label never assigned, and the constant that
+      negated them is gone).
 Opening range: establish, latch, arm, expire.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -234,7 +237,7 @@ from utils.time_utils import now_et, is_past_entry_cutoff
 from utils.math_utils import orb_strike_selection
 from config import (
     ORB_MAX_RETEST_BARS, STRIKE_INCREMENT, INSTRUMENT,
-    ORB_NO_ENTRY_AFTER_ET, ORB_FIRES_REGARDLESS_OF_REGIME
+    ORB_NO_ENTRY_AFTER_ET
 )
 
 # v3.7 — defect-G measurement. Guarded: engine runs identically without it.
@@ -636,9 +639,10 @@ class ORBEngine:
                 # retest so the engine can't get stuck OPEN with no position.
                 # (v3.2) UNLESS ORB_FIRES_REGARDLESS_OF_REGIME — then ORB beats
                 # sweep: confirm OPEN and let the dispatch fire it.
-                if regime == "SWEEP_REVERSAL" and not ORB_FIRES_REGARDLESS_OF_REGIME:
-                    logger.debug("ORB retest met but regime=SWEEP_REVERSAL — deferring to sweep")
-                    return
+                # v4.1 (2026-08-21) — the `regime == "SWEEP_REVERSAL"` deferral
+                # is DELETED. Doubly dead: v4 never assigns the label, and
+                # ORB_FIRES_REGARDLESS_OF_REGIME (also deleted) negated it
+                # anyway. A confirmed break+retest is self-validating.
                 d.state           = ORBState.OPEN_LONG
                 d.confirmed_at    = str(now_et())
                 d.retest_depth_px = round(d.orb_high - low, 4)   # v3.7 defect G
@@ -661,9 +665,7 @@ class ORBEngine:
             # RETEST (v3.3) — mirror of the long side. Wick enters the range
             # (high > orb_low), body stays outside (body_high <= orb_low). No grace.
             if high > d.orb_low and body_high <= d.orb_low:
-                if regime == "SWEEP_REVERSAL" and not ORB_FIRES_REGARDLESS_OF_REGIME:
-                    logger.debug("ORB retest met but regime=SWEEP_REVERSAL — deferring to sweep")
-                    return
+                # v4.1 — mirror of the long side; same deletion.
                 d.state           = ORBState.OPEN_SHORT
                 d.confirmed_at    = str(now_et())
                 d.retest_depth_px = round(high - d.orb_low, 4)   # v3.7 defect G

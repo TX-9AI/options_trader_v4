@@ -1,5 +1,9 @@
 """
 execution/exit_engine.py  v4.1
+v4.1  2026-08-21  REGIME PURGE PHASE A. The butterfly regime-flip exit and
+      the condor-leg adverse exit DELETED - both tested trending LABELS v4
+      never assigns, so neither had run once since the port. Two more exits
+      that were dead for a quieter reason than F0.
 Exit decisions: trails, structure stops, theta bleed, time.
 
 v4.1  2026-08-20  AUDIT F0/F6/F7/F10. F0: the class was BISECTED - r38 landed
@@ -1406,18 +1410,21 @@ class ExitEngine:
             decision.exit_reason = "hard_close_15:45_ET"
             return decision
 
-        # 2. REGIME FLIP EXIT — butterfly assumption (neutral/ranging) is broken
-        # if the market transitions to a trending regime. Exit immediately rather
-        # than waiting for the stop to get hit by the same directional move.
-        TRENDING_REGIMES = {"TRENDING_BULL", "TRENDING_BEAR", "BREAKOUT_VOLATILE"}
-        if regime and regime in TRENDING_REGIMES:
-            decision.should_exit = True
-            decision.exit_reason = f"regime_flip_exit: {regime} incompatible with butterfly"
-            logger.info(
-                f"BUTTERFLY REGIME EXIT: {trade_id[:8]} — "
-                f"regime flipped to {regime}, exiting neutral position"
-            )
-            return decision
+        # ── 🔴 v4.1 (2026-08-21) — REGIME FLIP EXIT DELETED (2/3) ────────────
+        # It tested `regime in {"TRENDING_BULL","TRENDING_BEAR",
+        # "BREAKOUT_VOLATILE"}`. v4 hardcodes the label to UNKNOWN, so this
+        # butterfly exit HAS NEVER RUN — not once since the port.
+        #
+        # ⚠️ THIS IS AN EXIT, NOT AN ENTRY, AND THAT IS WHY IT MATTERS. F0 was
+        # "every intraday exit was dead code" because the class was bisected;
+        # these were dead for a quieter reason — a label nothing computes — and
+        # so they were not in F0's blast radius and nobody looked. A butterfly
+        # whose neutral assumption breaks now holds to its stop or its clock.
+        #
+        # ⚠️ IF THIS PROTECTION IS WANTED BACK it must be rebuilt on something
+        # v4 MEASURES — the trend engine's direction and ADX are right there in
+        # the context. Do NOT resurrect it on a label. Operator's direction:
+        # if the idea returns it returns under a different name.
 
         # 3. MAX HOLD
         if entry_time:
@@ -1602,27 +1609,12 @@ class ExitEngine:
             # for a trend credit spread.
 
 
-        TRENDING_REGIMES = {"TRENDING_BULL", "TRENDING_BEAR", "BREAKOUT_VOLATILE"}
-        if regime and regime in TRENDING_REGIMES:
-            adverse = False
-            if option_side == "call" and regime in ("TRENDING_BULL", "BREAKOUT_VOLATILE"):
-                adverse = True
-            elif option_side == "put" and regime in ("TRENDING_BEAR", "BREAKOUT_VOLATILE"):
-                adverse = True
-
-            if adverse:
-                decision.should_exit = True
-                decision.exit_reason = f"regime_flip_adverse: {regime} threatens {option_side} spread"
-                logger.info(
-                    f"CONDOR LEG ADVERSE EXIT: {trade_id[:8]} — "
-                    f"{regime} moving into {option_side} short strikes"
-                )
-                return decision
-            else:
-                logger.info(
-                    f"CONDOR LEG: {regime} flip FAVORABLE for {option_side} spread "
-                    f"(pnl={pnl_pct:.1%}) — holding, Leg 2 will be cancelled by strategy"
-                )
+        # ── 🔴 v4.1 (2026-08-21) — CONDOR-LEG ADVERSE EXIT DELETED (3/3) ─────
+        # Same shape as the butterfly exit above: a membership test against
+        # trending LABELS, which v4 never assigns. The adverse-move exit for a
+        # short call spread into a bull trend, and for a short put spread into
+        # a bear trend, has never fired. The leg rode to its stop instead.
+        # Rebuild on measured direction if it is wanted, never on a label.
 
         # ── RATCHETING STOP (v4.1) ────────────────────────────────────────
         # Every stopped leg in the 07-07..07-22 sample was GREEN FIRST (median

@@ -668,8 +668,11 @@ FED_DAY_ORB_BOOST           = 0.20
 # decision stays readable, is reversible by env, and the refusal can be
 # JOURNALED — "ORB did not set up" and "ORB was forbidden" must not look the
 # same in the record.
-ORB_BLOCK_RANGING   = os.environ.get("OT_ORB_BLOCK_RANGING", "1") == "1"
-ORB_FIRES_REGARDLESS_OF_REGIME = True
+# v4.3 (2026-08-21) — ORB_BLOCK_RANGING and ORB_FIRES_REGARDLESS_OF_REGIME are
+# DELETED with the regime gates they modified. Both keyed on a label v4 never
+# assigns: the RANGING block could never fire, and the second was hardcoded
+# True so it never contributed a term to anything. OT_ORB_BLOCK_RANGING is now
+# INERT — stated here so nobody spends an evening looking for its reader.
 # When snapping an ORB strike target to the nearest available strike, break
 # toward the "higher" (more ITM / participation) or "lower" (further OTM) delta.
 ORB_STRIKE_DELTA_BIAS       = "lower"
@@ -1293,7 +1296,8 @@ BOS_MIN_DIST_ATR = float(os.getenv("OT_BOS_MIN_DIST_ATR", "0.35"))
 # and only for the handoff path — RANGING was never covered, and a strategy-level
 # check cannot stop the slot being consumed before P3/P4 are reached.
 # Set to 0 to restore the pre-CNT.6 behaviour exactly (kill switch and A/B).
-CONT_BLOCK_PREMIUM_REGIMES = os.getenv("OT_CONT_BLOCK_PREMIUM", "1") == "1"
+# v4.3 — CONT_BLOCK_PREMIUM_REGIMES DELETED with the continuation veto it fed;
+# that branch was unreachable. OT_CONT_BLOCK_PREMIUM is now INERT.
 
 # ── CONTINUATION CONFIRMATION TOLERANCE (v1.6, 2026-08-11) ───────────────────
 # v1.5 required the confirmation bar to close STRICTLY beyond the tagging bar's

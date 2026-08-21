@@ -1,5 +1,9 @@
 """
 data/open_interest.py  v4.0
+v4.1  2026-08-21  get_market_data_by_type IS A COROUTINE and was called
+      without await - GEX has run WITHOUT open interest on every cycle since
+      the port, logging a warning nobody actioned. Bridged for both call
+      contexts.
 Real open interest, fetched once per session over REST. GEX has never had it.
 
 v4.0  2026-08-19  Built at the OTV4 split.
@@ -66,6 +70,8 @@ reported as gamma exposure for the life of the project.
 """
 
 import logging
+import asyncio
+import concurrent.futures as cf
 import time
 from typing import Dict, Iterable, Optional
 
@@ -80,6 +86,38 @@ _BATCH = 100                # keep REST payloads modest
 
 def _today() -> str:
     return time.strftime("%Y-%m-%d")
+
+
+def _await(coro):
+    """Run an async SDK call from this SYNCHRONOUS function.
+
+    🔴 v4.1 (2026-08-21) — `get_market_data_by_type` IS A COROUTINE FUNCTION and
+    was being called WITHOUT await. Python returned a coroutine object, the
+    `for r in rows` below raised "'coroutine' object is not iterable", the
+    broad except swallowed it as a warning, and every cycle on every box logged
+        OI wiring failed ('coroutine' object is not iterable)
+        - GEX runs WITHOUT open interest
+    ⚠️ SO GEX HAS NEVER ONCE HAD OPEN INTEREST IN v4. That is the handoff's open
+    item "open_interest NON-ZERO in the log - v4's copy of OI.1 has never run":
+    it never ran because it could not. The gamma surface has been built from
+    volume-weighted greeks alone, and the butterfly's unpark depends on it.
+    ⚠️ AND IT FAILED LOUDLY-BUT-HARMLESSLY, which is why it survived: a WARNING
+    every cycle, with the run continuing. An error that is logged and then
+    ignored is a decision nobody made.
+
+    The SDK offers ONLY async variants (checked: `get_market_data` and
+    `get_market_data_by_type` are both `async def`), so the bridge lives here.
+    Both call contexts are handled because this is reached from the sync chain
+    fetch AND, on some paths, from inside a running loop: `asyncio.run` raises
+    if a loop is already running, so that case is handed to a worker thread
+    with its own loop rather than crashing.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)          # no loop here - the common case
+    with cf.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(asyncio.run, coro).result()
 
 
 def fetch_open_interest(session, occ_symbols: Iterable[str],
@@ -122,7 +160,7 @@ def fetch_open_interest(session, occ_symbols: Iterable[str],
     for i in range(0, len(missing), _BATCH):
         batch = missing[i:i + _BATCH]
         try:
-            rows = get_market_data_by_type(session, options=batch)
+            rows = _await(get_market_data_by_type(session, options=batch))
         except Exception as e:                                 # noqa: BLE001
             logger.warning("OI: fetch failed for %d symbol(s): %s", len(batch), e)
             continue

@@ -1,5 +1,11 @@
 """
-main.py  v4.2
+main.py  v4.3
+v4.3  2026-08-21  REGIME PURGE PHASE A. The dispatch HARD GATE deleted - it
+      tested primary_regime, which v4 hardcodes to UNKNOWN, so it returned
+      before dispatch on EVERY tick and the fleet traded NOTHING on its first
+      live session. ORB_BLOCK_RANGING, the _orb_ok_regimes test,
+      CONT_BLOCK_PREMIUM_REGIMES and the hardcoded regime="RANGING" trade-record
+      stamp go with it. Nothing replaces them, deliberately.
 Tick loop, context assembly, strategy dispatch. GATES STRIPPED - see ROADMAP Phase 2.
 
 v4.2  2026-08-20  `_REGIME_ENGINE` and its startup assert DELETED. Nothing read
@@ -710,11 +716,9 @@ from zoneinfo import ZoneInfo
 from config import (
     POLL_INTERVAL_SECONDS, LOG_LEVEL, LOG_FILE, LOG_ROTATION_MB,
     PAPER_TRADING, RISK_PER_TRADE_USD, DAILY_LOSS_LIMIT_USD,
-    CONT_BLOCK_PREMIUM_REGIMES,                 # CNT.6
     REGIME_REASSESS_MINUTES, INSTRUMENT, SessionConfig, DIRECTIONAL_ONLY,
     DEBIT_BLOCKED_STRUCTURES,
-    ORB_NO_ENTRY_AFTER_ET, BROKER_RECONCILE_ENABLED, ORB_FIRES_REGARDLESS_OF_REGIME,
-    ORB_BLOCK_RANGING,
+    ORB_NO_ENTRY_AFTER_ET, BROKER_RECONCILE_ENABLED,
     DEBIT_DIRECTIONAL_CUTOFF_ET, DEBIT_BLOCK_ACTIVE,
     CONDOR_PF_TIMEFRAME,                        # PF.5
     RTH_OPEN_ET, ORB_WINDOW_MINUTES,            # TC.6 v2.1 — range from tape
@@ -1116,8 +1120,11 @@ def run_analysis(state: BotState) -> dict:
 
     # ORB engine update (every tick during RTH). Pass last-tick regime so the
     # engine can gate its re-arm decision (this runs before reclassification).
-    _regime_str = state.current_regime.primary_regime if state.current_regime else None
-    orb = get_orb_engine().update(df_5m, df_1m, price, _regime_str)
+    # v4.3 — the ORB engine no longer receives a label. It was handed
+    # `primary_regime`, permanently UNKNOWN, to gate a re-arm decision that
+    # therefore never varied. Passing None makes the absence explicit rather
+    # than dressing it as a measurement.
+    orb = get_orb_engine().update(df_5m, df_1m, price, None)
 
     # Write ORB state to JSON file so status.py can read it directly
     # without parsing bot.log — eliminates all log-parsing timing issues.
@@ -1504,8 +1511,11 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         #     the condor.
         # The strategy and the exit engine were both correct in isolation; the
         # HANDOFF between them dropped every flag they agreed on.
-        regime           = ("RANGING" if not _is_tcs
-                            else getattr(signal, "regime", "") or "TRENDING"),
+        # v4.3 — was `("RANGING" if not _is_tcs else ... or "TRENDING")`, which
+        # STAMPED A LABEL NOTHING MEASURED onto every trade row. The column is
+        # kept for the existing history (see HANDOFF_REGIME_PURGE.md, Phase B)
+        # but it now records the honest answer.
+        regime           = "",
         underlying_stop  = getattr(signal, "underlying_stop", 0.0),
         # ── TCS.4 (2026-08-17) — REMOVED: `is_trend_credit` IS NOT A COLUMN ──
         # ⚠️ THIS CRASH-LOOPED NFLX LIVE. `log_entry` INSERTs every key in the
@@ -1910,8 +1920,12 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # price — which is the whole reason this exemption is safe and why it must
     # NOT be widened to "ignore stale".
     _orb_ctx = ctx.get("orb")
+    # v4.3 — ORB_FIRES_REGARDLESS_OF_REGIME dropped from this expression with
+    # the constant itself. It was hardcoded True, so it never contributed a
+    # term; exemption has always meant "the ORB engine is in a confirmed OPEN
+    # state", which is what remains.
     _orb_exempt = bool(
-        ORB_FIRES_REGARDLESS_OF_REGIME and _orb_ctx is not None
+        _orb_ctx is not None
         and getattr(_orb_ctx, "state", None) in (ORBState.OPEN_LONG,
                                                  ORBState.OPEN_SHORT))
     # v4.0: the stale-book entry guard is gone with the book. There is no
@@ -1946,12 +1960,33 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # below and the setup scorer decides (regime_conviction just contributes 0).
     orb = ctx["orb"]
     orb_confirmed = orb.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)
-    orb_regime_bypass = (ORB_FIRES_REGARDLESS_OF_REGIME and orb_confirmed
-                         and regime is not None)
-    if (regime is None or getattr(regime, "primary_regime", None)
-            in (Regime.UNKNOWN, None, "")) and not orb_regime_bypass:
-        logger.info("STRATEGY: NO TRADE — regime UNKNOWN/undefined (hard gate)")
-        return
+    # ── 🔴 v4.3 (2026-08-21) — THE DISPATCH HARD GATE IS DELETED ─────────────
+    # It read:
+    #     orb_regime_bypass = (ORB_FIRES_REGARDLESS_OF_REGIME and orb_confirmed
+    #                          and regime is not None)
+    #     if (regime is None or getattr(regime, "primary_regime", None)
+    #             in (Regime.UNKNOWN, None, "")) and not orb_regime_bypass:
+    #         logger.info("STRATEGY: NO TRADE — regime UNKNOWN/undefined (hard gate)")
+    #         return
+    #
+    # WHAT IT COST: `assemble_market_state` hardcodes primary_regime=UNKNOWN
+    # (v4 deleted the classifier), so this test was TRUE ON EVERY TICK. It
+    # returned before dispatch on every box, every session. The fleet's FIRST
+    # live day produced ZERO TRADES across all 15 boxes with relaxed entry ON,
+    # and this line is the whole reason. The only reachable path was a
+    # confirmed ORB break+retest via the bypass; every other strategy was
+    # unreachable code.
+    #
+    # ⚠️ A GUARD OUTLIVES THE THING IT GUARDED — the same rule r55 produced,
+    # one layer up and far more expensive. In v3 this protected against acting
+    # on an unclassified tape. v4 has no classifier, so "unclassified" is the
+    # PERMANENT state and the guard became a permanent veto.
+    #
+    # ⚠️ NOTHING REPLACES IT, DELIBERATELY. Operator's direction 2026-08-21:
+    # regime is eliminated, not Frankenstein-patched. Substituting a
+    # "structural context unbuilt" veto here would be inventing a rule nobody
+    # asked for, in the exact spot that just cost a session. Strategies own
+    # their own preconditions; dispatch does not second-guess them.
 
     # ── Strategy dispatch: regime → strategy ──────────────────────────────────
     # ── AFD.1 PRE-DISPATCH BLOCK (v6.6, 2026-08-14) ──────────────────────────
@@ -2024,23 +2059,14 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # and only the second is a decision we can audit or reverse.
     # OT_ORB_BLOCK_RANGING=0 restores the old behaviour exactly — RANGING is
     # still present in _orb_ok_regimes, so nothing was deleted.
-    if (ORB_BLOCK_RANGING and orb_confirmed and not _afd_orb
-            and regime.primary_regime == Regime.RANGING):
-        logger.info("ORB: BLOCKED — confirmed break+retest under RANGING, "
-                    "which is a blocked cell by operator direction")
-        if _sigj is not None:
-            try:
-                _sigj.journal("disposition",
-                              outcome="gate_block:orb_ranging",
-                              signal={"strategy": "ORBStrategy",
-                                      "stage": "regime_gate"},
-                              regime=_sigj.regime_ctx(regime, _l1_scores(ctx)))
-            except Exception:                                  # noqa: BLE001
-                pass
-    elif orb_confirmed and not _afd_orb and (
-            regime.primary_regime in _orb_ok_regimes
-            or (ORB_FIRES_REGARDLESS_OF_REGIME and
-                regime.primary_regime in (Regime.UNKNOWN, Regime.SWEEP_REVERSAL))):
+    # v4.3 — ORB_BLOCK_RANGING and the `_orb_ok_regimes` membership test are
+    # DELETED. Both keyed on primary_regime, which is permanently UNKNOWN: the
+    # RANGING block could never fire, and the ok-set test only ever passed
+    # through the UNKNOWN arm of the bypass. A confirmed break+retest is
+    # self-validating — the engine has proven the setup from the tape — so the
+    # ORB dispatch is now gated on CONFIRMATION alone, which is what the
+    # bypass's own doctrine said it was doing all along.
+    if orb_confirmed and not _afd_orb:
         orb_sig = _safe_strategy("ORB", lambda: _orb_strategy.generate_signal(
             orb           = orb,
             regime        = regime,
@@ -2168,15 +2194,12 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # veto still consumes the dispatch slot on its way to returning None — CNT.3
     # blocked the COMPRESSION handoff inside continuation_strategy and the
     # squeeze continued regardless.
-    _cont_blocked = (CONT_BLOCK_PREMIUM_REGIMES
-                     and regime.primary_regime in (Regime.RANGING, Regime.COMPRESSION))
-    if _cont_blocked and (_is_runaway
-                          or regime.primary_regime in (Regime.TRENDING_BULL,
-                                                       Regime.TRENDING_BEAR,
-                                                       Regime.BREAKOUT_VOLATILE)):
-        logger.info(f"[continuation] BLOCKED — regime {regime.primary_regime} is a "
-                    f"premium regime; a continuation needs a trend to continue "
-                    f"(runaway={_is_runaway}). Butterfly/Condor now get the slot.")
+    # v4.3 — CONT_BLOCK_PREMIUM_REGIMES DELETED. Both halves keyed on
+    # primary_regime: the first could never be true (UNKNOWN is not RANGING or
+    # COMPRESSION) so `_cont_blocked` was permanently False and the whole
+    # branch was unreachable. Removed rather than rewired — a continuation's
+    # precondition is that a trend exists, which the trend engine answers
+    # directly; it does not need a label to be told.
     # ── v4.0: SUPERSEDED STRATEGY REMOVED ───────────────────────────────
     # Continuation, SweepReversal and Butterfly dispatched here. All three
     # were gated on `regime.primary_regime`, which v4 leaves permanently
@@ -2231,9 +2254,11 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
         # 2026-08-04 that concluded only SPX and QQQ could plan condors. The
         # check stays — it is correct if the set is ever narrowed again — but
         # do not read it as describing today's fleet.
-        if (signal is None and
-                not DIRECTIONAL_ONLY and
-                regime.primary_regime == Regime.RANGING):
+        # v4.3 — the `primary_regime == RANGING` precondition is DELETED: it
+        # was permanently False, so the condor could never be planned. Its real
+        # precondition (no directional signal took the slot, and directional-
+        # only mode is off) is retained and is what the comment above describes.
+        if signal is None and not DIRECTIONAL_ONLY:
             _sess_hi, _sess_lo = _session_extremes(ctx)
             _rails = _condor_rails(ctx)
             plan = _safe_strategy("CondorPlan", lambda: _iron_condor_strategy.decide(
