@@ -334,6 +334,17 @@ class IronCondorStrategy(BaseOptionsStrategy):
     # Every call is wrapped and every failure is swallowed: a ledger write that
     # could raise into the condor's state machine would make the RECORD a
     # participant in the trade, which is the opposite of its purpose.
+    def _gate_report(self, name: str, reason: str) -> None:
+        """r73 — edge-triggered rung reporting. NEVER changes the verdict."""
+        try:
+            from analysis.gate_report import get_gate_reporter
+            from config import INSTRUMENT
+            r = get_gate_reporter(INSTRUMENT)
+            if r is not None:
+                r.blocked("IronCondorStrategy", name, reason)
+        except Exception:                                       # noqa: BLE001
+            pass
+
     def _ledger(self):
         try:
             from derived.registry import plan_ledger
@@ -633,11 +644,28 @@ class IronCondorStrategy(BaseOptionsStrategy):
         # never unguarded ones.
         use_rails = bool(CONDOR_PITCHFORK_ANCHOR and rails)
         if CONDOR_REQUIRE_FORK and not use_rails:
-            logger.info(
-                "Condor: NO PLAN — no usable %s pitchfork (rails=%s). The fork "
-                "is the guardrail; without it the structure has nothing to lean "
-                "on and the leg is not sold.",
-                CONDOR_PF_TIMEFRAME, "present but disabled" if rails else "absent")
+            # ⚠️ WAS INFO AND LEVEL-TRIGGERED — it printed on EVERY TICK all day
+            # on 2026-08-21, ~240 identical lines per hour per box, which is
+            # its own kind of silence. Now edge-triggered AND carrying the
+            # fork's REJECT REASON: "rails=absent" was one message covering six
+            # distinct causes (FRAME_TOO_SHORT, NO_ATR, NO_CONTAINED_WINDOW,
+            # RECENCY, SEPARATION, NOT_ANCHOR_TF) and that ambiguity is exactly
+            # why the r59 diagnosis took two wrong turns.
+            _why = "present but disabled" if rails else "absent"
+            try:
+                from analysis.pitchfork import last_reject_reason
+                _rr = last_reject_reason()
+                if _rr and not rails:
+                    _why = f"absent ({_rr})"
+            except Exception:                                   # noqa: BLE001
+                pass
+            self._gate_report("no_fork",
+                  f"no usable {CONDOR_PF_TIMEFRAME} pitchfork (rails={_why}). "
+                  f"The fork is the guardrail; without it the structure has "
+                  f"nothing to lean on and the leg is not sold.")
+            logger.debug(
+                "Condor: NO PLAN — no usable %s pitchfork (rails=%s)",
+                CONDOR_PF_TIMEFRAME, _why)
             return None
 
         if macro.vix >= VIX_BUTTERFLY_DISABLE:

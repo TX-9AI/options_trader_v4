@@ -132,6 +132,18 @@ from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
 
+
+def _gate(name: str, reason: str) -> None:
+    """r73 — report this rung, edge-triggered. NEVER changes the verdict."""
+    try:
+        from analysis.gate_report import get_gate_reporter
+        from config import INSTRUMENT
+        r = get_gate_reporter(INSTRUMENT)
+        if r is not None:
+            r.blocked("GexPinButterfly", name, reason)
+    except Exception:                                           # noqa: BLE001
+        pass
+
 # ⚠️ EVERY CONSTANT IS A STATED PRIOR AWAITING MEASUREMENT. Nothing here has
 # been validated against outcomes, because the data to do it did not exist until
 # 2026-08-19. `GEX_PIN_CONCENTRATION = 0.15` in gex_data was tuned against the
@@ -222,6 +234,7 @@ class GEXPinButterflyStrategy:
             logger.debug("[gex_bfly] no trade: pin concentration %.3f < %.2f - "
                          "PINNING without a dominant strike", conc, PIN_CONC_MIN)
             return None
+            _gate("pin_concentration", "pin concentration below floor")
 
         _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET)
         if now_et and not (_early <= now_et <= _late):
@@ -233,6 +246,7 @@ class GEXPinButterflyStrategy:
             # ⚠️ NO EXPECTED MOVE MEANS NO TRADE, not a fallback. Guessing one
             # would put the whole distance band on a number nobody measured.
             logger.debug("[gex_bfly] no trade: no ATM IV, so no expected move")
+            _gate("no_atm_iv", "no ATM IV, so no expected move — not a fallback")
             return None
 
         dist = abs(pin - price_now)
@@ -241,11 +255,17 @@ class GEXPinButterflyStrategy:
             logger.debug("[gex_bfly] no trade: pin is %.0f%% of the expected "
                          "move away - too near, the debit is expensive and the "
                          "payoff ratio poor", frac * 100)
+            _gate("pin_too_near",
+                  f"pin is {frac*100:.0f}% of expected move (floor "
+                  f"{EM_MIN_FRAC*100:.0f}%) - debit expensive, payoff poor")
             return None
         if frac > relaxed.widen(EM_MAX_FRAC, 1.3, name="em_max_frac"):
             logger.debug("[gex_bfly] no trade: pin is %.0f%% of the expected "
                          "move away - the chain says price probably cannot get "
                          "there", frac * 100)
+            _gate("pin_too_far",
+                  f"pin is {frac*100:.0f}% of expected move - the chain says "
+                  f"price probably cannot get there")
             return None
 
         side = "call" if pin > price_now else "put"

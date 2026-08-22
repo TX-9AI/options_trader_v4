@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-130 Python modules across 13 local packages.
+131 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -53,8 +53,8 @@ Change these with the most care; a break here reaches everything downstream.
 | `execution/exit_engine.py` | 7 | check_condor_spec.py, check_exit_executes.py, condor_roll.py, entry_snapshot.py |
 | `notifications/alert_manager.py` | 7 | condor_roll.py, entry_engine.py, eod_summary.py, exit_engine.py |
 | `strategy/__init__.py` | 7 | check_condor_spec.py, gex_pin_butterfly.py, iron_condor_strategy.py, runaway_continuation.py |
+| `analysis/pitchfork.py` | 6 | check_condor_rails.py, check_condor_spec.py, forks.py, iron_condor_strategy.py |
 | `data/candle_feed.py` | 6 | candle_logger.py, check_ext_polarity.py, check_feed_always_on.py, counterfactual.py |
-| `data/options_chain.py` | 6 | base_strategy.py, gex_data.py, iron_condor_strategy.py, main.py |
 
 ## Every module
 
@@ -73,6 +73,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `analysis/gap_measure.py`
 - **calls:** (none)
 - **called by:** `main.py`
+
+### `analysis/gate_report.py`
+- **calls:** `data/derived_store.py`
+- **called by:** `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/sweep_credit_spread.py`
 
 ### `analysis/get_orb_range.py`
 - **calls:** `data/market_data.py`
@@ -104,7 +108,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/pitchfork.py`
 - **calls:** `utils/math_utils.py`
-- **called by:** `analysis/pitchfork_lifecycle.py`, `analysis/pitchfork_observer.py`, `derived/forks.py`, `tests/check_condor_rails.py`, `tests/check_condor_spec.py`
+- **called by:** `analysis/pitchfork_lifecycle.py`, `analysis/pitchfork_observer.py`, `derived/forks.py`, `strategy/iron_condor_strategy.py`, `tests/check_condor_rails.py`, `tests/check_condor_spec.py`
 
 ### `analysis/pitchfork_lifecycle.py`
 - **calls:** `analysis/pitchfork.py`
@@ -172,7 +176,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/derived_store.py`
 - **calls:** (none)
-- **called by:** `derived/registry.py`, `tests/check_derived_layer.py`
+- **called by:** `analysis/gate_report.py`, `derived/registry.py`, `tests/check_derived_layer.py`
 
 ### `data/gex_data.py`
 - **calls:** `data/options_chain.py`
@@ -379,11 +383,11 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `strategy/iron_condor_strategy.py`, `strategy/trend_credit_spread.py`
 
 ### `strategy/gex_pin_butterfly.py`
-- **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`, `utils/time_utils.py`
+- **calls:** `analysis/gate_report.py`, `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`, `utils/time_utils.py`
 - **called by:** `main.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/iron_condor_strategy.py`
-- **calls:** `analysis/market_state.py`, `analysis/signal_journal.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `derived/registry.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`
+- **calls:** `analysis/gate_report.py`, `analysis/market_state.py`, `analysis/pitchfork.py`, `analysis/signal_journal.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `derived/registry.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`
 - **called by:** `main.py`
 
 ### `strategy/orb_strategy.py`
@@ -403,7 +407,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `execution/exit_engine.py`, `execution/position_manager.py`
 
 ### `strategy/sweep_credit_spread.py`
-- **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`
+- **calls:** `analysis/gate_report.py`, `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`
 - **called by:** `main.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/trend_credit_spread.py`

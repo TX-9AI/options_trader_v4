@@ -7,7 +7,13 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 ⚠️ **A table with no writer is an orphan. A table nobody reads is dead weight.** Both are visible here and in neither the schema nor the call graph alone.
 
-**22 tables.**
+**23 tables.**
+
+## (unattributed)
+
+| table | created by | written by | read by |
+|---|---|---|---|
+| `gate_disposition` | `analysis/gate_report.py` | `analysis/gate_report.py` (insert) | — |
 
 ## derived_store.db
 
@@ -49,6 +55,6 @@ Regenerated in the land gate; a stale map fails `--check`.
 ## Flags
 
 - **No writer** (0): none
-- **No external reader** (12): `chain_subs_aux`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `indicator_series`, `last_trade`, `plan_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
+- **No external reader** (13): `chain_subs_aux`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `gate_disposition`, `indicator_series`, `last_trade`, `plan_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
 
 ⚠️ *No external reader* is not automatically a defect — a table written today for a study run in a month is exactly the point of the derived layer. It IS a defect when nobody ever intends to read it, and this list is where that question gets asked.

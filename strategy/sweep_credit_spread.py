@@ -102,6 +102,24 @@ from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
 
+
+def _gate(name: str, reason: str) -> None:
+    """r73 — report this rung, edge-triggered. NEVER changes the verdict.
+
+    ⚠️ THE RUNGS WERE ALREADY WELL-WRITTEN AND ALREADY WRONG-LEVELLED. Every
+    line below was a logger.debug, so on 2026-08-21 the fleet declined every
+    setup all session and could not say which rung said no. This does not
+    rewrite the reasons — it makes them visible and queryable.
+    """
+    try:
+        from analysis.gate_report import get_gate_reporter
+        from config import INSTRUMENT
+        r = get_gate_reporter(INSTRUMENT)
+        if r is not None:
+            r.blocked("SweepCreditSpread", name, reason)
+    except Exception:                                           # noqa: BLE001
+        pass
+
 # ⚠️ STATED PRIORS AWAITING MEASUREMENT. v3's sweep book is 34 trades - far too
 # thin to fit anything - so these are reasoned, not calibrated, and are
 # config-overridable. `tests/sweep_discriminator.py` is the tool that will
@@ -299,6 +317,8 @@ class SweepCreditSpreadStrategy:
         if getattr(sweep, "invalidated", False):
             logger.debug("[sweep_cs] no trade: %s reclaimed then INVALIDATED - "
                          "price accepted through; that is a breakout", name)
+            _gate("invalidated", f"{name} reclaimed then invalidated - "
+                                 f"price accepted through; that is a breakout")
             return None
 
         # ── 3. it must be YOUNG - measured from the RECLAIM ─────────────────
@@ -310,6 +330,7 @@ class SweepCreditSpreadStrategy:
         if age > relaxed.widen(MAX_AGE_BARS, 3.0, name="max_age_bars"):
             logger.debug("[sweep_cs] no trade: %s reclaimed %d bars ago "
                          "(max %d)", name, age, MAX_AGE_BARS)
+            _gate("age", f"{name} reclaimed {age} bars ago (max {MAX_AGE_BARS})")
             return None
 
         # ── 4. the rejection must be real ───────────────────────────────────
@@ -323,6 +344,9 @@ class SweepCreditSpreadStrategy:
             logger.debug("[sweep_cs] no trade: %s pierced %.3f%% - too deep, "
                          "the level barely rejected (19%% survival measured)",
                          name, rej * 100.0)
+            _gate("pierce_depth",
+                  f"{name} pierced {rej*100:.3f}% - too deep; a deep pierce is "
+                  f"a WEAK level (19% survival measured)")
             return None
 
         # ── 5. which boundary did the pool become? ──────────────────────────
