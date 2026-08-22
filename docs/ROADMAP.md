@@ -134,10 +134,20 @@ placement. ⬜
 existing root sprawl on control migrates. ⬜
 **S.3 Bot independence is a FEATURE.** No box may require control to be
 reachable in order to trade. ⬜
-**S.4 Fleet: 15 traders, 29 collectors.** ⚠️ Collection is fleet-wide, trading is
-panel-only. **A box that stops collecting because it is not trading is a box
-whose pitchfork and ADX depth quietly dies**, and DXFeed history is
-same-evening only. ⬜
+**S.4 Fleet: 15 boxes. Collection and trading are the SAME SET.** Updated
+2026-08-25 — this row previously read "15 traders, 29 collectors / collection is
+fleet-wide", which has been false since the 2026-08-20 pare: **the other 14
+instances were TERMINATED, not stopped.**
+
+The principle it carried is unchanged and still right: **a box that stops
+collecting is a box whose pitchfork and ADX depth quietly dies**, and DXFeed
+history is same-evening only, so that depth cannot be recovered afterwards.
+Pruning stays disabled so it accumulates.
+
+⚠️ **WHAT THE COUNT CHANGE ACTUALLY COSTS:** the GEX butterfly's unpark depends
+on open-interest ACCUMULATION ACROSS THE FLEET. That now runs on 15 symbols,
+not 29 — roughly half the breadth, so the accumulation clock is longer than the
+original estimate assumed. Do not date the unpark off the old number. ⬜
 
 ---
 

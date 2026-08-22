@@ -498,11 +498,21 @@ orchestrates, verifies and reports — **no box may require control to be
 reachable in order to trade.** Any design that makes control load-bearing for
 entry or exit is wrong, however convenient.
 
-## 30. COLLECTION IS FLEET-WIDE. TRADING IS PANEL-ONLY.
-Added 2026-08-19. 15 traders, 29 collectors. **A box that stops collecting
-because it is not trading is a box whose pitchfork and ADX warm-up depth quietly
-dies** — and DXFeed history is same-evening only, so that depth cannot be
-recovered afterwards. Pruning is disabled specifically so it accumulates.
+## 30. EVERY BOX COLLECTS. THE COLLECTORS ARE THE TRADERS.
+Added 2026-08-19 as "collection is fleet-wide, trading is panel-only, 15 traders
+/ 29 collectors". **REWRITTEN 2026-08-25: that split no longer exists.** The
+2026-08-20 pare TERMINATED the other 14 instances, so the fleet is 15 boxes and
+they both trade and collect.
+
+The rule itself survives intact and is why the section stays: **a box that stops
+collecting is a box whose pitchfork and ADX warm-up depth quietly dies** — and
+DXFeed history is same-evening only, so that depth cannot be recovered
+afterwards. Pruning is disabled specifically so it accumulates.
+
+⚠️ **THE CONSEQUENCE NOBODY WROTE DOWN AT THE TIME:** fleet-wide open-interest
+accumulation — which the GEX butterfly's unpark waits on — now runs across 15
+symbols instead of 29. Half the breadth, so a longer clock. Any unpark date
+derived from the 29-symbol assumption is wrong.
 
 ## 31. MEASURE DOLLARS BEFORE TRUSTING A NUMBER.
 Added 2026-08-19, and it is the lesson OTV3 cost two months to learn. Every

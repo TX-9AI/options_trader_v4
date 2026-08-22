@@ -1,6 +1,52 @@
-# docs/PORT_STATE.md  v4.2  — where the project actually stands
+# docs/PORT_STATE.md  v4.3  — where the project actually stands
 
-**2026-08-20, end of the transition thread. HEAD `332edb8`, r50.**
+**Updated 2026-08-25. HEAD is r73. The fleet is 15 boxes, live and stopped
+between sessions.**
+
+## 🔴 SINCE THIS FILE LAST SAID "NOTHING HAS TRADED ON v4 YET"
+
+**v4 has now had one live session — 2026-08-21 — and it traded ZERO.** Not from
+one cause: four independent locks, each failing silently.
+
+  1. **The feed ate the open.** The ORB range only ESTABLISHED at 10:01-10:03;
+     ORB entries die at 11:00. → fixed r72 (opening-range rescue).
+  2. **A dispatch gate vetoed everything.** It tested a label the engine
+     hardcodes to UNKNOWN, so it returned before dispatch on EVERY tick with
+     relaxed entry ON across all 15 boxes. → fixed r57.
+  3. **The condor could never build rails** — a timeframe-key mismatch, then a
+     missing daily frame. → fixed r59, and the anchor moved to 1h by operator
+     ruling.
+  4. **A 14:00 hard entry cutoff nobody specced**, inherited from v3 by a
+     hygiene pass whose own changelog said "NOT a behaviour change".
+     → deleted r60.
+
+⚠️ **EVERY ONE FAILED IN THE DIRECTION THAT LOOKS LIKE CORRECT BEHAVIOUR**, and
+every one was invisible because the refusal was silent. That is why r61-r73 are
+almost entirely instrumentation rather than strategy.
+
+## What was built in response (2026-08-22 → 08-25)
+
+- **The feed manifold** (r61, r64) — ten of ten event types captured, was
+  three. Nothing is dropped, overwritten or captured conditionally.
+- **The derived layer** (r62, r63) — `/derived`, one engine per store. Charm
+  and vanna are computable for the first time; expected move decays through the
+  session instead of being one number all day.
+- **The exorcism** (r65) — the retired classification system is gone from the
+  tree, schema physically dropped so a query RAISES rather than returning empty.
+- **The plan ledger** (r69, r70) — intent survives a restart, and plans that
+  never fired are recorded for later scoring.
+- **Instruments** — manifold health board with per-stream bulbs (r68),
+  edge-triggered gate reporting (r73), WRITE_MAP (r71), and a devtools SENSORS
+  section (dtp r201).
+
+⚠️ **NONE OF IT HAS RUN AGAINST A LIVE TAPE.** Everything above is verified
+synthetically. Monday 2026-08-24 is the first session with any of it in place,
+and `tools/manifold_health.py` before the open is the thing that says whether
+the capture actually works.
+
+---
+
+**Historical, from 2026-08-20 (HEAD `332edb8`, r50):**
 **OTV3 is retired. The fleet is repointed. Nothing has traded on v4 yet.**
 
 ---

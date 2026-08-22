@@ -1,7 +1,18 @@
 # HANDOFF — options_trader_v4
 
-**Written 2026-08-20, end of the transition thread. HEAD `332edb8`, r50.**
+**Written 2026-08-20 (HEAD `332edb8`, r50). ⚠️ STALE HEADER — see below.**
 **Paste this as the opening message of the next thread.**
+
+> 🔴 **READ `docs/PORT_STATE.md` FIRST — THIS FILE IS FIVE DAYS AND TWENTY-THREE
+> REVISIONS BEHIND.** HEAD is r73, not r50. v4 has had one live session
+> (2026-08-21) and it traded zero, for four independent and separately-fixed
+> reasons. The feed manifold, the derived layer, the plan ledger and the
+> instrumentation all landed after this document was written and none of it is
+> described here.
+>
+> ⚠️ Everything below about the FAILURE CLASS, the delivery contract and the
+> working rules is still accurate and still worth reading. Only the state is
+> wrong.
 
 ---
 
@@ -22,14 +33,33 @@ threads rather than in code. Search on the finding, not the date:
 4. `docs/WORKING_AGREEMENT.md` — 36 sections of hard-won operational rules.
 5. `docs/AUDIT_FINDINGS.md` — the ten findings from the adversarial audit.
 
+**Added 2026-08-22→25 and ESSENTIAL — the feed architecture is not optional
+reading, it is where four of the five 2026-08-21 blockers lived:**
+6. `docs/FEED_MANIFOLD.md` — the governing rule (capture everything the wire
+   offers, give it a home, let consumers subscribe) and the port map. The
+   operator's framing: it comes in like a fire hose and this is the manifold.
+7. `docs/DERIVED_STORES.md` — what earns a home and why, in four tiers. The
+   rule: anything whose value depends on HISTORY rather than only on the
+   current bar. Includes the universal **bodies decide, wicks test** convention
+   and the level lifecycle.
+8. `docs/ENGINE_FEED_REQUIREMENTS.md` — what each strategy actually eats,
+   traced from signatures and dispatch call sites. ⚠️ The `analysis/` helpers
+   are NOT yet traced.
+9. `docs/WRITE_MAP.md` — generated. Who writes and reads every table. **An
+   asset register, not a cleanup list** — a table with no reader yet is an
+   investment, because data pruned before you knew you needed it cannot be
+   recovered at any price.
+
 ---
 
 ## The state in five lines
 
 · **OTV3 is retired.** Its regime classifier picked the correct side on 44.9%
   of 715 trades — CI entirely below a coin flip.
-· **29 boxes repointed to v4 and stopped.** 14 being terminated, 15 keepers.
-· **Nothing has traded on v4.** Not one tick, fill or exit.
+· **The fleet is 15 boxes** — the other 14 were TERMINATED on 2026-08-20, not
+  stopped. Collection and trading are now the same set.
+· **v4 has traded one session (2026-08-21) and it traded ZERO** — four
+  independent silent locks, all since fixed. See `PORT_STATE.md`.
 · **Five strategies specced**, three live-capable, one parked, one rare.
 · **Eight standing checks, all green**, three of which caught real bugs.
 
