@@ -530,10 +530,208 @@ def show_circuit_breakers(conn):
     print()
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MARKET DATA — r76. The derived layer, which query.py could not see until now.
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠️ EVERY SECTION BELOW READS THE DERIVED STORE, NOT trades.db. It opens
+# READ-ONLY and every section degrades to a printed note rather than an
+# exception: a dashboard that cannot render because one sensor is empty is
+# worse than one that says which sensor is empty.
+#
+# ⚠️ AND ABSENCE IS PRINTED AS ABSENCE. "no rows yet" and "this box has never
+# written this table" are different facts; a blank section conflates them,
+# which is the habit this project has paid for repeatedly.
+
+def _derived():
+    """Read-only handle on the derived store, or None."""
+    try:
+        import os as _os
+        import sqlite3 as _sq
+        path = _os.environ.get(
+            "OT_DERIVED_DB",
+            _os.path.expanduser("~/options-trader/data/derived_store.db"))
+        if not _os.path.exists(path):
+            return None
+        return _sq.connect(f"file:{path}?mode=ro", uri=True)
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+def _q(dc, sql, args=()):
+    try:
+        return dc.execute(sql, args).fetchall()
+    except Exception:                                           # noqa: BLE001
+        return None                    # None = table absent; [] = no rows
+
+
+def show_character(dc):
+    """The tape's character now, and the last few CHANGES with timestamps.
+
+    🔴 A CHARACTER THAT HELD ALL SESSION AND ONE THAT FLIPPED SIX TIMES ARE
+    DIFFERENT SESSIONS. The transitions are the object, which is why this shows
+    changes rather than a current value repeated.
+
+    ⚠️ THE ACCEPTANCE GATE IS VISIBLE HERE: the operator's 20-year prior is
+    1-3 changes per symbol-day. If this list is long, the deriver is wrong —
+    the retired engine produced ~20/symbol-day and that gap is what made its
+    churn visible at all.
+    """
+    sep("═")
+    print("  CHARACTER  (state, not signal — informs nothing, gates nothing)")
+    sep("═")
+    rows = _q(dc, "SELECT character, from_character, entered_ts, held_s,"
+                  " persistence, vol_ratio, gap_pct, gap_class"
+                  " FROM character_ledger WHERE symbol=?"
+                  " ORDER BY entered_ts DESC LIMIT 8", (INSTRUMENT,))
+    if rows is None:
+        print("  (character_ledger not present on this box)")
+        print(); return
+    if not rows:
+        print("  No character recorded yet today.")
+        print(); return
+
+    cur = rows[0]
+    held = (datetime.now(ET).timestamp() - cur[2]) / 60.0
+    print(f"  Now:  {str(cur[0]).upper():<12} held {held:.0f} min")
+    if cur[4] is not None or cur[5] is not None:
+        pv = "n/a" if cur[4] is None else f"{cur[4]:.2f}"
+        vv = "n/a" if cur[5] is None else f"{cur[5]:.2f}x"
+        print(f"        persistence {pv}   volatility {vv}")
+    if cur[6] is not None:
+        # ⚠️ THE GAP IS ADDITIVE CONTEXT, NEVER A FINDING ON ITS OWN. It
+        # qualifies the reading above; it does not assert anything by itself.
+        print(f"        on a {cur[6]:+.2f}% gap day"
+              + (f"  ({cur[7]})" if cur[7] else ""))
+    print()
+    print(f"  Changes today: {len(rows)}   (expected 1-3)")
+    for r in rows:
+        t = datetime.fromtimestamp(r[2], ET).strftime("%H:%M")
+        frm = f"{r[1]} → " if r[1] else ""
+        hs = f"  held {r[3]/60:.0f}m" if r[3] else ""
+        print(f"    {t}  {frm}{r[0]}{hs}")
+    print()
+
+
+def show_gates(dc):
+    """Which rung is refusing each strategy, and for how long.
+
+    🔴 THIS IS THE SECTION THAT WOULD HAVE ANSWERED 2026-08-21. The fleet
+    declined every setup on every box all session and could not say why: the
+    journal held one event type and every other refusal was a debug line. SPX
+    re-confirmed at 10:46 and sat refused for 44 minutes with nothing recording
+    which gate said no.
+    """
+    sep("═")
+    print("  GATES  (why a strategy is not trading)")
+    sep("═")
+    rows = _q(dc, "SELECT strategy, gate, reason, event, held_s, ticks,"
+                  " ts_epoch FROM gate_disposition"
+                  " WHERE symbol=? AND ts_epoch > ?"
+                  " ORDER BY ts_epoch DESC LIMIT 12",
+              (INSTRUMENT, datetime.now(ET).timestamp() - 86400))
+    if rows is None:
+        print("  (gate_disposition not present on this box)")
+        print(); return
+    if not rows:
+        print("  No gate transitions recorded in the last 24h.")
+        print(); return
+    for st, gate, reason, ev, held, ticks, ts in rows:
+        t = datetime.fromtimestamp(ts, ET).strftime("%H:%M")
+        mark = {"CLEARED": "✓", "CHANGED": "→"}.get(ev, "✗")
+        extra = f"  ({held/60:.0f}m, {ticks} ticks)" if held else ""
+        print(f"    {t} {mark} {st:<22} {gate}{extra}")
+        if reason and ev != "CLEARED":
+            print(f"           {reason[:78]}")
+    print()
+
+
+def show_plans(dc):
+    """Intent — including the plans that never became trades.
+
+    🔴 A PLAN CAN PRODUCE NO TRADE AT ALL, and that is the population worth
+    mining: an unfired plan still has a knowable outcome, so scoring it later
+    is a free backtest on live data. It is also how the trigger itself gets
+    measured — if unfired plans would have won at the same rate as fired ones,
+    the trigger filters noise; if better, it costs money.
+    """
+    sep("═")
+    print("  PLANS  (intent — fired, expired, and never triggered)")
+    sep("═")
+    rows = _q(dc, "SELECT strategy, state, terminal_reason, created_ts,"
+                  " closed_ts, short_strike, trigger_price, trade_ids"
+                  " FROM plan_ledger WHERE symbol=?"
+                  " ORDER BY created_ts DESC LIMIT 10", (INSTRUMENT,))
+    if rows is None:
+        print("  (plan_ledger not present on this box)")
+        print(); return
+    if not rows:
+        print("  No plans recorded.")
+        print(); return
+    for strat, state, term, cts, clts, ss, tp, tids in rows:
+        t = datetime.fromtimestamp(cts, ET).strftime("%m-%d %H:%M")
+        at = ss or tp
+        atx = f" @ {at:.2f}" if at else ""
+        # ⚠️ WIPED_BY_RESTART IS ITS OWN CATEGORY, not folded into CANCELLED —
+        # it is the countable cost of deploying mid-session.
+        flag = "⚠️ " if term == "WIPED_BY_RESTART" else "   "
+        live = "" if clts else "  ← LIVE"
+        traded = f"  traded={len(__import__('json').loads(tids))}" if tids else ""
+        print(f"  {flag}{t}  {strat:<22} {state}{atx}{traded}{live}")
+        if term:
+            print(f"        terminal: {term}")
+    print()
+
+
+def show_market(dc):
+    """Levels, forks and the second-order surface — the market picture."""
+    sep("═")
+    print("  MARKET")
+    sep("═")
+
+    lv = _q(dc, "SELECT price, kind, provenance, touch_count, is_live_session"
+                " FROM level_ledger WHERE symbol=? AND retired_ts IS NULL"
+                " ORDER BY touch_count DESC LIMIT 8", (INSTRUMENT,))
+    if lv:
+        print("  Live levels (by touches — a touch is a HOLD):")
+        for pr, kind, prov, touches, live in lv:
+            star = " ⟲" if live else ""
+            print(f"    {pr:>9.2f}  {str(kind or ''):<11} {str(prov or ''):<10}"
+                  f" touches={touches}{star}")
+    elif lv is None:
+        print("  (level_ledger not present)")
+    else:
+        print("  No live levels.")
+
+    fk = _q(dc, "SELECT interval, built, reject_reason, containment, span_bars"
+                " FROM fork_series WHERE symbol=? ORDER BY ts_epoch DESC LIMIT 2",
+            (INSTRUMENT,))
+    if fk:
+        print("\n  Pitchfork:")
+        for iv, built, rr, cont, span in fk:
+            if built:
+                print(f"    {iv}: BUILT  containment={cont:.2f} span={span} bars")
+            else:
+                # ⚠️ THE REASON, NOT JUST "absent". Six distinct causes used to
+                # collapse into one message, which is why a diagnosis took two
+                # wrong turns.
+                print(f"    {iv}: no fork — {rr}")
+
+    sf = _q(dc, "SELECT ROUND(AVG(charm),4), ROUND(AVG(vanna),4),"
+                " ROUND(MAX(gex)/1e6,2), COUNT(*) FROM surface_series"
+                " WHERE symbol=? AND ts_epoch > ?",
+            (INSTRUMENT, datetime.now(ET).timestamp() - 3600))
+    if sf and sf[0][3]:
+        c, v, g, n = sf[0]
+        print(f"\n  Surface (1h): charm={c}  vanna={v}  GEX={g}M  ({n} samples)")
+    print()
+
+
 def main():
     conn = connect()
     print()
     show_header()
+    # ── TRADES: what happened ────────────────────────────────────────────
     show_open_position(conn)
     show_today(conn)
     show_alltime(conn)
@@ -542,6 +740,24 @@ def main():
     show_by_setup_type(conn)
     show_recent(conn)
     show_circuit_breakers(conn)
+
+    # ── MARKET: what the tape was doing, and why nothing fired ───────────
+    # ⚠️ SEPARATE CONNECTION, SEPARATE FAILURE. The derived store is a
+    # different database; if it will not open, the trades dashboard above is
+    # unaffected and this half says so.
+    dc = _derived()
+    if dc is None:
+        sep("═")
+        print("  MARKET DATA — derived store not found on this box.")
+        print("  (expected at ~/options-trader/data/derived_store.db)")
+        sep("═")
+    else:
+        show_character(dc)
+        show_gates(dc)
+        show_plans(dc)
+        show_market(dc)
+        dc.close()
+
     sep("═")
     print()
     conn.close()
