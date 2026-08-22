@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-128 Python modules across 13 local packages.
+129 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -238,9 +238,13 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `analysis/order_flow.py`, `derived/base.py`
 - **called by:** `derived/registry.py`
 
+### `derived/plan_ledger.py`
+- **calls:** (none)
+- **called by:** `derived/registry.py`
+
 ### `derived/registry.py`
-- **calls:** `data/derived_store.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/snapshot.py`, `derived/surface.py`
-- **called by:** `main.py`, `tests/check_derived_layer.py`
+- **calls:** `data/derived_store.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/plan_ledger.py`, `derived/snapshot.py`, `derived/surface.py`
+- **called by:** `main.py`, `status.py`, `tests/check_derived_layer.py`
 
 ### `derived/snapshot.py`
 - **calls:** `derived/base.py`
@@ -355,7 +359,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (entry point)
 
 ### `status.py`
-- **calls:** `config.py`
+- **calls:** `config.py`, `derived/registry.py`
 - **called by:** (entry point)
 
 ### `strategy/__init__.py`

@@ -42,6 +42,7 @@ def build_engines(symbol: str) -> List:
         from derived.snapshot import SnapshotEngine
         from derived.counterfactual import CounterfactualExitEngine
         from derived.notes import NotesEngine
+        from derived.plan_ledger import PlanLedger
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("derived registry: engine import failed: %s", exc)
         return []
@@ -71,3 +72,19 @@ def snapshot_engine(engines):
         if getattr(e, "name", "") == "snapshot":
             return e
     return None
+
+
+def plan_ledger(symbol: str):
+    """The plan ledger for this box, or None.
+
+    ⚠️ NOT AN ENGINE — it is EVENT-DRIVEN (a plan opens when a strategy
+    decides, transitions when a leg fills). Modelling it as a tick engine
+    would either miss transitions or invent them.
+    """
+    try:
+        from data.derived_store import get_derived_store
+        from derived.plan_ledger import PlanLedger
+        store = get_derived_store()
+        return PlanLedger(store, symbol) if store is not None else None
+    except Exception:                                           # noqa: BLE001
+        return None

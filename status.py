@@ -360,7 +360,25 @@ def main():
     # here is an ACTIVE PLAN waiting on conditions; otherwise the line should
     # not exist at all.
     strategy, orb, gex_pin, gex_env = get_strategy_and_orb()
-    if strategy and str(strategy).upper() not in ("", "UNKNOWN", "NONE"):
+    # ── r69 — ACTIVE PLANS COME FROM THE LEDGER, NOT FROM PROCESS STATE ──
+    # ⚠️ `orb_state.json` is written by a RUNNING bot, so after a restart it
+    # shows whatever the NEW process has rebuilt — a condor sitting at
+    # LEG1_FILLED with a live leg at the broker would display as NOTHING AT
+    # ALL, and the box would look idle while holding half a structure. The
+    # ledger is on disk, independent of who is running.
+    try:
+        from derived.registry import plan_ledger as _pl
+        _led = _pl(INSTRUMENT)
+        _live = _led.live_plans() if _led else []
+    except Exception:                                          # noqa: BLE001
+        _live = []
+    if _live:
+        for _p in _live:
+            _what = _p.get("short_strike") or _p.get("trigger_price")
+            _at = f" @ {_what:.2f}" if _what else ""
+            print(f"  \U0001F3AF Active plan: {_p['strategy']} "
+                  f"[{_p['state']}]{_at}")
+    elif strategy and str(strategy).upper() not in ("", "UNKNOWN", "NONE"):
         print(f"  \U0001F3AF Active plan: {strategy}")
 
     # Live underlying price (from orb_state.json, written each tick)
