@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-127 Python modules across 13 local packages.
+128 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -523,6 +523,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/tine_order_study.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tools/manifold_health.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 

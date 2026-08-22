@@ -332,11 +332,36 @@ def main():
     except Exception:
         _risk_disp = RISK_PER_TRADE
     print(f"  \U0001F4B5 Risk:         ${_risk_disp}")
+    # ── 🔴 r68 — MANIFOLD ROLLUP. One bulb; the board is tools/manifold_health.py
+    # ⚠️ THIS IS THE LINE THAT WOULD HAVE CAUGHT 2026-08-21. The intraday tape
+    # was dead from 09:30, the blind latch paged ONCE so the silence afterwards
+    # meant nothing, and the fleet traded zero. A bulb here is checkable in one
+    # glance before the open.
+    # ⚠️ NEVER FATAL TO THE DISPLAY. status.py must render even if the health
+    # tool cannot — a broken instrument must not hide the instrument panel.
+    try:
+        import subprocess as _sp
+        _r = _sp.run([sys.executable,
+                      os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "tools", "manifold_health.py"), "--bulb"],
+                     capture_output=True, text=True, timeout=10)
+        _line = (_r.stdout or "").strip()
+        if _line:
+            print(f"  {_line}")
+    except Exception:                                          # noqa: BLE001
+        print("  \u26aa Manifold:    unavailable")
     print()
     sep()
 
+    # ── r68 — WHAT THE BOX IS DOING RIGHT NOW ────────────────────────────
+    # ⚠️ THE OLD "Strategy: UNKNOWN" LINE IS DELETED. It printed a label from
+    # the retired system on every box on every call — an artifact reporting a
+    # world that no longer exists. Operator: the only honest thing to show
+    # here is an ACTIVE PLAN waiting on conditions; otherwise the line should
+    # not exist at all.
     strategy, orb, gex_pin, gex_env = get_strategy_and_orb()
-    print(f"  \U0001F3AF Strategy:    {strategy}")
+    if strategy and str(strategy).upper() not in ("", "UNKNOWN", "NONE"):
+        print(f"  \U0001F3AF Active plan: {strategy}")
 
     # Live underlying price (from orb_state.json, written each tick)
     _price = orb.get("price")
