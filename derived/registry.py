@@ -40,6 +40,8 @@ def build_engines(symbol: str) -> List:
         from derived.levels import LevelEngine
         from derived.surface import SurfaceEngine
         from derived.snapshot import SnapshotEngine
+        from derived.counterfactual import CounterfactualExitEngine
+        from derived.notes import NotesEngine
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("derived registry: engine import failed: %s", exc)
         return []
@@ -51,6 +53,15 @@ def build_engines(symbol: str) -> List:
         levels,
         SurfaceEngine(store, symbol),
         SnapshotEngine(store, symbol, levels=levels),
+        # ⚠️ RECORDS ONLY — evaluates a flow exit on every open
+        # position and writes when it WOULD have fired. The
+        # mechanical stop is untouched. See the module docstring
+        # for why the burden of proof here is high (bos_exit).
+        CounterfactualExitEngine(store, symbol),
+        # ⚠️ EVENT-DRIVEN, not per-tick: one row per STRATEGY
+        # EVALUATION — fired AND declined — written from main's
+        # dispatch hook after the decision is already made.
+        NotesEngine(store, symbol),
     ]
 
 

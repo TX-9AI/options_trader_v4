@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-123 Python modules across 13 local packages.
+126 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -46,15 +46,15 @@ Change these with the most care; a break here reaches everything downstream.
 | `config.py` | 45 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
 | `utils/time_utils.py` | 18 | alert_manager.py, broker_reconcile.py, check_condor_spec.py, check_exit_executes.py |
 | `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
+| `derived/base.py` | 10 | __init__.py, check_derived_layer.py, counterfactual.py, forks.py |
 | `strategy/base_strategy.py` | 9 | entry_engine.py, gex_pin_butterfly.py, iron_condor_strategy.py, main.py |
 | `data/tasty_client.py` | 8 | candle_feed.py, condor_roll.py, entry_engine.py, exit_engine.py |
-| `derived/base.py` | 8 | __init__.py, check_derived_layer.py, forks.py, indicators.py |
+| `database/trade_logger.py` | 7 | condor_roll.py, counterfactual.py, entry_engine.py, exit_engine.py |
 | `execution/exit_engine.py` | 7 | check_condor_spec.py, check_exit_executes.py, condor_roll.py, entry_snapshot.py |
 | `notifications/alert_manager.py` | 7 | condor_roll.py, entry_engine.py, eod_summary.py, exit_engine.py |
 | `strategy/__init__.py` | 7 | check_condor_spec.py, gex_pin_butterfly.py, iron_condor_strategy.py, runaway_continuation.py |
+| `data/candle_feed.py` | 6 | candle_logger.py, check_ext_polarity.py, check_feed_always_on.py, counterfactual.py |
 | `data/options_chain.py` | 6 | base_strategy.py, gex_data.py, iron_condor_strategy.py, main.py |
-| `database/trade_logger.py` | 6 | condor_roll.py, entry_engine.py, exit_engine.py, main.py |
-| `analysis/__init__.py` | 5 | check_condor_rails.py, check_derived_layer.py, forks.py, main.py |
 
 ## Every module
 
@@ -97,6 +97,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `analysis/orb_engine.py`
 - **calls:** `analysis/signal_journal.py`, `config.py`, `utils/math_utils.py`, `utils/time_utils.py`
 - **called by:** `execution/position_manager.py`, `main.py`, `strategy/base_strategy.py`, `strategy/orb_strategy.py`
+
+### `analysis/order_flow.py`
+- **calls:** (none)
+- **called by:** `derived/counterfactual.py`, `derived/notes.py`
 
 ### `analysis/pitchfork.py`
 - **calls:** `utils/math_utils.py`
@@ -156,7 +160,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/candle_feed.py`
 - **calls:** `config.py`, `data/tasty_client.py`
-- **called by:** `data/candle_logger.py`, `data/market_data.py`, `derived/surface.py`, `tests/check_ext_polarity.py`, `tests/check_feed_always_on.py`
+- **called by:** `data/candle_logger.py`, `data/market_data.py`, `derived/counterfactual.py`, `derived/surface.py`, `tests/check_ext_polarity.py`, `tests/check_feed_always_on.py`
 
 ### `data/candle_logger.py`
 - **calls:** `config.py`, `data/candle_feed.py`
@@ -200,7 +204,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `database/trade_logger.py`
 - **calls:** `config.py`, `utils/time_utils.py`
-- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`
+- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`
 
 ### `debug_status.py`
 - **calls:** `config.py`
@@ -212,7 +216,11 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `derived/base.py`
 - **calls:** (none)
-- **called by:** `derived/__init__.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/snapshot.py`, `derived/surface.py`, `main.py`, `tests/check_derived_layer.py`
+- **called by:** `derived/__init__.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/snapshot.py`, `derived/surface.py`, `main.py`, `tests/check_derived_layer.py`
+
+### `derived/counterfactual.py`
+- **calls:** `analysis/order_flow.py`, `data/candle_feed.py`, `database/trade_logger.py`, `derived/base.py`
+- **called by:** `derived/registry.py`
 
 ### `derived/forks.py`
 - **calls:** `analysis/__init__.py`, `analysis/pitchfork.py`, `derived/base.py`
@@ -226,8 +234,12 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `derived/base.py`
 - **called by:** `derived/registry.py`
 
+### `derived/notes.py`
+- **calls:** `analysis/order_flow.py`, `derived/base.py`
+- **called by:** `derived/registry.py`
+
 ### `derived/registry.py`
-- **calls:** `data/derived_store.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/snapshot.py`, `derived/surface.py`
+- **calls:** `data/derived_store.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/snapshot.py`, `derived/surface.py`
 - **called by:** `main.py`, `tests/check_derived_layer.py`
 
 ### `derived/snapshot.py`

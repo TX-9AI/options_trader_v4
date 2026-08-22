@@ -1685,7 +1685,38 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
     )
 
 
-def _safe_strategy(name: str, fn):
+def _note_evaluation(name: str, ctx, signal) -> None:
+    """r66 — record what this engine SAW and what it decided. Never decides.
+
+    🔴 THE REJECTIONS ARE THE POINT. `fire_snapshot` captures the world when a
+    trade FIRES, but a fired trade is a biased sample of what an engine looked
+    at. Fitting needs both arms — taken AND declined — with the same derived
+    vector on each.
+
+    ⚠️ ON 2026-08-21 THE FLEET DECLINED EVERY SETUP ON EVERY BOX ALL SESSION
+    AND COULD NOT SAY WHY. The signal journal held one event type all day;
+    every other refusal was a debug line. This is the fix for that class.
+
+    ⚠️ WRITTEN AFTER THE DECISION, ALWAYS. A note that could alter an outcome
+    would make the record a participant in what it is measuring.
+    """
+    try:
+        eng = (ctx or {}).get("derived_engines")
+        if not eng:
+            return
+        w = None
+        for e in eng:
+            if getattr(e, "name", "") == "notes":
+                w = e
+                break
+        if w is None:
+            return
+        w.writer.write(name, ctx, fired=signal is not None)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+def _safe_strategy(name: str, fn, ctx=None):
     """v4.9 — run ONE strategy evaluation in isolation.
 
     THE DEFECT (2026-07-30): the dispatch in attempt_new_entry is a bare cascade
@@ -1706,7 +1737,12 @@ def _safe_strategy(name: str, fn):
     never be quiet, but it must not take the rest of the tick with it.
     """
     try:
-        return fn()
+        sig = fn()
+        # r66 — one note per evaluation, fired or not. ⚠️ AFTER fn(), so the
+        # note can never influence what it records.
+        if ctx is not None:
+            _note_evaluation(name, ctx, sig)
+        return sig
     except Exception as exc:                       # noqa: BLE001
         logger.error("%s raised during dispatch — SKIPPED, continuing to the "
                      "next priority; other strategies unaffected. %s: %s",
@@ -2132,7 +2168,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
             chain         = chain,
             macro         = macro,
             current_price = ctx["price"]
-        ))
+        ), ctx)
         if orb_sig:
             signal = orb_sig
             get_orb_engine().mark_triggered()
@@ -2177,7 +2213,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                                     prev_close    = _prev_close,
                                     now_et        = _now_et_hhmm,
                                     chain         = chain,
-                                ))
+                                ), ctx)
         if rc_sig:
             signal = rc_sig
             # ⚠️ THE RETEST IS DISARMED BY THE FIRING ITSELF. The runaway IS the
@@ -2200,7 +2236,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                                     now_et        = _now_et_hhmm,
                                     atr_pct       = _atr_pct,
                                     chain         = chain,
-                                ))
+                                ), ctx)
         if sc_sig:
             signal = sc_sig
 
@@ -2222,7 +2258,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                                     now_et        = _now_et_hhmm,
                                     atm_iv        = _atm_iv,
                                     chain         = chain,
-                                ))
+                                ), ctx)
         if bf_sig:
             signal = bf_sig
 
@@ -2323,7 +2359,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 rails         = _rails,           # PF.5 — None means NO CONDOR
                 session_high  = _sess_hi,
                 session_low   = _sess_lo
-            ))
+            ), ctx)
             # Plan is informational — no order yet. Leg triggers fire on
             # subsequent ticks via check_leg_triggers().
             if plan:
@@ -2346,7 +2382,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
             ms        = ms,
             chain         = chain,
             current_price = ctx["price"]
-        ))
+        ), ctx)
         if leg_signal is not None:
             # Route directly to entry — bypasses normal signal/score path
             # since condor legs are credit spreads with their own P&L math.
@@ -2386,7 +2422,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 session_high  = _tcs_hi,
                 session_low   = _tcs_lo,
                 condor_active = (_iron_condor_strategy.has_active_plan
-                                 or _condor_leg_open_without_plan()))))
+                                 or _condor_leg_open_without_plan()))), ctx)
         if tcs_sig is not None:
             _execute_condor_leg(tcs_sig, state, ctx)
             return
@@ -2873,7 +2909,7 @@ def main_loop(state: BotState):
                         ms        = ms,
                         chain         = ctx.get("chain"),
                         current_price = ctx["price"]
-                    ))
+                    ), ctx)
                     if leg_signal is not None:
                         _execute_condor_leg(leg_signal, state, ctx)
             else:
