@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-warehouse/self_close.py  v1.0
+warehouse/self_close.py  v1.1
 The box closes ITSELF: drain to S3, verify it landed, then shut down.
+
+v1.1  2026-08-25  Runs the RETENTION PURGE after verification and before the
+halt. Placed there deliberately: the purge must never touch unverified data,
+and a held box never reaches that line, so the guarantee falls out of the
+ordering rather than needing its own check. Dry unless OT_RETENTION_APPLY=1.
 
 v1.0  2026-08-25  Operator's design, and it is a better architecture than the
 control-only one it replaces:
@@ -101,7 +106,24 @@ def main(argv=None) -> int:
     if drift:
         _log("shortfall is COUNTER DRIFT — objects present; proceeding")
 
-    # ── 3. halt ─────────────────────────────────────────────────────────────
+    # ── 3. trim expired local data ──────────────────────────────────────────
+    # 🔑 HERE, AND NOWHERE ELSE, BECAUSE VERIFICATION HAS JUST SUCCEEDED. The
+    # purge's own rule is "never delete unverified data" — placing it after the
+    # SHORT check makes that fall out of the ORDERING instead of needing its
+    # own guard. A held box never reaches this line, so a box whose push failed
+    # keeps every local row.
+    # ⚠️ DRY UNLESS `OT_RETENTION_APPLY=1`. The policy numbers are arithmetic
+    # from EMA_ANCHOR, not measurements; a week of dry runs says whether they
+    # are right before anything is at risk.
+    # ⚠️ AND IT NEVER BLOCKS THE HALT. A purge failure is reported and stepped
+    # over — the machine still comes down, which is what ends the bill.
+    try:
+        from warehouse import retention_purge
+        retention_purge.main([])
+    except Exception as exc:                                    # noqa: BLE001
+        _log(f"retention purge skipped: {exc}")
+
+    # ── 4. halt ─────────────────────────────────────────────────────────────
     # ⚠️ `shutdown` NOT `systemctl stop` — the box stops the MACHINE, which is
     # what actually ends the EC2 bill. Stopping services would leave it running
     # and idle, which is the expensive half of the old failure mode.

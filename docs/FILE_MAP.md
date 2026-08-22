@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-134 Python modules across 13 local packages.
+135 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -584,14 +584,18 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/__init__.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** `warehouse/self_close.py`
+
+### `warehouse/retention_purge.py`
+- **calls:** (none)
+- **called by:** `warehouse/self_close.py`
 
 ### `warehouse/s3_push.py`
 - **calls:** (none)
 - **called by:** (entry point)
 
 ### `warehouse/self_close.py`
-- **calls:** `config.py`, `notifications/alert_manager.py`
+- **calls:** `config.py`, `notifications/alert_manager.py`, `warehouse/__init__.py`, `warehouse/retention_purge.py`
 - **called by:** (nothing - orphan or leaf)
 
 <!-- REMOVED-ON-PURPOSE -->
