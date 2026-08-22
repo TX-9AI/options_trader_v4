@@ -1,5 +1,13 @@
 """
-data/candle_feed.py  v4.6
+data/candle_feed.py  v4.7
+v4.7  2026-08-25  OPENING-RANGE RESCUE. If today's 09:30 5m bar is
+    missing between 09:36 and the 11:00 ORB cutoff, UNSUBSCRIBE 5m and
+    resubscribe it from the open — once per session, guarded by date.
+    On 2026-08-21 the feed ate the open and the range only established
+    at 10:01; get_orb_range fails SOFT in that case, carrying
+    YESTERDAY'S range as EXPIRED, which is why it took an hour to
+    notice. Unsubscribe-first is deliberate: two live subscriptions on
+    one tenor would race to write the same rows.
 v4.6  2026-08-22  MANIFOLD PART 2 — the five event types this feed
     never asked for are subscribed and housed: TimeAndSale (prints,
     WITH aggressor_side — buy vs sell initiated, real order flow),
@@ -888,6 +896,11 @@ class CandleFeed:
         self._greeks_series_buf: List[tuple] = []
         self._quote_series_buf: List[tuple] = []
         # MANIFOLD PART 2 — one append-buffer per new event type.
+        # r72 — the opening-range rescue fires AT MOST ONCE per session.
+        # ⚠️ A RETRY LOOP HERE WOULD BE WORSE THAN THE BUG. Fifteen boxes
+        # re-subscribing 5m every tick during an outage is a self-inflicted
+        # stampede on the same socket that is already struggling.
+        self._orb_rescue_done_for: str = ""
         self._prints_buf: List[tuple] = []
         self._trade_buf: List[tuple] = []
         self._summary_buf: List[tuple] = []
@@ -1114,6 +1127,79 @@ class CandleFeed:
             _g(getattr(g, "theta", None)), _g(getattr(g, "rho", None)),
             _g(getattr(g, "vega", None)),
         ))
+
+    # ── 🔴 r72 — OPENING-RANGE RESCUE ───────────────────────────────────
+    # WHY THIS EXISTS. On 2026-08-21 the feed ate the open: overnight "no 5m
+    # data returned" warnings, and the ORB range only ESTABLISHED at 10:01-10:03
+    # ET after a manual fix. ORB entries die at 11:00, so losing the open costs
+    # the WHOLE ORB DAY — and ORB is the flagship trade (96% win, +$30,696,
+    # worst loss -$16). Nothing in code prevented a repeat.
+    #
+    # ⚠️ `get_orb_range` FAILS SOFT AND THAT IS THE TRAP. With today's 09:30 bar
+    # absent it falls through to EXPIRED carrying YESTERDAY'S RANGE — a
+    # plausible-looking range for the wrong day. It does not raise, it does not
+    # warn loudly. That is why the outage took until 10:01 to notice.
+    #
+    # ⚠️ UNSUBSCRIBE FIRST, THEN RESUBSCRIBE — operator's requirement, and it
+    # matters: leaving the original 5m subscription warm while adding a second
+    # for the same tenor means two live subscriptions racing to write the same
+    # rows. One in, one out.
+    #
+    # ⚠️ ONCE PER SESSION, GUARDED BY DATE. Worst case is all 15 boxes doing
+    # this at the same moment during an unusual event; one extra subscribe each
+    # is survivable, a retry loop is not.
+    async def _maybe_rescue_opening_range(self, streamer) -> bool:
+        """If today's 09:30 5m bar is missing after the window, re-pull it.
+
+        Returns True if a rescue was attempted. Never raises.
+        """
+        try:
+            now = datetime.now(ET)
+            today = now.date().isoformat()
+            if self._orb_rescue_done_for == today:
+                return False
+            # Only between 09:36 (the bar has had a minute to arrive) and the
+            # 11:00 ORB cutoff — after that the rescue cannot help anything.
+            if not (now.weekday() < 5
+                    and ((now.hour == 9 and now.minute >= 36)
+                         or (10 <= now.hour < 11))):
+                return False
+            row = self.store.conn.execute(
+                "SELECT COUNT(*) FROM candles WHERE symbol=? AND interval='5m'"
+                " AND ts_epoch_ms >= ?",
+                (INSTRUMENT, int(datetime.combine(
+                    now.date(), dtime(9, 30), tzinfo=ET).timestamp() * 1000))
+            ).fetchone()
+            if row and row[0]:
+                return False                    # the bar is there; nothing to do
+
+            self._orb_rescue_done_for = today   # set BEFORE the attempt
+            logger.warning("ORB RESCUE: today's 09:30 5m bar is MISSING at %s "
+                           "— resubscribing 5m from the open. get_orb_range "
+                           "would otherwise carry YESTERDAY's range as EXPIRED.",
+                           now.strftime("%H:%M:%S"))
+            start = datetime.combine(now.date(), dtime(9, 30), tzinfo=ET)
+            try:
+                await streamer.unsubscribe_candle(self.dx_symbol, "5m")
+                logger.info("ORB RESCUE: unsubscribed %s 5m", self.dx_symbol)
+            except Exception as exc:                            # noqa: BLE001
+                # ⚠️ NOT FATAL, BUT NAMED. If the unsubscribe fails the
+                # resubscribe below may leave two live subscriptions for one
+                # tenor, so the operator needs to see it rather than have it
+                # swallowed.
+                logger.warning("ORB RESCUE: unsubscribe failed (%s) — "
+                               "resubscribing anyway; watch for duplicate 5m",
+                               _explain_exc(exc))
+            await streamer.subscribe_candle(
+                [self.dx_symbol], "5m", start_time=start,
+                extended_trading_hours=False)
+            logger.warning("ORB RESCUE: resubscribed %s 5m from %s",
+                           self.dx_symbol, start.isoformat())
+            return True
+        except Exception as exc:                                # noqa: BLE001
+            logger.error("ORB RESCUE failed: %s — the feed is unaffected",
+                         _explain_exc(exc))
+            return False
 
     # ── MANIFOLD PART 2 HANDLERS ────────────────────────────────────────
     # ⚠️ EVERY FIELD THE EVENT CARRIES IS BUFFERED. No selection at capture:
@@ -1515,6 +1601,11 @@ class CandleFeed:
                         now = _time.monotonic()
                         if now - last_flush >= FLUSH_INTERVAL_S:
                             await self._reconcile_chain_subs(streamer)
+                            # r72 — rides the flush cadence, so the check costs
+                            # one indexed COUNT every ~15s and only inside the
+                            # 09:36-11:00 window. Self-disarming after one
+                            # attempt per date.
+                            await self._maybe_rescue_opening_range(streamer)
                             n = self._flush()
                             last_flush = now
                             if n:
