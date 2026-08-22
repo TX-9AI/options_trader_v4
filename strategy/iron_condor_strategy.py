@@ -324,6 +324,52 @@ class IronCondorStrategy(BaseOptionsStrategy):
     def __init__(self):
         self._plan: Optional[CondorPlan] = None
         self._orphan_said: bool = False   # F5: warn once, not every tick
+        # r70 — the plan ledger's id for the CURRENT plan, or None.
+        # ⚠️ THE PLAN LIVED ONLY IN MEMORY UNTIL NOW. A restart at LEG1_FILLED
+        # left a leg live at the broker with no memory that a second was ever
+        # planned — the position existed and the intent did not.
+        self._plan_id: Optional[str] = None
+
+    # ── r70 — LEDGER HOOKS. Bookkeeping must NEVER affect a live position. ──
+    # Every call is wrapped and every failure is swallowed: a ledger write that
+    # could raise into the condor's state machine would make the RECORD a
+    # participant in the trade, which is the opposite of its purpose.
+    def _ledger(self):
+        try:
+            from derived.registry import plan_ledger
+            from config import INSTRUMENT
+            return plan_ledger(INSTRUMENT)
+        except Exception:                                       # noqa: BLE001
+            return None
+
+    def _ledger_open(self, plan, ctx=None):
+        try:
+            led = self._ledger()
+            if led is None:
+                return
+            self._plan_id = led.open_plan(
+                "IronCondorStrategy", "DECIDED", ctx or {},
+                short_strike=getattr(plan, "short_call_strike", None),
+                long_strike=getattr(plan, "long_call_strike", None),
+                short_put_strike=getattr(plan, "short_put_strike", None),
+                long_put_strike=getattr(plan, "long_put_strike", None),
+                underlying_at_decision=getattr(plan, "underlying_at_decision", None),
+                expected_move=getattr(plan, "expected_move", None))
+        except Exception:                                       # noqa: BLE001
+            pass
+
+    def _ledger_move(self, state, reason="", trade_id="", plan=None):
+        try:
+            led = self._ledger()
+            if led is None or not self._plan_id:
+                return
+            led.transition(self._plan_id, state, reason, trade_id,
+                           max_price=getattr(plan, "max_price_seen", None),
+                           min_price=getattr(plan, "min_price_seen", None))
+            if state in ("COMPLETE", "CANCELLED", "EXPIRED"):
+                self._plan_id = None
+        except Exception:                                       # noqa: BLE001
+            pass
         self._last_reset_date: Optional[str] = None
 
     @property
@@ -544,10 +590,16 @@ class IronCondorStrategy(BaseOptionsStrategy):
                current_price: float,
                rails: Optional[dict] = None,
                session_high: Optional[float] = None,
-               session_low: Optional[float] = None) -> Optional[CondorPlan]:
+               session_low: Optional[float] = None,
+               ctx: Optional[dict] = None) -> Optional[CondorPlan]:
         """
         Evaluate whether to plan an iron condor. If conditions are met,
         identify both vertical spreads and set up the plan. No orders placed.
+
+        `ctx` is OPTIONAL and used only to record WHY this plan was made — the
+        derived vector at decision time — into the plan ledger.
+        ⚠️ IT MUST STAY OPTIONAL. A required argument here would make the
+        bookkeeping a precondition of the trade.
         Returns the plan if one was created, None otherwise.
         """
         self._reset_if_new_day()
@@ -742,6 +794,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
         )
 
         self._plan = plan
+        self._ledger_open(plan, ctx)
 
         logger.info(
             f"\U0001F985 CONDOR PLANNED: "
@@ -839,6 +892,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
                     self._approach_text(plan, _a))
         self._journal_abandon(plan, _a, "cutoff")
         plan.state = CondorState.CANCELLED
+        self._ledger_move("CANCELLED", "cancelled", plan=plan)
         self._plan = None
         return None
 
@@ -925,10 +979,12 @@ class IronCondorStrategy(BaseOptionsStrategy):
             if plan.state == CondorState.DECIDED:
                 logger.info("Condor: past cutoff, Leg 1 never fired — abandoned")
                 plan.state = CondorState.EXPIRED
+                self._ledger_move("EXPIRED", "past_cutoff", plan=plan)
                 self._plan = None
             elif plan.state == CondorState.LEG1_FILLED:
                 logger.info("Condor: past cutoff, Leg 2 never fired — Leg 1 standalone")
                 plan.state = CondorState.COMPLETE
+                self._ledger_move("COMPLETE", "leg2_never_fired", plan=plan)
             return None
 
         # ── INDEPENDENT LEGS (v-indep-legs 2026-07-28) ───────────────────────
@@ -975,6 +1031,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
         plan.pending_side = ""
         if is_leg1:
             plan.state         = CondorState.LEG1_FILLED
+            self._ledger_move("LEG1_FILLED", plan=plan)
             plan.leg1_credit   = credit
             plan.leg1_short    = short_contract
             plan.leg1_long     = long_contract

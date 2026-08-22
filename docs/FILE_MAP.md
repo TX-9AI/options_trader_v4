@@ -244,7 +244,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `derived/registry.py`
 - **calls:** `data/derived_store.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/plan_ledger.py`, `derived/snapshot.py`, `derived/surface.py`
-- **called by:** `main.py`, `status.py`, `tests/check_derived_layer.py`
+- **called by:** `main.py`, `status.py`, `strategy/iron_condor_strategy.py`, `tests/check_derived_layer.py`
 
 ### `derived/snapshot.py`
 - **calls:** `derived/base.py`
@@ -383,7 +383,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `main.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/iron_condor_strategy.py`
-- **calls:** `analysis/market_state.py`, `analysis/signal_journal.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`
+- **calls:** `analysis/market_state.py`, `analysis/signal_journal.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `derived/registry.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`
 - **called by:** `main.py`
 
 ### `strategy/orb_strategy.py`

@@ -844,6 +844,17 @@ class BotState:
         # r63 — the derived engines, built ONCE per process. [] when the
         # derived store will not open, which is a normal degraded state and
         # not an error: derivers are contributors, never gates.
+        self._orb_plan_id = None
+        # r70 — any plan left LIVE by a dead process is recorded at boot.
+        # ⚠️ LEG1_FILLED IS DELIBERATELY NOT WIPED — a leg is live at the
+        # broker, so the intent must survive for the reconciler to act on.
+        try:
+            from derived.registry import plan_ledger as _plg
+            _led = _plg(INSTRUMENT)
+            if _led is not None:
+                _led.mark_restart_wipe()
+        except Exception:                                      # noqa: BLE001
+            pass
         try:
             from derived.registry import build_engines
             self.derived_engines = build_engines(INSTRUMENT)
@@ -1102,6 +1113,44 @@ def run_analysis(state: BotState) -> dict:
     # v6.18 — ctx was bound above; add the last two members and return it.
     ctx["macro"] = macro
     ctx["orb"]   = orb
+
+    # ── r70 — ORB CONFIRMATION IS A PLAN, AND IT IS RECORDED ────────────────
+    # 🔴 ON 2026-08-21 CRM, GOOGL, UNH AND SPX ALL CONFIRMED BREAK+RETEST
+    # BETWEEN 10:20 AND 10:24 AND NONE OF THEM TRADED. The 10:39 deploy
+    # erased in-process confirmation state — v3's orb_state.json write-only
+    # lesson recurring — and ORB dies at 11:00, so there was no second chance.
+    # A confirmed break+retest IS a plan waiting on a trigger, so it belongs in
+    # the same ledger with the same lifecycle.
+    # ⚠️ RECORDED, NOT RESTORED. The row makes the loss COUNTABLE; resuming a
+    # stale confirmation blind after an outage is a different decision and
+    # needs re-qualification against the current tape.
+    try:
+        _st = str(getattr(orb, "state", "") or "")
+        if _st in ("ORBState.OPEN_LONG", "ORBState.OPEN_SHORT",
+                   "OPEN_LONG", "OPEN_SHORT"):
+            if getattr(state, "_orb_plan_id", None) is None:
+                from derived.registry import plan_ledger as _plg
+                _led = _plg(INSTRUMENT)
+                if _led is not None:
+                    state._orb_plan_id = _led.open_plan(
+                        "ORBStrategy", "CONFIRMED", ctx,
+                        direction=("LONG" if "LONG" in _st else "SHORT"),
+                        trigger_price=getattr(orb, "orb_high", None)
+                        if "LONG" in _st else getattr(orb, "orb_low", None),
+                        underlying_at_decision=ctx.get("price"))
+        elif getattr(state, "_orb_plan_id", None) is not None:
+            # The engine left the confirmed state without a fill: the setup
+            # expired or was invalidated. ⚠️ RECORDED WITH ITS REASON so
+            # "confirmed but never traded" becomes a countable population.
+            from derived.registry import plan_ledger as _plg
+            _led = _plg(INSTRUMENT)
+            if _led is not None:
+                _led.transition(state._orb_plan_id, "EXPIRED",
+                                str(getattr(orb, "invalidation_reason", "")
+                                    or "left_confirmed_state"))
+            state._orb_plan_id = None
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("orb plan ledger: %s", exc)
     # PHASE B (r58): commit THIS tick's direction for the NEXT tick's gap
     try:
         state.prev_trend_direction = getattr(ctx.get("trend"), "overall_direction", "") or ""
@@ -2372,8 +2421,8 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 current_price = ctx["price"],
                 rails         = _rails,           # PF.5 — None means NO CONDOR
                 session_high  = _sess_hi,
-                session_low   = _sess_lo
-            ), ctx)
+                session_low   = _sess_lo,
+            ctx=ctx), ctx)
             # Plan is informational — no order yet. Leg triggers fire on
             # subsequent ticks via check_leg_triggers().
             if plan:
