@@ -1266,6 +1266,20 @@ def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> MarketSta
     return ms
 
 
+# ── 🔴 r67 (2026-08-25) — RESTORED, SAME CLASS AS THE alert_manager CRASH ────
+# Both sets back these functions' "log once per reason per process" guards, and
+# both were declared `global` inside the function while existing nowhere at
+# module level. Unlike the alert_manager NameError — which fired on EVERY boot
+# and crash-looped all 15 boxes — these fire only the FIRST TIME A CAPTURE
+# FAILS, inside the trade-write path. That is strictly worse to debug: the
+# failure needs another failure to reveal it, and it lands mid-fill.
+# ⚠️ FOUND BY AST SWEEP, NOT BY A TEST. `import main` succeeds; the name only
+# resolves at CALL time. That is why tests/check_singletons.py now EXECUTES
+# accessors instead of importing modules.
+_contract_warned: set = set()
+_snapshot_warned: set = set()
+
+
 def _capture_entry_contract(ctx: dict, record: dict) -> bool:
     """v5.5 (N.9) — persist the CONTRACT's own state at entry.
 

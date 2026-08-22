@@ -459,6 +459,28 @@ class AlertManager:
             f"{session_losses} losses — {reason}"
         )
 
+# ── 🔴 r67 (2026-08-25) — RESTORED. ITS ABSENCE CRASH-LOOPED THE ENTIRE FLEET.
+# `get_alert_manager()` declares `global _alert_manager` and reads it before
+# assignment, so without this line the FIRST call raises
+#     NameError: name '_alert_manager' is not defined
+# and `main()` calls it during startup, before the tick loop. Every box died
+# 1.0s after boot and systemd restarted it forever: AVGO showed NRestarts=23,
+# ActiveState=activating, SubState=auto-restart.
+#
+# ⚠️ THE OUTAGE PRESENTED AS "ACTIVATING", WHICH READS LIKE A SLOW START.
+# It was auto-restart — a crash loop wearing the costume of a boot. The
+# operator spotted it from two screenshots eight minutes apart showing the
+# same state; nothing else reported it.
+#
+# ⚠️ HOW IT WENT: collateral from the r65 exorcism, which deleted two alert
+# methods from this file. A module-level singleton declaration sitting next to
+# deleted code is exactly what a sweep removes without noticing — and NO CHECK
+# CAUGHT IT, because `import alert_manager` succeeds fine. The NameError only
+# exists at CALL time. `tests/check_singletons.py` now executes every
+# get_*() accessor for this reason.
+_alert_manager: "AlertManager | None" = None
+
+
 def get_alert_manager() -> AlertManager:
     global _alert_manager
     if _alert_manager is None:

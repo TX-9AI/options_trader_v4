@@ -380,7 +380,14 @@ TCS_WING_WIDTH_QQQ          = float(os.environ.get("OT_TCS_WING_QQQ", "5"))
 # different document. Default now matches the stated design: OFF. Turning it
 # on requires the env var AND a v4 spec in TRADES.md — the flag is not the gap;
 # the missing spec is.
-TREND_CREDIT_ACTIVE         = os.environ.get("OT_TCS_ACTIVE", "0") == "1"
+# 🔴 DEFAULT IS ON. Operator has authorised TC.6 three separate times; the
+# default of "0" was a SILENT ENCODING nobody chose — the strategy returned
+# None on its FIRST line, before any logging, so it was invisible in the log
+# and looked like "evaluated and declined" rather than "switched off".
+# ⚠️ SPEC.1 CLASS. An operator decision must not live in an env-var default
+# that no surface reports. If TC.6 is ever to be disabled again it is an
+# explicit OT_TCS_ACTIVE=0, not an absence.
+TREND_CREDIT_ACTIVE         = os.environ.get("OT_TCS_ACTIVE", "1") == "1"
 # ── TC.6 ENTRY GATES (2026-08-14 HOTFIX — it rapid-fired the whole fleet) ─────
 # Observed 10:02 ET on 08-14: NVDA sold a $5-wide for $0.06, PLTR a $6-wide for
 # $0.08, and every box re-entered seconds after a nickel close.
