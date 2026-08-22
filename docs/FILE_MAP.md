@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-110 Python modules across 12 local packages.
+115 Python modules across 12 local packages.
 
 ## How to read this repo - orientation
 
@@ -60,7 +60,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/__init__.py`
 - **calls:** (none)
-- **called by:** `main.py`, `risk/setup_scorer.py`, `tests/check_condor_rails.py`
+- **called by:** `main.py`, `risk/setup_scorer.py`, `tests/check_condor_rails.py`, `tests/check_derived_layer.py`
 
 ### `analysis/chain_snapshot.py`
 - **calls:** `config.py`
@@ -110,6 +110,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `analysis/pitchfork.py`
 - **called by:** `main.py`, `tests/check_condor_rails.py`
 
+### `analysis/second_order.py`
+- **calls:** (none)
+- **called by:** `tests/check_derived_layer.py`
+
 ### `analysis/signal_journal.py`
 - **calls:** `config.py`
 - **called by:** `analysis/orb_engine.py`, `main.py`, `risk/setup_scorer.py`, `strategy/iron_condor_strategy.py`
@@ -138,6 +142,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `config.py`, `utils/math_utils.py`
 - **called by:** `main.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`
 
+### `analysis/volatility_measures.py`
+- **calls:** (none)
+- **called by:** `tests/check_derived_layer.py`
+
 ### `config.py`
 - **calls:** (none)
 - **called by:** `analysis/chain_snapshot.py`, `analysis/liquidity_mapper.py`, `analysis/orb_engine.py`, `analysis/signal_journal.py`, `analysis/structure_analyzer.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `data/candle_feed.py`, `data/candle_logger.py`, `data/data_cache.py`, `data/macro_data.py`, `data/market_data.py`, `data/options_chain.py`, `data/tasty_client.py`, `database/trade_logger.py`, `debug_status.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/limit_ladder.py`, `execution/order_confirm.py`, `execution/position_manager.py`, `execution/tick_size.py`, `main.py`, `notifications/alert_manager.py`, `notifications/telegram_sender.py`, `query.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `status.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `strategy/relaxed.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `stress_theta_bleed.py`, `tests/check_condor_rails.py`, `tests/check_ext_polarity.py`, `tests/eod_compare.py`, `utils/time_utils.py`
@@ -157,6 +165,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `data/data_cache.py`
 - **calls:** `config.py`, `data/market_data.py`
 - **called by:** `main.py`, `shadow/observer.py`
+
+### `data/derived_store.py`
+- **calls:** (none)
+- **called by:** `tests/check_derived_layer.py`
 
 ### `data/gex_data.py`
 - **calls:** `data/options_chain.py`
@@ -370,6 +382,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/check_derived_layer.py`
+- **calls:** `analysis/__init__.py`, `analysis/second_order.py`, `analysis/volatility_measures.py`, `data/derived_store.py`
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/check_dispatch.py`
 - **calls:** `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
 - **called by:** (nothing - orphan or leaf)
@@ -459,6 +475,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/tine_order_study.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tools/manifold_status.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 

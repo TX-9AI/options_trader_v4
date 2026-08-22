@@ -1,5 +1,16 @@
 """
-data/candle_feed.py  v4.4
+data/candle_feed.py  v4.5
+v4.5  2026-08-22  THE MANIFOLD. Capture everything, give it a home.
+    (a) greeks_series + quote_series — ALL 13 Greeks fields and ALL 12 Quote
+        fields incl. bid_size/ask_size, append-only, PK (symbol, ts).
+        chain_marks is UNCHANGED and stays the fast current-value read.
+        CHARM and VANNA are second-order derivatives of delta OVER A SERIES,
+        so a last-write-wins row made both uncomputable.
+    (b) extended candles on ALL FIVE tenors, not just 1h. Four fifths of the
+        overnight tape was never requested.
+    (c) VIX at full tenor parity (was 1m+1d). Capture on all 15 boxes,
+        publish to S3 from SPX only.
+    Series writes are wrapped: they can never stall the raw tape.
 v4.4  2026-08-21  `_is_ext_of` polarity INVERTED and fixed. `tho=true` marks the
     RTH echo, not the extended one. 1m/5m/15m/1d were dropped outright (no
     (sym,tf,True) key exists for them) and the two 1h streams were swapped.
@@ -370,6 +381,57 @@ class FeedStore:
                 delta REAL, gamma REAL, theta REAL, vega REAL, iv REAL,
                 updated_epoch REAL NOT NULL
             );""")
+
+        # ── 🔴 THE MANIFOLD (2026-08-22) — FULL-FIDELITY SERIES HOMES ────────
+        # Operator's governing rule: **STOP DISCARDING INFORMATION.** See
+        # docs/FEED_MANIFOLD.md. `chain_marks` above is PRIMARY KEY
+        # (streamer_symbol) — last-write-wins — so ~250 chain symbols ticking
+        # all session each overwrote ONE row. The entire intraday evolution of
+        # the greek surface was captured and then destroyed.
+        #
+        # ⚠️ chain_marks IS UNCHANGED AND STAYS. It is the tick loop's fast
+        # current-value read; every existing consumer keeps working untouched.
+        # These tables are ADDITIVE. That is FEED.2's lesson applied on purpose
+        # instead of after the fact.
+        #
+        # ⚠️ EVERY FIELD THE EVENT CARRIES IS STORED. Greeks has 13 and we kept
+        # 7; Quote has 12 and we kept 2 — losing bid_size/ask_size, which is
+        # depth at the touch and the signal FRC.1 needed and never had.
+        #
+        # 🔴 CHARM AND VANNA LIVE HERE. Both are second-order derivatives of
+        # delta OVER A SERIES — charm = dDelta/dt, vanna = dDelta/dVol — so
+        # NEITHER was computable from a single overwritten row. For 0DTE charm
+        # is the mechanism behind pin; a 0DTE book that cannot compute it is
+        # asserting pin risk rather than measuring it. Storing `delta`,
+        # `volatility` and `time` per strike per tick makes both a finite
+        # difference over this table.
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS greeks_series (
+                streamer_symbol TEXT NOT NULL,
+                ts_epoch        REAL NOT NULL,
+                event_time      REAL, event_flags INTEGER, idx REAL,
+                ev_time         REAL, sequence INTEGER,
+                price REAL, volatility REAL,
+                delta REAL, gamma REAL, theta REAL, rho REAL, vega REAL,
+                PRIMARY KEY (streamer_symbol, ts_epoch)
+            );""")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_greeks_series_ts "
+            "ON greeks_series(ts_epoch)")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS quote_series (
+                streamer_symbol TEXT NOT NULL,
+                ts_epoch        REAL NOT NULL,
+                event_time      REAL, sequence INTEGER, time_nano_part INTEGER,
+                bid_time REAL, bid_exchange_code TEXT,
+                ask_time REAL, ask_exchange_code TEXT,
+                bid_price REAL, ask_price REAL,
+                bid_size REAL, ask_size REAL,
+                PRIMARY KEY (streamer_symbol, ts_epoch)
+            );""")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_quote_series_ts "
+            "ON quote_series(ts_epoch)")
         self.conn.commit()
 
     def upsert_candles(self, rows: List[Tuple]):
@@ -503,6 +565,33 @@ class FeedStore:
                 "vega=excluded.vega, iv=excluded.iv, "
                 "updated_epoch=excluded.updated_epoch", rows)
 
+    # ── MANIFOLD WRITERS (2026-08-22) — append-only, every field ────────────
+    # ⚠️ INSERT OR IGNORE, not UPSERT. The PK is (symbol, ts) so a duplicate
+    # tick is a no-op rather than a silent overwrite — the whole point of these
+    # tables is that nothing is ever destroyed.
+    def append_greeks_series(self, rows):
+        """rows: 13-tuples, full Greeks fidelity. See docs/FEED_MANIFOLD.md."""
+        if not rows:
+            return
+        with self._lock:
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO greeks_series (streamer_symbol, ts_epoch,"
+                " event_time, event_flags, idx, ev_time, sequence, price,"
+                " volatility, delta, gamma, theta, rho, vega)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    def append_quote_series(self, rows):
+        """rows: 13-tuples, full Quote fidelity INCLUDING bid_size/ask_size."""
+        if not rows:
+            return
+        with self._lock:
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO quote_series (streamer_symbol, ts_epoch,"
+                " event_time, sequence, time_nano_part, bid_time,"
+                " bid_exchange_code, ask_time, ask_exchange_code, bid_price,"
+                " ask_price, bid_size, ask_size)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
     def clear_chain_marks(self):
         with self._lock:
             self.conn.execute("DELETE FROM chain_marks")
@@ -554,7 +643,16 @@ class CandleFeed:
             # symbol+interval twice and the second registration used to
             # overwrite the first. Three-tuple, one entry per subscription.
             self.symbol_map[(self.dx_symbol, tf, False)] = INSTRUMENT
-        for tf in VIX_INTERVALS:
+        # ── 🔴 MANIFOLD (2026-08-22) — VIX AT FULL TENOR PARITY ──────────────
+        # Was `VIX_INTERVALS = ("1m","1d")` — 2 of 5. VIX feeds macro,
+        # vol_state and SessionGuard's crisis lockout, and none of them could
+        # ever see a 5m/15m/1h VIX because it was never requested.
+        # ⚠️ CAPTURE ON ALL 15 BOXES, PUBLISH FROM SPX ONLY. VIX is the one
+        # fleet-wide duplicate (traced: each box subscribes its own instrument
+        # plus VIX, nothing else). It is needed locally everywhere and is
+        # identical everywhere, so the S3 push is SPX's job — operator's call,
+        # 2026-08-22. See docs/FEED_MANIFOLD.md.
+        for tf in TIMEFRAMES.keys():
             self.subs.append((VIX_SYMBOL, tf, _backfill_start(tf), False))
             self.symbol_map[(VIX_SYMBOL, tf, False)] = "VIX"
 
@@ -577,10 +675,29 @@ class CandleFeed:
         # would change shape overnight with nothing announcing it. This lands
         # under its OWN store symbol so **no existing consumer moves at all**;
         # only the named-level frame reads it.
+        # ── 🔴 MANIFOLD (2026-08-22) — EXTENDED ON EVERY TENOR, NOT JUST 1h ──
+        # The block above is the FEED.2 finding and it is still correct; what
+        # was wrong is that it was applied to ONE tenor. 1h got an extended
+        # twin because LIQ.6 starved and noticed. 1m/5m/15m/1d never had one —
+        # so four fifths of the overnight tape had no home and was simply not
+        # requested.
+        # ⚠️ THIS IS THE CAPTURE-ON-DEMAND PATTERN ITSELF. Operator, 2026-08-22:
+        # every fix in this repo "had to do with unlocking one feed store
+        # artifact at a time until something started working, where we should
+        # have started with subscribe to everything, find a place for it, and
+        # then if we need it, it's there." A consumer cannot starve on data
+        # that was never conditional.
+        # ⚠️ STILL SEPARATE STORE SYMBOLS — the reasoning above holds for all
+        # five: extended bars land under SYM_EXT/interval, so NO existing
+        # consumer moves. The RTH series stay byte-identical.
+        # ⚠️ FAILS OPEN PER TENOR. If an entitlement does not cover extended on
+        # some tenor, that ONE subscription logs SUBSCRIBE FAILED and the rest
+        # continue — the loop that opens these already guarantees it.
         if EXT_1H_ENABLED:
-            self.subs.append((self.dx_symbol, EXT_INTERVAL,
-                              _backfill_start(EXT_INTERVAL), True))
-            self.symbol_map[(self.dx_symbol, EXT_INTERVAL, True)] = EXT_STORE_SYMBOL
+            for tf in TIMEFRAMES.keys():
+                self.subs.append((self.dx_symbol, tf,
+                                  _backfill_start(tf), True))
+                self.symbol_map[(self.dx_symbol, tf, True)] = EXT_STORE_SYMBOL
         # ── v3.16 — COLLISION GUARD. REFUSE TO START ON A DUPLICATE ROUTE ───
         # The FEED.2 defect was not that someone wrote a wrong key; it was that
         # TWO subscriptions could legally resolve to the SAME store target and
@@ -631,6 +748,12 @@ class CandleFeed:
         self._chain_subscribed: set = set()
         self._quotes_buf: Dict[str, tuple] = {}    # sym -> (sym,bid,ask,epoch)
         self._greeks_buf: Dict[str, tuple] = {}    # sym -> (sym,d,g,t,v,iv,epoch)
+        # MANIFOLD (2026-08-22) — LISTS, not dicts. The two buffers above are
+        # keyed by symbol precisely so the newest tick REPLACES the previous
+        # one; that is correct for a current-value cache and fatal for history.
+        # These append, so every tick survives to the flush.
+        self._greeks_series_buf: List[tuple] = []
+        self._quote_series_buf: List[tuple] = []
 
     def _interval_of(self, event_symbol: str) -> Optional[str]:
         """Map DXFeed's echoed candle symbol back to OUR config timeframe key.
@@ -806,7 +929,24 @@ class CandleFeed:
             ask = float(q.ask_price or 0)
         except (TypeError, ValueError):
             return
-        self._quotes_buf[sym] = (sym, bid, ask, _time.time())
+        now = _time.time()
+        self._quotes_buf[sym] = (sym, bid, ask, now)
+        # MANIFOLD — full fidelity alongside the fast path. Nothing dropped.
+        def _f(v):
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+        self._quote_series_buf.append((
+            sym, now, _f(getattr(q, "event_time", None)),
+            getattr(q, "sequence", None), getattr(q, "time_nano_part", None),
+            _f(getattr(q, "bid_time", None)),
+            getattr(q, "bid_exchange_code", None),
+            _f(getattr(q, "ask_time", None)),
+            getattr(q, "ask_exchange_code", None),
+            bid, ask,
+            _f(getattr(q, "bid_size", None)), _f(getattr(q, "ask_size", None)),
+        ))
 
     def _on_greeks(self, g: Greeks):
         sym = getattr(g, "event_symbol", "") or ""
@@ -819,6 +959,22 @@ class CandleFeed:
         except (TypeError, ValueError):
             return
         self._greeks_buf[sym] = row
+        # MANIFOLD — all 13 fields. `volatility`, `rho` and `price` were being
+        # thrown away; volatility is the smile and rho is simply free here.
+        def _g(v):
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+        self._greeks_series_buf.append((
+            sym, _time.time(), _g(getattr(g, "event_time", None)),
+            getattr(g, "event_flags", None), _g(getattr(g, "index", None)),
+            _g(getattr(g, "time", None)), getattr(g, "sequence", None),
+            _g(getattr(g, "price", None)), _g(getattr(g, "volatility", None)),
+            _g(getattr(g, "delta", None)), _g(getattr(g, "gamma", None)),
+            _g(getattr(g, "theta", None)), _g(getattr(g, "rho", None)),
+            _g(getattr(g, "vega", None)),
+        ))
 
     async def _reconcile_chain_subs(self, streamer):
         """Every flush cycle: make the socket's Greeks/Quote subscriptions match
@@ -864,6 +1020,22 @@ class CandleFeed:
         self._greeks_buf.clear()
         self.store.upsert_chain_quotes(q)
         self.store.upsert_chain_greeks(g)
+        # ── MANIFOLD (2026-08-22) — the full-fidelity series ride the same
+        # flush. Taken and cleared BEFORE the write so a raising writer cannot
+        # make the buffer grow without bound across cycles.
+        # ⚠️ WRAPPED SO A SERIES WRITE CAN NEVER STALL CAPTURE. Operator's
+        # rule: derived/observational data INFORMS, it never blocks. The raw
+        # candle and chain_marks writes above have already committed; if these
+        # fail the tape is still intact and the gap shows up as a short series
+        # rather than as a dead feed.
+        gs, qs = self._greeks_series_buf, self._quote_series_buf
+        self._greeks_series_buf, self._quote_series_buf = [], []
+        try:
+            self.store.append_greeks_series(gs)
+            self.store.append_quote_series(qs)
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning("series append failed (%d greeks, %d quotes): %s "
+                           "— raw tape unaffected", len(gs), len(qs), exc)
         self.store.heartbeat()
         self.store.commit()
         return len(rows) + len(q) + len(g)

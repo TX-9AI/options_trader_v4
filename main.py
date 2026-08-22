@@ -1765,12 +1765,28 @@ def _session_extremes(ctx: dict):
 
 
 def _condor_rails(ctx: dict):
-    """Daily pitchfork rails for the condor, or None. Never raises.
+    """Pitchfork rails for the condor, or None. Never raises.
 
-    DAILY by operator ruling — "It's a guardrail, not the road." A daily fork is
-    invalidated only by DAILY closes, so an intraday session cannot move the
-    rail a spread was sold against. None means NO CONDOR, which is the whole
-    point of the gate.
+    🔴 1h BY OPERATOR RULING, 2026-08-22 — "it has to be the one hour or not at
+    all." A DAILY fork demands an excursion from one anchor to the next that a
+    single session rarely meets; gating on it produces a permanent no-trade
+    rather than a guardrail.
+
+    ⚠️ THIS REPLACES THE PRIOR RULING, which read: "DAILY by operator ruling —
+    it's a guardrail, not the road. A daily fork is invalidated only by DAILY
+    closes, so an intraday session cannot move the rail a spread was sold
+    against." That reasoning is sound and it is SUPERSEDED — stability is worth
+    nothing if the anchor is never constructible. Recorded rather than deleted
+    so the next reader knows a decision changed, not that a comment rotted.
+
+    ⚠️ AVAILABILITY SETTLES IT INDEPENDENTLY OF THE ARGUMENT. On 2026-08-21 the
+    1d frame was ABSENT FROM THE WAREHOUSE ENTIRELY (present Wed 30, Thu 16,
+    Fri 0) while 1h carried 240 objects. An anchor that exists beats one that is
+    theoretically more stable.
+
+    None still means NO CONDOR, and that remains correct and expected: if the
+    fork cannot be derived there is nothing to anchor to. Operator: that is the
+    only legitimate condor no-go — expected behaviour, not a defect.
     """
     try:
         from analysis.pitchfork_observer import rails_for

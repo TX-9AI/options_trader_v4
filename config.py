@@ -1,5 +1,7 @@
 """
 config.py  v4.2
+v4.3  2026-08-22  CONDOR_PF_TIMEFRAME -> "1h" per operator ruling. See the
+    site comment; supersedes the daily anchor.
 
 v4.2  2026-08-21  r60: GLOBAL_NO_ENTRY_ET deleted (unauthorized 14:00
       all-strategy cutoff - see the block at its former site); TCS_ENTRY_END_ET
@@ -853,7 +855,19 @@ CONDOR_REQUIRE_FORK         = os.environ.get("OT_CONDOR_REQUIRE_FORK", "1") == "
 # stood down on every box, every session, reading as the guardrail policy
 # working. Default is now the frame key; legacy spellings are normalised in
 # pitchfork_observer._norm_tf so a stale env var cannot re-break it.
-CONDOR_PF_TIMEFRAME         = os.environ.get("OT_CONDOR_PF_TF", "1d")
+# 🔴 OPERATOR RULING 2026-08-22 — **1h, OR NO CONDOR.**
+# The daily fork demands an excursion from one anchor to the next that a single
+# session rarely meets — "too extreme of a measurement" — so a daily anchor
+# produces a PERMANENT no-trade rather than a guardrail.
+# ⚠️ THIS SUPERSEDES the earlier "DAILY by operator ruling" recorded at
+# main.py::_condor_rails, which is rewritten in this same commit. Do not
+# restore "daily" from that block: it is the older decision.
+# ⚠️ AND r59 SET THIS TO "1d", WHICH WAS ALSO WRONG. The original "daily"
+# never resolved (the cache keys on "1d"/"1h"), so r59 fixed the resolution and
+# guessed the frame. Availability settles it independently: 1h is populated
+# continuously all session while 1d appears ~once a day and was ABSENT ENTIRELY
+# from the warehouse on 2026-08-21.
+CONDOR_PF_TIMEFRAME         = os.environ.get("OT_CONDOR_PF_TF", "1h")
 # Slope magnitude (fraction of price per bar) below which the fork is treated as
 # FLAT and leg order falls back to proximity. A sign alone is not a slope: a
 # fork drifting 0.001% a bar is noise, and ordering legs off its sign would be
