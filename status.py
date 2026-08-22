@@ -469,6 +469,40 @@ def main():
         gex_icon = ("\U0001F4CC" if gex_env == "PINNING"
                     else "\U0001F4C8" if gex_env == "TRENDING" else "\u2796")
         print(f"  {gex_icon} GEX pin:     ${gex_pin}  ({_gex_label})")
+
+    # ── r78 — FORK TILT. Relative, never literal, and None is not FLAT. ─────
+    # ⚠️ "FLAT" MEANS FLAT-ISH: a band around zero, because a channel tilting a
+    # tenth of an ATR per bar has no meaningful heading and calling it BULLISH
+    # would manufacture one out of noise.
+    # ⚠️ NORMALISED BY THE SYMBOL'S OWN ATR. A raw slope is not comparable
+    # across the fleet — +0.20/bar is FLAT on a $700 QQQ and BULLISH on a $180
+    # PLTR, and a single raw threshold would get one of them wrong every time.
+    # 🔴 NO FORK PRINTS "None" WITH ITS REASON, NEVER "FLAT". Those are
+    # different states and conflating them is the silent-zero habit this repo
+    # has paid for repeatedly.
+    try:
+        from derived.registry import build_engines as _be2
+        from config import CONDOR_PF_TIMEFRAME as _PFTF
+        from analysis.pitchfork import SLOPE_FLAT_ATR as _FLAT
+        _st2 = None
+        for _e2 in (_be2(INSTRUMENT) or []):
+            _st2 = getattr(_e2, "_store", None) or _st2
+        if _st2 is not None:
+            _row = _st2.conn.execute(
+                "SELECT built, reject_reason, slope FROM fork_series"
+                " WHERE symbol=? AND interval=? ORDER BY ts_epoch DESC LIMIT 1",
+                (INSTRUMENT, _PFTF)).fetchone()
+            if _row and _row[0] and _row[2] is not None and orb.get("atr"):
+                _rt = float(_row[2]) / float(orb["atr"])
+                _lab = ("BULLISH" if _rt > _FLAT else
+                        "BEARISH" if _rt < -_FLAT else "FLAT")
+                print(f"  \U0001F4D0 Fork ({_PFTF}):  {_lab}"
+                      f"   ({_rt:+.2f} ATR/bar)")
+            elif _row and not _row[0]:
+                _why = f"  ({_row[1]})" if _row[1] else ""
+                print(f"  \U0001F4D0 Fork ({_PFTF}):  None{_why}")
+    except Exception:                                          # noqa: BLE001
+        pass
     print()
     sep()
 

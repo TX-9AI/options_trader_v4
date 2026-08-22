@@ -1173,6 +1173,12 @@ def run_analysis(state: BotState) -> dict:
     # "measured as absent" from "this port does not exist in this build".
     # r75 — character: the tape's state, with how long it has held. ⚠️ It
     # INFORMS and gates nothing, like every other derived port.
+    # r78 — fork tilt, PARALLEL like ADX/ATR/gap: recorded and shown, feeding
+    # no axis and gating nothing. The condor still anchors on the fork's
+    # EXISTENCE, not its tilt.
+    ctx.setdefault("fork_slope_ratio", None)
+    ctx.setdefault("fork_slope_label", None)
+    ctx.setdefault("fork_reject_reason", None)
     ctx.setdefault("character", None)
     ctx.setdefault("character_held_s", None)
     ctx.setdefault("charm", None)
@@ -1228,6 +1234,36 @@ def _apply_derived_ports(ctx: dict, state: "BotState", engines) -> None:
                 ctx[k] = v
     except Exception as exc:                                   # noqa: BLE001
         logger.debug("vol measures unavailable: %s", exc)
+
+    # Fork tilt from the most recent stored row for the condor's anchor frame.
+    # ⚠️ READ FROM `fork_series`, NOT REBUILT. The row already carries slope,
+    # atr_at_birth and the reject reason, so this survives a restart and costs
+    # one indexed lookup instead of a 60-80 bar scan.
+    try:
+        _fstore = None
+        for e in engines:
+            _fstore = getattr(e, "_store", None) or _fstore
+        if _fstore is not None:
+            _r = _fstore.conn.execute(
+                "SELECT built, reject_reason, slope, containment FROM fork_series"
+                " WHERE symbol=? AND interval=? ORDER BY ts_epoch DESC LIMIT 1",
+                (INSTRUMENT, CONDOR_PF_TIMEFRAME)).fetchone()
+            if _r:
+                if _r[0]:
+                    from analysis.pitchfork import SLOPE_FLAT_ATR
+                    _atr = getattr(ctx.get("vol"), "atr_current", None)
+                    if _atr and float(_atr) > 0 and _r[2] is not None:
+                        _ratio = float(_r[2]) / float(_atr)
+                        ctx["fork_slope_ratio"] = _ratio
+                        ctx["fork_slope_label"] = (
+                            "BULLISH" if _ratio > SLOPE_FLAT_ATR else
+                            "BEARISH" if _ratio < -SLOPE_FLAT_ATR else "FLAT")
+                else:
+                    # ⚠️ NO FORK IS NOT A FLAT FORK. The label stays None and
+                    # the REASON is carried so the display can say which.
+                    ctx["fork_reject_reason"] = _r[1]
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("fork slope port unavailable: %s", exc)
 
     # Character — current state and its duration, read from the engine that
     # owns the ledger so status and the strategy notes see the same value.

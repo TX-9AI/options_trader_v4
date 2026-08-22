@@ -564,6 +564,54 @@ def _epoch_triple(df: pd.DataFrame, start: int, k: int):
     return direction, p0, p1, p2
 
 
+# ── r78 — SLOPE, NORMALISED. Relative, never literal. ────────────────────────
+# 🔴 A RAW SLOPE IS NOT COMPARABLE ACROSS SYMBOLS. 0.22 points per bar is a
+# steep channel on a $180 PLTR and nearly flat on a $700 QQQ, so a single
+# threshold on the raw number would call every high-priced symbol flat and
+# every cheap one trending. Normalising by the fork's OWN `atr_at_birth` asks
+# the only question that travels: does the channel tilt faster than this
+# symbol usually moves?
+#
+# ⚠️ "FLAT" MEANS FLAT-ISH, DELIBERATELY — operator, 2026-08-25. A band, not
+# an equality test. A channel tilting a tenth of an ATR per bar is not
+# meaningfully sloped and calling it BULLISH would manufacture a heading out
+# of noise.
+#
+# ⚠️ AND `None` IS NOT `FLAT`. No fork at all and a fork with no tilt are
+# COMPLETELY DIFFERENT STATES; reporting both as "flat" is the silent-zero
+# confusion that has cost this repo more than any other single habit. A caller
+# with no fork gets None and says so.
+SLOPE_FLAT_ATR = 0.12          # |slope| below this fraction of ATR/bar = flat
+
+
+def slope_atr_ratio(fork) -> Optional[float]:
+    """Fork slope as a fraction of its own ATR-at-birth, per bar. None if unusable."""
+    if fork is None:
+        return None
+    try:
+        atr = float(getattr(fork, "atr_at_birth", 0.0) or 0.0)
+        if atr <= 0:
+            return None
+        return float(getattr(fork, "slope", 0.0) or 0.0) / atr
+    except (TypeError, ValueError):
+        return None
+
+
+def slope_label(fork) -> Optional[str]:
+    """BULLISH / BEARISH / FLAT — or None when there is NO FORK to describe.
+
+    ⚠️ THE None RETURN IS THE POINT. "No fork" is not a heading of zero.
+    """
+    r = slope_atr_ratio(fork)
+    if r is None:
+        return None
+    if r > SLOPE_FLAT_ATR:
+        return "BULLISH"
+    if r < -SLOPE_FLAT_ATR:
+        return "BEARISH"
+    return "FLAT"
+
+
 def _containment(df: pd.DataFrame, start: int, origin_idx: float,
                  origin_price: float, slope: float, p1: Pivot, p2: Pivot,
                  atr: float, tol_atr: float) -> float:
