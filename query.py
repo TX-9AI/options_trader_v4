@@ -607,7 +607,7 @@ def show_character(dc):
     print(f"  Changes today: {len(rows)}   (expected 1-3)")
     for r in rows:
         t = datetime.fromtimestamp(r[2], ET).strftime("%H:%M")
-        frm = f"{r[1]} → " if r[1] else ""
+        frm = f"{r[1]} -> " if r[1] else ""
         hs = f"  held {r[3]/60:.0f}m" if r[3] else ""
         print(f"    {t}  {frm}{r[0]}{hs}")
     print()
@@ -638,7 +638,8 @@ def show_gates(dc):
         print(); return
     for st, gate, reason, ev, held, ticks, ts in rows:
         t = datetime.fromtimestamp(ts, ET).strftime("%H:%M")
-        mark = {"CLEARED": "✓", "CHANGED": "→"}.get(ev, "✗")
+        # ASCII only: the fleet terminal rendered these as "?" over SSH.
+        mark = {"CLEARED": "ok", "CHANGED": "->"}.get(ev, "X ")
         extra = f"  ({held/60:.0f}m, {ticks} ticks)" if held else ""
         print(f"    {t} {mark} {st:<22} {gate}{extra}")
         if reason and ev != "CLEARED":
@@ -675,7 +676,7 @@ def show_plans(dc):
         # ⚠️ WIPED_BY_RESTART IS ITS OWN CATEGORY, not folded into CANCELLED —
         # it is the countable cost of deploying mid-session.
         flag = "⚠️ " if term == "WIPED_BY_RESTART" else "   "
-        live = "" if clts else "  ← LIVE"
+        live = "" if clts else "  <- LIVE"
         traded = f"  traded={len(__import__('json').loads(tids))}" if tids else ""
         print(f"  {flag}{t}  {strat:<22} {state}{atx}{traded}{live}")
         if term:
@@ -695,7 +696,7 @@ def show_market(dc):
     if lv:
         print("  Live levels (by touches — a touch is a HOLD):")
         for pr, kind, prov, touches, live in lv:
-            star = " ⟲" if live else ""
+            star = " (live)" if live else ""
             print(f"    {pr:>9.2f}  {str(kind or ''):<11} {str(prov or ''):<10}"
                   f" touches={touches}{star}")
     elif lv is None:
@@ -707,7 +708,8 @@ def show_market(dc):
                 " FROM fork_series WHERE symbol=? ORDER BY ts_epoch DESC LIMIT 2",
             (INSTRUMENT,))
     if fk:
-        print("\n  Pitchfork:")
+        print()
+        print("  Pitchfork:")
         for iv, built, rr, cont, span in fk:
             if built:
                 print(f"    {iv}: BUILT  containment={cont:.2f} span={span} bars")
@@ -723,7 +725,8 @@ def show_market(dc):
             (INSTRUMENT, datetime.now(ET).timestamp() - 3600))
     if sf and sf[0][3]:
         c, v, g, n = sf[0]
-        print(f"\n  Surface (1h): charm={c}  vanna={v}  GEX={g}M  ({n} samples)")
+        print()
+        print(f"  Surface (1h): charm={c}  vanna={v}  GEX={g}M  ({n} samples)")
     print()
 
 

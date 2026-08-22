@@ -453,8 +453,22 @@ def main():
         print(f"  \u23F1  ORB:         Waiting for 9:35 ET range to be set")
 
     if gex_pin:
-        gex_icon = "\U0001F4CC" if gex_env == "PINNING" else "\U0001F4C8" if gex_env == "TRENDING" else "\u2796"
-        print(f"  {gex_icon} GEX pin:     ${gex_pin}  ({gex_env})")
+        # ── r77 — SAY WHAT THE GAMMA DOES TO A MOVE, NOT A STATE WORD ───────
+        # ⚠️ THIS LINE USED TO PRINT "TRENDING" NEXT TO THE CHARACTER LINE, AND
+        # THEY MEAN COMPLETELY DIFFERENT THINGS. Character is what PRICE is
+        # doing; this is what dealer gamma will do TO price. Character can read
+        # RANGING while this reads TRENDING and both are correct — but as two
+        # bare state words stacked in one panel they look like a contradiction.
+        # ⚠️ PINNING KEEPS ITS OWN NAME because it IS the thing itself: gamma
+        # pulling price to the strike. The other two are renamed to their
+        # EFFECT, which is also the vocabulary `orb_bias` already uses, so this
+        # is the repo's own language rather than a new one.
+        _gex_label = {"PINNING": "PINNING",
+                      "TRENDING": "AMPLIFYING",
+                      "NEUTRAL": "DAMPENING"}.get(gex_env, gex_env)
+        gex_icon = ("\U0001F4CC" if gex_env == "PINNING"
+                    else "\U0001F4C8" if gex_env == "TRENDING" else "\u2796")
+        print(f"  {gex_icon} GEX pin:     ${gex_pin}  ({_gex_label})")
     print()
     sep()
 
