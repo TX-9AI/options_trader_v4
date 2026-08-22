@@ -1,5 +1,12 @@
 """
-config.py  v4.3
+config.py  v4.4
+v4.4  2026-08-25  LOCAL RETENTION POLICY DECLARED, NOT ENFORCED. Per-tenor day
+    counts written down in config BEFORE any purge exists to read them, and
+    COMMENTED OUT so nothing acts on them yet. The binding consumer is
+    EMA_ANCHOR=200, which inverts the intuition: every tenor needs the same
+    BARS, so 1m needs 5 days and 1h needs 60. A flat row cap — which is what
+    candle_feed.PRUNE_KEEP_ROWS is — cannot express that. Pruning stays OFF.
+
 v4.3  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -1215,6 +1222,71 @@ TIMEFRAMES = {
     "5m":  {"candles": 100, "role": "entry_context"},
     "1m":  {"candles": 60,  "role": "trigger"},
 }
+
+# ─── LOCAL RETENTION POLICY — DECLARED, NOT YET ENFORCED ─────────────────────
+# v4.0 (2026-08-25). The policy is written down HERE, in config, BEFORE anything
+# acts on it — operator's instruction: "we need to write the per tenor retain
+# before writing any kind of per-tenor purge." A purge that carries its own
+# numbers inline is a purge whose policy can only be found by reading deletion
+# code.
+#
+# 🔴 EVERYTHING BELOW IS COMMENTED OUT AND NOTHING READS IT. Pruning on the
+# boxes is OFF (candle_feed.PRUNE_KEEP_ROWS = 0) and stays off until this is
+# deliberately enabled. Declaring it inert is the point: the numbers can be
+# argued with before a single row is at risk.
+#
+# 🔑 THE BINDING CONSUMER IS EMA_ANCHOR = 200, and it inverts the intuition.
+# Every tenor needs the SAME NUMBER OF BARS, so the DAYS differ by how fast that
+# tenor accumulates them:
+#
+#     tenor   bars/session   200 bars =      keep      why
+#     1m           390       0.5 sessions    5 days    days are for RE-PUSH,
+#                                                      not warm-up
+#     5m            78       2.6 sessions   10 days
+#     15m           26       7.7 sessions   20 days
+#     1h             7      28.6 sessions   60 days    ← THE BINDING ONE
+#     1d             1     200   sessions   keep all   one row a day
+#
+# ⚠️ A FLAT ROW CAP IS WRONG, AND THAT IS WHAT EXISTS TODAY. PRUNE_KEEP_ROWS is
+# one number for every tenor: at 200 it would hold half a session of 1m and 29
+# sessions of 1h. A naive "keep 30 days of everything" fails the other way — it
+# wastes space on the bulkiest tenor while STARVING THE 1h FORK, which is the
+# condor's anchor and the thing already failing to build.
+#
+# ⚠️ THE FORK ITSELF NEEDS FAR LESS THAN THE EMA: (2k+1)*3 bars, k=3 on 1h = 21
+# bars = 3 sessions. If EMA_ANCHOR is ever confirmed NOT to be consumed on 1h,
+# the 60 days below drops to about 5.
+#
+# ⚠️ PADDED ~1.5x OVER THE MINIMUM ON PURPOSE. A warm-up sitting exactly at its
+# boundary breaks on the first holiday week.
+#
+# RETENTION_DAYS = {
+#     "1m":  5,
+#     "5m":  10,
+#     "15m": 20,
+#     "1h":  60,
+#     "1d":  None,        # None = keep everything; it is one row per session
+# }
+#
+# Non-candle artifacts. ⚠️ VERIFIED IN SOURCE 2026-08-25, NOT ASSUMED: the
+# surface engine reads a 15-MINUTE WINDOW and a 120-second slice, so NOTHING
+# reaches across sessions. These days are a RE-PUSH WINDOW, not a warm-up
+# requirement — and 3 rather than 1 because a Friday push that fails silently
+# is not noticed until Monday, and a 2-day window expires over the weekend.
+# RETENTION_DAYS_ARTIFACTS = {
+#     "chain_snapshots": 3,
+#     "greeks_series":   3,
+#     "quote_series":    3,
+# }
+#
+# 🔴 NEVER PURGED ON THE BOX, AT ANY AGE: character_ledger, plan_ledger,
+# gate_disposition, strategy_note, fire_snapshot. These are LIFECYCLE records —
+# they capture state transitions as they happened, and a recomputation cannot
+# reconstruct a biography. Indicators, forks and surface ARE recomputable from
+# the candles and are the safe ones to trim.
+#
+# 🔴 AND THE PURGE MUST KEY OFF VERIFICATION, NEVER OFF AGE ALONE. A box whose
+# last push failed still holds the ONLY copy. Land, verify, then maintain.
 
 CACHE_STALENESS_SECONDS = {
     "1d":  3600,
