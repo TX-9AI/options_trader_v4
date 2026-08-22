@@ -76,7 +76,12 @@ def main() -> int:
     report["candles"] = cand
 
     # ── series ports: the full-fidelity homes ───────────────────────────
-    for tbl in ("greeks_series", "quote_series"):
+    # MANIFOLD PART 2 — the five event types added 2026-08-22 are checked the
+    # same way. ⚠️ MISSING IS REPORTED, NOT INFERRED: a port with no rows may
+    # mean the entitlement does not cover it, and that is a fact worth seeing
+    # rather than a silence to interpret.
+    for tbl in ("greeks_series", "quote_series", "prints", "last_trade",
+                "session_summary", "underlying_series", "theo_series"):
         r = _q(con, f"SELECT COUNT(*), MAX(ts_epoch) FROM {tbl}")
         if not r or r[0][0] is None or r[0][0] == 0:
             report[tbl] = "MISSING"
@@ -117,7 +122,9 @@ def main() -> int:
         print(f"  {k:16} rows={d['rows']:<7} age={d['age_s']:<7}s  {flag}")
         if d["stale"]:
             problems.append(f"{k}: stale by {d['age_s']}s")
-    for k in ("greeks_series", "quote_series", "chain_marks"):
+    for k in ("greeks_series", "quote_series", "prints", "last_trade",
+              "session_summary", "underlying_series", "theo_series",
+              "chain_marks"):
         v = report[k]
         print(f"  {k:16} {v if v == 'MISSING' else str(v)}")
     print(f"  {'heartbeat':16} age={report['feed_heartbeat_age_s']}s")

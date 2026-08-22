@@ -1,5 +1,14 @@
 """
-data/candle_feed.py  v4.5
+data/candle_feed.py  v4.6
+v4.6  2026-08-22  MANIFOLD PART 2 — the five event types this feed
+    never asked for are subscribed and housed: TimeAndSale (prints,
+    WITH aggressor_side — buy vs sell initiated, real order flow),
+    Trade (last_trade), Summary (session_summary, carrying
+    prev_day_close_price), Underlying (put_call_ratio, front/back
+    volatility term structure) and TheoPrice. Ten of ten event types
+    are now captured. Each subscribes INDEPENDENTLY and fails open
+    per port; the drain is wrapped so no aux stream can stop the
+    candle loop.
 v4.5  2026-08-22  THE MANIFOLD. Capture everything, give it a home.
     (a) greeks_series + quote_series — ALL 13 Greeks fields and ALL 12 Quote
         fields incl. bid_size/ask_size, append-only, PK (symbol, ts).
@@ -104,7 +113,9 @@ from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from tastytrade import DXLinkStreamer           # module-level so tests can patch
-from tastytrade.dxfeed import Candle, Greeks, Quote
+from tastytrade.dxfeed import (Candle, Greeks, Quote, Trade,
+                               Summary, TimeAndSale, Underlying,
+                               TheoPrice)
 
 from config import INSTRUMENT, TIMEFRAMES
 from data.tasty_client import get_session, get_loop
@@ -432,6 +443,76 @@ class FeedStore:
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS ix_quote_series_ts "
             "ON quote_series(ts_epoch)")
+
+        # ── 🔴 MANIFOLD PART 2 (2026-08-22) — THE FIVE UNSUBSCRIBED EVENTS ───
+        # The SDK offers TEN event types. Until now this feed subscribed THREE.
+        # These five were never asked for, so no consumer could ever starve on
+        # them loudly — they simply did not exist. Operator's rule: capture
+        # everything the wire offers, give it a home, let consumers subscribe.
+        #
+        # ⚠️ TWO OF THESE CARRY THINGS THIS REPO HAS BEEN MISSING BY NAME:
+        #   · TimeAndSale.aggressor_side — BUY vs SELL initiated, per print.
+        #     Real order flow. Nothing here has ever seen who lifted the offer
+        #     versus hit the bid, and FRC.1's friction work was blind to it.
+        #   · Underlying.put_call_ratio / front_volatility / back_volatility —
+        #     term structure and flow skew from the VENDOR, no derivation.
+        #   · Summary.prev_day_close_price — `runaway_continuation` takes
+        #     prev_close as a BARE SCALAR whose 1d dependency is invisible at
+        #     the call site, and 1d was absent from the warehouse on
+        #     2026-08-21. This is a second, independent source for it.
+        #
+        # ⚠️ ALL APPEND-ONLY, PK (symbol, ts). Nothing overwrites.
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS prints (
+                symbol TEXT NOT NULL, ts_epoch REAL NOT NULL,
+                event_time REAL, idx REAL, ev_time REAL, sequence INTEGER,
+                exchange_code TEXT, price REAL, size REAL,
+                bid_price REAL, ask_price REAL,
+                aggressor_side TEXT, spread_leg INTEGER,
+                extended_trading_hours INTEGER, valid_tick INTEGER,
+                type TEXT, buyer TEXT, seller TEXT,
+                exchange_sale_conditions TEXT,
+                PRIMARY KEY (symbol, ts_epoch, sequence)
+            );""")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_prints_ts ON prints(ts_epoch)")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS last_trade (
+                symbol TEXT NOT NULL, ts_epoch REAL NOT NULL,
+                event_time REAL, ev_time REAL, sequence INTEGER,
+                exchange_code TEXT, day_id INTEGER, tick_direction TEXT,
+                extended_trading_hours INTEGER,
+                price REAL, change REAL, size REAL,
+                day_volume REAL, day_turnover REAL,
+                PRIMARY KEY (symbol, ts_epoch)
+            );""")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_summary (
+                symbol TEXT NOT NULL, ts_epoch REAL NOT NULL,
+                event_time REAL, day_id INTEGER, prev_day_id INTEGER,
+                open_interest REAL,
+                day_open_price REAL, day_high_price REAL,
+                day_low_price REAL, day_close_price REAL,
+                prev_day_close_price REAL, prev_day_volume REAL,
+                PRIMARY KEY (symbol, ts_epoch)
+            );""")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS underlying_series (
+                symbol TEXT NOT NULL, ts_epoch REAL NOT NULL,
+                event_time REAL, idx REAL, ev_time REAL, sequence INTEGER,
+                volatility REAL, front_volatility REAL, back_volatility REAL,
+                call_volume REAL, put_volume REAL, option_volume REAL,
+                put_call_ratio REAL,
+                PRIMARY KEY (symbol, ts_epoch)
+            );""")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS theo_series (
+                symbol TEXT NOT NULL, ts_epoch REAL NOT NULL,
+                event_time REAL, idx REAL, ev_time REAL, sequence INTEGER,
+                price REAL, underlying_price REAL,
+                delta REAL, gamma REAL, dividend REAL, interest REAL,
+                PRIMARY KEY (symbol, ts_epoch)
+            );""")
         self.conn.commit()
 
     def upsert_candles(self, rows: List[Tuple]):
@@ -591,6 +672,58 @@ class FeedStore:
                 " bid_exchange_code, ask_time, ask_exchange_code, bid_price,"
                 " ask_price, bid_size, ask_size)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    # ── MANIFOLD PART 2 WRITERS — append-only, every field ──────────────
+    def append_prints(self, rows):
+        return self._append_many(
+            "INSERT OR IGNORE INTO prints (symbol, ts_epoch, event_time, idx,"
+            " ev_time, sequence, exchange_code, price, size, bid_price,"
+            " ask_price, aggressor_side, spread_leg, extended_trading_hours,"
+            " valid_tick, type, buyer, seller, exchange_sale_conditions)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    def append_last_trade(self, rows):
+        return self._append_many(
+            "INSERT OR IGNORE INTO last_trade (symbol, ts_epoch, event_time,"
+            " ev_time, sequence, exchange_code, day_id, tick_direction,"
+            " extended_trading_hours, price, change, size, day_volume,"
+            " day_turnover) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    def append_session_summary(self, rows):
+        return self._append_many(
+            "INSERT OR IGNORE INTO session_summary (symbol, ts_epoch,"
+            " event_time, day_id, prev_day_id, open_interest, day_open_price,"
+            " day_high_price, day_low_price, day_close_price,"
+            " prev_day_close_price, prev_day_volume)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    def append_underlying(self, rows):
+        return self._append_many(
+            "INSERT OR IGNORE INTO underlying_series (symbol, ts_epoch,"
+            " event_time, idx, ev_time, sequence, volatility,"
+            " front_volatility, back_volatility, call_volume, put_volume,"
+            " option_volume, put_call_ratio)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    def append_theo(self, rows):
+        return self._append_many(
+            "INSERT OR IGNORE INTO theo_series (symbol, ts_epoch, event_time,"
+            " idx, ev_time, sequence, price, underlying_price, delta, gamma,"
+            " dividend, interest) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    def _append_many(self, sql, rows) -> int:
+        """Shared append. Never raises — a lost observation must not stall
+        the tape (same rule as the series writes)."""
+        if not rows:
+            return 0
+        try:
+            with self._lock:
+                self.conn.executemany(sql, rows)
+            return len(rows)
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning("append failed (%d rows): %s — raw candles "
+                           "unaffected", len(rows), exc)
+            return 0
 
     def clear_chain_marks(self):
         with self._lock:
@@ -754,6 +887,12 @@ class CandleFeed:
         # These append, so every tick survives to the flush.
         self._greeks_series_buf: List[tuple] = []
         self._quote_series_buf: List[tuple] = []
+        # MANIFOLD PART 2 — one append-buffer per new event type.
+        self._prints_buf: List[tuple] = []
+        self._trade_buf: List[tuple] = []
+        self._summary_buf: List[tuple] = []
+        self._underlying_buf: List[tuple] = []
+        self._theo_buf: List[tuple] = []
 
     def _interval_of(self, event_symbol: str) -> Optional[str]:
         """Map DXFeed's echoed candle symbol back to OUR config timeframe key.
@@ -976,6 +1115,114 @@ class CandleFeed:
             _g(getattr(g, "vega", None)),
         ))
 
+    # ── MANIFOLD PART 2 HANDLERS ────────────────────────────────────────
+    # ⚠️ EVERY FIELD THE EVENT CARRIES IS BUFFERED. No selection at capture:
+    # the feed's job is to make analysis possible, not to decide what will
+    # turn out to be interesting.
+    @staticmethod
+    def _n(v):
+        """Number or None — NEVER 0.0 as a fallback."""
+        if v is None:
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return None if f != f else f
+
+    @staticmethod
+    def _s(v):
+        return None if v is None else str(v)
+
+    def _on_trade(self, t):
+        sym = _base_symbol(getattr(t, "event_symbol", "") or "")
+        if not sym:
+            return
+        n, ss = self._n, self._s
+        self._trade_buf.append((
+            sym, _time.time(), n(getattr(t, "event_time", None)),
+            n(getattr(t, "time", None)), getattr(t, "sequence", None),
+            ss(getattr(t, "exchange_code", None)), getattr(t, "day_id", None),
+            ss(getattr(t, "tick_direction", None)),
+            1 if getattr(t, "extended_trading_hours", False) else 0,
+            n(getattr(t, "price", None)), n(getattr(t, "change", None)),
+            n(getattr(t, "size", None)), n(getattr(t, "day_volume", None)),
+            n(getattr(t, "day_turnover", None))))
+
+    def _on_time_and_sale(self, ts_ev):
+        """Every print. ⚠️ `aggressor_side` IS THE PRIZE — buy vs sell
+        initiated, per print. Nothing in this repo has ever seen who lifted
+        the offer versus hit the bid."""
+        sym = _base_symbol(getattr(ts_ev, "event_symbol", "") or "")
+        if not sym:
+            return
+        n, ss = self._n, self._s
+        self._prints_buf.append((
+            sym, _time.time(), n(getattr(ts_ev, "event_time", None)),
+            n(getattr(ts_ev, "index", None)), n(getattr(ts_ev, "time", None)),
+            getattr(ts_ev, "sequence", None),
+            ss(getattr(ts_ev, "exchange_code", None)),
+            n(getattr(ts_ev, "price", None)), n(getattr(ts_ev, "size", None)),
+            n(getattr(ts_ev, "bid_price", None)),
+            n(getattr(ts_ev, "ask_price", None)),
+            ss(getattr(ts_ev, "aggressor_side", None)),
+            1 if getattr(ts_ev, "spread_leg", False) else 0,
+            1 if getattr(ts_ev, "extended_trading_hours", False) else 0,
+            1 if getattr(ts_ev, "valid_tick", False) else 0,
+            ss(getattr(ts_ev, "type", None)), ss(getattr(ts_ev, "buyer", None)),
+            ss(getattr(ts_ev, "seller", None)),
+            ss(getattr(ts_ev, "exchange_sale_conditions", None))))
+
+    def _on_summary(self, sm):
+        """⚠️ CARRIES prev_day_close_price — a SECOND, independent source for
+        the scalar `runaway_continuation` takes as `prev_close`, whose 1d
+        dependency is invisible at its call site and which was missing from the
+        warehouse entirely on 2026-08-21."""
+        sym = _base_symbol(getattr(sm, "event_symbol", "") or "")
+        if not sym:
+            return
+        n = self._n
+        self._summary_buf.append((
+            sym, _time.time(), n(getattr(sm, "event_time", None)),
+            getattr(sm, "day_id", None), getattr(sm, "prev_day_id", None),
+            n(getattr(sm, "open_interest", None)),
+            n(getattr(sm, "day_open_price", None)),
+            n(getattr(sm, "day_high_price", None)),
+            n(getattr(sm, "day_low_price", None)),
+            n(getattr(sm, "day_close_price", None)),
+            n(getattr(sm, "prev_day_close_price", None)),
+            n(getattr(sm, "prev_day_volume", None))))
+
+    def _on_underlying(self, u):
+        """⚠️ put_call_ratio, front/back volatility — TERM STRUCTURE AND FLOW
+        SKEW FROM THE VENDOR, no derivation needed."""
+        sym = _base_symbol(getattr(u, "event_symbol", "") or "")
+        if not sym:
+            return
+        n = self._n
+        self._underlying_buf.append((
+            sym, _time.time(), n(getattr(u, "event_time", None)),
+            n(getattr(u, "index", None)), n(getattr(u, "time", None)),
+            getattr(u, "sequence", None), n(getattr(u, "volatility", None)),
+            n(getattr(u, "front_volatility", None)),
+            n(getattr(u, "back_volatility", None)),
+            n(getattr(u, "call_volume", None)), n(getattr(u, "put_volume", None)),
+            n(getattr(u, "option_volume", None)),
+            n(getattr(u, "put_call_ratio", None))))
+
+    def _on_theo(self, tp):
+        sym = _base_symbol(getattr(tp, "event_symbol", "") or "")
+        if not sym:
+            return
+        n = self._n
+        self._theo_buf.append((
+            sym, _time.time(), n(getattr(tp, "event_time", None)),
+            n(getattr(tp, "index", None)), n(getattr(tp, "time", None)),
+            getattr(tp, "sequence", None), n(getattr(tp, "price", None)),
+            n(getattr(tp, "underlying_price", None)),
+            n(getattr(tp, "delta", None)), n(getattr(tp, "gamma", None)),
+            n(getattr(tp, "dividend", None)), n(getattr(tp, "interest", None))))
+
     async def _reconcile_chain_subs(self, streamer):
         """Every flush cycle: make the socket's Greeks/Quote subscriptions match
         what the bot requested via chain_subs. Expiry rollover unsubscribes all
@@ -1030,9 +1277,18 @@ class CandleFeed:
         # rather than as a dead feed.
         gs, qs = self._greeks_series_buf, self._quote_series_buf
         self._greeks_series_buf, self._quote_series_buf = [], []
+        pr, tr = self._prints_buf, self._trade_buf
+        sm, un, th = self._summary_buf, self._underlying_buf, self._theo_buf
+        self._prints_buf, self._trade_buf = [], []
+        self._summary_buf, self._underlying_buf, self._theo_buf = [], [], []
         try:
             self.store.append_greeks_series(gs)
             self.store.append_quote_series(qs)
+            self.store.append_prints(pr)
+            self.store.append_last_trade(tr)
+            self.store.append_session_summary(sm)
+            self.store.append_underlying(un)
+            self.store.append_theo(th)
         except Exception as exc:                                # noqa: BLE001
             logger.warning("series append failed (%d greeks, %d quotes): %s "
                            "— raw tape unaffected", len(gs), len(qs), exc)
@@ -1202,6 +1458,23 @@ class CandleFeed:
                     backoff = RECONNECT_MIN_S
                     last_flush = 0.0
                     last_prune = _time.time()
+                    # ── 🔴 MANIFOLD PART 2 (2026-08-22) — SUBSCRIBE THE REST ─
+                    # Five event types the SDK offers that this feed never
+                    # asked for. Each is subscribed INDEPENDENTLY and wrapped,
+                    # so an entitlement gap costs THAT ONE PORT on THIS ONE BOX
+                    # and is named in the log — never the whole socket.
+                    for _ev, _label in ((Trade, "Trade"),
+                                        (TimeAndSale, "TimeAndSale"),
+                                        (Summary, "Summary"),
+                                        (Underlying, "Underlying"),
+                                        (TheoPrice, "TheoPrice")):
+                        try:
+                            await streamer.subscribe(_ev, [self.dx_symbol])
+                            logger.info("subscribed %s %s", self.dx_symbol, _label)
+                        except Exception as exc:                # noqa: BLE001
+                            logger.warning("SUBSCRIBE FAILED %s %s: %s — "
+                                           "continuing without it",
+                                           self.dx_symbol, _label, exc)
                     quiet_since: Optional[float] = None
                     while True:
                         try:
@@ -1222,6 +1495,23 @@ class CandleFeed:
                             if q is None:
                                 break
                             self._on_quote(q)
+                        # MANIFOLD PART 2 — drain the five new streams the
+                        # same way. Wrapped as a group: an unexpected payload
+                        # shape from any one of them must not stop the candle
+                        # loop, which is the tape everything else depends on.
+                        try:
+                            for _ev, _fn in ((Trade, self._on_trade),
+                                             (TimeAndSale, self._on_time_and_sale),
+                                             (Summary, self._on_summary),
+                                             (Underlying, self._on_underlying),
+                                             (TheoPrice, self._on_theo)):
+                                while True:
+                                    _e = streamer.get_event_nowait(_ev)
+                                    if _e is None:
+                                        break
+                                    _fn(_e)
+                        except Exception as exc:                # noqa: BLE001
+                            logger.debug("aux stream drain: %s", exc)
                         now = _time.monotonic()
                         if now - last_flush >= FLUSH_INTERVAL_S:
                             await self._reconcile_chain_subs(streamer)
