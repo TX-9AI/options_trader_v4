@@ -1,5 +1,9 @@
 """
-query.py  v4.0
+query.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Ad-hoc trade and store queries.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -216,7 +220,6 @@ def show_open_position(conn):
     _score = row['setup_score']
     _score_str = f"score={_score:.2f}" if _score is not None else "score=n/a"
     print(f"  Grade:         {row['setup_grade']}  ({_score_str})")
-    print(f"  Regime:        {row['regime']}")
     print(f"  Expiry:        {row['expiry']}")
     print(f"  Contracts:     {contracts}")
     print()
@@ -527,29 +530,6 @@ def show_circuit_breakers(conn):
     print()
 
 
-def show_regime_log(conn, n: int = 5):
-    rows = conn.execute(
-        "SELECT * FROM regime_log ORDER BY logged_at DESC LIMIT ?", (n,)
-    ).fetchall()
-
-    if not rows:
-        return
-
-    sep()
-    print(f"  RECENT REGIME CHANGES (last {n})")
-    sep()
-    for r in rows:
-        print(
-            f"  {to_et(r['logged_at'])}  "
-            f"{r['regime']:<22} "
-            f"conviction={r['conviction']:.0%}  "
-            f"macro={r['macro_context']}"
-        )
-    print()
-
-
-# ─── Main ─────────────────────────────────────────────────────────────────────
-
 def main():
     conn = connect()
     print()
@@ -562,7 +542,6 @@ def main():
     show_by_setup_type(conn)
     show_recent(conn)
     show_circuit_breakers(conn)
-    show_regime_log(conn)
     sep("═")
     print()
     conn.close()

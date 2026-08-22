@@ -1,5 +1,9 @@
 """
-data/derived_store.py  v4.0
+data/derived_store.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 The derived layer's homes. Tier 1-4 of docs/DERIVED_STORES.md.
 
 v4.0  2026-08-22  Built with the manifold.
@@ -11,7 +15,6 @@ current bar, and which therefore give a DIFFERENT ANSWER when recomputed.
     raw port -> home -> deriver -> DERIVED HOME -> ctx -> engine
 
 ⚠️ DERIVERS ARE CONTRIBUTORS, NEVER GATES. Operator's ruling 2026-08-22.
-Derived values INFORM; they never authorise — the rule the regime labels
 violated. **A missing derived value is NOT an error.** The engine trades
 without it. Only RAW ports can be hard requirements. Nothing in this module may
 raise into a caller's decision path.

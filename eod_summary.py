@@ -1,5 +1,9 @@
 """
-eod_summary.py  v4.0
+eod_summary.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 End-of-day per-box summary.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -161,7 +165,6 @@ def dump_trades():
     """
     Full detail for today's closed trades — every column, so the control
     server's harvest can do deep post-mortem (setup, grade, exit_reason,
-    regime/ADX context, premiums, sizing). Returns the list written.
     """
     today = now_et().strftime("%Y-%m-%d")
     payload = {

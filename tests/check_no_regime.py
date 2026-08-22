@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-tests/check_no_regime.py  v4.2
+tests/check_no_regime.py  v4.4
+v4.4  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
+
+v4.3  2026-08-25  THE EXORCISM BAR: tree-wide word scan, every .py/.sh, code
+      and comments and docstrings alike, any casing, exit 1 on any hit.
+      docs/ excluded from the walk (GENESIS.md is the designated ledger).
 
 v4.2  2026-08-21  PHASE B (r58) COMPLETE: countdown dicts emptied, macro_data
       exemption removed after the vix_band rename, and CARRIES NOW FAIL — a
@@ -81,7 +89,7 @@ EXEMPT = {}
 # ── PHASE B HANDOFF LIST (2026-08-21) ────────────────────────────────────────
 # Sites that PASS a regime value as an argument rather than gating on it. They
 # are reroutes, not deletions: each carries a live measurement that rides on
-# `RegimeState` and needs pointing at its real source before the type can be
+# `MarketState` and needs pointing at its real source before the type can be
 # deleted. Owned by Phase B — see docs/HANDOFF_REGIME_PURGE.md.
 #
 # ⚠️ THIS LIST IS A COUNTDOWN, NOT AN EXEMPTION. It exists so the board can be
@@ -201,6 +209,40 @@ def _gate_lines(tree):
     return out
 
 
+
+# ═══ v4.3 — THE WORD ITSELF (the exorcism bar) ═══════════════════════════════
+# Four removal passes reported green while hundreds of mentions survived,
+# because every earlier bar was narrower than what the operator asked for.
+# The bar is now the word: any occurrence, any casing, in any .py or .sh —
+# code, comment or docstring — fails the board. Two exemptions only: this
+# file (it must name what it hunts) and docs/GENESIS.md (the append-only
+# ledger where the history lives; it is .md and outside the scan anyway).
+_WORD = re.compile("regime", re.IGNORECASE)
+_SCAN_ALLOW = {"tests/check_no_regime.py"}
+
+def word_scan(root="."):
+    import os
+    hits = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames
+                       if d not in (".git", "__pycache__", "docs")]
+        for fn in filenames:
+            if not (fn.endswith(".py") or fn.endswith(".sh")):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, fn), root)
+            if rel in _SCAN_ALLOW:
+                continue
+            try:
+                lines = open(os.path.join(dirpath, fn),
+                             encoding="utf-8", errors="replace").readlines()
+            except OSError:
+                continue
+            rows = [(n, ln.rstrip()) for n, ln in enumerate(lines, 1)
+                    if _WORD.search(ln)]
+            if rows:
+                hits[rel] = rows
+    return hits
+
 def main(argv):
     problems, carries, checked, shells, exempt = [], [], 0, [], []
     for path in _targets():
@@ -314,7 +356,16 @@ def main(argv):
         for p in sorted(set(problems)):
             print(f"    {p}")
         return 1
-    print("  no regime label GATES anything in the tree")
+    hits = word_scan()
+    if hits:
+        total = sum(len(v) for v in hits.values())
+        print(f"  THE WORD SURVIVES - {total} textual mention(s) in "
+              f"{len(hits)} file(s):")
+        for rel in sorted(hits, key=lambda r: -len(hits[r]))[:14]:
+            print(f"    {len(hits[rel]):4d}  {rel}")
+        print("  the standard is NEVER EXISTED (HANDOFF_EXORCISM) - exit 1")
+        return 1
+    print("  the word does not appear anywhere in the tree")
     if carries:
         # PHASE B COMPLETE (r58): a carry is no longer pending work - it is a
         # REGRESSION. The countdown reached zero; anything that reappears was

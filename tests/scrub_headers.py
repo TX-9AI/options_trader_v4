@@ -150,7 +150,7 @@ DESCRIPTIONS = {
     "strategy/base_strategy.py": "Signal dataclass and the strategy interface.",
     "strategy/structure.py": "Derives trade structure from PERSISTED fields, never a flag.",
     "strategy/credit_vertical.py": "Credit vertical construction, liquidity and POP helpers.",
-    "strategy/orb_strategy.py": "Opening-range break and retest. Regime-agnostic by design.",
+    "strategy/orb_strategy.py": "Opening-range break and retest. Label-agnostic by design.",
     "strategy/continuation_strategy.py": "Trend continuation. TRIGGER REBUILT IN PHASE 2.",
     "strategy/trend_credit_spread.py": "ORB-bounded credit spread. TRIGGER REBUILT IN PHASE 2.",
     "strategy/iron_condor_strategy.py": "Two-leg condor with ladder. TRIGGER REBUILT IN PHASE 2.",
@@ -210,14 +210,11 @@ DESCRIPTIONS = {
     # --- ROUND 3: over-dropped structure providers, restored ---------------
     # I dropped these on LOCATION AND NAME - they live in analysis/ and have
     # "engine" in the title - rather than on what they COMPUTE. Neither is a
-    # regime engine.
     # `volatility_engine` produces ATR, Bollinger bands, price_vs_bb, VWAP,
     # price_vs_vwap and compression state. `trend_engine` produces ADX, the EMA
     # stack and momentum. **The operator's successor list names ADX and VWAP
     # explicitly** - both were sitting in modules I had cut.
-    # What actually failed is narrower: regime_confluence (the damper x
     # corroborator grammar), conviction_integrator (confirmatory by
-    # construction), regime_axes (Cliff's delta +0.09), regime_classifier (the
     # label and the conviction number).
     "analysis/volatility_engine.py": "ATR, Bollinger bands, VWAP, price-vs-band, compression state.",
     "analysis/trend_engine.py": "ADX, EMA stack and momentum per timeframe. DIRECTION VOTE IS DESCRIPTIVE ONLY.",
@@ -242,7 +239,11 @@ def _autodescribe(header, rel):
         # ⚠️ A CHANGELOG TITLE IS NOT A MODULE DESCRIPTION. In OTV3's commonest
         # header the path, the version, the date and the last change's TITLE all
         # share one line:
-        #   analysis/liquidity_mapper.py  v4.3  2026-08-15  AUDIT A2: THE INPUT...
+        #   analysis/liquidity_mapper.py  v4.4
+v4.4  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+  2026-08-15  AUDIT A2: THE INPUT...
         # A naive extract yields "AUDIT A2: THE INPUT COULD NOT" as the
         # description — **a header that describes the last bug fix instead of
         # what the module does is worse than no header at all.** If the line

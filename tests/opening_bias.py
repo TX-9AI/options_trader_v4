@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/opening_bias.py  v4.0
+tests/opening_bias.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Does the session OPENING expose a directional bias for the rest of the day?
 
 v4.0  2026-08-19  Built at the OTV4 split. ROADMAP Phase 1.
@@ -406,7 +410,7 @@ def main(argv):
     print("     failure - it says the opening does not expose direction and the")
     print("     search moves on. A `BIAS` verdict on n<30 is not a finding.")
     print("  ⚠️ AND A BIAS FOUND HERE IS STILL IN-SAMPLE. 27 sessions is one")
-    print("     market regime. It needs forward validation before it gates")
+    print("     market character. It needs forward validation before it gates")
     print("     anything - LOG-ONLY first, as with every gate this project has")
     print("     shipped.")
     return 0

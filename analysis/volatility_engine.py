@@ -1,5 +1,9 @@
 """
-analysis/volatility_engine.py  v4.0
+analysis/volatility_engine.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 ATR, Bollinger bands, VWAP, price-vs-band, compression state.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -11,7 +15,6 @@ reasoning behind the thresholds, the design guarantees, and the
 defects that recur when forgotten. WORKING_AGREEMENT 32 requires
 this block be read before the file is edited.
 
-analysis/volatility_engine.py — Volatility regime detection.
 ATR expansion/contraction, Bollinger Band compression,
 and VIX-based macro volatility context.
 repo-wide v3.0 bump: Yahoo-Finance purge & data stream

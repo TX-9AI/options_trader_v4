@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_condor_spec.py  v4.1
+tests/check_condor_spec.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 
 v4.1  2026-08-20  AUDIT F5: the ladder section asserted a stub of its own
       making — it could not fail, and it was green while the 15%%-unhedged
@@ -117,7 +121,6 @@ def main(argv):
         check("pitchfork imports", False, str(e)[:70])
 
     # ── the RANGING gate must be GONE ──────────────────────────────────────
-    # ⚠️ v3 cancelled a pending leg when the regime flipped away from RANGING.
     # That label is exactly what v4 removed for picking the wrong side 55% of
     # the time. Fork invalidation is the structural replacement, and the
     # operator's accepted risk says the two are the SAME EVENT.

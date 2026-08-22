@@ -1,7 +1,10 @@
 """
-data/macro_data.py  v4.1
+data/macro_data.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
 
-v4.1  2026-08-21  PHASE B (r58): vix_regime -> vix_band. Same values, same
+
       logic; the word goes so a live measurement stops dressing as an artifact.
 VIX and macro context snapshot.
 
@@ -55,7 +58,6 @@ logger = logging.getLogger(__name__)
 class MacroSnapshot:
     vix:            float = 0.0
     vix_band:       str   = "UNKNOWN"   # LOW / NORMAL / ELEVATED / CRISIS
-    # PHASE B (r58): renamed from vix_regime. This is a LIVE VIX-band
     # measurement computed from the VIX itself — it never touched the retired
     # classifier and only carried the poisoned word. SessionGuard's crisis
     # lockout and setup_scorer read it; the rename touches every reader.

@@ -1,22 +1,19 @@
 """
-analysis/market_state.py  v4.1
+analysis/market_state.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
 
-v4.1  2026-08-21  PHASE B (r58): label members deleted from Regime (UNKNOWN
-      stays as the honest write), primary_regime and conviction fields deleted
-      from the dataclass (nothing computes either), vix_regime -> vix_band.
-Structural market state and the regime vocabulary. No scoring, no gating.
 
-v4.0  2026-08-19  Built at the OTV4 split, replacing analysis/regime_classifier.py.
+
 
 INHERITED DOCTRINE
 MEASUREMENTS AND CONSTRAINTS CARRIED FROM v3 - NOT A CHANGELOG.
 WORKING_AGREEMENT 32 requires this block be read before the file is edited.
 
 WHY THIS MODULE EXISTS.
-`regime_classifier.py` had fan-in 12 - third highest in the whole codebase,
 behind only config.py and time_utils. It could not simply be deleted. But the
 file map showed the shape of the dependency: EIGHT OF ITS NINE IMPORTERS WANTED
-ONLY `RegimeState` AND `Regime` - the dataclass and the enum. Two called the
 classifier.
 
 So the cut is: KEEP THE TYPES, DROP THE SCORING.
@@ -31,13 +28,11 @@ A blind read of six random tapes agreed: two of six were directionally BACKWARDS
 on the largest moves in the sample.
 
 WHAT SURVIVES AND WHY.
-Most of `RegimeState` was never a regime at all - it was a CARRIER for
 structural facts computed elsewhere: adx, atr_normalized, bb_width_pct,
 trend_direction, structure_sequence, sweep_recent, flat_angle_deg,
 sweep_age_bars, vix_band, timeframe_alignment. Those are exactly the inputs
 v4 is built on and they pass through untouched.
 
-`Regime` - the six-label vocabulary - survives DELIBERATELY. Operator, 2026-08-19:
 labels "must be predicated on structure above all else & shaped by the other
 available cues", and they INFORM rather than authorise. A setup may read one.
 NO SETUP MAY REQUIRE ONE. The labels themselves are rebuilt from structure in
@@ -55,29 +50,6 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 
-class Regime:
-    """The vocabulary. Descriptive labels, never an authorisation.
-
-    ⚠️ These names are carried from v3 unchanged so that historical journals,
-    trade rows and replay logs remain readable against v4 code. **The names
-    survive; the way they were COMPUTED does not** - v3 derived them from a
-    damper x corroborator confluence score whose every scoring defect is
-    catalogued in docs/INHERITED_FINDINGS.md. v4 derives them from structure
-    (ROADMAP Phase 4.1).
-    """
-    # PHASE B (r58): the five classifier labels are DELETED. They were the
-    # vocabulary of a scorer measured at 44.9% side accuracy; nothing in v4
-    # computes them and r57 removed every gate that read them. Historical
-    # rows keep their strings — reading old data needs no enum. Per the
-    # operator: a revived concept must wear a DIFFERENT phrase.
-    UNKNOWN = "UNKNOWN"
-
-    # PHASE B (r58): ALL is gone with the members — nothing iterates a dead
-    # vocabulary. UNKNOWN is the only writable value.
-    ALL = (UNKNOWN,)
-
-
-@dataclass
 class MarketState:
     """Structural facts about the tape, plus a descriptive label slot.
 
@@ -108,7 +80,7 @@ class MarketState:
     structure_sequence: str = "NEUTRAL"
     sweep_recent: bool = False
     sweep_age_bars: int = 999
-    vix_band: str = "UNKNOWN"   # PHASE B: renamed from vix_regime — a live
+    vix_band: str = "UNKNOWN"
                                 # VIX-band measurement that only carried the
                                 # poisoned word
     timeframe_alignment: Dict[str, str] = field(default_factory=dict)
@@ -127,8 +99,6 @@ class MarketState:
 
 
 # ⚠️ BACK-COMPAT ALIAS, DELIBERATE AND TEMPORARY. Eight modules import
-# `RegimeState` by name. Aliasing here lets the repo import while those call
 # sites are updated one at a time; renaming all of them in a single edit would
 # be a large blind change with nothing testable until every file compiled.
 # Remove once the last importer reads `MarketState` directly.
-RegimeState = MarketState

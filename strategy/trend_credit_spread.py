@@ -75,7 +75,6 @@ MEASURED (`spread_counterfactual --anchor floor`, 18 sessions, PDL + session
 low): TRENDING_BEAR +0.39 / +0.48 / +0.46 and TRENDING_BULL +0.60 / +0.66 /
 +0.78 at 0.00%% / 0.25%% / 0.50%% beyond the floor.
 ⚠️ **BOTH ARMS POSITIVE, so this is a GENERAL credit edge rather than a
-regime-specific one** — weaker evidence than the ORB result, whose control
 FAILED. Stated plainly rather than dressed up.
 ⚠️ AND THE RUNAWAY GATE WAS A CATEGORY ERROR. Operator: *"The reason it
 requires a runaway before 11am is because ORB OWNS THAT SLOT. So a runaway is
@@ -160,7 +159,7 @@ class TrendCreditSpread:
         return (TCS_WING_WIDTH_SPX if INSTRUMENT in ("SPX", "SPXW")
                 else TCS_WING_WIDTH_QQQ)
 
-    def generate_signal(self, regime, vol_state, chain, macro,
+    def generate_signal(self, ms, vol_state, chain, macro,
                         current_price: float, trend=None,
                         orb_high: Optional[float] = None,
                         orb_low: Optional[float] = None,
@@ -406,13 +405,13 @@ class TrendCreditSpread:
                 return None
 
             return self._build_signal(side, short, long_c, direction, bound,
-                                      current_price, regime, bars)
+                                      current_price, ms, bars)
         except Exception as exc:                               # noqa: BLE001
             logger.warning("[tcs] generate_signal failed: %s", exc)
             return None
 
     def _build_signal(self, side, short, long_c, direction, boundary,
-                      current_price, regime, bars):
+                      current_price, ms, bars):
         """Condor-leg shape, so `_execute_condor_leg` runs it unchanged.
 
         `is_trend_credit` is the flag `exit_engine` keys on. WITHOUT IT this leg
@@ -430,7 +429,7 @@ class TrendCreditSpread:
             # THE INVALIDATION LEVEL, and the exit. A close beyond the broken
             # boundary is thesis death — the same event orb_structure_stop names.
             underlying_stop=boundary,
-            regime="",   # PHASE B (r58): the label field is not written
+            ms="",   # PHASE B (r58): the label field is not written
         )
         sig.is_credit_vertical = True         # credit-spread math, not debit
         sig.is_trend_credit = True            # exit_engine: breach-or-nickel ONLY

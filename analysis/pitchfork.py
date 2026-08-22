@@ -1,5 +1,9 @@
 """
-analysis/pitchfork.py  v4.1
+analysis/pitchfork.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 v4.1  2026-08-21  _epoch_triple no longer proposes a P2 inside the last k
       bars - it was selecting the tail RUNNING EXTREME, which the 4.4
       confirmation-lag guard was then obliged to reject. Contained-fork build
@@ -112,7 +116,6 @@ WHY THIS MODULE DEFINES ITS OWN SWING PIVOTS — and the ugly part, stated plain
     utils.math_utils.find_swing_highs/lows, consumed by StructureAnalyzer.
     Consuming that shared helper was considered and rejected for THREE reasons:
       1. SEGREGATION. find_swing_highs feeds StructureAnalyzer ->
-         structure_sequence -> a HARD VETO in regime_confluence._trending, plus
          the A4 invariant. Putting pitchfork evolution inside a function the live
          gate reads makes every PF.2/PF.3 anchor tweak a diff against the trading
          path. A definition owned by this module can change freely for six weeks

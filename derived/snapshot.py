@@ -1,5 +1,9 @@
 """
-derived/snapshot.py  v4.0
+derived/snapshot.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Owns `fire_snapshot`. Everything derived at the instant a trade fired.
 
 v4.0  2026-08-22  See docs/DERIVED_STORES.md.
@@ -22,7 +26,6 @@ trade's LIFE and stay on `trades`. This is one frozen instant at entry.
 Different clocks, different tables, no collision — and the join is what makes
 excursion work BETTER than it does today.
 
-⚠️ SNAPSHOT EVERYTHING AVAILABLE, NOT WHAT WE THINK MATTERS. `regime_ctx()`
 recorded label plus conviction and dropped every term that actually decided the
 entry — so the journal had a vocabulary of two for a decision made on twenty.
 If the point is DISCOVERING which indicator reveals edge, pre-selecting the

@@ -1,5 +1,9 @@
 """
-warehouse/s3_push.py  v4.0
+warehouse/s3_push.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Pushes collected data to S3 and verifies what landed.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -58,10 +62,8 @@ CHANGELOG
            consumes that captured nothing is not a capture bug to fix; it is a
            stream to stop collecting.** The 81 existing orb_range objects stay
            in raw/ (which never deletes) and simply stop growing.
-    v1.7 — 2026-08-16 — WH.8a: `regime_log` and `circuit_breaker_events` join the
            warehouse. FOUND WHILE BUILDING THE READER, NOT BY LOOKING: the
            control-side bundle `fleet_trades_<date>.json` has a
-           `regime_timeline` and a `breaker_events` section, both sourced from
            those two tables inside trades.db — and NOTHING WAS PUSHING THEM. WH.2
            scoped itself to the `trades` table and said the other two would
            follow; WH.3 covered six OTHER streams and they were never picked up.
@@ -666,7 +668,6 @@ def _wrap(datatype, rec, sym, day, extra=None):
 def push_table(s3, bucket, db_path, table, ts_col, datatype, ledger, me, counters=None):
     """Push every row of an append-only table in trades.db, one object per row.
 
-    Used for `regime_log` and `circuit_breaker_events`. Unlike `trades` these
     do not mutate, so there is no change-data-capture to reason about: a row's
     content hash is stable for its lifetime and the ledger simply records which
     hashes have landed.
@@ -968,9 +969,6 @@ def main(argv=None) -> int:
         #   journal — largest by far, and the most tolerant of lag
         stages = [
             ("trades", lambda: push_trades(s3, BUCKET, TRADES_DB, t_ledger, counters)),
-            ("regime_log", lambda: push_table(
-                s3, BUCKET, TRADES_DB, "regime_log", "logged_at",
-                "regime_log", t_ledger, me, counters)),
             ("circuit_breaker", lambda: push_table(
                 s3, BUCKET, TRADES_DB, "circuit_breaker_events", "event_time",
                 "circuit_breaker", t_ledger, me, counters)),

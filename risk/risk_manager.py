@@ -1,5 +1,9 @@
 """
-risk/risk_manager.py  v4.0
+risk/risk_manager.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Position sizing, loss caps, halt state.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -47,7 +51,6 @@ DAILY CAP MADE DEFINITIVE & RESTART-PROOF:
 v1.0 — original release
 remove TRADE_GRADE_C and Twilio references,
         clean up Grade C sizing logic
-(a) regime reassessment after EVERY losing trade (not just
         at a count threshold). (b) NET daily loss halt: track session net P&L
         (seeded from today's closed trades so it survives restarts) and halt
         NEW entries when day P&L <= -DAILY_LOSS_LIMIT_USD. Wins offset losses —
@@ -56,7 +59,6 @@ add compute_condor_leg_size(): sizes ONE condor vertical
         at HALF the grade budget (each side gets half), against the spread
         max-loss = (width - credit) x 100. Enables two independent verticals.
 session loss limit no longer halts the session. Hitting
-        SESSION_LOSS_LIMIT now REQUESTS a regime reassessment (consumed by the
         main loop) instead of stopping the service. Rationale: a 2-loss count
         breaker was too blunt — it would kill sessions that are still net
         profitable. Removed _fire_circuit_breaker()/systemctl-stop and the
@@ -70,12 +72,9 @@ Sizing model:
   - Contracts = floor(risk_usd × grade_multiplier / cost_per_contract)
   - cost_per_contract = mark × 100 (single leg) or net_debit × 100 (butterfly)
   - Always whole contracts; minimum 1 if affordable
-Regime reassessment (NOT a halt):
   - EVERY losing trade sets a one-shot reassessment request (v1.4). A loss is
-    fresh information about whether the regime read still holds. There is no
     count threshold — the old SESSION_LOSS_LIMIT count was deleted in config
     v3.2 (it had gated nothing since v1.4). `session_losses` is retained purely
-    as a session statistic. main_loop consumes the request and forces a fresh regime
     classification. Trading continues; the bot re-reads the market.
   - NOTE (live): this intentionally removes the hard stop. For live capital a
     separate $-based session backstop is advisable — not implemented here.
@@ -307,14 +306,12 @@ class RiskManager:
 
     def record_loss(self, pnl_usd: float = 0.0):
         self._session_losses += 1
-        # Reassess the regime after EVERY losing trade — a loss is fresh
-        # information about whether the current regime read still holds.
         self._reassess_requested = True
         # The halt decision comes from the DB (authoritative), not this counter.
         net = self.day_realized_pnl()
         logger.warning(
             f"Session loss #{self._session_losses} (${pnl_usd:+.0f}) — "
-            f"day realized ${net:+.0f}; forcing regime reassessment"
+            f"day realized ${net:+.0f}; forcing reassessment"
         )
         self.is_halted()   # evaluate + fire the halt alert at close time
 

@@ -1,5 +1,9 @@
 """
-config.py  v4.2
+config.py  v4.3
+v4.3  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 v4.3  2026-08-22  CONDOR_PF_TIMEFRAME -> "1h" per operator ruling. See the
     site comment; supersedes the daily anchor.
 
@@ -100,7 +104,6 @@ CONTINUATION_STOP_LOSS_PCT default 0.25 -> 0.15. THE REPO
         an in-sample argmax.
         ⚠️ WHAT THIS COHORT IS, and why tightening it is not the same as
         tightening a thesis stop: these are BY DEFINITION the trades where NO
-        structural stop fired — not regime_flip, not bos_exit, not
         insurance_stop. The thesis was still technically intact and the premium
         died anyway. Zero winners cut over 9 sessions is evidence it did not
         cost anything; it is not proof that it cannot.
@@ -128,11 +131,9 @@ CNT.1: CONT_BREAKOUT_DIRECTION + CONT_BREAKOUT_MIN_ADX.
         Standalone continuation may now fire under BREAKOUT_VOLATILE, taking
         direction from the trend engine's `overall_direction` instead of from
         the label (which carries none). Gated on ADX rather than on
-        regime.conviction, because under a non-trending label the conviction
         floor is skipped and BREAKOUT's conviction is not the trend's. Tagged
         `trend_continuation_breakout` so it scores separately.
 SWP.1: SWEEP_SETUP_FLOOR (OT_SWEEP_SETUP_FLOOR, default
-        0.05). Sweep stops gating on the regime label and gates on the L1
         _sweep SETUP SCORE. The label wins 0.4% of live ticks and is exactly
         zero on 96%, so the trade was effectively off. A PRIOR for the
         collection phase, to be tightened on live fires.
@@ -171,8 +172,6 @@ SWEEP STRIKE FLOOR. SWEEP_DELTA_STRONG 0.08 -> 0.12,
         endpoints now read: max conviction -> 0.12 delta (leveraged but
         REACHABLE), low conviction -> 0.30 (near-ATM), linear between.
         SEPARATE DEFECT, SEPARATE FIX: the same trade also had a bad ENTRY
-        because analysis/regime_confluence.py _sweep could not see trend at
-        all (fixed in regime_confluence v1.3). These are deliberately not
         bundled — bundling them would make post-freeze sweep P&L
         unattributable between strike selection and entry quality.
 PAPER FRICTION UNIFIED (audit defect T). Default
@@ -250,7 +249,6 @@ TOLERANCES REMOVED + SESSION_LOSS_LIMIT deleted.
         (b) SESSION_LOSS_LIMIT (the integer 2) DELETED. It was a COUNT of losing
             trades from the v1.x count-based circuit breaker, and it is NOT the
             daily loss halt. It has been vestigial since risk_manager v1.4, which
-            requests a regime reassessment after EVERY losing trade — the count
             gates nothing. It survived only in dashboards, which printed
             "Session CB: 2 losses -> halt" for a halt that could never occur.
             The REAL halt is DAILY_LOSS_LIMIT_USD (below): dollars, net for the
@@ -267,7 +265,6 @@ DEAD-CONSTANT PURGE + honest comments.
               ORB_TRAIL_ACTIVATION   — duplicate of TRAIL_ACTIVATION_PCT
               CONDOR_SHORT_DELTA     — from iron_condor v1.0 (delta selection),
               CONDOR_DELTA_TOLERANCE   dead since v1.1 made strikes BB-anchored
-              MIN_TF_CONFLUENCE      — concept lives in regime_classifier v1.3 as
                                        a HARDCODED `aligned_timeframes < 2`; the
                                        config value (1) was LOOSER and unwired
               ENTRY_COOLDOWN_MINUTES — ORB's state machine IS the cooldown
@@ -674,23 +671,16 @@ ORB_MAX_RETEST_BARS         = 12
 ORB_TP_MULTIPLIER           = 1.0
 FED_DAY_ORB_BOOST           = 0.20
 
-# ─── ORB REGIME GATE SWITCH (v3.2) ────────────────────────────────────────────
-# When True, a CONFIRMED ORB break+retest fires regardless of the regime label —
 # including UNKNOWN and SWEEP_REVERSAL. The ORB engine's break+retest is self-
 # validating (the classifier does not even test for it), so the label is not
 # consulted for the go/no-go; only the setup scorer's B-threshold and the ORB
-# engine's own structure gate it. Under UNKNOWN the regime_conviction dimension
 # simply contributes 0 to the score. Under SWEEP_REVERSAL, ORB wins (the engine
 # no longer defers its OPEN to the sweep). Set False to restore strict v2 gating
 # (UNKNOWN/sweep block ORB). Every ORB that fires under UNKNOWN is logged with
-# regime=UNKNOWN — labeled tape for the shadow observer.
 # v4.19 (2026-08-19) — ORB IS BLOCKED UNDER RANGING (operator: the conclusive
-# loss leader). A flag rather than a deletion from _orb_ok_regimes, so the
 # decision stays readable, is reversible by env, and the refusal can be
 # JOURNALED — "ORB did not set up" and "ORB was forbidden" must not look the
 # same in the record.
-# v4.3 (2026-08-21) — ORB_BLOCK_RANGING and ORB_FIRES_REGARDLESS_OF_REGIME are
-# DELETED with the regime gates they modified. Both keyed on a label v4 never
 # assigns: the RANGING block could never fire, and the second was hardcoded
 # True so it never contributed a term to anything. OT_ORB_BLOCK_RANGING is now
 # INERT — stated here so nobody spends an evening looking for its reader.
@@ -707,7 +697,6 @@ SWEEP_DELTA_STRONG          = 0.12   # conviction -> 1.0 : leveraged but REACHAB
 SWEEP_DELTA_WEAK            = 0.30   # conviction -> 0.0 : near-ATM, participation
 SWEEP_DELTA_TOLERANCE       = 0.04   # acceptable band around the target delta
 
-# ── SWP.1 — sweep is an EVENT, not a regime (2026-08-07, operator's ruling) ──
 # The trade required the committed L2 label to be SWEEP_REVERSAL, a label that
 # wins 0.4% of live ticks and is exactly 0 on 96% of them, so the trade was
 # effectively off. It now gates on the L1 _sweep SETUP SCORE instead.
@@ -792,7 +781,6 @@ BUTTERFLY_WING_QQQ          = 5      # $5 wings on QQQ/SPY
 BUTTERFLY_GEX_PIN_PROXIMITY_MULT = 1.0  # Multiplier on expected move
 
 # ─── IRON CONDOR STRATEGY ─────────────────────────────────────────────────────
-# Fallback for RANGING regime when no GEX pin is available for a butterfly.
 # Strike selection is BOLLINGER-BAND ANCHORED — there is NO delta anywhere in the
 # condor path (short call = lowest liquid strike at/above the BB upper band; short
 # put = highest liquid strike at/below the BB lower band). Delta is deliberately
@@ -986,7 +974,6 @@ SWEEP_POST_TARGET_TRAIL     = os.environ.get("OT_SWEEP_POST_TARGET_TRAIL", "True
 
 POLL_INTERVAL_SECONDS       = 15
 
-# ─── REGIME CLASSIFICATION ────────────────────────────────────────────────────
 
 ADX_TREND_THRESHOLD         = 25
 
@@ -1001,7 +988,6 @@ ADX_TREND_THRESHOLD         = 25
 # WHY A SEPARATE ADX FLOOR RATHER THAN THE CONVICTION FLOOR: under a non-trending
 # label `_label_trending` is False, so continuation's `CONTINUATION_CONV_FLOOR`
 # check is SKIPPED ENTIRELY — the same hole the handoff path has. Reusing
-# `regime.conviction` would be worse than nothing, since under BREAKOUT it is
 # BREAKOUT's conviction, not the trend's. The direction is coming from the trend
 # engine, so the quality bar must come from there too.
 #
@@ -1053,19 +1039,16 @@ CONT_BREAKOUT_MIN_ADX   = float(os.environ.get("OT_CONT_BREAKOUT_MIN_ADX",
 ADX_RANGE_THRESHOLD         = 25   # v3.3 (2026-07-14): was 20 — closed the ADX
                                    # DEAD ZONE. _is_ranging required adx<20 while
                                    # _is_trending requires adx>=25, so ordinary
-                                   # mild-drift tape at ADX 20-25 matched NO regime
                                    # and fell to UNKNOWN (hard no-trade). Measured
                                    # live: AAPL sat at ADX 19.26 — 0.74 under the
                                    # cliff — flickering RANGING<->UNKNOWN all session;
                                    # ~85% of fleet ticks were UNKNOWN on 07-13/07-14
                                    # and the fleet took ZERO trades for two days.
                                    # A range does not stop being a range because ADX
-                                   # ticked 19.9 -> 20.1; it is the same regime with
                                    # LOWER CONVICTION. _ranging_conviction already
                                    # ramps on 1 - adx/ADX_RANGE_THRESHOLD, so raising
                                    # the gate to the trend line extends that ramp
                                    # across the gap: ADX 12 -> ~0.52, ADX 24 -> ~0.16.
-                                   # Matches docs/REGIME_TRUTHS.md, which defines ADX
                                    # for RANGING as "any (allowed)" and strength as a
                                    # SOFT-NECESSARY ramp, never a cliff.
                                    # PRIOR — recalibrate from multi-day tape.
@@ -1073,7 +1056,7 @@ ATR_EXPANSION_MULTIPLIER    = 1.5
 BB_WIDTH_COMPRESSION_PCT    = 0.20
 SWEEP_REJECTION_CANDLES     = 3
 EQUAL_LEVEL_PCT             = 0.001
-REGIME_REASSESS_MINUTES     = 5
+REASSESS_MINUTES     = 5
 
 # ─── SETUP SCORING ────────────────────────────────────────────────────────────
 
@@ -1239,7 +1222,6 @@ CACHE_STALENESS_SECONDS = {
 NOTIFY_ON_ENTRY             = True
 NOTIFY_ON_EXIT              = True
 NOTIFY_ON_CIRCUIT_BREAK     = True
-NOTIFY_ON_REGIME_CHANGE     = True
 
 # ─── DATABASE & LOGGING ───────────────────────────────────────────────────────
 
@@ -1287,7 +1269,6 @@ class SessionConfig:
 # Continuation stop. 2026-07-22: 0.40 -> 0.25 per user directive. The 40%
 # blanket floor (MAX_LOSS_PCT) is a DISASTER backstop sized for trades whose
 # primary stop is structural; the continuation trade's primary stop is the
-# REGIME FLIP, which fires long before a 40% premium bleed. A 40% floor was
 # therefore dead weight that only ever paid out on a gap. 25% keeps the
 # backstop meaningful without letting a dead thesis bleed.
 CONTINUATION_STOP_LOSS_PCT      = float(os.environ.get("OT_CONT_STOP_PCT", "0.15"))
@@ -1316,25 +1297,21 @@ CONTINUATION_REQUIRE_CONFIRM = os.getenv("OT_CONT_REQUIRE_CONFIRM", "1") == "1"
 # 0.0 restores the pre-v4.15 behaviour exactly (kill switch and A/B control).
 BOS_MIN_DIST_ATR = float(os.getenv("OT_BOS_MIN_DIST_ATR", "0.35"))
 
-# ── CONTINUATION: THE PREMIUM REGIMES ARE NOT ITS TAPE (CNT.6, 2026-08-10) ────
 # A trend continuation is, definitionally, a trend resuming after a pullback.
 # RANGING and COMPRESSION are the assertion that there is NO trend to continue,
 # so a continuation entry there is not a marginal call — it is a contradiction.
 # It happened anyway because the dispatch gate reads
-#     `_is_runaway OR regime in (TRENDING_BULL, TRENDING_BEAR, BREAKOUT_VOLATILE)`
 # and `_is_runaway` BYPASSES THE LABEL ENTIRELY. So an ORB runaway flag let
 # continuation fire on any tape at Priority 2 — ahead of Butterfly (P3, needs
 # RANGING/COMPRESSION) and Condor (P4, needs RANGING), both of which sit behind
 # `if signal is None` and were therefore never evaluated.
 # MEASURED over 13 sessions: RANGING → Continuation 94 trades vs IronCondor 27;
 # COMPRESSION → Continuation 39 vs Butterfly 6. Continuation took 3.5x the
-# condor's opportunities and 6.5x the butterfly's, inside the regimes those
 # strategies exist for.
 # CNT.3 already blocked the handoff in COMPRESSION, but only INSIDE the strategy
 # and only for the handoff path — RANGING was never covered, and a strategy-level
 # check cannot stop the slot being consumed before P3/P4 are reached.
 # Set to 0 to restore the pre-CNT.6 behaviour exactly (kill switch and A/B).
-# v4.3 — CONT_BLOCK_PREMIUM_REGIMES DELETED with the continuation veto it fed;
 # that branch was unreachable. OT_CONT_BLOCK_PREMIUM is now INERT.
 
 # ── CONTINUATION CONFIRMATION TOLERANCE (v1.6, 2026-08-11) ───────────────────
@@ -1417,7 +1394,6 @@ SWEEP_STALE_HARD_BARS = int(os.environ.get("OT_SWEEP_STALE_HARD_BARS", "48"))
 #            15m        18.0           0.3        26.7
 #            20m        29.8           0.9        18.5     <- barely overlap
 # The median surviving LOSER sits at ~1.0 — treading water exactly at breakeven
-# — while the bottom decile of WINNERS is at 30x it. Different regimes, not a
 # marginal difference.
 #
 # ⚠️ THE 5-MINUTE ROW IS WHY GRACE EXISTS: winners p10 of -21.1 means the bottom

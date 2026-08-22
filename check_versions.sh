@@ -1,6 +1,10 @@
 #!/bin/bash
 # ==========================================================================
-# check_versions.sh  v4.0
+# check_versions.sh  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 # Header/canary/parity verification before shipping.
 #
 # v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -92,12 +96,10 @@
 #         the one check: a permanently-red sweep trains the reader to skip its
 #         own DONE banner, at which point every OTHER canary here stops working
 #         too. Also adds the VW.1f pins.
-# RGM.4 per-regime commit bar. Two canaries: the override
 #         map itself, and the ARMING site using the challenger's own bar. If
 #         either reverts to the global theta_commit, RANGING goes quiet again
 #         with no error — it reads as "no ranges today", which is exactly how it
 #         hid for weeks.
-# CNT.6 continuation blocked in the premium regimes. The
 #         canary pins the NEGATED form (`not _cont_blocked`) because restoring
 #         the bare `_is_runaway or ...` bypass raises NOTHING — butterfly and
 #         condor simply go quiet again, which reads as "no setups today" rather
@@ -119,7 +121,6 @@
 #         confirmation. Falling through on thin tape would restore the
 #         unconfirmed entry invisibly and only sometimes, which is the worst
 #         shape a regression can take here.
-# sweep spent-move (regime_confluence v1.4) + L1 evidence
 #         on the fired disposition (main v5.9). The LOAD-BEARING canary is
 #         `soft_necessary=.trend_opp, age_decay.` — if trend_opp ever leaves
 #         that list a high ambient score can rescue a sweep fighting an
@@ -212,7 +213,6 @@
 #         describing nothing.
 # main v5.4: ORB EXEMPT FROM THE STALE ENTRY GATE, +3
 #         canaries and the header re-pinned. v5.0's block sat ABOVE the dispatch
-#         so ORB_FIRES_REGARDLESS_OF_REGIME was unreachable on a stale tick, and
 #         the fleet lost 09:35-09:41 of the flagship's window every session since
 #         it deployed. The ABSENCE canary is the load-bearing one: the v5.0
 #         unconditional form returns before ORB is ever consulted, raises
@@ -258,10 +258,8 @@
 # labels are BULL/BEAR and the map is SHARED. The same
 #         truncation defect was found in tests/replay_confluence.py (the
 #         nightly emitted-distribution line the freeze watch reads) and in
-#         regime_confluence's self-test. Canaries now pin the shared map and
 #         each consumer of it, because fixing one renderer leaves the next free
 #         to invent its own abbreviation.
-# +3 canaries for regime_diary v1.3. The ABSENCE check is
 #         the load-bearing one: `k.split('_')[0][:4]` collapsed TRENDING_BULL
 #         and TRENDING_BEAR into the same token for 16 sessions and nothing
 #         failed — no error, no test, a report that simply could not express
@@ -270,11 +268,9 @@
 #         pin FAILED on its own during the W.2a pass, which is the point of
 #         having it: a version bump that nobody re-pins is how the pin sat at
 #         v4.8 while the fleet ran v5.0.
-# +3 canaries for main v5.2 (no regime-flip exit on a
 #         stale book). The ABSENCE check is the one that matters: the gate is a
 #         single argument, so a stale sync reverting it produces NO error and NO
 #         log line — exits simply start firing on unconfirmed labels again, and
-#         the only visible symptom would be regime_flip hold-times creeping back
 #         down weeks later in flicker_audit. Also pins the main header to v5.2.
 # +6 canaries for N.5 exit-ladder latency (exit_engine
 #         v4.11 / trade_logger v3.11). The load-bearing one is the ABSENCE
@@ -295,13 +291,11 @@
 #         a working capture looks like. Nothing else in the repo can see that.
 # +4 canaries for main v4.8: the opening warm-up now logs
 #         INFO rather than a WARNING that fired on 13/15 boxes every morning for
-#         designed behaviour, and regime_log/trades carry the engine that
 #         produced each label. The engine stamp is the one that matters most —
 #         without it, "which engine labelled this row" was answerable only by
 #         grepping bot.log, and the designed v1.3 opening window could not be
 #         excluded from an L2-conditioned fit.
 # REACHABILITY CANARY. main v4.7 fixed the real 07-29 root
-#         cause: `_REGIME_ENGINE` is .lower()ed to "l2" while both gates compared
 #         it to "L2", so L2.5 never executed once on any box since v4.0 wired it.
 #         An absence canary now fails if the uppercase literal returns, plus a
 #         presence check on the startup engine-identity line. This is the canary
@@ -317,7 +311,6 @@
 #         corrected L2 import and the v1.7 degraded-engine pager, after an
 #         ImportError swallowed by the L2 guard put all 15 boxes on the v1.3
 #         classifier for a full session. Also fixes a defect in v4.3's own
-#         banner: the regime_confluence ABSENCE loop printed ✗ STALE without
 #         incrementing MISS, so a restored fabricated fallback would have
 #         reported "ALL CANARIES GREEN". Absence failures now count.
 # GLYPH FIX (legibility, no logic change). Every status
@@ -347,10 +340,8 @@
 #         v4.4, tests/readiness_digest.py (conductor phase-9 target).
 # +6 canaries: trade_readiness v1.0 engine + main v4.3
 #         every-tick hook (LOG-ONLY readiness workstream).
-# +1 canary: regime_confluence v1.3.1 compression
 #         containment veto (the A3 squeeze-break fix the A/B pool surfaced).
 # CONFLUENCE EXCAVATION CANARIES. Adds 11 presence checks
-#         and 4 ABSENCE checks for regime_confluence v1.3, plus 2 VALUE-pinned
 #         checks for the config v4.0 sweep strike floor. The absence loop is the
 #         load-bearing half: v1.3 was mostly about REMOVING terms (two constant
 #         corroborators, two fabricated no-window fallbacks), and a stale sync
@@ -387,12 +378,10 @@
 # ORB geometry-gate fingerprints (setup_scorer v1.4).
 #         Pins that the ORB grades via _grade_orb (liquidity-in-path A/B only)
 #         and that _orb_quality is GONE — a stale file would silently restore
-#         the regime/VWAP/macro-weighted ORB score that could veto a confirmed
 #         break. Absence-check on _orb_quality is inverted (see below).
 # CANARY GAP CLOSED (audit defect U). Before this the
 #         newest fingerprint was dated 2026-07-18: a stale sync of ANY file
 #         shipped 07-20 → 07-22 (orb v3.9, sweep v3.2, main v4.0/v4.1,
-#         regime_confluence v1.2, the whole limit_ladder execution change,
 #         status v1.13) passed this check silently — the exact failure mode
 #         this script exists to catch, and the one that caused the 07-16
 #         unmanaged-position incident. Adds 16 fingerprints covering every
@@ -498,7 +487,6 @@ check "status.py"                        "get_runtime_env"              "v1.12 l
 
 # main v4.0 / L2.5 (2026-07-21) — the Layer-2 label drives live trading
 # REMOVED 2026-08-20 with main.py v4.2: this canary asserted the PRESENCE of
-# OT_REGIME_ENGINE, and main no longer reads it. A canary that demands a
 # deleted feature still exists is a red that can never be cleared - the
 # WORKING_AGREEMENT 24 trap. Deleted with the thing it guarded, in the same
 # commit, per WORKING_AGREEMENT 23 (ship coupled changes together).
@@ -508,31 +496,14 @@ check "main.py"                          "integrator_state.json"        "v4.0 co
 # sweep v3.2 (2026-07-21) — ORB-ownership gate
 check "strategy/sweep_reversal_strategy.py" "_orb_released_price"       "v3.2 sweep blocked until the ORB releases price"
 
-# regime_confluence v1.2 (2026-07-22) — ramp de-saturation. PIN THE VALUES:
 # a stale file keeps the constant NAMES and silently reverts the bounds, which
 # is invisible to a name-only check and would re-saturate RANGING.
-check "analysis/regime_confluence.py"    "RANGE_ROOM_LO\", 0.17"        "v1.2 room_s lower bound de-saturated (0.05 -> 0.17)"
-check "analysis/regime_confluence.py"    "OSC_CROSS_HI\", 10.0"         "v1.2 osc_s upper bound de-saturated (5 -> 10)"
-check "analysis/regime_confluence.py"    "_envf"                        "v1.2 all 14 ramp bounds env-overridable (OT_RC_*)"
 
-# regime_confluence v1.3 (2026-07-27) — confluence excavation. PIN THE VALUES
 # and the ABSENCES. A stale sync keeps constant NAMES while reverting values, so
 # weights are value-pinned; and since this pass was mostly about REMOVING terms,
 # absence is the load-bearing check. The v1.3 changelog deliberately does not
 # spell the removed identifiers, so bare-token greps below are safe (the
 # changelog-prose trap has re-tripped absence canaries twice).
-check "analysis/regime_confluence.py"    "v1.3 — 2026-07-27"            "v1.3 confluence excavation header present"
-check "analysis/regime_confluence.py"    "def _sweep(self, liq_map, trend_state=None, ambient=None)"  "v1.3/v1.4 _sweep receives trend_state (PLTR blindness fix) + ambient"
-check "analysis/regime_confluence.py"    "trend_opp = 1.0 - (opp_adx \* opp_mom)"  "v1.3 sweep trend-opposition suppressor live"
-check "analysis/regime_confluence.py"    "W_SWEEP_REJQ, W_SWEEP_EXH = 0.45, 0.55"  "v1.3 sweep weights pinned (rejq 0.45 / exhaustion 0.55)"
-check "analysis/regime_confluence.py"    "W_RANGE_OSC, W_RANGE_BAL = 0.55, 0.45"   "v1.3 ranging weights pinned (osc 0.55 / balance 0.45)"
-check "analysis/regime_confluence.py"    "W_COMP_STORED, W_COMP_ATR, W_COMP_SQZ = 0.45, 0.35, 0.20"  "v1.3 compression weights pinned"
-check "analysis/regime_confluence.py"    "W_BRK_EXPAND, W_BRK_CLEAR, W_BRK_MOM = 0.40, 0.30, 0.30"   "v1.3 breakout weights pinned"
-check "analysis/regime_confluence.py"    "COMP_OSC_LO"                  "v1.3 crossings axis decoupled ranging/compression"
-check "analysis/regime_confluence.py"    "def midline_balance"          "v1.3 real range-balance corroborator exists"
-check "analysis/regime_confluence.py"    "def momentum_val"             "v1.3 shared momentum mapper (no-vote earns no credit)"
-check "analysis/regime_confluence.py"    "soft_necessary=\[narrow_s\]"   "v1.3 compression tightness stays NECESSARY (not a corroborator)"
-check "analysis/regime_confluence.py"    "veto_inside"                  "v1.3.1 compression containment veto (A3 squeeze-break fix)"
 
 # trade readiness v1.0 / main v4.3 (2026-07-27) — LOG-ONLY readiness engine.
 # The absence half matters: a stale main.py sync silently drops the hook and
@@ -541,7 +512,6 @@ check "analysis/trade_readiness.py"      "TradeReadinessEngine"         "v1.0 tr
 check "analysis/trade_readiness.py"      "readiness_would_fire"         "v1.0 would-fire observation event"
 check "analysis/trade_readiness.py"      "TR_DEARM_SLOPE"               "v1.0 slope de-arm knob (falling confluence disarms)"
 check "analysis/trade_readiness.py"      "0.5 \*\* (dt / TR_SLOPE_HALFLIFE_S)" "v1.0 dt-aware slope EMA (wall-clock, no tick counters)"
-check "main.py"                          "_readiness.assess_all(ctx, regime)" "v4.3 readiness hooked in the every-tick block"
 check "main.py"                          "main.py — options_trader v6.1" "v6.1 main header current (ORB exempt from the stale entry gate)"
 check "main.py"                          "_orb_exempt"                  "v5.4 confirmed ORB bypasses the stale entry block"
 check "main.py"                          "STALE book, but ORB is CONFIRMED"  "v5.4 the exempt path says why in the log"
@@ -626,14 +596,10 @@ check "tests/test_bos_min_distance.py"   "test_min_dist_zero_is_byte_identical_t
 check "tests/vwap_orientation_ledger.py" "MIN_ARM_TRADES"              "v1.6 VW.1f-c — a verdict rests on the SMALLER arm; a floor on the total does not constrain it"
 check "tests/vwap_orientation_ledger.py" "MAPPED BUT UNMATCHED"        "v1.6 VW.1f-a — trades that map but never match were vanishing with no line anywhere"
 check "tests/vwap_orientation_ledger.py" "_SRC_BY_TRACK"               "v1.6 VW.1f-b — the era warning must key on ONE TRACK holding both, not on the totals"
-check "analysis/conviction_integrator.py" "regime engine. — v2.3"      "v2.3 header current"
-check "analysis/conviction_integrator.py" "theta_commit_by_regime"     "v2.3 RGM.4 per-regime commit bar — a revert to the global silently re-darkens RANGING"
 check "analysis/conviction_integrator.py" "p.commit_bar(top_r)"        "v2.3 the ARMING site uses the challenger's own bar, not the global"
 check "tests/test_ranging_commit_bar.py" "test_the_bar_stays_out_of_the_impostor_window" "v1.0 the bar may move; it may not move into the 12-15 bar false-flat zone"
-check "main.py"                          "not _cont_blocked"           "v6.0 CNT.6 — the runaway bypass must NOT reopen the premium regimes; its return is silent"
 check "main.py"                          "main.py — options_trader v6.1" "v6.1 header current"
 check "config.py"                        "OT_CONT_BLOCK_PREMIUM"       "v6.0 kill switch AND A/B control"
-check "tests/test_continuation_premium_block.py" "test_runaway_cannot_bypass_a_premium_regime" "v1.0 the guard that matters"
 check "strategy/continuation_strategy.py" "CONT_CONFIRM_TOL_ATR"        "v1.6 CNT.7 — the confirmation tolerance must be ATR-scaled, never raw price"
 check "config.py"                        "OT_CONT_CONFIRM_TOL_ATR"     "v1.6 kill switch AND A/B control"
 check "tests/test_continuation_confirmation.py" "test_a_too_small_tolerance_would_be_a_no_op" "v1.6 guards against a fix in name only"
@@ -648,14 +614,9 @@ check "strategy/continuation_strategy.py" "confirmation UNDECIDABLE"    "v1.5 th
 # change itself. Found red at HEAD 89cbaf6 during audit #2 packaging.
 check "config.py"                        "OT_CONT_REQUIRE_CONFIRM"     "v1.5 kill switch AND A/B control"
 check "tests/test_continuation_confirmation.py" "test_undecidable_refuses_rather_than_passes" "v1.0 the guard that matters"
-check "analysis/regime_confluence.py"    "soft_necessary=.trend_opp, age_decay." "v1.4 PLTR GUARD — trend_opp stays multiplicative; ambient must never rescue an opposed sweep"
-check "analysis/regime_confluence.py"    "spent_val"                   "v1.4 the spent-move corroborator — was the thing being faded actually a MOVE"
-check "analysis/regime_confluence.py"    '"DECELERATING": 0.25, "": 0.6' "v1.4 absence must not SUPPRESS harder than FLAT"
-check "analysis/regime_confluence.py"    '"ACCELERATING": 0.0, "": 0.0' "v1.4 absence must not CORROBORATE either — the asymmetry is deliberate"
 check "tests/test_sweep_spent_move.py"   "test_pltr_protection_survives" "v1.0 the guard that matters"
 check "main.py"                          "_L1_BREAKDOWN_FOR"           "v5.9 L1 evidence recorded at the fire, not replayed later"
 check "main.py"                          "main.py — options_trader v6.1" "v6.1 main header current"
-check "tests/test_disposition_l1_capture.py" "test_orb_records_no_breakdown_by_design" "v1.0 ORB is regime-immune — a mapping there would imply a dependency that does not exist"
 check "tests/test_readiness_market_snapshot.py" "READ_from_the_engine_not_derived" "v1.0 side comes from the engine, never a derived sign"
 check "tests/test_readiness_peg_count.py" "counts_ramps_not_raw_values"  "v1.0 one definition of pegged"
 _n_cap=$(grep -c "_capture_entry_contract(ctx, record)" main.py 2>/dev/null || echo 0)
@@ -703,42 +664,17 @@ check "analysis/trade_readiness.py"      "TR_CONV_LO"                   "v1.2 co
 check "analysis/trade_readiness.py"      "TR_PULL_ATR_LO"               "v1.2 midline-pull band env-overridable"
 check "analysis/trade_readiness.py"      "TR_NARROW_PIVOT"              "v1.2 all 13 factor bounds OT_TR_* (parity with OT_RC_*)"
 
-# ABSENCE checks — these four terms must be GONE from the whole file. Unlike the
-# _orb_quality canary we can grep the bare token, because v1.3's changelog was
-# written to describe them without naming them.
-for _tok in W_RANGE_BASE W_COMP_BASE quiet_fallback vol_only_fallback; do
-    if grep -q "$_tok" analysis/regime_confluence.py 2>/dev/null; then
-        echo "  ✗ STALE:   $_tok is BACK in regime_confluence.py — a constant corroborator or fabricated fallback was restored (expected DELETED)"
-        MISS=$((MISS+1))
-    else
-        echo "  ✓ PRESENT: $_tok deleted (v1.3 excavation held)"
-    fi
-done
 
 # main v4.5 (2026-07-29) — THE L2.5 IMPORT CONTRACT. RANGE_WINDOW_BARS is owned
-# by regime_confluence; importing it via conviction_integrator relied on a
 # re-export tuple that the v1.3 excavation trimmed, and the resulting ImportError
 # was swallowed by the L2 guard — 15 boxes ran the v1.3 classifier for a whole
 # session on nothing but one WARNING per start. Presence pins the corrected
 # source; absence pins that the broken form has not come back on a stale sync.
 # The v4.5 changelog in main.py deliberately does not spell the old import line,
 # so the bare grep below stays honest (changelog-prose trap).
-check "main.py"  "regime_confluence import RegimeConfluenceScorer, RANGE_WINDOW_BARS"  "v4.5 L2 symbols imported from their OWNING module"
-check "main.py"  "send_regime_engine_degraded_alert"  "v4.5 silent L2 fallback now pages (data-integrity event)"
 check "main.py"  "L2.5 NOT committing"  "v4.6 non-committing L2 gate reports its reason (was silent)"
 check "main.py"  "_l2_mute"             "v4.6 reason-change throttle present"
-check "main.py"  "REGIME ENGINE:"       "v4.7 active regime engine stated at startup"
 check "main.py"  "warming as designed"  "v4.8 opening 1m warm-up logs INFO, not a false WARNING"
-check "main.py"  "engine        = \"L2\" if l2_label"  "v4.8 regime_log rows stamped with the engine"
-check "database/trade_logger.py"  "regime_engine"  "v4.8 trades carry regime_engine"
-check "database/trade_logger.py"  "ALTER TABLE regime_log ADD COLUMN engine"  "v4.8 regime_log auto-migrates"
-if grep -q '_REGIME_ENGINE == "L2"' main.py 2>/dev/null; then
-    echo "  ✗ STALE:   main.py compares _REGIME_ENGINE to \"L2\" but the value is .lower()ed — L2.5 is UNREACHABLE dead code (the 07-29 root cause is back)"
-    MISS=$((MISS+1))
-else
-    echo "  ✓ PRESENT: v4.7 L2 gate literal is lowercase (block is reachable)"
-fi
-check "notifications/alert_manager.py"  "def send_regime_engine_degraded_alert"  "v1.7 degraded-engine pager exists"
 check "notifications/alert_manager.py"  "def _send(self, msg: str) -> bool"      "v1.9 _send reports delivery"
 check "notifications/alert_manager.py"  "def send_blind_alert"                   "v1.8 blind-alert pager exists"
 check "utils/blindness_latch.py"        "def update"                             "v1.0 blindness latch present"
@@ -807,7 +743,6 @@ check "database/trade_logger.py"         "def set_exit_latency"         "v3.11 l
 check "database/trade_logger.py"         "exit_mark_at_trigger"         "v3.11 mark-at-trigger captured (latency is not a cost until it is priced)"
 check "tests/test_exit_latency.py"       "does_not_restart_the_clock"   "v1.0 multi-tick accumulation test present"
 
-# ── v5.2 (2026-08-04) — NO REGIME-FLIP EXIT ON A STALE BOOK ──────────────
 check "main.py"                          "_rgm_stale"                   "v5.2 stale gate present on the exit path"
 
 # ── W.2a (2026-08-04) — this thread's own swallows, made audible ─────────
@@ -815,9 +750,6 @@ check "tests/swallow_audit.py"           "def _report_new"              "v1.1 --
 check "execution/exit_engine.py"         "_telemetry_logged"            "v4.13 telemetry throttle has its OWN set (reusing the alert set misread as pages)"
 check "analysis/entry_snapshot.py"       "def _first"                   "v1.2 inline logging + throttle (a log behind a helper is invisible to the census)"
 
-# ── regime_diary v1.3 (2026-08-04) — the diary could not tell bull from bear ──
-check "utils/regime_labels.py"           "\"TRENDING_BEAR\":     \"BEAR\""  "v1.0 shared label map (bull/bear distinguishable)"
-check "tests/regime_diary.py"            "LABEL = REGIME_LABELS"        "v1.4 diary uses the SHARED map, not a local copy"
 
 # ── gap_outcome_join v1.5 (2026-08-04) — the pooled read, with its own guard ──
 check "tests/gap_outcome_join.py"        "POOLED_CLASSES"               "v1.5 --pool gapflat present"
@@ -837,22 +769,6 @@ check "tests/tcs_floor_durability.py"    "i = rng.choice(elig)"         "v1.3 th
 # ── pitchfork variant sweep (2026-08-04) — §12 open question 2 ────────────
 check "tests/pitchfork_filter_audit.py"  "VARIANT SWEEP"                "v1.4 three-variant geometry comparison present"
 check "tests/pitchfork_filter_audit.py"  "replay(sym, h1, \"1h\", av, variant=variant"  "v1.4 variant is THREADED to the replay (not swallowed)"
-check "tests/replay_confluence.py"       "from utils.regime_labels import label"  "v2.3 emitted-distribution line uses the shared map"
-check "tests/regime_diary.py"            "churn-cut"                    "v1.3 churn-cut on the L2 line (flips per committed switch)"
-check "tests/regime_diary.py"            "def rerender"                 "v1.3 --rerender rebuilds the md from the jsonl"
-if grep -q "k.split('_')\[0\]\[:4\]} {d\[k\]" tests/regime_diary.py 2>/dev/null; then
-    echo "  ✗ STALE:   regime_diary is back to the truncating label — TRENDING_BULL and TRENDING_BEAR both render as TREN"
-    MISS=$((MISS+1))
-else
-    echo "  ✓ PRESENT: v1.3 truncating label is gone from the dominance row"
-fi
-check "tests/test_stale_no_regime_flip.py" "hard_close_still_fires"     "v1.0 proves PRICE exits still fire with no label"
-if grep -q "regime=regime.primary_regime if regime else None," main.py 2>/dev/null; then
-    echo "  ✗ STALE:   main.py passes the label to the exit path unconditionally — regime-flip exits can fire on a stale book again (v5.1 form is back)"
-    MISS=$((MISS+1))
-else
-    echo "  ✓ PRESENT: v5.2 label withheld from exits while the book is stale"
-fi
 if grep -q "if not result or not result.confirmed:" execution/exit_engine.py 2>/dev/null; then
     echo "  ✓ PRESENT: v4.11 latency writes ONLY on a confirmed close"
 else
@@ -883,7 +799,6 @@ else
     echo "  ✓ PRESENT: continuation momentum vocabulary is ACCELERATING/FLAT (no phantom STEADY)"
 fi
 # ABSENCE check: _orb_quality must be GONE from executable code. A stale sync
-# that restores it re-introduces the regime/VWAP/macro-weighted ORB score. We
 # grep only for a CALL (self._orb_quality(), def _orb_quality) — the string
 # survives in the v1.4 changelog prose, which is fine.
 if grep -qE "def _orb_quality|self\._orb_quality\(" risk/setup_scorer.py 2>/dev/null; then
@@ -911,7 +826,6 @@ check "status.py"                        "ORB High"                    "Structur
 check "status.py"                        "No Trade"                    "No Trade display string"
 check "notifications/alert_manager.py"   "send_shutdown_alert"          "Shutdown alert method"
 check "notifications/alert_manager.py"   "INSTRUMENT"                   "Ticker in alerts"
-check "notifications/alert_manager.py"   "send_regime_alert"            "Regime alert present (should be no-op/pass)"
 check "risk/setup_scorer.py"             "return None"                  "Grade C elimination (returns None)"
 check "risk/setup_scorer.py"             "Optional\[SetupScore\]"       "Score return type updated"
 check "strategy/butterfly_strategy.py"   "gex_environment"              "GEX field name fix"

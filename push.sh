@@ -1,6 +1,10 @@
 #!/bin/bash
 # ==========================================================================
-# push.sh  v4.0
+# push.sh  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 # Pushes the control checkout to GitHub.
 #
 # v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -53,7 +57,6 @@
 #         undefined name compiles fine and raises at RUNTIME, so the deploy path
 #         could not see the class that cost two sessions in two days —
 #         continuation `mid` (07-29, whole ORB window, all 15 boxes) and
-#         butterfly `_mult` (07-30, IWM crash-loop, regime-gated so 14 boxes ran
 #         it clean). pyflakes now runs over the tracked *.py set and REFUSES the
 #         commit on any "undefined name". Missing pyflakes is a REFUSAL, never a
 # TARGET RESOLUTION: prefer the caller's directory over the
@@ -304,7 +307,6 @@ if [ "$HAS_CHANGES" = true ]; then
     #   2026-07-29  continuation `mid` — orphaned after the FVG rewire. NameError
     #               every tick; all 15 boxes took ZERO trades until 10:05 ET.
     #   2026-07-30  butterfly `_mult` — orphaned after the 1x-EM revert.
-    #               Regime-gated, so ONLY a box in COMPRESSION reached it: IWM
     #               crash-looped for an hour while 14 boxes ran it clean.
     # Both are found by static analysis in under a second. This runs here because
     # push.sh is the chokepoint every deploy already passes through, and control

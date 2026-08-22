@@ -1,5 +1,9 @@
 """
-analysis/gap_measure.py  v4.0
+analysis/gap_measure.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Overnight gap, measured rather than inherited as an ATR spike.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -30,7 +34,6 @@ sees it (1m is session-scoped; a regression must not span a gap).
 nothing conditions on it. Every consumer sees a volatility number that is
 partly last night's news and cannot tell which part.
 ⚠️ **AND IT IS THE ONLY PRE-OPEN DECISION-TIME INPUT IN THE STACK.** Every
-other primitive tested — ADX, conviction, the regime scores, IV skew — needs
 bars from the session to exist. The gap is **fully formed at 09:30**, before a
 single RTH bar prints. If anything collected can speak before the day starts,
 this is it.

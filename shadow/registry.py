@@ -1,5 +1,9 @@
 """
-shadow/registry.py  v4.0
+shadow/registry.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Registry of shadow primitives and their gates.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -15,8 +19,6 @@ shadow/registry.py — registry of named "completeness" conjunctions.
 initial release.
 A PASSIVE library of reusable sub-checks over the shared primitives. Always
 available; every scorer reads it independently and composes its own recipe.
-Deliberately NO regime-gating here — these are pattern-agnostic building
-blocks, and gating a precursor library behind the regime it helps detect
 would reintroduce the late-entry chicken-and-egg.
 Every function is pure: (Primitives, [LiquidityMap]) -> bool / small struct.
 Calibration constants are placeholders to be tightened from shadow sessions.

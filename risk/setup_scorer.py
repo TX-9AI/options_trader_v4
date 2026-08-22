@@ -1,7 +1,10 @@
 """
-risk/setup_scorer.py  v4.1
+risk/setup_scorer.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
 
-v4.1  2026-08-21  PHASE B (r58): reads vix_band (renamed from vix_regime).
+
 Journaling and gate plumbing. FACTOR SET REMOVED - see VISION.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -17,8 +20,6 @@ risk/setup_scorer.py — Scores and grades options trade signals A/B.
 CONTINUATION GETS AN EXPLICIT PROFILE. It had none, so it
         fell through to `"default"` — a silent default nobody chose for the
         strategy carrying 77%% of fleet volume. In that profile
-        `regime_conviction` weighs 0.30 and `signal_quality` 0.25, and
-        continuation_strategy.py sets `signal.conviction = regime.conviction`.
         THE SAME NUMBER, WEIGHTED TWICE = 55%% of the grade. Measured over 619
         joined trades (scorer_backtest, 18 sessions): both dimensions report
         identical medians AND identical spreads (0.913 / 0.636), because they
@@ -28,7 +29,6 @@ CONTINUATION GETS AN EXPLICIT PROFILE. It had none, so it
         A 399 trades -$8,244 (-$21/trade at 1.5x size) vs B 220 trades
         +$1,893 (+$9). High conviction means the trend is already obvious,
         which means LATE — v1.4 stripped exactly this from the ORB, calling it
-        "regime conviction in costume", and left it on continuation.
         THE TOTAL IS ARITHMETICALLY UNCHANGED: 0.55*conv + 0.15*vwap +
         0.20*liq + 0.10*macro is what the default profile already computed via
         0.30+0.25 on one number. grade_b stays 0.55, so THE FIRE/NO-FIRE
@@ -70,14 +70,10 @@ E: VWAP HARD GATE. `vwap_alignment` scores 0.11 against a
         own rejections.
 ORB IS A GEOMETRY GATE, NOT A WEIGHTED SCORE. The ORB
         was being run through the same 5-dimension weighted sum as every
-        other strategy (regime_conviction, orb_quality, vwap_alignment,
         liquidity_clear, macro_context). That was wrong for this trade by
-        design: the ORB is regime-AGNOSTIC (it is deliberately not regime-
-        gated at dispatch) yet regime_conviction was 20%% of its grade; VWAP
         and macro have no bearing on a mechanically-confirmed break+retest;
         and orb_quality was a confluence-COUNT proxy (0.2*n) that never
         measured the geometry its docstring claimed. Net effect: the A/B
-        grade of an ORB was regime conviction in costume, and liquidity-in-
         path could VETO a confirmed setup by dragging the weighted total
         under the bar.
         NOW: the ORB short-circuits BEFORE the weighted machinery. A
@@ -85,14 +81,12 @@ ORB IS A GEOMETRY GATE, NOT A WEIGHTED SCORE. The ORB
         unswept liquidity pool sits between the breakout and the 100%% TP:
           - clear path  -> A (1.5x size)
           - pool in path -> B (1.0x size)
-        Liquidity can downgrade A->B; it can NEVER veto. No regime, no VWAP,
         no macro, no confluence count, no brief nudge, no session modifier
         touch the ORB grade. _orb_quality is DELETED. The 5-dimension path is
         unchanged for SweepReversal / Butterfly / Condor / default.
 SIGNAL JOURNAL (ROADMAP Phase 3.1 instrumentation, log-only):
         every scored signal — including below-B REJECTS — emits one `scored`
         event to analysis/signal_journal with the full breakdown, thresholds,
-        regime conviction, quote context (bid/ask/spread/IV at signal time)
         and vol/macro snapshot. Zero behavior change: the journal call is
         wrapped so any failure degrades to a missing log line, never an
         exception; grading logic is untouched. This is the perishable data
@@ -119,7 +113,6 @@ eliminated C grade entirely. There is no such thing
 remove duplicate Fed-day boost. is_fed_day was being
         applied twice on ORB: once in the macro_context dimension (its
         designated home) and again inside _orb_quality, double-counting the
-        effect and polluting a dimension that measures confluence/regime/
         liquidity. Fed-day now boosts ORB through macro_context only.
 repo-wide v3.0 bump: Yahoo-Finance purge & data stream
         mapping optimization (all market data now flows from the single
@@ -135,7 +128,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from strategy.base_strategy import OptionsSignal
-from analysis.market_state import RegimeState, Regime
+from analysis.market_state import MarketState
 from analysis.volatility_engine import VolatilityState
 from analysis.structure_analyzer import StructureMap
 from analysis.liquidity_mapper import LiquidityMap
@@ -184,8 +177,6 @@ STRATEGY_PROFILES = {
         "grade_b": 0.55,
     },
     # CONTINUATION (v1.7). Was absent -> fell to "default", which weighted
-    # regime.conviction twice under two names (0.30 regime_conviction +
-    # 0.25 signal_quality, and signal.conviction IS regime.conviction).
     # 0.55 is those two summed: the arithmetic is identical, the double count
     # is gone, and grade_b 0.55 keeps the fire boundary byte-for-byte.
     # grade_a is ABOVE THE MAXIMUM ACHIEVABLE TOTAL (0.55+0.15+0.20+0.10 =
@@ -197,7 +188,6 @@ STRATEGY_PROFILES = {
     # veto that has never been observed to fire but can.
     "ContinuationStrategy": {
         "score_weights": {
-            "regime_conviction":    0.55,
             "vwap_alignment":       0.15,
             "liquidity_clear":      0.20,
             "macro_context":        0.10,
@@ -207,7 +197,6 @@ STRATEGY_PROFILES = {
     },
     "SweepReversal": {
         "score_weights": {
-            "regime_conviction":    0.25,
             "sweep_quality":        0.35,   # Rejection %, freshness, named level
             "vwap_alignment":       0.10,
             "liquidity_clear":      0.20,
@@ -218,7 +207,6 @@ STRATEGY_PROFILES = {
     },
     "ButterflyStrategy": {
         "score_weights": {
-            "regime_conviction":    0.30,   # Need clean ranging regime
             "range_quality":        0.35,   # BB width, ADX, time in range
             "vwap_alignment":       0.15,
             "liquidity_clear":      0.10,
@@ -229,7 +217,6 @@ STRATEGY_PROFILES = {
     },
     "default": {
         "score_weights": {
-            "regime_conviction":    0.30,
             "signal_quality":       0.25,
             "vwap_alignment":       0.15,
             "liquidity_clear":      0.20,
@@ -272,7 +259,7 @@ class SetupScorer:
 
     def score(self,
               signal:    OptionsSignal,
-              regime:    RegimeState,
+              ms:    MarketState,
               vol_state: VolatilityState,
               structure: StructureMap,
               liq_map:   LiquidityMap,
@@ -293,23 +280,18 @@ class SetupScorer:
         # ── ORB: geometry gate, not a weighted score (v1.4) ───────────────────
         # A confirmed ORB break+retest ALWAYS trades — the ORB state machine
         # already validated the geometry (body/wick rules) before this signal
-        # existed, and the trade is regime-agnostic by design. The ONLY grade
         # input is liquidity in the path to the 100%% TP: clear -> A, pool in
-        # the way -> B. Never a veto. Nothing else (regime/VWAP/macro/session/
         # brief) touches it. Returns here, before the 5-dimension machinery.
         if name == "ORBStrategy":
-            return self._grade_orb(signal, liq_map, regime, vol_state, macro)
-
-        # ── 1. Regime Conviction ──────────────────────────────────────────────
-        reg_score = regime.conviction
-        breakdown["regime_conviction"] = round(reg_score, 3)
+            return self._grade_orb(signal, liq_map, ms, vol_state, macro)
+        reg_score = 0.0
 
         # ── 2. Strategy-specific quality score ───────────────────────────────
         if name == "SweepReversal":
-            quality_score = self._sweep_quality(signal, liq_map, regime)
+            quality_score = self._sweep_quality(signal, liq_map, ms)
             breakdown["sweep_quality"] = round(quality_score, 3)
         elif name == "ButterflyStrategy":
-            quality_score = self._range_quality(regime, vol_state)
+            quality_score = self._range_quality(ms, vol_state)
             breakdown["range_quality"] = round(quality_score, 3)
         else:
             quality_score = signal.conviction
@@ -418,10 +400,10 @@ class SetupScorer:
                 f"setup scored {total:.2f} ({_would_grade})"
             )
             if VWAP_FILTER_ACTIVE:
-                self._journal_scored(signal, regime, vol_state, macro,
+                self._journal_scored(signal, ms, vol_state, macro,
                                      total, f"GATE_BLOCK_VWAP({_would_grade})",
                                      breakdown, grade_a, grade_b, session)
-                self._journal_gate_block(signal, regime, vol_state, "vwap",
+                self._journal_gate_block(signal, ms, vol_state, "vwap",
                                          f"{signal.direction} with price "
                                          f"{vol_state.price_vs_vwap} VWAP, "
                                          f"would have graded {_would_grade}")
@@ -449,10 +431,10 @@ class SetupScorer:
                 f"setup scored {total:.2f} ({_would_grade})"
             )
             if MIN_RRR_ACTIVE:
-                self._journal_scored(signal, regime, vol_state, macro,
+                self._journal_scored(signal, ms, vol_state, macro,
                                      total, f"GATE_BLOCK_RRR({_would_grade})",
                                      breakdown, grade_a, grade_b, session)
-                self._journal_gate_block(signal, regime, vol_state, "rrr",
+                self._journal_gate_block(signal, ms, vol_state, "rrr",
                                          f"rrr={_rrr:.2f} < floor {MIN_RRR:.2f}, "
                                          f"would have graded {_would_grade}")
                 return None
@@ -470,7 +452,7 @@ class SetupScorer:
                 f"(need >= {grade_b:.2f}) strategy={name} "
                 f"breakdown={breakdown}"
             )
-            self._journal_scored(signal, regime, vol_state, macro,
+            self._journal_scored(signal, ms, vol_state, macro,
                                  total, "REJECT", breakdown,
                                  grade_a, grade_b, session)
             return None
@@ -489,7 +471,7 @@ class SetupScorer:
             f"strategy={name} mult={multiplier}x "
             f"breakdown={breakdown}"
         )
-        self._journal_scored(signal, regime, vol_state, macro,
+        self._journal_scored(signal, ms, vol_state, macro,
                              total, grade, breakdown,
                              grade_a, grade_b, session)
         return result
@@ -513,7 +495,7 @@ class SetupScorer:
             return None
 
     @staticmethod
-    def _journal_gate_block(signal, regime, vol_state, gate: str, detail: str):
+    def _journal_gate_block(signal, ms, vol_state, gate: str, detail: str):
         """N.2 — `gate_block:<gate>` disposition, emitted whenever a hard gate
         vetoes a setup that had already been scored.
 
@@ -530,7 +512,6 @@ class SetupScorer:
                 "disposition",
                 outcome = f"gate_block:{gate}",
                 signal  = _journal.signal_ctx(signal),
-                regime  = _journal.regime_ctx(regime),
                 vol     = _journal.vol_ctx(vol_state),
                 gate    = {"name": gate, "detail": detail},
             )
@@ -538,7 +519,7 @@ class SetupScorer:
             pass
 
     @staticmethod
-    def _journal_scored(signal, regime, vol_state, macro,
+    def _journal_scored(signal, ms, vol_state, macro,
                         total, grade, breakdown, grade_a, grade_b, session):
         """v1.3 — one `scored` event per scored signal, REJECTs included.
         Log-only; every failure is swallowed inside signal_journal."""
@@ -548,7 +529,6 @@ class SetupScorer:
             _journal.journal(
                 "scored",
                 signal   = _journal.signal_ctx(signal),
-                regime   = _journal.regime_ctx(regime),
                 vol      = _journal.vol_ctx(vol_state),
                 macro    = _journal.macro_ctx(macro),
                 score    = {"total": round(float(total), 4),
@@ -563,7 +543,7 @@ class SetupScorer:
 
     def _grade_orb(self, signal: OptionsSignal,
                    liq_map:   LiquidityMap,
-                   regime:    RegimeState,
+                   ms:    MarketState,
                    vol_state: VolatilityState,
                    macro) -> Optional["SetupScore"]:
         """The WHOLE ORB grade (v1.4). A confirmed ORB always trades; the only
@@ -575,7 +555,6 @@ class SetupScorer:
 
         There is no REJECT branch here: a confirmed ORB is never a no-trade on
         quality grounds. (Session/RTH/cutoff gating lives in session_guard, not
-        here.) Regime, VWAP, macro, confluence count and the brief nudge are
         deliberately absent — this trade is geometry, validated upstream by the
         ORB state machine, plus one liquidity modifier.
         """
@@ -620,7 +599,7 @@ class SetupScorer:
                     f"RRR floor COUNTER (ORB never blocked): rrr={_orb_rrr:.2f} "
                     f"< {MIN_RRR:.2f} — grade {grade}, trading anyway"
                 )
-        self._journal_scored(signal, regime, vol_state, macro,
+        self._journal_scored(signal, ms, vol_state, macro,
                              float(multiplier), grade, breakdown,
                              grade_a=None, grade_b=None,
                              session=current_session_label())
@@ -649,7 +628,7 @@ class SetupScorer:
 
     def _sweep_quality(self, signal: OptionsSignal,
                         liq_map: LiquidityMap,
-                        regime: RegimeState) -> float:
+                        ms: MarketState) -> float:
         """Sweep quality: rejection %, freshness, named level."""
         if not liq_map.recent_sweep:
             return 0.3
@@ -659,10 +638,10 @@ class SetupScorer:
         named_bonus     = 0.15 if sweep.swept_named_level else 0.0
         return min(rejection_score * 0.45 + age_score * 0.4 + named_bonus, 1.0)
 
-    def _range_quality(self, regime: RegimeState,
+    def _range_quality(self, ms: MarketState,
                         vol_state: VolatilityState) -> float:
         """Ranging quality: low ADX, BB squeeze, stable ATR."""
-        adx_score = max(0, 1 - regime.adx / 25)
+        adx_score = max(0, 1 - ms.adx / 25)
         bb_score  = max(0, 1 - vol_state.bb_width_pct * 3)
         vol_score = 1.0 if vol_state.atr_state in ("STABLE", "CONTRACTING") else 0.5
         return adx_score * 0.4 + bb_score * 0.4 + vol_score * 0.2

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_imports.py  v4.0
+tests/check_imports.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Imports every runtime module and reports what fails. Called by the land gate.
 
 v4.0  2026-08-19  Built at the OTV4 split.
@@ -17,7 +21,6 @@ Python block is not one. A check that cannot be pasted does not get run.
 WHY IMPORTING IS NOT THE SAME AS PARSING.
 `tests/gen_file_map.py` PARSES - deliberately, so a module that crashes on
 import still maps. This one EXECUTES the import, which is the only way to catch:
-  - a module that no longer exists (eight files after the regime-engine drop)
   - a circular import
   - a top-level statement that raises
 None of those show up in an AST walk, and none of them showed up in `ast.parse`

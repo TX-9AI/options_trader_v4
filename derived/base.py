@@ -1,5 +1,9 @@
 """
-derived/base.py  v4.0
+derived/base.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 The contract every derived engine implements.
 
 v4.0  2026-08-22  Built with the manifold. See docs/DERIVED_STORES.md.
@@ -23,7 +27,6 @@ structurally: `run()` is wrapped so a subclass CANNOT raise into the caller,
 no matter what it does internally. A missing derived value is not an error —
 the engine trades without it.
 
-⚠️ THE WRAP IS THE POINT, NOT A COURTESY. The regime gate was a value nothing
 computed that became a veto and stopped the fleet for a whole session. A
 deriver that can throw into the tick loop is the same shape: an observation
 becoming an authority. It is made impossible here rather than promised in a

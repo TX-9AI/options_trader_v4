@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_derived_layer.py  v4.0
+tests/check_derived_layer.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 
 The derived layer informs and never blocks, absence is never zero, and
 the 0DTE term decays.
@@ -13,7 +17,6 @@ before at real cost:
   1. **DERIVERS ARE CONTRIBUTORS, NEVER GATES.** No write path in the derived
      layer may raise into a caller's decision path. A derived value that
      cannot be produced is simply absent; the engine trades without it. This
-     is the rule the regime labels violated — a label nothing computed became
      a veto that stopped a fleet for a whole session.
 
   2. **ABSENCE IS NULL, NEVER 0.0.** A charm of zero means delta is stable —

@@ -1,9 +1,12 @@
 """
-analysis/orb_engine.py  v4.1
+analysis/orb_engine.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 
 v4.1  2026-08-21  r60: re-arm check reads ORB_NO_ENTRY_AFTER_ET, not the
       deleted global cutoff.
-v4.1  2026-08-21  REGIME PURGE PHASE A. The two SWEEP_REVERSAL deferrals
       deleted - doubly dead (label never assigned, and the constant that
       negated them is gone).
 Opening range: establish, latch, arm, expire.
@@ -101,7 +104,6 @@ THE BREAK IS NOW DEFINITIONAL. Two changes, one principle:
             STOP   = a close beyond the impulsive candle's wick.
 STATE VOCABULARY CORRECTED. The state names described the
         mechanism, not the trade, and one of them collided with an unrelated
-        concept. `ORBState.RANGING` and `Regime.RANGING` shared a string while
         meaning completely different things ("the ORB has no break yet" vs "the
         tape is oscillating") — a latent trap for any reader, human or model,
         holding both in view. Renamed to the operator's own vocabulary:
@@ -146,10 +148,7 @@ RETEST GRACE BAND REMOVED (correctness fix, both sides).
         (negative = near-miss) and let the Phase-3 ROI buckets decide. It belongs
         in orb_quality inside setup_scorer, never as a tolerance in the state
         machine. See ROADMAP Phase 3.
-ORB beats sweep under the regime switch. The retest confirm
-        used to DEFER (leave the setup awaiting retest) whenever the regime was
         SWEEP_REVERSAL, so a sweep label suppressed a valid ORB. Guarded by
-        config.ORB_FIRES_REGARDLESS_OF_REGIME: when on, the engine confirms OPEN
         under a sweep label and the dispatch fires ORB (ORB wins). When off,
         behaviour is unchanged (defers to sweep). Pairs with main.py v3.2, which
         admits UNKNOWN/SWEEP_REVERSAL to the ORB dispatch. No change to the v3.1
@@ -194,7 +193,6 @@ FIX (grave): break latches broke_high/broke_low are now
 (a) session break latches broke_high/broke_low set on a
         1-min CLOSE beyond the range — these arm the sweep reversal (same break
         the ORB retest uses), so a wick poke that closes back inside no longer
-        arms a sweep. (b) retest confirm DEFERS when regime==SWEEP_REVERSAL
         (sweeps take priority) so the engine can't get stuck in a phantom OPEN.
         (c) re-arm rule tightened to: 1-min close back inside AND before 11:00
         (runaway/timeout never re-arm).
@@ -207,13 +205,9 @@ ORB range now read from orb_range.json (written by
 fix _range_date comparison: now stored as string from
         JSON date field so today check works correctly and engine stops
         reloading orb_range.json every tick after range is set.
-regime-gated re-arm: after a (b) close-inside invalidation,
-        re-arm and watch for another break ONLY while the regime is still
         ORB-friendly (RANGING/COMPRESSION). Do NOT re-arm after an (a) runaway
-        (hand off to sweep) or once the regime has shifted to sweep/trend/
         breakout. Tracks invalidation_reason to distinguish the two.
 11:00 ET HARD cutoff (expire even awaiting-retest, so the
-        bot moves to other regimes after 11:00) + two explicit invalidation
         rules: (a) price runs to the 50% TP with no retest (runaway breakout,
         favors sweep reversal); (b) a 1m candle closes back inside the ORB
         range. Replaces the 2PM/exempt-retest behavior.
@@ -381,7 +375,7 @@ class ORBEngine:
             logger.debug(f"ORB range file not ready: {e}")
 
     def update(self, df_5m: pd.DataFrame, df_1m: pd.DataFrame,
-               current_price: float, regime: Optional[str] = None) -> ORBData:
+               current_price: float, ms: Optional[str] = None) -> ORBData:
         d = self._data
 
         # Load range from file if not yet set for today
@@ -425,7 +419,7 @@ class ORBEngine:
             self._check_for_break(df_1m)
 
         if d.state in (ORBState.ARMED_LONG, ORBState.ARMED_SHORT):
-            self._check_for_retest(df_1m, regime)
+            self._check_for_retest(df_1m, ms)
 
         if d.state == ORBState.INVALIDATED:
             # Re-arm ONLY after a (b) close-inside invalidation. Past 11:00 the
@@ -440,7 +434,7 @@ class ORBEngine:
             else:
                 logger.debug(
                     f"ORB dormant after '{d.invalidation_reason}' invalidation "
-                    f"(regime={regime}) — deferring to sweep reversal"
+                    f"(ms={ms}) — deferring to sweep reversal"
                 )
 
         return d
@@ -567,7 +561,7 @@ class ORBEngine:
                 f"below {d.orb_low:.2f} target={d.target_100pct:.2f} strike={d.target_strike}"
             )
 
-    def _check_for_retest(self, df_1m: pd.DataFrame, regime: Optional[str] = None):
+    def _check_for_retest(self, df_1m: pd.DataFrame, ms: Optional[str] = None):
         d = self._data
         if df_1m is None or len(df_1m) < 2:
             return
@@ -642,14 +636,10 @@ class ORBEngine:
             # not. A body that closes back inside the range is a DISARM, not a
             # near-miss, and falls through to the (b) branch below.
             if low < d.orb_high and body_low >= d.orb_high:
-                # Sweeps take priority when regime is sweep: don't confirm a
                 # phantom OPEN the dispatch will override — leave it awaiting
                 # retest so the engine can't get stuck OPEN with no position.
-                # (v3.2) UNLESS ORB_FIRES_REGARDLESS_OF_REGIME — then ORB beats
                 # sweep: confirm OPEN and let the dispatch fire it.
-                # v4.1 (2026-08-21) — the `regime == "SWEEP_REVERSAL"` deferral
                 # is DELETED. Doubly dead: v4 never assigns the label, and
-                # ORB_FIRES_REGARDLESS_OF_REGIME (also deleted) negated it
                 # anyway. A confirmed break+retest is self-validating.
                 d.state           = ORBState.OPEN_LONG
                 d.confirmed_at    = str(now_et())

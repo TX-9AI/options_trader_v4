@@ -1,5 +1,9 @@
 """
-execution/entry_engine.py  v4.1
+execution/entry_engine.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Entry dispatch and slot assignment.
 
 v4.1  2026-08-20  AUDIT F4: relaxed_entry copied signal -> record. Without it
@@ -73,7 +77,6 @@ mark ± PAPER_FILL_SLIPPAGE_PCT when the stress knob is set). No real order.
 """
 # v-obs2 (2026-07-24) — entry record now also stores swept_level_name + level_strength.
 
-# v-obs (2026-07-24) — directional entry record now stores adx_at_entry / regime_conviction / flat_angle_deg from the signal.
 
 
 import logging
@@ -178,10 +181,8 @@ class EntryEngine:
             underlying_entry  = signal.underlying_entry,
             underlying_stop   = signal.underlying_stop,
             underlying_target = signal.underlying_target,
-            regime            = signal.regime,
             vix_at_entry      = signal.vix_at_signal,
             adx_at_entry      = getattr(signal, 'adx_at_signal', 0.0),
-            regime_conviction = getattr(signal, 'conviction', 0.0),
             flat_angle_deg    = getattr(signal, 'flat_angle_deg', 0.0),
             swept_level_name  = getattr(signal, 'swept_level_name', ''),
             level_strength    = getattr(signal, 'level_strength', 0.0),

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# devtools.sh  v4.0
+# devtools.sh  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 # Control-side service menu.
 #
 # v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -68,7 +72,6 @@ run_suite() {
 }
 run_contract() { "$PY" -m tests.test_market_data_contract; }
 run_orb()      { "$PY" tests/test_orb_retest_v33.py; }
-run_gate()     { "$PY" tests/test_regime_gate.py; }
 run_feed_verify() {
   echo "verify_feed_v3.sh must run ON-BOX during RTH with $FEED + $BOT live (paper)."
   confirm "run it now?" || { echo "skipped"; return; }
@@ -118,7 +121,6 @@ menu() {
    10) full pytest suite    the 5 audit-defect tests  ← go-live gate
    11) market-data contract standalone
    12) ORB retest v3.3      standalone
-   13) regime gate          standalone
    14) verify_feed_v3.sh    ON-BOX, needs live services in RTH
 
   SERVICES (this box)

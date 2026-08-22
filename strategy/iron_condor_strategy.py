@@ -1,5 +1,9 @@
 """
-strategy/iron_condor_strategy.py  v4.0
+strategy/iron_condor_strategy.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Two-leg condor with ladder. TRIGGER REBUILT IN PHASE 2.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -80,7 +84,6 @@ v-approachalways — 2026-08-04 — APPROACH TELEMETRY ON EVERY PLAN DEATH.
   `_abandon_past_cutoff` reported them — but only on the CUTOFF path.
   Measured fleet-wide 2026-08-04: 23 plans, 23 deaths, **cutoff fired ZERO
   times**; every plan died on CANCELLED-before-Leg-1, which reported nothing
-  but the regime it flipped to. The one instrument that answers "how close did
   price get?" sat behind the one door that never opens.
   WHAT IT UNBLOCKS — item AI, and the two answers need OPPOSITE fixes:
   an approach fraction near ZERO means the trigger sits where price never goes
@@ -112,7 +115,6 @@ v-holdcompression + v-selfdiag — 2026-07-30 — TWO CHANGES, both about a plan
       into CONTRACTING premium, and strikes are validated against EM once and
       never re-checked. Makes the anchor question (VWAP? pitchfork median?)
       answerable with a number instead of an argument.
-  ORDERING: the cutoff check sits ABOVE the regime block on purpose — the first
   cut had HOLD first, which meant a held plan returned early every tick and never
   reached the cutoff at all. Caught by test, not by reasoning.
 v-dualfloor + v-indep-legs — 2026-07-28 — TWO FIXES to strike selection and legging.
@@ -133,7 +135,6 @@ v-dualfloor + v-indep-legs — 2026-07-28 — TWO FIXES to strike selection and 
       leg never fired at all. call_filled/put_filled tracked separately;
       COMPLETE only when both are in. leg1/leg2 now mean only first/second to
       fill (preserved for the entry_engine interface and the roll path).
-strategy/iron_condor_strategy.py — Legged Iron Condor for RANGING regime.
 LEG 2 PAUSES INSTEAD OF CANCELLING on a non-RANGING tick,
         and its short strike is RE-DERIVED from the CURRENT bands at fire time
         rather than the value frozen at plan time. Rationale: if price wanders
@@ -170,7 +171,6 @@ Strategy design:
   (e.g. short call at 7545 → leg 1 fires when price hits 7540, 2 strikes away)
   Leg 2 is queued after Leg 1 fills. It fires when price reaches within
   CONDOR_PROXIMITY_STRIKES of the opposite side's short strike.
-  Invalidation: if regime flips away from RANGING (to ANY other regime)
   before a leg fires, that pending leg is permanently cancelled. An
   already-filled leg stays open and manages independently — it is NEVER
   cancelled after the order is placed.
@@ -185,7 +185,6 @@ State machine:
        -> LEG1_FILLED (Leg 1 live, Leg 2 queued, watching for Leg 2 trigger)
        -> LEG2_TRIGGERED (Leg 2 order placed, waiting for fill)
        -> COMPLETE (both legs filled — full iron condor assembled)
-  Any state -> CANCELLED (regime flipped before a pending leg fired)
 """
 
 import logging
@@ -197,7 +196,7 @@ from zoneinfo import ZoneInfo
 
 from strategy import credit_vertical as cv
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
-from analysis.market_state import RegimeState, Regime
+from analysis.market_state import MarketState
 from analysis.volatility_engine import VolatilityState, VolatilityEngine
 from data.options_chain import OptionContract, OptionsChain
 from data.macro_data import MacroSnapshot
@@ -251,7 +250,7 @@ class CondorState:
     DECIDED      = "DECIDED"       # Strikes identified, watching for Leg 1 trigger
     LEG1_FILLED  = "LEG1_FILLED"   # Leg 1 live, Leg 2 queued
     COMPLETE     = "COMPLETE"      # Both legs filled
-    CANCELLED    = "CANCELLED"     # Regime flipped before a pending leg fired
+    CANCELLED    = "CANCELLED"
     EXPIRED      = "EXPIRED"       # Past entry cutoff
 
 
@@ -540,7 +539,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
             return None
         return min(liquid, key=lambda c: abs(c.strike - target_strike))
 
-    def decide(self, regime: RegimeState, vol_state: VolatilityState,
+    def decide(self, ms: MarketState, vol_state: VolatilityState,
                chain: OptionsChain, macro: MacroSnapshot,
                current_price: float,
                rails: Optional[dict] = None,
@@ -563,10 +562,8 @@ class IronCondorStrategy(BaseOptionsStrategy):
             return None  # Already have an active plan this session
 
         # ── v4.0: THE RANGING LABEL IS GONE. THE FORK IS THE GATE. ──────────
-        # v3 required `primary_regime == RANGING` here. That label was measured
         # picking the correct SIDE on 44.9% of 715 directional trades - worse
         # than a coin - and v4's `assemble_market_state` classifies nothing, so
-        # `primary_regime` is permanently UNKNOWN. **This line refused EVERY
         # condor, silently.**
         # The replacement was already sitting directly below it: no fork, no
         # plan. Operator: *"consider the condor off the table if we don't have
@@ -764,7 +761,6 @@ class IronCondorStrategy(BaseOptionsStrategy):
     # _abandon_past_cutoff reported them — but ONLY on the cutoff path. Measured
     # 2026-08-04 fleet-wide: 23 plans, 23 deaths, **cutoff fired ZERO times**.
     # Every plan died on the CANCELLED-before-Leg-1 branch, which reported
-    # nothing but the regime it flipped to. The one instrument that could answer
     # "how close did price get?" was behind the one door that never opens.
     # THE QUESTION IT UNBLOCKS is item AI: whether CONDOR_TRIGGER_APPROACH=0.65
     # is a parameter to fit or the MIDPOINT is wrong. Those need opposite fixes,
@@ -846,7 +842,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
         self._plan = None
         return None
 
-    def check_leg_triggers(self, regime: RegimeState,
+    def check_leg_triggers(self, ms: MarketState,
                             chain: OptionsChain,
                             current_price: float) -> Optional[OptionsSignal]:
         """
@@ -866,7 +862,6 @@ class IronCondorStrategy(BaseOptionsStrategy):
         plan.max_price_seen = max(plan.max_price_seen, current_price)
         plan.min_price_seen = min(plan.min_price_seen, current_price)
 
-        # ORDERING MATTERS: the cutoff is evaluated BEFORE the regime block.
         # If HOLD came first, a plan held through COMPRESSION would return early
         # every tick and NEVER reach the cutoff — sitting alive to end of session
         # and producing exactly the silence this change exists to remove.
@@ -875,7 +870,6 @@ class IronCondorStrategy(BaseOptionsStrategy):
                 and plan.state == CondorState.DECIDED:
             return self._abandon_past_cutoff(plan, chain, current_price)
 
-        # Invalidation: regime flipped to a DIRECTIONAL regime.
         #
         # v-holdcompression 2026-07-30 — CANCELLING ON COMPRESSION WAS BACKWARDS.
         # Any flip off RANGING used to kill an un-filled plan. On 2026-07-30 CVX
@@ -886,20 +880,16 @@ class IronCondorStrategy(BaseOptionsStrategy):
         # trigger problem.
         # MECHANISM (operator): compression is a TIGHTENING range — where a
         # short-premium NEUTRAL structure is most comfortable, not least. Only a
-        # DIRECTIONAL regime breaks the neutral thesis. Leg 2 has held rather
         # than cancelled since v3.2; Leg 1 never got the same treatment.
-        # ── v4.0: FORK INVALIDATION REPLACES THE REGIME FLIP ────────────────
         # ⚠️ AND THE OPERATOR'S ACCEPTED RISK SAYS THE TWO ARE THE SAME EVENT:
         # *"If it gets breached, then our fork may also become invalid & I can
         # live with that, because we are accepting that risk for an asymmetric
         # payoff if it holds."* **The structure and the overlay agree on when
-        # the thesis died instead of arguing about it** - which the regime label
         # never did, because it was measuring something else entirely.
         # A filled leg is NEVER cancelled: that rule is untouched.
-        _fork_dead = bool(getattr(regime, "fork_invalidated", False))
+        _fork_dead = bool(getattr(ms, "fork_invalidated", False))
         if _fork_dead:
             # ⚠️ v4.0: NO SUB-CLASSIFICATION. v3 split this on whether the new
-            # regime was DIRECTIONAL - hold if merely non-RANGING, cancel if
             # trending - because "not RANGING" covered everything from a genuine
             # breakout to a label wobble. **Fork invalidation carries no such
             # ambiguity: the guardrail is gone, so the plan is gone.**
@@ -1062,11 +1052,9 @@ class IronCondorStrategy(BaseOptionsStrategy):
             net_credit           = net_credit,
             max_loss_condor      = max_loss,
             underlying_entry     = plan.underlying_at_decision,
-            # v4.0: the signal no longer claims a regime it did not measure.
             # Stamping RANGING here wrote a label onto the trade record that
             # nothing computed - a fabricated field reading as observed data,
             # which is the `oi_proxy` failure in miniature.
-            regime               = Regime.UNKNOWN,
             stop_loss_pct        = CONDOR_STOP_LOSS_PCT,
             tp_pct               = 0.0,   # No TP — hold to nickel or stop
             notes                = (

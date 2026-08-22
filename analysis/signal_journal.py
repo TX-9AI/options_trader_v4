@@ -1,8 +1,10 @@
 """
-analysis/signal_journal.py  v4.1
+analysis/signal_journal.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
 
-v4.1  2026-08-21  PHASE B (r58): regime_ctx deleted (label was hardcoded
-      UNKNOWN, scores source never wired); vix_regime -> vix_band.
+
 Structured event journal for every decision and refusal.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -16,13 +18,11 @@ this block be read before the file is edited.
 
 analysis/signal_journal.py — signal-time instrumentation (LOG-ONLY, never trades).
 N.7: every row carries `ruleset`, the short commit this
-P0.3 / AX.3: `regime_ctx` now carries the RAW L1 AXES.
         It stamped every event with only the INTEGRATED label and conviction,
         and both are measured dead as entry-side quantities (RGCV.nf 1.00 vs
         .ok 0.34 in RANGING - an ANTI-signal; 1.00 vs 1.00 in trend).
         The RAW direction axis SEPARATES: nf 0.628 -> ok 0.885, gap +0.257,
         n=753 / 17 sessions (P0.1) - up from AX.2's +0.188 on n=571, so it GREW
-        on more data. `regime_axes.py` reached this first on 08-07: "The RAW
         score separates where the INTEGRATED conviction does not."
         IT WAS JOURNALED NOWHERE - decompose() was a pure function main never
         called. LOG-ONLY: gates nothing, sizes nothing.
@@ -49,7 +49,6 @@ N.2 + N.3: signal_ctx now carries `rrr` (reward:risk from the
 initial release.
 WHY THIS EXISTS (ROADMAP Phase 3.1, verbatim):
     "Instrument first. Log at signal time, for EVERY signal (fired AND
-     gate-blocked): trade type, regime, conviction, setup score, GEX context,
      fees estimate, and eventual outcome for fired ones. A gate you can't
      counterfactual is a gate you can't calibrate."
 The 1-min OHLC tape is replayable forever; what is NOT reconstructible after
@@ -84,8 +83,6 @@ EVENT VOCABULARY (the offline bucketer keys on `event`):
                   wick never entered the range). Raw px + orb_width; divide
                   by tape ATR offline (ATR-relative per defect G, never a
                   percentage).
-  condor_plan   — condor plan created (regime + conviction at decision time).
-  condor_leg    — condor leg trigger fired (regime + conviction at fire time).
 Joining scored -> disposition -> trades.db outcome: events within the same
 second for the same symbol/strategy are the same signal (the loop is
 single-threaded per box; one signal per tick). `ts_et` is the join key.
@@ -209,7 +206,6 @@ def signal_ctx(signal) -> dict:
         return None
 
 
-# PHASE B (r58): `regime_ctx` is DELETED. It journalled label=UNKNOWN (the
 # hardcode) plus L1 axes decomposed from `ctx["l1"].scores` — which NOTHING in
 # v4 sets, so every section it ever wrote here carried an empty vocabulary of
 # a retired concept. The call sites are gone with it; journal() takes dict
@@ -244,7 +240,6 @@ def macro_ctx(macro) -> dict:
 # ── v1.2 — RULESET STAMP (N.7) ────────────────────────────────────────────────
 # Every analysis that pools journal rows across dates is pooling DECISIONS FROM
 # DIFFERENT ENGINES, and until now nothing recorded which. 2026-08-07 alone
-# changed the emission law (conviction_integrator v2.2), the regime set (sweep
 # left the argmax), two dispatch gates (SWP.1, CNT.1), an exit gate (CNT.2) and
 # two floors (SWP.2, CNT.3). A rejection ledger or gate calibration spanning
 # that window averages six rulesets and cannot say so.

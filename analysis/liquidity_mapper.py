@@ -1,5 +1,9 @@
 """
-analysis/liquidity_mapper.py  v4.0
+analysis/liquidity_mapper.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Named liquidity pools, session sections, and the 3-deep ladder.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -75,7 +79,6 @@ audit #2 fixes:
         a collision never deletes a fact in either direction.
         (A2.8) the candle-count fallback still built OLD-definition session
         pools, and any exception in the LIQ.6 path silently reverted a tick
-        to it at debug level — a per-tick regime coin toss. The fallback now
         emits PDH/PDL only, and the exception path warns ONCE per process.
         Hygiene: dead ASIA/LONDON/NY_START/END constants (values
         contradicted SECTIONS) and the never-read RTH_OPEN_UTC deleted.
@@ -146,7 +149,6 @@ SWEEP DEFINITION CORRECTION (rejection, not just penetration).
 detection fixes: recent_sweep is now selected by ACTUAL
         TIME (own-timeframe bars_ago × tf minutes), not raw cross-timeframe bar
         index; sweep_age_bars reported in consistent 5m-equivalent bars (fixes
-        the nonsense/negative age that let junk sweeps flip the regime and made
         fresh sweeps look stale); duplicate same-level sweeps are collapsed.
 repo-wide v3.0 bump: Yahoo-Finance purge & data stream
         mapping optimization (all market data now flows from the single
@@ -182,7 +184,6 @@ LIQ.6 (2026-08-15) — A WHOLESALE CHANGE TO WHAT A NAMED POOL IS.
     ⚠️ CONSEQUENCE FOR ANALYSIS: every sweep in the archive was scored against
     the OLD definition. The 2026-08-15 reads (accept-veto at 64.5%, the retreat
     distribution, the SWEEP tape gap) describe a mapper that no longer exists —
-    correct then, NOT a baseline now. The archive is a third regime from this
     bake. **The retreat probe must be re-run, and the sweep TIMING change waits
     until this has collected**, or neither can be attributed.
 """
@@ -526,7 +527,6 @@ class LiquidityMapper:
             # v3.1 AS-OF FIX: derive 'today' from the FRAME'S LAST BAR, not the
             # wall clock. now_utc.date() made every tape replay blind to named
             # levels (historical bars never match the real today), so the
-            # regime diary's "SWEEP 0%" measured nothing — and live it was
             # merely coincidentally right. 'yesterday' is now the previous
             # TRADING day actually present in the frame (calendar-minus-one
             # returned Sunday every Monday: no PDH/PDL to start the week).
@@ -645,7 +645,6 @@ class LiquidityMapper:
         except Exception as e:
             # A2.8 — this fallback used to be SILENT (debug) and the fallback
             # built OLD-definition pools: any exception here reverted the tick
-            # to the pre-LIQ.6 regime with nothing visible at fleet INFO — a
             # per-tick coin toss over what a named pool IS. Warn ONCE.
             if not getattr(self, "_fallback_warned", False):
                 self._fallback_warned = True

@@ -1,5 +1,9 @@
 """
-shadow/scorers.py  v4.0
+shadow/scorers.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Post-mortem scoring surface for observed entries.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -24,7 +28,6 @@ SweepReversalPrecursorScorer models the reversal as a staged sequence:
   - decay: completed stages expire (STAGE_TTL_S) as a forming setup goes stale.
   - invalidation collapse: ACCEPTANCE through the level (clean_break) means
     it's a breakout, not a reversal ==> full reset.
-SELF-GATING IS ON ELIGIBILITY (position), NEVER ON REGIME. score() returns:
   None  -> ineligible: no named level within range; the pattern CANNOT form here
   0.0   -> eligible: the pattern COULD form here, nothing has assembled yet
 These are logged distinctly (null vs 0) — they mean different things.

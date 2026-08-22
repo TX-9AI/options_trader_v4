@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/exit_record.py  v4.0
+tests/exit_record.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Which exit had the better record in v3? Per exit reason, per strategy.
 
 v4.0  2026-08-19  Built at the OTV4 split. ROADMAP Phase 1.
@@ -83,7 +87,6 @@ def main(argv):
             if a.strategy and str(r.get("strategy") or "") != a.strategy:
                 continue
             # ⚠️ NORMALISE BEFORE GROUPING. v3 writes the trade's OWN P&L into
-            # the reason string - `bos_exit pnl=-0.7%`, `regime_flip (RANGING)`
             # - so EVERY DISTINCT PERCENTAGE BECAME ITS OWN EXIT REASON. The
             # first run of this tool showed 415 reasons collapsed under n<5 and
             # **ORBStrategy's entire 107-trade record was invisible**: nothing

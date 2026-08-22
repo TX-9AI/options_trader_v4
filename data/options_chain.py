@@ -1,5 +1,9 @@
 """
-data/options_chain.py  v4.0
+data/options_chain.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Chain construction, strike selection, chain_subs publication.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -55,7 +59,6 @@ PERSISTENT CHAIN STREAMER (superseded same day; header kept
         'user sessions has exceeded the configured limit' roughly once per tick
         on 24/29 boxes, quotes/Greeks came back empty, every contract kept
         mark=0.0, the mark>0.05 liquidity filters rejected every strike in every
-        regime, and the fleet took ZERO trades on 2026-07-13 while logging a
         plausible-looking "no setup" day. Changes:
         1. ONE long-lived DXLinkStreamer per process (lazy connect on the shared
            tasty_client loop thread, held via AsyncExitStack). Subscriptions are

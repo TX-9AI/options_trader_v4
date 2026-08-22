@@ -1,5 +1,9 @@
 """
-status.py  v4.0
+status.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Box status summary.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -31,17 +35,13 @@ fix ORB state display: read structured ORB data (high/low/width/
         state/attempt) from bot.log instead of fragile string matching against
         state names that no longer exist (CONFIRMED_LONG -> OPEN_LONG, etc).
         Always show ORB H/L/width once range is set, regardless of state.
-remove early break from log scan so regime is always
         found regardless of log line order.
-read regime from database (regime_log table) instead
         of log parsing — reliable across restarts and outside RTH.
-fix regime_log query: ORDER BY logged_at not timestamp.
 consume the orb_range.json "status" field (ESTABLISHED/
         IN_PROGRESS/EXPIRED) instead of inventing ORB state from the clock.
         Only an ESTABLISHED range dated today is shown as live; EXPIRED and
         IN_PROGRESS ranges are labeled as such with their date, so a carried
         prior-session range can never be shown as "watching for break".
-reword loss-limit banner: the limit now forces a regime
         reassessment (session continues), not a halt.
 banner reflects the NET daily loss halt (day P&L <= -limit).
 read authoritative orb_state.json (live engine state:
@@ -55,7 +55,6 @@ repo-wide v3.0 bump: Yahoo-Finance purge & data stream
         shared TastyTrade candle feed — see data/candle_feed.py). No logic
         change in this file.
 Run: python status.py
-Shows: service state, instrument, mode, regime, ORB range + state,
 open position (with current premium & P&L), and session summary.
 Read-only — never modifies anything.
 """
@@ -168,9 +167,8 @@ ORB_STATE_LABELS = {
 }
 
 
-def get_regime_and_orb():
+def get_strategy_and_orb():
     log_path = os.path.join(INSTALL_DIR, "bot.log")
-    regime    = "UNKNOWN"
     strategy  = "UNKNOWN"
     gex_pin   = None
     gex_env   = None
@@ -236,10 +234,7 @@ def get_regime_and_orb():
             pass
 
     if not os.path.exists(log_path):
-        return regime, strategy, orb, gex_pin, gex_env
-
-    # Get regime from database — most reliable source
-    regime = get_latest_regime()
+        return strategy, orb, gex_pin, gex_env
 
     try:
         result = subprocess.run(
@@ -249,14 +244,6 @@ def get_regime_and_orb():
         lines = result.stdout.strip().split("\n")
 
         for line in reversed(lines):
-            if regime == "UNKNOWN":
-                if "REGIME:" in line and "→" in line:
-                    parts = line.split("REGIME:")
-                    if len(parts) > 1:
-                        regime = parts[1].strip().split()[0]
-                elif "STRATEGY: NO TRADE" in line and "regime=" in line:
-                    m = re.search(r"regime=(\S+)", line)
-                    if m: regime = m.group(1)
 
             if "STRATEGY TRANSITION:" in line and strategy == "UNKNOWN":
                 parts = line.split("\u2192")
@@ -278,29 +265,12 @@ def get_regime_and_orb():
                 except Exception:
                     pass
 
-            # Don't break early — scan all lines to ensure regime is found
             # even when it appears near the bottom of the log
 
     except Exception:
         pass
 
-    return regime, strategy, orb, gex_pin, gex_env
-
-
-def get_latest_regime():
-    """Read most recent regime from database — reliable, no log parsing."""
-    if not os.path.exists(DB_PATH):
-        return "UNKNOWN"
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT regime FROM regime_log ORDER BY logged_at DESC LIMIT 1"
-        ).fetchone()
-        conn.close()
-        return row["regime"] if row else "UNKNOWN"
-    except Exception:
-        return "UNKNOWN"
+    return strategy, orb, gex_pin, gex_env
 
 
 def get_open_trade():
@@ -365,8 +335,7 @@ def main():
     print()
     sep()
 
-    regime, strategy, orb, gex_pin, gex_env = get_regime_and_orb()
-    print(f"  \U0001F4CA Regime:      {regime}")
+    strategy, orb, gex_pin, gex_env = get_strategy_and_orb()
     print(f"  \U0001F3AF Strategy:    {strategy}")
 
     # Live underlying price (from orb_state.json, written each tick)
@@ -474,7 +443,6 @@ def main():
 
         print(f"     Grade:      {grade}  |  {strategy_name}")
         print(f"     Entered:    {to_et(trade.get('entry_time', ''))}")
-        print(f"     Regime:     {trade.get('regime', '')}")
     else:
         print("  \u23F3 No open position")
 

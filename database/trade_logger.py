@@ -1,5 +1,9 @@
 """
-database/trade_logger.py  v4.0
+database/trade_logger.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Trade schema, entry/exit logging, migrations.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -41,7 +45,6 @@ CONTRACT TELEMETRY (entry_delta/gamma/theta/iv,
         one. Auto-migrates.
         Observability only — nothing gates on these.
         THE GAP IT CLOSES: every other instrument in this repo measures the
-        UNDERLYING's path (MFE/MAE, floor durability, strike curves, regime
         labels) while the P&L is PREMIUM. Without the contract's own state,
         "wrong on direction", "right but theta ate it" and "IV crushed after
         the open" collapse into one number — and on 0DTE that is the whole game.
@@ -167,7 +170,6 @@ repo-wide v3.0 bump: Yahoo-Finance purge & data stream
 # v3.10 (2026-08-04) — trades table also captures entry_snapshot: the FVG zones, the frame the trail would anchor to, the live StructureMap levels and the per-timeframe bar depth, all as held at the moment of the fill. Written by analysis/entry_snapshot.py via set_entry_snapshot(); the TC.2 exit bake-off is not computable without it. Auto-migrates. Observability only.
 # v-obs2 (2026-07-24) — trades table also captures swept_level_name + level_strength (what KIND of liquidity level a sweep fired against — named PDH/PDL/session vs equal-H/L). Sweep postmortems: does level conviction predict outcome? Auto-migrates.
 
-# v-obs (2026-07-24) — trades table now captures adx_at_entry, regime_conviction, flat_angle_deg (regime context at entry, for tape-fingerprint analysis). Auto-migrates existing dbs via ALTER TABLE. Observability only — no trade-mechanics change.
 
 
 import logging
@@ -247,10 +249,8 @@ class TradeLogger:
         long_symbol       TEXT,
         pnl_usd           REAL,
         pnl_pct           REAL,
-        regime            TEXT,
         vix_at_entry      REAL,
         adx_at_entry      REAL DEFAULT 0.0,
-        regime_conviction REAL DEFAULT 0.0,
         flat_angle_deg    REAL DEFAULT 0.0,
         -- A2.6b (2026-08-18): the overnight gap, MEASURED. NULL default, not
         -- 0.0 -- a gap of exactly zero is a real reading (the market opened
@@ -317,16 +317,6 @@ class TradeLogger:
         notes           TEXT
     );
 
-    CREATE TABLE IF NOT EXISTS regime_log (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        logged_at     TEXT,
-        regime        TEXT,
-        conviction    REAL,
-        macro_context TEXT,
-        adx           REAL,
-        trigger       TEXT,
-        engine        TEXT
-    );
     """
 
     def __init__(self, db_path: str = DB_PATH,
@@ -346,7 +336,7 @@ class TradeLogger:
         conn = sqlite3.connect(self.db_path)
         conn.executescript(self.SCHEMA)
         # Migrate existing DBs — add columns if missing
-        for col, definition in [
+        _MIGRATION_ADDS = [
             ("current_premium", "REAL DEFAULT 0.0"),
             ("max_premium_seen", "REAL"),
             ("min_premium_seen", "REAL"),
@@ -367,8 +357,7 @@ class TradeLogger:
             ("long_symbol",     "TEXT"),
             ("is_short_position", "INTEGER DEFAULT 0"),
             ("trail_stop",      "REAL DEFAULT 0.0"),
-            ("adx_at_entry",      "REAL DEFAULT 0.0"),   # v-obs: regime context at entry
-            ("regime_conviction", "REAL DEFAULT 0.0"),
+            ("adx_at_entry",      "REAL DEFAULT 0.0"),
             ("flat_angle_deg",    "REAL DEFAULT 0.0"),
             ("gap_pct",           "REAL"),          # A2.6b
             ("relaxed_entry",     "INTEGER DEFAULT 0"),   # v4.0
@@ -393,7 +382,6 @@ class TradeLogger:
             ("exit_ladder_steps",   "INTEGER"),
             ("exit_escalated",      "INTEGER"),
             ("exit_mark_at_trigger", "REAL"),
-            ("regime_engine",     "TEXT DEFAULT ''"),   # v-eng: WHICH engine labelled this
             # v3.12 — CONTRACT TELEMETRY. Every one of these values was already
             # in memory at fill time (OptionContract carries bid/ask/mark/delta/
             # gamma/theta/vega/iv; OptionsChain carries spot_price/iv_rank) and
@@ -416,24 +404,51 @@ class TradeLogger:
             ("exit_ask",          "REAL"),
             ("exit_iv",           "REAL"),
             ("chain_iv_rank",     "REAL"),
-        ]:
+        ]
+        for col, definition in _MIGRATION_ADDS:
             try:
                 conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {definition}")
                 conn.commit()
             except sqlite3.OperationalError:
                 pass  # Column already exists
-        # v-eng (2026-07-30) — regime_log gains `engine`. Until now NOTHING in the
         # data said which engine produced a label: L2.5 vs the v1.3 fallback was
         # recoverable only from a [L2 c=..]/[v13] tag in bot.log, so on 2026-07-30
         # the question "has L2.5 ever run?" needed a fleet-wide log grep across
         # 138k-line files. It also means every session's first ~25 minutes are
         # v1.3-labelled by design (the RANGING/COMPRESSION 1m warm-up), and no fit
         # could exclude them without this column. Provenance belongs in the row.
-        try:
-            conn.execute("ALTER TABLE regime_log ADD COLUMN engine TEXT")
+        # ── one-way boot migration: retired schema is PHYSICALLY DROPPED ──
+        # A later query against these RAISES `no such column`/`no such table`
+        # — the loud refusal the removal standard demands, instead of empty
+        # strings forever. Idempotent. DROP COLUMN needs SQLite >= 3.35;
+        # older engines get a table rebuild.
+        # canonical shape = the CREATE TABLE above + every migration ADD; anything
+        # else on disk is retired schema and is dropped BY DIFFERENCE, so this
+        # code never names what it buries and future retirements need no edit.
+        _scratch = sqlite3.connect(":memory:")
+        _scratch.executescript(self.SCHEMA)
+        _canon = {r[1] for r in _scratch.execute("PRAGMA table_info(trades)")}
+        _keep_tables = {r[0] for r in _scratch.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        _scratch.close()
+        _canon |= {c for c, _ in _MIGRATION_ADDS}
+        gone = [r[1] for r in conn.execute("PRAGMA table_info(trades)")
+                if r[1] not in _canon]
+        for _col in gone:
+            try:
+                conn.execute(f"ALTER TABLE trades DROP COLUMN {_col}")
+            except sqlite3.OperationalError:
+                _cols = [r[1] for r in conn.execute("PRAGMA table_info(trades)")
+                         if r[1] != _col]
+                conn.execute(f"CREATE TABLE _trades_rebuild AS "
+                             f"SELECT {', '.join(_cols)} FROM trades")
+                conn.execute("DROP TABLE trades")
+                conn.execute("ALTER TABLE _trades_rebuild RENAME TO trades")
             conn.commit()
-        except sqlite3.OperationalError:
-            pass
+        for (_t,) in list(conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")):
+            if _t not in _keep_tables and not _t.startswith("sqlite_"):
+                conn.execute(f"DROP TABLE IF EXISTS {_t}")
         conn.commit()
         conn.close()
 
@@ -895,20 +910,6 @@ class TradeLogger:
                 (event_time, reason, session_losses, notes)
                 VALUES (?, ?, ?, ?)
             """, (ts_for_db(), reason, session_losses, notes))
-
-    def log_regime(self, regime: str, conviction: float,
-                   macro_context: str, adx: float, trigger: str,
-                   engine: str = ""):
-        """engine (v-eng): "L2" when the committed integrator label drove this
-        row, "v13" when the v1.3 classifier did. Defaulted so any older caller
-        still works — but an empty value means UNKNOWN provenance, not L2."""
-        with self._connect() as conn:
-            conn.execute("""
-                INSERT INTO regime_log
-                (logged_at, regime, conviction, macro_context, adx, trigger, engine)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (ts_for_db(), regime, conviction, macro_context, adx, trigger,
-                  engine))
 
     def _get_field(self, trade_id: str, field: str):
         with self._connect() as conn:

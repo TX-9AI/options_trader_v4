@@ -29,7 +29,7 @@ isolated rather than being everywhere at once.
   this class and every intraday exit became dead code for seven
   revisions behind a green board.** `check_exit_executes.py`
   exists so it cannot happen silently again.
-- `analysis/market_state.py` - replaced `regime_classifier`.
+- `analysis/market_state.py` - the structural state assembly.
   **Carries the vocabulary, classifies nothing.**
 
 **Where the evidence lives:** `tests/` holds the eight standing

@@ -1,5 +1,9 @@
 """
-strategy/runaway_continuation.py  v4.0
+strategy/runaway_continuation.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Runaway-ORB continuation: the ORB ran to its 50% TP and HELD. Buy the direction
 that already proved itself.
 
@@ -25,7 +29,6 @@ The move is not a forecast; it is in evidence. That is the same reason ORB
 itself is the one v3 strategy with a positive record - break-and-retest geometry
 is self-validating and consults no label.
 
-NO REGIME LABEL IS READ ANYWHERE IN THIS FILE. That is deliberate and is the
 whole point of v4.
 
 ────────────────────────────────────────────────────────────────────────────
@@ -103,7 +106,6 @@ from strategy.base_strategy import OptionsSignal as Signal
 logger = logging.getLogger(__name__)
 
 # ── measured thresholds. Overridable via config so they can be retuned without
-#    a code change - they were measured on 28 sessions in ONE market regime and
 #    will drift. A constant in strategy code is a constant nobody revisits.
 ATR_FLOOR_PCT = getattr(config, "RUNAWAY_ATR_FLOOR_PCT", 0.08)
 ATR_HARD_VETO_PCT = getattr(config, "RUNAWAY_ATR_VETO_PCT", 0.05)

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_dispatch.py  v4.0
+tests/check_dispatch.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Every v4 strategy is wired, in the right order, and its call site EXECUTES.
 
 v4.0  2026-08-20  Built at the OTV4 split.
@@ -14,7 +18,6 @@ WHY: IMPORT-CLEAN IS NOT RUNTIME-CLEAN, AND IT HAS FOOLED US TWICE.
     trading. `import main` passed the entire time, because the name resolves at
     RUNTIME inside the function.
   · 2026-08-19 - `main.py` imported cleanly while calling
-    `get_regime_classifier()`, a function that no longer existed anywhere.
   · 2026-08-20 - `closes_beyond` consumed `_rc_bar` fourteen lines before it was
     assigned. Caught only by reading the line numbers.
 **All three are the same defect: a name that is fine at parse time and absent at

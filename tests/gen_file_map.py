@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/gen_file_map.py  v4.0
+tests/gen_file_map.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Generates docs/FILE_MAP.md from the real import graph; fails on drift.
 
 v4.0  2026-08-19  Built at the OTV4 split.
@@ -26,7 +30,6 @@ most needed.
 THE THREE FAILURES IT CATCHES, all seen for real during the v3 -> v4 port:
   1. DRIFT. The committed map disagrees with the code. Fails.
   2. BROKEN LOCAL IMPORT. A module imports something that is not there. Eight
-     files did after the deliberate regime-engine drop, and it was found by
      running imports BY HAND rather than by any check.
   3. ORPHANS. A module nothing imports and that is not an entry point. Twenty
      files were silently omitted from the port manifest; nothing errored,
@@ -34,7 +37,6 @@ THE THREE FAILURES IT CATCHES, all seen for real during the v3 -> v4 port:
 
 DELIBERATE ABSENCES ARE PRESERVED, NOT REGENERATED. The "REMOVED ON PURPOSE"
 block is hand-written and carried across every regeneration: a parser cannot
-know that regime_confluence was dropped because its output measured
 anti-predictive, and without that line someone re-adds it in six months because
 a strategy appears to want it.
 """
@@ -171,7 +173,7 @@ def render(root, files, calls, called_by, broken, unparsed, absent_block):
     L.append("  this class and every intraday exit became dead code for seven")
     L.append("  revisions behind a green board.** `check_exit_executes.py`")
     L.append("  exists so it cannot happen silently again.")
-    L.append("- `analysis/market_state.py` - replaced `regime_classifier`.")
+    L.append("- `analysis/market_state.py` - the structural state assembly.")
     L.append("  **Carries the vocabulary, classifies nothing.**")
     L.append("")
     L.append("**Where the evidence lives:** `tests/` holds the eight standing")
@@ -223,13 +225,10 @@ def _absent_block(dst):
                "know WHY something is absent, and without that a dropped module gets\n"
                "re-added by someone who finds a strategy that appears to want it.\n\n"
                "| module | removed | why |\n|---|---|---|\n"
-               "| `analysis/regime_confluence.py` | v4 split | The damper x corroborator grammar. Every scoring defect found in the final week lived in it. |\n"
                "| `analysis/conviction_integrator.py` | v4 split | Confirmatory by construction: a leaky integrator over argmax agreement is only confident once winning has persisted. |\n"
-               "| `analysis/regime_axes.py` | v4 split | `direction_conf` measured Cliff's delta **+0.09** at 28% ties - a median artifact, not separation. |\n"
-               "| `utils/regime_labels.py` | v4 split | Vocabulary is redefined in v4's own structural terms. |\n\n"
                "⚠️ `analysis/volatility_engine.py` and `analysis/trend_engine.py` were\n"
                "dropped at first and **RESTORED**: they are structure providers, not\n"
-               "regime engines. ATR, Bollinger bands, VWAP, price-vs-band, ADX, the EMA\n"
+
                "stack. They were cut on location and name rather than on what they\n"
                "compute. See `docs/INHERITED_FINDINGS.md`.\n")
     if not os.path.exists(dst):

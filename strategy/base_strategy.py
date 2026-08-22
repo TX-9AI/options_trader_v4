@@ -1,5 +1,9 @@
 """
-strategy/base_strategy.py  v4.0
+strategy/base_strategy.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Signal dataclass and the strategy interface.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -16,7 +20,6 @@ v3.0 — original release
 added orb_range_high/low fields to OptionsSignal for
         strategy-aware exit routing in exit_engine.py
 added 4-leg fields for IronCondorStrategy (RANGING
-        regime fallback when no GEX pin available for butterfly)
 repo-wide v3.0 bump: Yahoo-Finance purge & data stream
         mapping optimization (all market data now flows from the single
         shared TastyTrade candle feed — see data/candle_feed.py). No logic
@@ -24,7 +27,6 @@ repo-wide v3.0 bump: Yahoo-Finance purge & data stream
 """
 # v-obs2 (2026-07-24) — OptionsSignal carries swept_level_name + level_strength for sweep level postmortems.
 
-# v-obs (2026-07-24) — OptionsSignal carries adx_at_signal + flat_angle_deg so entry records can store the regime context the tape-analysis needs.
 
 
 from abc import ABC, abstractmethod
@@ -107,7 +109,6 @@ class OptionsSignal:
     setup_grade:    str   = "B"
 
     # ── Context ──────────────────────────────────────────────────────
-    regime:         str   = ""
     adx_at_signal:  float = 0.0    # v-obs: ADX at entry, for tape-context analysis
     flat_angle_deg: float = 0.0    # v-obs: flat-angle at entry (0 if unavailable)
     swept_level_name: str = ""     # v-obs: name of swept level (PDH/PDL/session) — '' if equal-H/L

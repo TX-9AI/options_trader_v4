@@ -1,6 +1,9 @@
 """
-strategy/orb_strategy.py  v4.0
-Opening-range break and retest. Regime-agnostic by design.
+strategy/orb_strategy.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
@@ -51,7 +54,7 @@ from typing import Optional, List, Tuple
 
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
 from analysis.orb_engine import ORBData, ORBState
-from analysis.market_state import RegimeState, Regime
+from analysis.market_state import MarketState
 from analysis.volatility_engine import VolatilityState
 from analysis.liquidity_mapper import LiquidityMap, LiquidityPool
 from data.options_chain import OptionsChain
@@ -63,7 +66,6 @@ logger = logging.getLogger(__name__)
 
 # ⚠️ FEASIBILITY FLOOR. Below this ATR the target is unreachable - measured, not
 # chosen. Config-overridable because it was measured on 28 sessions in ONE
-# market regime and will drift.
 ORB_ATR_FLOOR_PCT = getattr(config, "ORB_ATR_FLOOR_PCT", 0.05)
 
 # ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
@@ -98,7 +100,7 @@ class ORBStrategy(BaseOptionsStrategy):
 
     def generate_signal(self,
                          orb: ORBData,
-                         regime: RegimeState,
+                         ms: MarketState,
                          vol_state: VolatilityState,
                          liq_map: LiquidityMap,
                          chain: OptionsChain,
@@ -148,14 +150,12 @@ class ORBStrategy(BaseOptionsStrategy):
             # ── ORB range boundaries for strategy-aware exit ──────────────────
             orb_range_high    = orb.orb_high,
             orb_range_low     = orb.orb_low,
-            # v4.0: PURE MECHANICAL. ORB never asked the regime for permission
             # - which is exactly why it kept working while every gated strategy
             # degraded, and why it is the one v3 strategy with a positive
             # record (orb_trail_stop 96% / 85 trades / +$30,696, worst -$16).
             # The label is no longer stamped: writing one the engine did not
             # compute puts a fabricated field on the trade record where a
             # reader will take it for an observation.
-            regime            = Regime.UNKNOWN,
             vix_at_signal     = macro.vix,
             is_fed_day        = macro.is_fed_day,
             stop_loss_pct     = MAX_LOSS_PCT,
@@ -179,8 +179,6 @@ class ORBStrategy(BaseOptionsStrategy):
         elif direction == "short" and vol_state.price_vs_vwap == "BELOW":
             self._add_confluence(signal, "Below VWAP — bearish bias")
 
-        # v4.0: the regime-agreement confluence note is gone. It added no
-        # conviction and gated nothing, but `primary_regime` is permanently
         # UNKNOWN so it could never fire - and a dead branch reads as a live
         # one to anyone auditing this file.
 
@@ -205,16 +203,14 @@ class ORBStrategy(BaseOptionsStrategy):
             )
             signal.conviction += FED_DAY_ORB_BOOST
 
-        # v4.0: `regime.conviction` is gone from the decision. It was
         # confirmatory by construction - a leaky integrator over argmax
         # agreement is only confident once winning has already persisted - and
         # it is permanently 0.0 in v4, so this line added nothing while looking
         # like it added something.
         # ⚠️ THE REMAINING `signal.conviction` ADDITIONS ARE STRUCTURAL FACTS
-        # (a named level in the break, a Fed day), not a regime score. They
         # describe the setup; they do not authorise it.
-        signal.adx_at_signal = regime.adx
-        signal.flat_angle_deg = getattr(regime, 'flat_angle_deg', 0.0) or 0.0
+        signal.adx_at_signal = ms.adx
+        signal.flat_angle_deg = getattr(ms, 'flat_angle_deg', 0.0) or 0.0
 
         # ⚠️ v4.0: THE CONFLUENCE GATE IS GONE, AND IT COULD NEVER FAIL.
         # Two factors were required; two are added UNCONDITIONALLY above ("ORB

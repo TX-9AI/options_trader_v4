@@ -1,7 +1,10 @@
 """
-shadow/observer.py  v4.1
+shadow/observer.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
 
-v4.1  2026-08-21  PHASE B (r58): dead regime fields dropped from the record.
+
 Shadow observer: records primitives without trading them.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -135,8 +138,6 @@ def one_tick(symbol: str, acc: TickAccumulator, scorers: list) -> dict:
     trend = get_trend_engine().analyze(data)
     structure = get_structure_analyzer().analyze(df_5m, df_15m, df_1h, price)
     liq = get_liquidity_mapper().analyze(df_5m, df_15m, price)
-    regime = get_regime_classifier().classify(vol, trend, structure, liq,
-                                              macro=None, trigger="shadow")
 
     now = _now_et()
     prim = compute_primitives(
@@ -148,7 +149,6 @@ def one_tick(symbol: str, acc: TickAccumulator, scorers: list) -> dict:
     rec = {
         "ts": prim.ts_et, "symbol": symbol, "stage": STAGE,
         "price": price,
-        # PHASE B (r58): regime/regime_conviction fields removed — the label
         # was hardcoded UNKNOWN and conviction is not computed in v4. Rows
         # before r58 carry "UNKNOWN"/0.0; absent keys after r58 mean r58+.
         "primitives": _prim_fields(prim),

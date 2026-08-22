@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/entry_profile.py  v4.0
+tests/entry_profile.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 What did a GOOD entry look like? Profile contrast and the wants list.
 
 v4.0  2026-08-19  Built at the OTV4 split. ROADMAP Phase 1.
@@ -71,7 +75,7 @@ DTP = os.path.expanduser("~/day_trader_pro")
 TRADES = os.path.join(DTP, "trades", "*", "*_trades_*.db")
 OHLC = os.path.join(DTP, "ohlc")
 
-EXCLUDE_STRATEGIES = {"ORBStrategy"}   # regime-agnostic; would credit the layer
+EXCLUDE_STRATEGIES = {"ORBStrategy"}
 NEUTRAL = ("condor", "butterfly", "iron")
 POLLUTED = {"2026-08-14"}              # identity-chain artifacts
 
@@ -245,7 +249,6 @@ def recorded_features(r):
     actually carried data, because three of these were largely EMPTY in the v3
     book and only fixed on 2026-08-18/19:
         flat_angle_deg   100% ties on ONE value - computed every tick, never
-                         attached to the regime object
         level_strength   94% ties on TWO - the formula collapsed because
                          touch_count is a constant, and only a hard-gated
                          strategy wrote it

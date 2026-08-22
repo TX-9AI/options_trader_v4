@@ -1,6 +1,10 @@
 #!/bin/bash
 # ==========================================================================
-# install_tooling.sh  v4.0
+# install_tooling.sh  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 # Installs shared tooling onto a box.
 #
 # v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -111,7 +115,7 @@ _IMPORT_ERR="$("$PY" -c "
 import sys
 sys.path.insert(0, '$REPO_DIR')
 try:
-    import data.macro_data, analysis.regime_classifier, risk.setup_scorer
+    import data.macro_data, risk.setup_scorer
 except Exception as e:
     print(f'{type(e).__name__}: {e}')
 " 2>&1)"

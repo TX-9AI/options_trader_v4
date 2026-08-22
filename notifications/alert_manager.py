@@ -1,5 +1,9 @@
 """
-notifications/alert_manager.py  v4.0
+notifications/alert_manager.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Alert routing and de-duplication.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -16,7 +20,6 @@ v3.0 — original release (Twilio SMS)
 replaced Twilio SMS with Telegram
 stripped down to exactly 4 essential alerts:
         bot started, bot stopped, trade entered, trade closed (win/loss).
-        Removed regime change spam and circuit breaker noise
         (circuit breaker is implied by no further entry alerts —
         operator can check status.py for the reason if curious).
 added send_daily_summary(): a deliberate end-of-day P&L
@@ -95,7 +98,6 @@ send_blind_alert() / send_sight_restored_alert(): the
         RTH; only the paging and the log level are gated.
         drill=True prefixes an unmistakable DRILL marker and is used by
         tests/blind_alert_selftest.py, which exercises this exact function.
-send_regime_engine_degraded_alert(): the L2.5 integrator
         failing to import degraded all 15 boxes to the v1.3 classifier for a
         full session and announced it only as a WARNING in each box's log —
         nobody saw it until the logs were read by hand. Trading was unaffected,
@@ -266,22 +268,6 @@ class AlertManager:
         self._send(
             f"\u26A0\uFE0F Broker reconcile unavailable{why} | {instrument} | "
             f"DB-only recovery, no positions closed | verify manually | "
-            f"{fmt_et_short()}"
-        )
-
-    def send_regime_engine_degraded_alert(self, instrument: str, reason: str = ""):
-        """The L2.5 conviction integrator failed to load and the bot fell back to
-        the v1.3 classifier. Trading continues, but every regime label and
-        conviction value produced this session comes from a DIFFERENT engine than
-        the one the calibration ladder is fitted against — so the session's
-        conviction data is not comparable and must be excluded from any fit.
-        Silent for a full session on 2026-07-29 across all 15 boxes; this alert
-        exists so that can never happen quietly again."""
-        why = f" ({reason})" if reason else ""
-        self._send(
-            f"\U0001F534 REGIME ENGINE DEGRADED{why} | {instrument} | "
-            f"running v1.3 fallback, NOT L2.5 | trading continues | "
-            f"today's conviction data is NOT calibration-grade | "
             f"{fmt_et_short()}"
         )
 
@@ -472,15 +458,6 @@ class AlertManager:
             f"Circuit breaker fired (not sent to Telegram): "
             f"{session_losses} losses — {reason}"
         )
-
-    def send_regime_alert(self, old_regime: str, new_regime: str,
-                           conviction: float, notes: str = ""):
-        """Suppressed. Regime changes are too frequent to be useful as alerts."""
-        pass
-
-
-_alert_manager: Optional[AlertManager] = None
-
 
 def get_alert_manager() -> AlertManager:
     global _alert_manager

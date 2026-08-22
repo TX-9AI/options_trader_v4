@@ -1,5 +1,9 @@
 """
-strategy/condor_roll.py  v4.2
+strategy/condor_roll.py  v4.3
+v4.3  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 
 v4.2  2026-08-21  PHASE B (r58): the rolled record no longer wears RANGING.
 Condor roll handling.
@@ -358,8 +362,6 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
             max_loss        = new_maxloss,
             stop_premium    = roll_credit_fill * (1 + CONDOR_STOP_LOSS_PCT),
             target_premium  = CONDOR_NICKEL_CLOSE,
-            regime          = "",   # PHASE B (r58): a label nothing measured;
-                                    # "" is the honest value (Phase A precedent)
             is_condor_leg   = 1,
             is_broken_wing  = 1,                       # FINAL FORM
             short_symbol    = plan.new_short_symbol,

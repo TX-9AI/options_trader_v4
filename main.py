@@ -1,29 +1,22 @@
 """
-main.py  v4.4
-v4.4  2026-08-21  PHASE B (r58): the regime carriers are out. The gap
+main.py  v4.5
+v4.5  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
       measure's prior direction moves to BotState.prev_trend_direction,
       committed at the end of each analysis pass — the old carrier
-      (state.current_regime) was NEVER ASSIGNED anywhere, so prior_dir had
       been a silent 0 and gap_class permanently UNDIRECTED since the split.
       The L1 sweep-score read is deleted for the same reason one level up:
       ctx["l1"] is set nowhere in v4, so the score was a silent 0.0 and the
-      PLTR protection it claimed to carry did not exist here. regime_ctx
       journal sections (7 sites), the chain_snapshot label pass, the
-      position_manager label pass, the consumerless _orb_ok_regimes tuple and
       two _L1_BREAKDOWN_FOR rows are removed; heartbeat and NO TRADE lines
-      state measured facts (adx/dir/seq); vix_regime reads become vix_band.
-v4.3  2026-08-21  REGIME PURGE PHASE A. The dispatch HARD GATE deleted - it
-      tested primary_regime, which v4 hardcodes to UNKNOWN, so it returned
       before dispatch on EVERY tick and the fleet traded NOTHING on its first
-      live session. ORB_BLOCK_RANGING, the _orb_ok_regimes test,
-      CONT_BLOCK_PREMIUM_REGIMES and the hardcoded regime="RANGING" trade-record
       stamp go with it. Nothing replaces them, deliberately.
 Tick loop, context assembly, strategy dispatch. GATES STRIPPED - see ROADMAP Phase 2.
 
-v4.2  2026-08-20  `_REGIME_ENGINE` and its startup assert DELETED. Nothing read
       the variable - v4 removed both engines it used to choose between - so the
       assert was a gate with no consumer that could only ever refuse to start.
-      It crash-looped the QQQ box, which carried OT_REGIME_ENGINE=smc from the
       SMC fork's unit file. A guard outlives the thing it guarded.
 v4.1  2026-08-20  AUDIT F4: relaxed_entry copied onto the condor-leg record -
       the tag was set on the signal and dropped before the insert.
@@ -42,14 +35,12 @@ ORB IS BLOCKED UNDER RANGING (operator direction; that
        so the A/B arms stay comparable. The refusal journals as
        `gate_block:orb_ranging` rather than being a silent absence. Leading
        branch with the existing ladder moved to `elif`, so RANGING is refused
-       BEFORE the permissive ORB_FIRES_REGARDLESS_OF_REGIME clause can readmit
        it. OT_ORB_BLOCK_RANGING=0 restores the old behaviour.
 🔴 P0 HOTFIX — run_analysis raised NameError on EVERY tick.
        v6.16 (Level.1) and v6.17 (A2.6b) write ctx["gap"], ctx["gap_pct"] and
        ctx["level_near"] into `ctx`, but run_analysis did not bind that name
        until its return statement. The NameError raised inside the try; the
        except handler's own ctx["gap"] = None then re-raised it UNCAUGHT. Net
-       effect on any box baking 0720753: no ctx, no regime classification, no
        strategy evaluation — the bot trades nothing and the failure is a
        traceback per tick, not a quiet degradation. `ctx` is now bound before
        the Level.1/A2.6b blocks, which write into it; macro/orb are added at
@@ -64,9 +55,7 @@ A2.6b: MEASURE the overnight gap instead of inheriting it
         night's news and CANNOT TELL WHICH PART. Nowhere was the gap measured
         as itself.
         THE ONLY PRE-OPEN DECISION-TIME INPUT IN THE STACK: ADX, conviction,
-        the regime scores and IV skew all need bars from THIS session; the gap
         is fully formed at 09:30 before a single RTH bar prints.
-        PRIOR DIRECTION COMES FROM LAST TICK'S REGIME, deliberately: `regime` is
         not bound this early in the tick, and a bare getattr would have raised
         into the except and pinned prior_dir=0 forever - making gap_class
         permanently "UNDIRECTED". A silent constant is the failure this whole
@@ -93,11 +82,8 @@ Level.1: GRADED LEVEL STRENGTH, FOR EVERY STRATEGY.
         -$8,244 vs B +$1,893).
         UNBLOCKED BY LIQ.6 (rung in the name) AND FEED.2 (ON High/Low real).
 STR.2: carry `flat_angle_deg` from the L1 breakdown onto
-        the regime state. FIVE strategies already read `regime.flat_angle_deg`
-        and ALL FIVE took the default, because RegimeState had no such
         attribute - so trades.flat_angle_deg came back 100% tied on ONE unique
         value and the separation probe read it as a measured zero.
-        The quantity was never missing: regime_confluence.flat_angle_deg() runs
         on every RANGING/COMPRESSION evaluation and lands in the breakdown as
         {"angle": ...}. COMPUTED, RECORDED IN THE EVIDENCE, NEVER DELIVERED -
         the same shape as `direction_conf`. Third instance of that class in a
@@ -108,7 +94,6 @@ STR.2: carry `flat_angle_deg` from the L1 breakdown onto
         WHY IT MATTERS MOST: the angle is a STRUCTURAL read, not a magnitude
         one - slope of the recent window in ATR units, the closest thing
         collected to "is price going anywhere or just rotating".
-P0.3: all seven `regime_ctx` call sites now pass the RAW
         L1 score vector, via `_l1_scores(ctx)` reading `ctx["l1"].scores`
         defensively. Emission only - no gate, no size, no behaviour change.
         A malformed ctx returns None and the axes are simply ABSENT, which is
@@ -201,7 +186,6 @@ TC.6 IDENTITY THROUGH THE EXECUTION PATH.
         built, so `is_trend_credit` and `underlying_stop` never reached the
         trade and the exit branch gated on them COULD NEVER FIRE. Every trend
         credit spread inherited the condor ratchet and the 25%% premium stop.
-        Identity now derives from the SIGNAL: strategy, regime, underlying_stop,
         is_trend_credit, and stop_premium=0 for a trend credit spread.
 `_opening_range()`: the ORB high/low recomputed FROM THE
         TAPE as trend PARTICIPATION's bound. Separates the ORB ENGINE (no
@@ -277,7 +261,6 @@ RGM.6: THE FALLBACK RESOLVES TO A KNOWN LABEL.
         been the fallback-rate measure all week — with the split, a DROP in it
         must not be read as a fix when it is a relabelling.
         ⚠️ EXPECT UNKNOWN TO FALL TOWARD ITS ~2.4% FLOOR and the labelled
-        population to grow a low-conviction tail. Per-regime statistics are
         therefore NOT poolable across this deploy.
         Kill switch: OT_RGM6_L1_ARGMAX=0 restores the pre-RGM.6 ladder exactly.
 v6.0
@@ -287,7 +270,6 @@ CNT.6: CONTINUATION IS BLOCKED IN RANGING AND COMPRESSION.
         entry contradicts its own premise — this is a correctness defect, not a
         permissiveness setting.
         ⚠️ THE MECHANISM WAS THE `_is_runaway` BYPASS. The gate read
-        `_is_runaway OR regime in (TRENDING_BULL, TRENDING_BEAR, BREAKOUT)`, so a
         runaway ORB flag skipped the label check entirely and continuation fired
         on ANY tape at Priority 2 — ahead of Butterfly (P3, RANGING/COMPRESSION)
         and Condor (P4, RANGING), both behind `if signal is None` and therefore
@@ -295,7 +277,6 @@ CNT.6: CONTINUATION IS BLOCKED IN RANGING AND COMPRESSION.
         extinct; the cause was a dispatch bypass, not an absence of setups.
         MEASURED, 13 sessions: RANGING → Continuation 94 vs IronCondor 27 ·
         COMPRESSION → Continuation 39 vs Butterfly 6. Continuation took 3.5x the
-        condor's opportunities and 6.5x the butterfly's, inside the regimes those
         strategies exist for.
         ⚠️ WHY IT IS IN DISPATCH AND NOT IN THE STRATEGY: CNT.3 already blocked
         the COMPRESSION handoff INSIDE continuation_strategy and the squeeze
@@ -309,7 +290,6 @@ CNT.6: CONTINUATION IS BLOCKED IN RANGING AND COMPRESSION.
         slot is necessary but not sufficient for condor volume.
 L1 EVIDENCE ON THE FIRED DISPOSITION. The sweep collection
         is meant to characterise what made a good ENTRY good, and the journal
-        was recording only the regime's label and conviction — every
         contributing term that decided the entry was computed at the fire and
         then discarded. Reconstructing them later means replaying the tape and
         hoping the replayed score matches the one that fired, which is an
@@ -317,7 +297,6 @@ L1 EVIDENCE ON THE FIRED DISPOSITION. The sweep collection
         six-score vector on every fire, plus the firing setup's own L1
         breakdown via `_L1_BREAKDOWN_FOR`.
         ⚠️ A WRONG MAPPING IS SILENT — it files a well-formed breakdown from the
-        wrong scorer. ORB is deliberately unmapped (regime-immune by design);
         an unmapped strategy records no breakdown rather than a wrong one.
         Log-only: no gate, no dispatch and no sizing reads any of this.
 MEM.2: in-process tracemalloc, gated by OT_MEM_TRACE.
@@ -343,9 +322,7 @@ CNT.1: CONTINUATION DISPATCH OPENED TO BREAKOUT_VOLATILE.
         Entries are tagged `trend_continuation_breakout` so the cross-day rollup
         scores this path separately from _standalone and _handoff.
         Kill switch: OT_CONT_BREAKOUT_DIRECTION=0.
-SWP.1: SWEEP UNGATED FROM THE REGIME LABEL. Operator's
         ruling — sweep is an EVENT, not a market state. The dispatch required
-        `regime.primary_regime == Regime.SWEEP_REVERSAL`; that label wins 0.4%
         of live ticks, is exactly zero on 96%, and F7's commit threshold made it
         rarer still. Dispatch now gates on the L1 `_sweep` SETUP SCORE
         (>= SWEEP_SETUP_FLOOR), captured from the confluence result this loop
@@ -358,15 +335,12 @@ LIVE A/B ON THE EMISSION LAW (RGM.1 F7). conviction_
         incumbent was replaced by bare argmax every tick, which accounted for
         96.9% of 8,345 label switches across 19 sessions at a median incumbent
         conviction of 0.08. v2.1 now runs BOTH laws on every tick and reports
-        the other one's label as `shadow_regime`; this file logs the pair
         whenever the divergence CHANGES (never per tick). Nothing reads the
         shadow to trade. Kill switch: OT_L2_PROTECT_BELOW_HOLD=0 restores the
         v2.0 law exactly, and the shadow then models v2.1 — so the A/B reads
         the same in either direction and one env var runs the control.
 ORB WAS BEING GATED BY THE STALE-BOOK ENTRY BLOCK, AND THAT
         WAS NEVER INTENDED. v5.0 put the block ABOVE the dispatch, so it
-        returned before `orb_regime_bypass` ran and
-        ORB_FIRES_REGARDLESS_OF_REGIME — the constant defect V exists to
         provide — became unreachable on a stale tick. MEASURED, not inferred:
         the block ran 09:35:01 → 09:39-09:41 ET on ALL 15 boxes on 2026-08-04,
         which is the first four to six minutes of ORB's own entry window (ORB
@@ -376,31 +350,22 @@ ORB WAS BEING GATED BY THE STALE-BOOK ENTRY BLOCK, AND THAT
         A CONFIRMED ORB (OPEN_LONG / OPEN_SHORT) is now exempt. Nothing else is:
         continuation, condor, butterfly and sweep all condition on the label and
         stay blocked, so v5.0's actual protection is intact.
-        THIS IS NOT "IGNORE STALE". `stale` is the regime BOOK; the feed has its
         own guard, latch and pager. A confirmed ORB break on a stale book reads
         fresh price and no label at all.
 W.2: _capture_entry_snapshot's handler now logs inside the
         except itself. It always warned, but the census reads the HANDLER BODY,
         so it was counted SILENT — and a census that miscounts is worse than
         none. No behaviour change.
-NO REGIME-FLIP EXIT ON A STALE BOOK (operator directive).
         v5.1 blocked ENTRIES on stale and held the committed label, but a HELD
-        label is still a label: `_evaluate_continuation` fires `regime_flip` on
         any label that is not TRENDING in the trade's direction, so a position
         could still be closed on a classification the engine could not confirm
         at that moment. And on a COLD book — stale with nothing committed —
         main fell back to v1.3 raw argmax, which is the churn L2 exists to
-        remove, feeding it straight into the exit that checks regime SECOND,
         before any price stop. That is the 07-23..08-03 flicker mechanism with
         one branch left open.
-        THE FIX IS ONE ARGUMENT, NOT A NEW GATE: pass `regime=None` into the
-        exit path while the book is stale. All three regime-driven exits
-        already guard on the label being present — `regime_flip`,
-        `regime_flip_adverse` (condor) and the butterfly `regime_flip_exit` —
         so None disables exactly those three and nothing else.
         EVERY PRICE-BASED EXIT STILL RUNS: 15:45 hard close, stop, max_loss,
         trail, FVG trail, break-of-structure, condor ratchet, nickel close,
-        theta. Stale means the regime BOOK has not resolved; it is not evidence
         the price feed is down, and refusing to stop out on it would be a
         different and worse rule. A 0DTE position must still flatten at 15:45.
 ENTRY SNAPSHOT HOOK (log-only, freeze-safe). Every confirmed
@@ -429,12 +394,9 @@ DISPATCH ISOLATION. Each strategy evaluation now runs inside
         sites plus the Leg-2 check in the tick loop.
 STOP TRADING ON THE UN-SMOOTHED CLASSIFIER. Two rules, no
         new parameter, nothing to tune.
-        THE DEFECT: `st.regime and not st.stale` was read correctly, but the
         FALLBACK was wrong. On a stale tick the bot dropped to the v1.3
         classifier — raw L1 argmax — which is precisely the churn L2 exists to
         remove (436 committed switches vs 695 argmax flips). exit_engine checks
-        regime-flip SECOND, before any price stop, so a single wobbled tick
-        closed the position. MEASURED over 2026-07-23..: regime_flip exits have
         median hold 0.8 min and p25 12 SECONDS, against 5-12 min for every other
         exit reason; 19% of continuation exits and 27% of iron-condor exits.
         A 12-second position has not had time to be right or wrong — only to pay
@@ -451,7 +413,6 @@ STOP TRADING ON THE UN-SMOOTHED CLASSIFIER. Two rules, no
         is deliberately permissive to collect a broad sample. A flickered exit
         does not just cost $48, it writes a row tagged
         "ContinuationStrategy / TRENDING / -$48" that will later be counted as
-        evidence about continuation in a trending regime. It is not — it is
         evidence about an exit mechanism. The fix does not reduce firing; it
         stops premature exits, so each trade actually expresses its setup.
 DECLARE THE OPENING GAP, AND STAMP THE ENGINE.
@@ -468,15 +429,12 @@ DECLARE THE OPENING GAP, AND STAMP THE ENGINE.
         fixed by padding the frame (that is what the guard prevents) nor by
         fabricating a low value (synthetic data would enter the calibration set)
         nor by weakening the integrator's full-vector invariant.
-        (b) regime_log rows now carry `engine` ("L2" | "v13"), and trades carry
-        `regime_engine`. Provenance was previously recoverable only from a
         [L2 c=..]/[v13] tag in bot.log — which is why "has L2.5 ever committed?"
         took a fleet-wide grep across 138k-line logs. It also makes the designed
         v1.3 opening window excludable from L2-conditioned fits by a WHERE
         clause instead of by inference. Auto-migrates via ALTER TABLE (v-obs
         pattern); observability only, no trade-mechanics change.
 **L2.5 WAS NEVER REACHABLE.** Root cause of every symptom
-        chased today. `_REGIME_ENGINE` is built with `.lower()`, yielding "l2",
         and BOTH gates compared it to the uppercase literal "L2" — at the tick
         override (was line 482) and at the startup warm-load (was 1749). "l2" ==
         "L2" is False, so the L2.5 block has never executed on any box since
@@ -490,15 +448,12 @@ DECLARE THE OPENING GAP, AND STAMP THE ENGINE.
         plus a start-up assert that refuses to boot on an unrecognised value
         rather than silently selecting an engine nobody chose, and a start-up log
         line naming the active engine so "which engine is running?" is answerable
-        from line one of the log instead of inferred from regime tags.
 THE SILENT L2 GATE IS NOW AUDIBLE. v4.5 fixed the import,
         and a probe against the real classes confirmed L2 commits from tick 1
         on a full evidence vector (TRENDING_BULL, conviction 0.984). But three
         conditions must hold for L2 to override v1.3, and only two of them
-        logged anything: `st.regime and not st.stale` failing was completely
         silent. Since ConvictionIntegrator clears `stale` ONLY when every
         dimension of the evidence vector is non-None, one perpetually-None
-        dimension pins the book stale indefinitely and every REGIME line prints
         [v13] with no warning anywhere — which is exactly why "did L2.5 land?"
         was unanswerable from the logs. The non-committing branch now reports
         the reason and names the missing dimensions, throttled to one line per
@@ -508,14 +463,12 @@ THE SILENT L2 GATE IS NOW AUDIBLE. v4.5 fixed the import,
         tick. Observability only — no change to trading behaviour.
 L2.5 IMPORT CONTRACT FIXED + SILENT DEGRADATION MADE LOUD.
         `RANGE_WINDOW_BARS` was imported from conviction_integrator, which does
-        not define it — it lives in regime_confluence (v1.3, ~line 181) and was
         only ever reachable through a re-export tuple that the 07-28 excavation
         trimmed. The ImportError was swallowed by the L2 guard, so all 15 boxes
         ran the v1.3 classifier for the whole 07-29 session while logging a
         single WARNING per start. Two changes: (a) both symbols now import from
         the modules that OWN them — a re-export is not a contract; (b) the
         fallback logs at ERROR and pages via
-        alert_manager.send_regime_engine_degraded_alert (v1.7), because a
         silent engine swap invalidates the session's conviction data for
         calibration even though trading continues unaffected. The pager is
         itself wrapped — it can never take the bot down.
@@ -559,24 +512,18 @@ PAPER CONDOR CREDIT via the shared authority (audit
         paper-pricing authority, which honours the same knob for every path
         (default 0.0 = book the mark, matching the mid-credit limit live
         actually posts). No live-path change.
-L2.5: LIVE regime now driven by the Layer-2 conviction
         integrator's committed label (Layer-1 confluence evidence → integrator),
         replacing the v1.3 boolean classifier's raw argmax as the trade gate.
         Cures the fleet-wide UNKNOWN flicker (v1.3 dropped to UNKNOWN mid-trend
         at avg ADX ~29 — a hard no-trade gate firing during the strongest
-        conditions). The integrator holds a regime through single-tick evidence
         drops (theta_hold hysteresis) and never emits UNKNOWN. Gates run WIDE
         OPEN (conviction logged, not gated — L3 tunes bars later); paper P&L is
-        the arbiter. v1.3 still runs and populates RegimeState's rich fields;
-        only primary_regime/conviction are overridden. Book persisted per box
         (data/integrator_state.json), warm-loaded at boot. Rollback:
-        OT_REGIME_ENGINE=v13.
 SIGNAL JOURNAL DISPOSITIONS (ROADMAP Phase 3.1, log-only,
         zero behavior change): attempt_new_entry now emits what happened to
         every signal AFTER scoring — `disposition` events for fired /
         sizing_rejected / invalid_signal (below-B REJECTs are already emitted
         by setup_scorer v1.3's `scored` event) — plus `condor_plan` /
-        `condor_leg` events carrying regime conviction at decision time (the
         condor bypasses the score path, so without these its conviction bar
         could never be calibrated). ORB dispositions carry retest_depth_px
         (orb_engine v3.7, defect G) and its ATR-relative form. All emissions
@@ -623,9 +570,6 @@ handle_hard_close() now fetches the options chain once and
 defect H rename only: NO_ENTRY_AFTER_ET -> ORB_NO_ENTRY_AFTER_ET
         (import + the orb_state.json "past_cutoff" flag). Same constant, same
         (11, 0) value, same behaviour — the name now states its ORB scope.
-REGIME UN-GATE for the flagship ORB (config-switched,
-        ORB_FIRES_REGARDLESS_OF_REGIME, default on). A confirmed ORB break+retest
-        now fires regardless of the regime label — including UNKNOWN and
         SWEEP_REVERSAL — because the ORB engine's break+retest is self-validating
         and the classifier does not test for it. Two changes in run_entry_logic:
         (1) the hard UNKNOWN gate is bypassed when the engine is in a confirmed
@@ -633,10 +577,7 @@ REGIME UN-GATE for the flagship ORB (config-switched,
         (2) the ORB dispatch admits UNKNOWN and SWEEP_REVERSAL (ORB beats sweep;
             engine no longer defers OPEN under a sweep — see orb_engine v3.2).
         Nothing else loosens: sweep/butterfly/condor still self-gate on their own
-        regime values, and the setup scorer's B-threshold still governs (under
-        UNKNOWN the regime_conviction dimension just contributes 0). Set the flag
         False to restore strict v2 gating. Every ORB fired under UNKNOWN is logged
-        regime=UNKNOWN — labeled tape for the shadow observer.
 condor leg ENTRY alert now names the instrument. The leg-
         filled Telegram alert was built with a raw _send() that omitted the
         symbol (every other entry alert routes through the structured methods
@@ -676,13 +617,11 @@ block new entries when the daily loss halt is active
         (day P&L <= -DAILY_LOSS_LIMIT_USD); open positions still exit.
 (2a) ORB-window sweep override: when an ORB signal fires but
         a sweep reversal has higher conviction, take the sweep. (2b) pass the
-        current regime into the ORB engine for regime-gated re-arm. (#3) run
         the broken-wing roll check when both condor verticals are open.
 condor legs are now TRACKED positions: each vertical is
         sized at half the grade budget, written to the trade log, registered
         with the position manager (the only two-position strategy), and
         managed/exited per-side. Replaces the phantom notify-only path.
-session loss limit forces a regime reassessment instead of
         halting: main_loop consumes RiskManager.consume_reassess_request() and
         reclassifies with trigger="loss_limit".
 ORB range is now three-state (ESTABLISHED/IN_PROGRESS/
@@ -700,7 +639,6 @@ remove duplicate _execute_condor_leg (dead 2-arg def shadowed by
         unit-file parsing).
 fix missing ZoneInfo import causing loop error every tick
 iron condor legged entry, BB-anchored strikes,
-        regime-flip exits, ORB range via get_orb_range.py/orb_range.json,
         fed day trading enabled, ORB cutoff 11AM, condor window 11AM-2PM
 v1.0 — original release
 0DTE options bot: ORB, Sweep Reversal, Butterfly
@@ -711,7 +649,6 @@ Run modes:
 """
 # v-runaway-fix (2026-07-24) — runaway ORB reroute — hands to CONTINUATION (with-trend on pullback) FIRST, not sweep; post-runaway sweep gated to NAMED levels only. Fixes afternoon-giveback: runaway momentum was being faded by sweep reversal.
 
-# v-obs (2026-07-24) — condor leg entry record now stores adx_at_entry / regime_conviction / flat_angle_deg (from signal, falling back to state.current_regime).
 
 
 import logging
@@ -728,7 +665,7 @@ from zoneinfo import ZoneInfo
 from config import (
     POLL_INTERVAL_SECONDS, LOG_LEVEL, LOG_FILE, LOG_ROTATION_MB,
     PAPER_TRADING, RISK_PER_TRADE_USD, DAILY_LOSS_LIMIT_USD,
-    REGIME_REASSESS_MINUTES, INSTRUMENT, SessionConfig, DIRECTIONAL_ONLY,
+    REASSESS_MINUTES, INSTRUMENT, SessionConfig, DIRECTIONAL_ONLY,
     DEBIT_BLOCKED_STRUCTURES,
     ORB_NO_ENTRY_AFTER_ET, BROKER_RECONCILE_ENABLED,
     DEBIT_DIRECTIONAL_CUTOFF_ET, DEBIT_BLOCK_ACTIVE,
@@ -778,28 +715,22 @@ from analysis.trend_engine import get_trend_engine
 from analysis.structure_analyzer import get_structure_analyzer
 from analysis.entry_snapshot import to_json as _entry_snapshot_json
 from analysis.liquidity_mapper import get_liquidity_mapper
-from analysis.market_state import RegimeState, Regime
+from analysis.market_state import MarketState
 from analysis.orb_engine import get_orb_engine, ORBState
 
 # ── L2.5 (2026-07-21): wire the Layer-1 confluence scorer + Layer-2 conviction
-# integrator into the LIVE regime decision. The committed (integrated) label
-# replaces the v1.3 boolean classifier's raw argmax as the regime that gates
 # trades. WHY: the v1.3 classifier flickers to UNKNOWN for a single tick at high
 # ADX (fleet-wide: UNKNOWN fired at avg ADX ~29, i.e. mid-trend, up to 41 on
 # AAPL) — each flicker a hard no-trade gate slamming shut during exactly the
-# high-conviction moments. The integrator holds a regime through single-tick
 # evidence drops (theta_hold hysteresis) and NEVER emits UNKNOWN — indecision is
 # a low conviction number on a best-fit label, not a seventh label. Gates run
 # WIDE OPEN this week (conviction logged, not gated — L3 tunes the bars later);
-# paper P&L is the de-facto arbiter of L1+L2 quality. Rollback: OT_REGIME_ENGINE=v13.
-# ── v4.10 (2026-08-20) — `_REGIME_ENGINE` AND ITS STARTUP ASSERT ARE DELETED ──
 # The variable was read by NOTHING. v3 used it to choose between the L2.5 stack
 # and the v1.3 classifier; v4 removed both, and the log line below already
 # states the answer unconditionally. What survived the port was an assert with
 # no consumer — a gate that could only ever REFUSE TO START, never change
 # behaviour.
 #
-# 🔴 IT COST A BOX. The QQQ instance carried `Environment=OT_REGIME_ENGINE=smc`
 # from the SMC fork. On v4 that value matched neither "l2" nor "v13", so the
 # assert fired at import and systemd crash-looped it — restart counter at 4,
 # `activating (auto-restart)`, on a box that had nothing wrong with its code.
@@ -811,10 +742,8 @@ from analysis.orb_engine import get_orb_engine, ORBState
 # leftovers — it is a live veto over a value nothing consumes, and stale
 # environment on a repointed box is exactly how it gets triggered. Deleting the
 # consumer without deleting the assert is how a clean box refuses to boot.
-# `OT_REGIME_ENGINE` is now INERT: set it to anything, or leave it set from a
 # previous fork, and v4 neither reads it nor cares.
 # ── v4.0 — THE LAYER-2 CONVICTION STACK IS GONE ─────────────────────────────
-# v3 imported RegimeConfluenceScorer and ConvictionIntegrator here, inside a
 # try/except that set _L2_OK. At the v4 split those modules were dropped and the
 # except branch became permanent: _L2_OK was ALWAYS False, so _l1_scorer and
 # _l2_integ were ALWAYS None and every block gated on them was dead code that
@@ -832,11 +761,7 @@ from analysis.orb_engine import get_orb_engine, ORBState
 # so the remaining reads can be removed file by file with tests passing at each
 # step. It must not acquire a producer. See docs/INHERITED_FINDINGS.md.
 _l2_mute = {}          # retained: read by the log-throttling helpers below
-# v4.7 — state the active regime engine ONCE at import, at INFO. Until now the
 # only way to answer "which engine is running?" was to infer it from [L2]/[v13]
-# tags on regime-CHANGE lines — which is how a dead L2.5 block hid for weeks.
-logger.info("REGIME ENGINE: v4 structural assembly (no L2, no conviction) - "
-            "labels INFORM, they never authorise")
 
 # v3.9 — signal journal (log-only). Guarded: the loop runs identically without it.
 try:
@@ -906,10 +831,8 @@ _trend_credit_strategy = TrendCreditSpread()
 
 class BotState:
     def __init__(self):
-        self.last_regime_at:   Optional[datetime] = None
-        self.current_regime:   Optional[RegimeState] = None
+        self.last_assess_at:   Optional[datetime] = None
         self.prev_trend_direction: str = ""   # PHASE B: prior tick, for the gap measure
-        self.last_regime_name: str = "UNKNOWN"
         self.tick_count:       int = 0
         self.errors_this_hour: int = 0
         self.paper_trading:    bool = PAPER_TRADING
@@ -1108,7 +1031,6 @@ def run_analysis(state: BotState) -> dict:
     # operator reads charts with and the class nothing here has ever recorded.
     # ── A2.6b (2026-08-18) — MEASURE THE GAP, DO NOT INHERIT IT ─────────────
     # ⚠️ THE ONLY PRE-OPEN DECISION-TIME INPUT IN THE STACK. ADX, conviction,
-    # the regime scores and IV skew all need bars from THIS session to exist;
     # the overnight gap is fully formed at 09:30 before a single RTH bar prints.
     # ⚠️ TODAY IT ENTERS ANONYMOUSLY. `atr_series` uses true range with
     # prev_close and the 5m tape is continuous, so a large gap SPIKES ATR at the
@@ -1119,15 +1041,12 @@ def run_analysis(state: BotState) -> dict:
     # somewhere."
     try:
         from analysis.gap_measure import measure_gap
-        # ⚠️ LAST TICK'S REGIME, DELIBERATELY. `regime` is not bound yet at this
         # point — classification happens further down the tick — and a bare
-        # `getattr(regime, ...)` would have raised into the except and set
         # prior_dir=0 forever, making `gap_class` permanently "UNDIRECTED".
         # A silent constant is exactly the failure this whole week has been
         # about, so the prior tick's committed direction is used instead: it is
         # yesterday's trend at the open, which is precisely what CONT/REV means.
         # PHASE B (r58): the prior direction now lives on BotState directly.
-        # The old read went through state.current_regime — WHICH NOTHING EVER
         # ASSIGNED, so _pd was a silent 0 and gap_class was permanently
         # UNDIRECTED since the split: the exact failure the comment above
         # warns about, one attribute over. prev_trend_direction is committed
@@ -1146,10 +1065,8 @@ def run_analysis(state: BotState) -> dict:
         ctx["level_near"] = None
     macro     = get_macro_manager().get()
 
-    # ORB engine update (every tick during RTH). Pass last-tick regime so the
     # engine can gate its re-arm decision (this runs before reclassification).
     # v4.3 — the ORB engine no longer receives a label. It was handed
-    # `primary_regime`, permanently UNKNOWN, to gate a re-arm decision that
     # therefore never varied. Passing None makes the absence explicit rather
     # than dressing it as a measurement.
     orb = get_orb_engine().update(df_5m, df_1m, price, None)
@@ -1186,7 +1103,6 @@ def run_analysis(state: BotState) -> dict:
     ctx["macro"] = macro
     ctx["orb"]   = orb
     # PHASE B (r58): commit THIS tick's direction for the NEXT tick's gap
-    # measure — the old carrier (state.current_regime) was never assigned.
     try:
         state.prev_trend_direction = getattr(ctx.get("trend"), "overall_direction", "") or ""
     except Exception:                                          # noqa: BLE001
@@ -1287,12 +1203,10 @@ def _apply_derived_ports(ctx: dict, state: "BotState", engines) -> None:
         logger.debug("second-order ports unavailable: %s", exc)
 
 
-def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeState:
+def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> MarketState:
     """Gather structural facts into a MarketState. Classifies NOTHING.
 
-    v4.0 replacement for `run_regime_classification`.
 
-    WHAT CHANGED AND WHY. v3 called `regime_classifier.classify()`, which
     produced a six-way label and a conviction number, and Layer 2 then
     OVERRODE the label with an integrated one. Measured 2026-08-19 across 715
     closed directional trades: that label picked the correct SIDE 44.9% of the
@@ -1301,11 +1215,9 @@ def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeSta
 
     WHAT REPLACES IT: nothing. This assembles the SAME structural facts the
     classifier used to gather - adx, atr, bb width, trend direction, structure
-    sequence, sweep age, vix regime - into one object a consumer can read.
     Those facts were always the useful part; the label was the part that
     failed.
 
-    `primary_regime` stays UNKNOWN. A structure-first label is ROADMAP Phase
     4.1, and until it exists an honest UNKNOWN is better than a number nobody
     should trust. INFORMS, NEVER AUTHORISES - no setup may require one.
 
@@ -1318,7 +1230,7 @@ def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeSta
     liq = ctx.get("liq_map")
     macro = ctx.get("macro")
 
-    regime = RegimeState(
+    ms = MarketState(
         macro_context=getattr(macro, "vix_band", "UNKNOWN") or "UNKNOWN",
         adx=float(getattr(trend, "primary_adx", 0.0) or 0.0),
         atr_normalized=float(getattr(vol, "atr_normalized", 0.0) or 0.0),
@@ -1345,13 +1257,13 @@ def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeSta
         for _v in _bd.values():
             _a = (_v or {}).get("angle")
             if _a is not None:
-                regime.flat_angle_deg = float(_a)
+                ms.flat_angle_deg = float(_a)
                 break
     except Exception:                                          # noqa: BLE001
         pass
 
-    state.last_regime_at = now_utc()
-    return regime
+    state.last_assess_at = now_utc()
+    return ms
 
 
 def _capture_entry_contract(ctx: dict, record: dict) -> bool:
@@ -1430,7 +1342,6 @@ def _capture_fire_snapshot(ctx: dict, record: dict) -> None:
     entry. Different clocks, different tables — and the join makes excursion
     work BETTER than it does now.
 
-    ⚠️ SNAPSHOT EVERYTHING, NOT WHAT WE THINK MATTERS. regime_ctx() recorded
     label plus conviction and dropped every term that decided the entry — a
     vocabulary of two for a decision made on twenty. Pre-selecting the columns
     defeats a study whose whole purpose is DISCOVERING which indicator
@@ -1497,7 +1408,6 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
 
     Legging model (per strategy design): Leg 1 fires on the side price is
     moving toward first; Leg 2 is queued and only fires after Leg 1 fills and
-    only while the regime is still RANGING. If the regime flips before Leg 2,
     the strategy cancels Leg 2 and the filled Leg 1 vertical is managed
     standalone through normal stop/nickel exits. This function just executes
     whichever leg the strategy has decided is ready this tick.
@@ -1670,16 +1580,13 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         #   · `underlying_stop` was never set, so even had the branch fired the
         #     breach rule would have had NO BOUND to test and would have skipped
         #     itself silently.
-        #   · `strategy` and `regime` were hardcoded, so TC.6 trades were logged
         #     as IronCondorStrategy in RANGING and their P&L was attributed to
         #     the condor.
         # The strategy and the exit engine were both correct in isolation; the
         # HANDOFF between them dropped every flag they agreed on.
         # v4.3 — was `("RANGING" if not _is_tcs else ... or "TRENDING")`, which
         # STAMPED A LABEL NOTHING MEASURED onto every trade row. The column is
-        # kept for the existing history (see HANDOFF_REGIME_PURGE.md, Phase B)
         # but it now records the honest answer.
-        regime           = "",
         underlying_stop  = getattr(signal, "underlying_stop", 0.0),
         # ── TCS.4 (2026-08-17) — REMOVED: `is_trend_credit` IS NOT A COLUMN ──
         # ⚠️ THIS CRASH-LOOPED NFLX LIVE. `log_entry` INSERTs every key in the
@@ -1697,15 +1604,12 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         # was write-only and the exit path never needed it.
         vix_at_entry     = getattr(signal, "vix_at_signal", 0.0),
         adx_at_entry      = getattr(signal, "adx_at_signal", 0.0)
-                            or (state.current_regime.adx if state.current_regime else 0.0),
-        regime_conviction = getattr(signal, "conviction", 0.0)
-                            or (state.current_regime.conviction if state.current_regime else 0.0),
+                            or 0.0,
         flat_angle_deg    = getattr(signal, "flat_angle_deg", 0.0),
         # ── Level.1 (2026-08-18) — PERSIST THE GRADE OR IT IS TELEMETRY ─────
         # ⚠️ THE WHOLE POINT OF THIS WEEK: a quantity computed and not written
         # to the row cannot be tested against outcomes. `direction_conf`
         # separated on the live book and was journaled nowhere;
-        # `flat_angle_deg` was computed every tick and never reached the regime
         # object; the pusher's SHORT lines were captured and truncated. This is
         # the same class, caught before shipping rather than after.
         # Falls back to the strategy's own value (sweep sets one directly), so
@@ -2040,8 +1944,6 @@ def _l1_scores(ctx):
     """The RAW Layer-1 score vector for the axis decomposition, or None.
 
     ⚠️ P0.3 / AX.3 (2026-08-17). `ctx["l1"]` is the scorer result set at
-    `run_regime_classification`; its `.scores` is the vector `regime_axes`
-    decomposes. Reading it defensively here means the seven `regime_ctx` call
     sites need no plumbing and a missing/blank L1 simply omits the axes rather
     than raising inside a journal write.
     """
@@ -2053,7 +1955,7 @@ def _l1_scores(ctx):
         return None
 
 
-def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
+def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     """Try to generate and execute a trade signal."""
     session  = get_session_guard()
     risk_mgr = get_risk_manager()
@@ -2072,7 +1974,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
         logger.debug(f"Entry blocked: {reason}")
         return
 
-    # ── v5.0 — NO NEW ENTRIES WHILE THE REGIME BOOK IS STALE ──────────────────
     # The asymmetry is deliberate and is the other half of the hold above.
     # HOLDING a label on a stale tick is declining to act on unknown information.
     # OPENING a position is a DECISION — taking on new risk against a
@@ -2084,8 +1985,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # price-based stop.
     # v5.4 — ORB IS EXEMPT, and this is a RESTORATION rather than a new licence.
     # v5.0's gate sat ABOVE the dispatch, so it returned before
-    # `orb_regime_bypass` (line ~1111) could ever execute — which made
-    # ORB_FIRES_REGARDLESS_OF_REGIME, the constant defect V created for exactly
     # this purpose, unreachable on any stale tick. Measured 2026-08-04: the
     # block ran 09:35:01 → 09:39-09:41 ET on ALL 15 boxes, i.e. the first four
     # to six minutes of ORB's own entry window, every session since v5.0.
@@ -2095,13 +1994,11 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # graded on liquidity alone since setup_scorer v1.4. There is no label for a
     # stale label to invalidate. Continuation, condor, butterfly and sweep all
     # genuinely condition on the label and stay blocked.
-    # AND STALE IS NOT BLIND. `stale` is the REGIME BOOK (a tick gap past
     # dt_max=90s); the feed has its own guard, latch and pager (market_data v3.3
     # / blindness_latch). A confirmed ORB break on a stale book still has fresh
     # price — which is the whole reason this exemption is safe and why it must
     # NOT be widened to "ignore stale".
     _orb_ctx = ctx.get("orb")
-    # v4.3 — ORB_FIRES_REGARDLESS_OF_REGIME dropped from this expression with
     # the constant itself. It was hardcoded True, so it never contributed a
     # term; exemption has always meant "the ORB engine is in a confirmed OPEN
     # state", which is what remains.
@@ -2111,7 +2008,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
                                                  ORBState.OPEN_SHORT))
     # v4.0: the stale-book entry guard is gone with the book. There is no
     # integrator to go stale, so this can never fire. ORB was already exempt
-    # from it - it reads no regime label at all, which is why it kept trading
     # through v3's stale-book stalls and is the one strategy with a positive
     # record.
 
@@ -2125,32 +2021,20 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     macro = ctx["macro"]
     signal = None
 
-    # ── HARD GATE: UNKNOWN / undefined regime ⇒ NO TRADE, full stop. ───────────
     # Memoryless pass-through of the classifier's verdict — it adds ZERO latency
     # and holds NO state. It does not debounce, confirm, or wait: the instant
-    # classify() returns a real regime, this passes on the SAME tick, so a
     # UNKNOWN→BREAKOUT transition fires the entry immediately (no late entries).
     # It only blocks when the tape is genuinely unclassified. Leaving UNKNOWN is
-    # gated solely by the regime definitions becoming true, never by this gate.
     #
-    # EXCEPTION (v3.2, ORB_FIRES_REGARDLESS_OF_REGIME): a confirmed ORB break+
     # retest is self-validating — the engine has already proven the setup
-    # independent of the regime label, which the classifier does not even test
     # for. When the switch is on and the engine is in a confirmed OPEN state, an
     # UNKNOWN/undefined label does not veto: it flows through to the ORB dispatch
-    # below and the setup scorer decides (regime_conviction just contributes 0).
     orb = ctx["orb"]
     orb_confirmed = orb.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)
     # ── 🔴 v4.3 (2026-08-21) — THE DISPATCH HARD GATE IS DELETED ─────────────
     # It read:
-    #     orb_regime_bypass = (ORB_FIRES_REGARDLESS_OF_REGIME and orb_confirmed
-    #                          and regime is not None)
-    #     if (regime is None or getattr(regime, "primary_regime", None)
-    #             in (Regime.UNKNOWN, None, "")) and not orb_regime_bypass:
-    #         logger.info("STRATEGY: NO TRADE — regime UNKNOWN/undefined (hard gate)")
     #         return
     #
-    # WHAT IT COST: `assemble_market_state` hardcodes primary_regime=UNKNOWN
     # (v4 deleted the classifier), so this test was TRUE ON EVERY TICK. It
     # returned before dispatch on every box, every session. The fleet's FIRST
     # live day produced ZERO TRADES across all 15 boxes with relaxed entry ON,
@@ -2164,12 +2048,10 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # PERMANENT state and the guard became a permanent veto.
     #
     # ⚠️ NOTHING REPLACES IT, DELIBERATELY. Operator's direction 2026-08-21:
-    # regime is eliminated, not Frankenstein-patched. Substituting a
     # "structural context unbuilt" veto here would be inventing a rule nobody
     # asked for, in the exact spot that just cost a session. Strategies own
     # their own preconditions; dispatch does not second-guess them.
 
-    # ── Strategy dispatch: regime → strategy ──────────────────────────────────
     # ── AFD.1 PRE-DISPATCH BLOCK (v6.6, 2026-08-14) ──────────────────────────
     # ⚠️ THIS WAS A POST-SELECTION VETO AND THAT WAS THE BUG. The gate ran AFTER
     # every strategy had been evaluated, so past 11:00 a debit strategy could
@@ -2224,11 +2106,9 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
                 pass
 
     # Priority 1: ORB — only when the engine has a CONFIRMED break+retest.
-    # With ORB_FIRES_REGARDLESS_OF_REGIME on, a confirmed ORB also fires under
     # UNKNOWN and SWEEP_REVERSAL (ORB beats sweep — the engine no longer defers
     # its OPEN under a sweep label; see orb_engine v3.2). The break+retest is the
     # edge; the label is not consulted for go/no-go, only for scoring.
-    # PHASE B (r58): the _orb_ok_regimes tuple is DELETED — its membership
     # test went at r57 and the tuple sat consumerless: a guard's corpse one
     # level down. The v4.3 note below records the test's deletion.
     # v6.19 (2026-08-19) — ORB IS BLOCKED UNDER RANGING (operator direction:
@@ -2238,9 +2118,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # up" and "ORB was forbidden to fire" are indistinguishable in the record,
     # and only the second is a decision we can audit or reverse.
     # OT_ORB_BLOCK_RANGING=0 restores the old behaviour exactly — RANGING is
-    # still present in _orb_ok_regimes, so nothing was deleted.
-    # v4.3 — ORB_BLOCK_RANGING and the `_orb_ok_regimes` membership test are
-    # DELETED. Both keyed on primary_regime, which is permanently UNKNOWN: the
     # RANGING block could never fire, and the ok-set test only ever passed
     # through the UNKNOWN arm of the bypass. A confirmed break+retest is
     # self-validating — the engine has proven the setup from the tape — so the
@@ -2249,7 +2126,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     if orb_confirmed and not _afd_orb:
         orb_sig = _safe_strategy("ORB", lambda: _orb_strategy.generate_signal(
             orb           = orb,
-            regime        = regime,
+            ms        = ms,
             vol_state     = ctx["vol"],
             liq_map       = ctx["liq_map"],
             chain         = chain,
@@ -2352,7 +2229,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
 
     # Priority 2 (was sweep): Trend Continuation.
     # The runaway proved directional force, so it gets FIRST refusal on the
-    # pullback via the looser handoff gate — even if the regime label has since
     # flipped to SWEEP_REVERSAL/BREAKOUT (a runaway commonly flips it). The
     # standalone (stricter) path still requires a trending label.
     # CNT.1 (v5.7) — BREAKOUT_VOLATILE added. The strategy decides whether it
@@ -2364,7 +2240,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # ── CNT.6 (2026-08-10) — A CONTINUATION CANNOT CONTINUE A TREND THAT THE
     # LABEL SAYS IS NOT THERE. RANGING and COMPRESSION assert the absence of a
     # trend, so continuation in them is a contradiction, not a permissive edge.
-    # ⚠️ THE BYPASS IS THE BUG: `_is_runaway` is OR'd with the regime tuple, so a
     # runaway ORB flag let continuation fire on ANY tape — at Priority 2, ahead
     # of Butterfly (P3, RANGING/COMPRESSION) and Condor (P4, RANGING), which sit
     # behind `if signal is None` and were never even evaluated. That is the
@@ -2374,15 +2249,12 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # veto still consumes the dispatch slot on its way to returning None — CNT.3
     # blocked the COMPRESSION handoff inside continuation_strategy and the
     # squeeze continued regardless.
-    # v4.3 — CONT_BLOCK_PREMIUM_REGIMES DELETED. Both halves keyed on
-    # primary_regime: the first could never be true (UNKNOWN is not RANGING or
     # COMPRESSION) so `_cont_blocked` was permanently False and the whole
     # branch was unreachable. Removed rather than rewired — a continuation's
     # precondition is that a trend exists, which the trend engine answers
     # directly; it does not need a label to be told.
     # ── v4.0: SUPERSEDED STRATEGY REMOVED ───────────────────────────────
     # Continuation, SweepReversal and Butterfly dispatched here. All three
-    # were gated on `regime.primary_regime`, which v4 leaves permanently
     # UNKNOWN - so they were DEAD CODE that still had to be read and
     # reasoned about by anyone auditing this path.
     # Their replacements are written and specced in docs/TRADES.md:
@@ -2401,7 +2273,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # and is gated to NAMED levels only — a runaway that then sweeps a real pool
     # and rejects is a legitimate reversal; a runaway that pokes an equal-H/L is
     # not. Non-runaway sweeps are unchanged (fire as before on the SWEEP label).
-    # v5.6 (SWP.1) — SWEEP IS AN EVENT, NOT A REGIME. This required the
     # committed label to be SWEEP_REVERSAL; that label wins 0.4% of live ticks
     # and is exactly zero on 96%, so the trade was effectively off, and F7's
     # commit threshold narrowed it further. It now gates on the L1 _sweep SETUP
@@ -2428,7 +2299,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # conviction instead of blocking entries.
     # Priority 4: Iron Condor — legged entry, RANGING fallback when no GEX pin.
     if not _iron_condor_strategy.has_active_plan:
-        # Try to make a condor plan if no other signal fired and regime is RANGING.
         # NOTE (2026-08-04): DIRECTIONAL_ONLY is EMPTY fleet-wide — config.py:220
         # set FULL_STRATEGY_INSTRUMENTS = set(STRIKE_INCREMENTS) on the
         # 2026-07-14 operator directive ("neutral strategies enabled FLEET-WIDE
@@ -2438,7 +2308,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
         # 2026-08-04 that concluded only SPX and QQQ could plan condors. The
         # check stays — it is correct if the set is ever narrowed again — but
         # do not read it as describing today's fleet.
-        # v4.3 — the `primary_regime == RANGING` precondition is DELETED: it
         # was permanently False, so the condor could never be planned. Its real
         # precondition (no directional signal took the slot, and directional-
         # only mode is off) is retained and is what the comment above describes.
@@ -2446,7 +2315,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
             _sess_hi, _sess_lo = _session_extremes(ctx)
             _rails = _condor_rails(ctx)
             plan = _safe_strategy("CondorPlan", lambda: _iron_condor_strategy.decide(
-                regime        = regime,
+                ms        = ms,
                 vol_state     = ctx["vol"],
                 chain         = chain,
                 macro         = macro,
@@ -2474,7 +2343,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     else:
         # Active plan: check if a leg should fire this tick
         leg_signal = _safe_strategy("CondorLeg", lambda: _iron_condor_strategy.check_leg_triggers(
-            regime        = regime,
+            ms        = ms,
             chain         = chain,
             current_price = ctx["price"]
         ))
@@ -2506,7 +2375,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
         _orb_hi, _orb_lo = _opening_range(ctx)   # from the TAPE, not the engine
         tcs_sig = _safe_strategy("TrendCreditSpread", lambda: (
             _trend_credit_strategy.generate_signal(
-                regime        = regime,
+                ms        = ms,
                 vol_state     = ctx["vol"],
                 chain         = chain,
                 macro         = macro,
@@ -2523,8 +2392,8 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
             return
 
     if signal is None:
-        logger.info(f"STRATEGY: NO TRADE — adx={regime.adx:.0f} "
-                f"dir={regime.trend_direction} seq={regime.structure_sequence}")
+        logger.info(f"STRATEGY: NO TRADE — adx={ms.adx:.0f} "
+                f"dir={ms.trend_direction} seq={ms.structure_sequence}")
         return
 
     # ── AFTERNOON DEBIT BLOCK (2026-08-13) ────────────────────────────────────
@@ -2573,7 +2442,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
     # ── Score and size ─────────────────────────────────────────────────────────
     score  = scorer.score(
         signal    = signal,
-        regime    = regime,
+        ms    = ms,
         vol_state = ctx["vol"],
         structure = ctx["structure"],
         liq_map   = ctx["liq_map"],
@@ -2637,7 +2506,6 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
                                 "retest_depth_atr": (round(_depth / _atr, 4)
                                                      if _atr > 0 else None)}
                 # v5.9 — L1 EVIDENCE AT THE MOMENT OF THE FIRE.
-                # `regime_ctx` records only label + conviction, so every term
                 # that DECIDED the entry — the sweep's spent_val, ambient,
                 # rejq_val, exh_val, trend_opp, touch_count, depth_val,
                 # opp_adx, momentum — was computed here and then dropped.
@@ -2687,7 +2555,6 @@ def _rnd4(v):
 # does not raise: it files a well-formed breakdown from the wrong scorer under a
 # correct-looking key, and a week of collection would be characterised against
 # features that decided nothing. ORB and Butterfly are deliberately ABSENT —
-# ORB is regime-immune at both dispatch and exit, so attaching a regime
 # breakdown to it would imply a dependency the engine does not have. An unmapped
 # strategy records the score vector and NO breakdown, never a wrong one.
 _L1_BREAKDOWN_FOR = {
@@ -2878,19 +2745,15 @@ def main_loop(state: BotState):
             # ── Main analysis ─────────────────────────────────────────────
             ctx = run_analysis(state)
 
-            # ── Regime reassessment — EVERY TICK ──────────────────────────
-            # "Regime aware" means aware now, not eventually. Classification is
             # cheap (threshold checks over the ctx run_analysis already computed),
             # so we reclassify every tick — no throttle. Verified safe: the only
-            # stateful consumer of regime is exit_engine's regime-flip exits
             # (butterfly/condor), which are event-driven and WANT to fire the
-            # instant a regime flips. A loss-limit request still forces its own
             # off-schedule reassessment tag for the logs.
             loss_reassess = get_risk_manager().consume_reassess_request()
             trigger = "loss_limit" if loss_reassess else "scheduled"
-            regime = assemble_market_state(ctx, trigger, state)
+            ms = assemble_market_state(ctx, trigger, state)
 
-            if regime is None:
+            if ms is None:
                 time.sleep(POLL_INTERVAL_SECONDS)
                 continue
 
@@ -2931,11 +2794,9 @@ def main_loop(state: BotState):
                         pass
                     try:
                         from analysis.chain_snapshot import snapshot as _chain_snap
-                        _r = ctx.get("regime")
                         _chain_snap(
                             _gex_chain,
                             underlying_price=ctx.get("price"),
-                            # PHASE B (r58): the regime kwarg is no longer
                             # passed — the label was permanently UNKNOWN.
                             # snapshot() keeps the parameter (default None)
                             # so the field stops being WRITTEN while the
@@ -2952,7 +2813,7 @@ def main_loop(state: BotState):
             # confluence RISING AND FALLING is the point. Gates nothing; the
             # engine swallows its own failures; the loop cannot be touched.
             if _readiness is not None:
-                _readiness.assess_all(ctx, regime)
+                _readiness.assess_all(ctx, ms)
 
             # ── Manage open position ──────────────────────────────────────
             if pos_mgr.has_open_position():
@@ -2973,10 +2834,7 @@ def main_loop(state: BotState):
                 except Exception as _roll_err:
                     logger.warning(f"Roll check failed: {_roll_err}")
 
-                # v5.2 — the regime label is WITHHELD from the exit path while
-                # the book is stale, so no regime-driven exit can fire on a
                 # classification the engine cannot currently confirm. None is
-                # the existing "do not judge on regime" signal every one of
                 # those three branches already honours; price-based exits are
                 # untouched and keep protecting the position.
                 # v4.0: no integrator, no book, never stale.
@@ -2984,7 +2842,7 @@ def main_loop(state: BotState):
                 pos_mgr.manage_open_position(
                     chain=ctx.get("chain"),
                     df_1m=ctx.get("df_1m"),
-                    regime=None,   # PHASE B (r58): label retired; the exit
+                    ms=None,   # PHASE B (r58): label retired; the exit
                                    # engine's label arms are deleted with it
                     df_5m=ctx.get("df_5m"),   # v3.8: 5m FVG trail anchor
                     vol_state=ctx.get("vol"),
@@ -3012,14 +2870,14 @@ def main_loop(state: BotState):
                         _iron_condor_strategy.plan is not None and
                         _iron_condor_strategy.plan.state == "LEG1_FILLED"):
                     leg_signal = _safe_strategy("CondorLeg", lambda: _iron_condor_strategy.check_leg_triggers(
-                        regime        = regime,
+                        ms        = ms,
                         chain         = ctx.get("chain"),
                         current_price = ctx["price"]
                     ))
                     if leg_signal is not None:
                         _execute_condor_leg(leg_signal, state, ctx)
             else:
-                attempt_new_entry(ctx, regime, state)
+                attempt_new_entry(ctx, ms, state)
 
             # ── Periodic heartbeat log ────────────────────────────────────
             if state.tick_count % 20 == 0:
@@ -3028,7 +2886,7 @@ def main_loop(state: BotState):
                     f"Tick #{state.tick_count} | "
                     f"{fmt_et_short()} | "
                     f"price=${ctx['price']:,.2f} | "
-                    f"adx={regime.adx:.0f} dir={regime.trend_direction} | "
+                    f"adx={ms.adx:.0f} dir={ms.trend_direction} | "
                     f"orb={ctx['orb'].state} | "
                     f"session: {summary.get('wins',0)}W/"
                     f"{summary.get('losses',0)}L "
@@ -3491,7 +3349,6 @@ def main():
     # mid-session restart doesn't reset the book to zero (the NVDA-restart
     # lesson). If the snapshot is stale/absent, load() returns False and the
     # book stays cold — the first few ticks re-warm it, and stale=True keeps it
-    # from driving the gate until warmed (see run_regime_classification).
     # v4.0: no integrator book to reload at startup. v3 persisted conviction
     # across restarts so a mid-session bake did not reset it; there is nothing
     # to persist now.

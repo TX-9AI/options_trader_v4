@@ -1,5 +1,9 @@
 """
-analysis/trend_engine.py  v4.0
+analysis/trend_engine.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 ADX, EMA stack and momentum per timeframe. DIRECTION VOTE IS DESCRIPTIVE ONLY.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -29,7 +33,6 @@ STARVATION IS NO LONGER SILENT, and it was hiding a
         each NEUTRAL frame = 0.675, so bull_score = 0.519*conviction and the
         0.30 gate needs the 5m vote above 0.579 conviction. Below that,
         overall_direction is NEUTRAL — which is a HARD VETO on TRENDING in
-        regime_confluence._trending — so TRENDING is structurally unreachable and
         argmax necessarily lands on RANGING/COMPRESSION. Iron condor is the
         RANGING fallback, so it has been absorbing that deficit.
         This release adds the WARNING only; the fetch-depth change is config.py
@@ -257,7 +260,6 @@ class TrendEngine:
             state.votes[tf] = vote
             state.total_timeframes += 1
 
-            # primary_adx drives the regime classifier's trending/ranging
             # decision. For an intraday 0DTE bot this must reflect the
             # timeframe the bot actually trades on (5m ORB/butterfly
             # structure), not 1H which lags the live session by hours.

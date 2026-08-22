@@ -1,5 +1,9 @@
 """
-strategy/sweep_credit_spread.py  v4.0
+strategy/sweep_credit_spread.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 A named pool was swept and rejected. Sell the boundary it just became.
 
 v4.0  2026-08-19  Built at the OTV4 split. The second v4 entry rule.
@@ -60,7 +64,6 @@ v3's grammar - a product of two soft-necessaries and a weighted corroborator sum
 - capped SWEEP at 0.171 out of 1.0 while TRENDING pinned at 1.00, so it could
 never win an argmax regardless of evidence.
 
-⚠️ AND NO REGIME LABEL IS READ ANYWHERE. Four independent searches found no
 directional predictor in this data. This rule does not predict a direction; it
 sells a boundary that has already rejected price once.
 

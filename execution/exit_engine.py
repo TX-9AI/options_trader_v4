@@ -1,10 +1,13 @@
 """
-execution/exit_engine.py  v4.2
+execution/exit_engine.py  v4.3
+v4.3  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 
 v4.2  2026-08-21  PHASE B (r58): still_trending label arms deleted — dead by
       construction since the split; the trend vote alone decides, per the
       block's own doctrine.
-v4.1  2026-08-21  REGIME PURGE PHASE A. The butterfly regime-flip exit and
       the condor-leg adverse exit DELETED - both tested trending LABELS v4
       never assigns, so neither had run once since the port. Two more exits
       that were dead for a quieter reason than F0.
@@ -35,7 +38,6 @@ this block be read before the file is edited.
 execution/exit_engine.py — AUDIT F7: the BREAKOUT_VOLATILE exemption was scoped to
         `_breakout` records only, so a standalone/handoff continuation that
         ACCELERATED into a breakout IN ITS OWN DIRECTION was closed as a
-        regime_flip while a breakout record survived the identical tape.
         Now ANY continuation survives, gated on the TREND VOTE agreeing -
         which is what v4.19's own comment already said should decide, and
         which the label cannot supply because BREAKOUT_VOLATILE has no
@@ -100,7 +102,6 @@ v4.21 — Strategy-aware exit logic for all options positions.
         TRENDING_BULL / TRENDING_BEAR. So every `trend_continuation_breakout`
         trade was **BORN ALREADY FAILING ITS OWN EXIT TEST** — opened on tick N,
         closed on tick N+1 by reading the SAME UNCHANGED LABEL. THE LABEL NEVER
-        FLIPPED, and `regime_flip` was a lie in the exit reason.
         Measured live 2026-08-14: 15-second holds, exactly one tick, repeating
         while the setup held. P&L symmetric noise — one tick of random walk minus
         the spread. **This has been true for every breakout continuation since
@@ -139,7 +140,6 @@ THE RATCHET WAS CLOSING UNTESTED CONDOR LEGS. Operator:
         earned. Same interlock the take-profit already used, and it FAILS CLOSED
         (True on error) — treating a leg as part of a structure is the safe
         error.
-        NOT CHANGED, deliberately: the adverse-regime-flip exit. It is
         direction-aware — a call spread exits only on TRENDING_BULL, which IS
         price rising toward that short strike — so it already fires only on the
         threatened side and is a tested-side exit.
@@ -271,8 +271,6 @@ CONDOR LEG MANAGEMENT v2 (user directive, data-driven).
             at every level, confirming a condor leg must never be closed on
             profit — the only reason to close one is the roll.
         (c) Min-hold before TP: a quote-noise filter, not a structure mechanism.
-        Nickel close, 15:45 hard close and the direction-aware regime exit are
-        UNCHANGED (that regime exit has fired 0 times in 143 legs).
 CONTINUATION EXIT REWORK (user directive). Three changes,
         all scoped to _evaluate_continuation — no other strategy touched:
         (a) TRAIL ANCHORS TO 5m FVGs. It was passing df_1m straight into
@@ -806,14 +804,12 @@ class ExitEngine:
                  record: TradeRecord,
                  current_premium: float,
                  df_1m: Optional[pd.DataFrame] = None,
-                 regime: Optional[str] = None,
                  df_5m: Optional[pd.DataFrame] = None,
                  vol_state=None,
                  trend=None) -> ExitDecision:
         """
         Strategy-aware exit evaluation.
         Routes to the appropriate exit logic based on strategy_name.
-        regime: current regime string — used for regime-flip exit checks on
                 neutral strategies (butterfly, condor) that depend on RANGING.
         """
         strategy = record.get("strategy", "")
@@ -827,7 +823,7 @@ class ExitEngine:
         _track_excursion(record, current_premium)
 
         if record.get("is_butterfly"):
-            return self._evaluate_butterfly(record, current_premium, regime=regime)
+            return self._evaluate_butterfly(record, current_premium)
         elif strategy == "IronCondorStrategy" or is_credit_vertical(record):
             # v4.21 (AUDIT F2): route on the STRUCTURE, not one strategy string.
             # main v6.8 writes strategy="TrendCreditSpread"; the old test sent
@@ -836,16 +832,11 @@ class ExitEngine:
             # every record opened after the identity fix. is_credit_vertical()
             # reads only persisted columns, so legacy rows and the rolled
             # broken wing route here too.
-            return self._evaluate_condor_leg(record, current_premium,
-                                             regime=regime, df_1m=df_1m)
+            return self._evaluate_condor_leg(record, current_premium, df_1m=df_1m)
         elif strategy == "ADOPTED":
             return self._evaluate_adopted(record, current_premium)
         elif strategy == "ORBStrategy":
             return self._evaluate_orb(record, current_premium, df_1m, df_5m)
-        elif strategy == "ContinuationStrategy":
-            return self._evaluate_continuation(record, current_premium, df_1m,
-                                               df_5m=df_5m, regime=regime,
-                                               vol_state=vol_state, trend=trend)
         elif strategy == "RunawayContinuation":
             # ⚠️ AUDIT F10 (2026-08-20): the flagship fell into the else below —
             # a fall-through whose comment still named SweepReversal, DELETED at
@@ -1386,11 +1377,9 @@ class ExitEngine:
     # \u2500\u2500\u2500 Butterfly Exit \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
     def _evaluate_butterfly(self, record: TradeRecord,
-                             current_premium: float,
-                             regime: Optional[str] = None) -> ExitDecision:
+                             current_premium: float) -> ExitDecision:
         """
         Butterfly exit logic:
-        - Regime flip: exit immediately if regime flips to TRENDING
         - Max hold: 2.5 hours
         - Hard stop: net value <= 25% loss   (SL: 25% of net debit)
         - Target: BUTTERFLY_TP_PCT = 20% of max profit  (was documented as 25%)
@@ -1414,8 +1403,6 @@ class ExitEngine:
             decision.exit_reason = "hard_close_15:45_ET"
             return decision
 
-        # ── 🔴 v4.1 (2026-08-21) — REGIME FLIP EXIT DELETED (2/3) ────────────
-        # It tested `regime in {"TRENDING_BULL","TRENDING_BEAR",
         # "BREAKOUT_VOLATILE"}`. v4 hardcodes the label to UNKNOWN, so this
         # butterfly exit HAS NEVER RUN — not once since the port.
         #
@@ -1501,20 +1488,17 @@ class ExitEngine:
 
     def _evaluate_condor_leg(self, record: TradeRecord,
                               current_premium: float,
-                              regime: Optional[str] = None,
                               df_1m=None) -> ExitDecision:
         """
         Iron condor leg exit logic.
         Each leg is a credit spread — rising spread value = losing money.
 
-        Regime-flip exits are DIRECTION-AWARE:
           - Call spread: only exit on TRENDING_BULL or BREAKOUT_VOLATILE
             (price moving toward short calls). TRENDING_BEAR is favorable — hold.
           - Put spread: only exit on TRENDING_BEAR or BREAKOUT_VOLATILE
             (price moving toward short puts). TRENDING_BULL is favorable — hold.
           - Leg 2 cancellation on favorable flips handled by check_leg_triggers().
 
-        Exits: hard close, adverse regime flip, 25% stop, $0.05 nickel close.
         """
         from config import (CONDOR_NICKEL_CLOSE, CONDOR_STOP_LOSS_PCT,
                             CONDOR_RATCHET_BE_AT, CONDOR_RATCHET_LOCK_AT,
@@ -1844,7 +1828,6 @@ class ExitEngine:
     # This is where the continuation trade lives or dies. Entry is deliberately a
     # low bar; the intelligence is here. The move is ridden while it has energy
     # and cut when it's SPENT — which is a different question than "was I proven
-    # wrong" (that's the regime-flip / 40% floor below). Two exhaustion signals:
     #
     #   (1) EXTENSION-FROM-MIDLINE  — price stretched an abnormal distance from
     #       the BB midline (its mean). Cheap, early, stateless. FIRST TIER:
@@ -1871,233 +1854,6 @@ class ExitEngine:
     # — same midline/momentum the entry judged against). Falls back to values
     # RECOMPUTED from df_5m when the state isn't available (restart recovery,
     # adopted positions) so this NEVER raises — it only degrades precision.
-    def _evaluate_continuation(self, record: TradeRecord,
-                               current_premium: float,
-                               df_1m: Optional[pd.DataFrame],
-                               df_5m: Optional[pd.DataFrame] = None,
-                               regime: Optional[str] = None,
-                               vol_state=None,
-                               trend=None) -> ExitDecision:
-        decision   = ExitDecision()
-        trade_id   = record["trade_id"]
-        entry_prem = record["entry_premium"]
-        direction  = record.get("direction", "long")
-
-        pnl_pct = (current_premium - entry_prem) / entry_prem if entry_prem > 0 else 0
-        pnl_usd = (current_premium - entry_prem) * record["contracts"] * CONTRACT_MULTIPLIER
-        decision.current_pnl_pct = pnl_pct
-        decision.current_pnl_usd = pnl_usd
-
-        # 1. HARD CLOSE (session end)
-        if is_hard_close_time():
-            decision.should_exit = True
-            decision.exit_reason = "hard_close_15:45_ET"
-            return decision
-
-        # 2. REGIME-FLIP EXIT — the primary smart stop. The trade is DEFINED by
-        #    the trend; if regime is no longer trending in our direction, the
-        #    thesis is dead regardless of P&L. (regime is a string here.)
-        rgm = (regime or "").upper()
-        # ⚠️ CNT.1 SHIPPED HALF A FEATURE (2026-08-07) AND THIS IS THE OTHER
-        # HALF. The entry branch lets continuation OPEN on BREAKOUT_VOLATILE —
-        # taking direction from the trend vote instead of the label, gated on
-        # ADX — and produces setup_type `trend_continuation_breakout`. This test
-        # never learned about it, so such a trade was **BORN ALREADY FAILING ITS
-        # OWN EXIT CONDITION**: it opens on tick N with the label at
-        # BREAKOUT_VOLATILE, and on tick N+1 this reads the SAME UNCHANGED label,
-        # finds it is not TRENDING_BULL/BEAR, and closes as `regime_flip`.
-        # THE LABEL NEVER FLIPPED.
-        # Measured live 2026-08-14: 15-SECOND holds — exactly one tick —
-        # repeating for as long as the setup stayed valid. SMH 14:24:19->14:24:34,
-        # re-enter 14:24:49->14:25:04, eight times. P&L was symmetric noise
-        # because the hold is one tick of random walk minus the spread (SMH's
-        # eight netted -$29; GS's eight netted +$331 on the same mechanism).
-        # This block sits BEFORE `bos_exit`, so it fired first and nothing else
-        # ever got a look.
-        # A breakout continuation must live or die on the TREND VOTE it was born
-        # from, not on a label test it was never able to pass.
-        # ── AUDIT F7 (2026-08-15) — THE BREAKOUT EXEMPTION WAS ASYMMETRIC ────
-        # v4.19 scoped `BREAKOUT_VOLATILE` survival to `_breakout` records only,
-        # to avoid over-reaching. That created a worse problem: **a STANDALONE
-        # or HANDOFF continuation riding TRENDING_BULL that ACCELERATES into
-        # BREAKOUT_VOLATILE — the strongest tape in its own direction — was
-        # closed as a `regime_flip`, while a breakout record survived the
-        # IDENTICAL TAPE.** Same market, opposite decision, on setup_type alone.
-        #
-        # ⚠️ AND BREAKOUT_VOLATILE CARRIES NO DIRECTION. v4.19's own comment says
-        # a breakout continuation must live or die on the TREND VOTE — but the
-        # code tested the LABEL, so a long survived a violent move DOWN. The
-        # vote is already a parameter here and is the only directional evidence
-        # available, so it decides.
-        _vote = str(getattr(trend, "overall_direction", "") or "").upper()
-        _vote_agrees = ((direction == "long" and _vote == "BULLISH")
-                        or (direction == "short" and _vote == "BEARISH"))
-        # PHASE B (r58): the three LABEL arms are deleted. `rgm` derives from
-        # a label v4 never computes, so every arm was permanently False and
-        # this exit could only ever fire through `regime is not None` with a
-        # dead still_trending — the vote already carried the only live
-        # evidence, exactly as the doctrine above says. NOTE: this evaluator's
-        # router branch ("ContinuationStrategy") has no v4 writer — the whole
-        # function is dead-routed and its wholesale deletion is owed (audit).
-        still_trending = _vote_agrees
-        if regime is not None and not still_trending:
-            decision.should_exit = True
-            decision.exit_reason = f"regime_flip ({regime})"
-            return decision
-
-        # 2b. BREAK OF STRUCTURE (v4.10) — the structural stop continuation
-        #     never had. Operator's rule: the trade is defined by the trend, so
-        #     the trend's structure failing is the exit — not a premium level.
-        #     BOSTracker ratchets: every new closing high (long) promotes that
-        #     candle's LOW to the protected higher-low; a 1m CLOSE below it means
-        #     the HH/HL sequence is broken. Mirrors for shorts on closing lows /
-        #     protected lower-high. Uses iloc[-2], the last FULLY CLOSED candle.
-        #
-        #     UNGATED, deliberately. Sweep's copy of this exit is gated on
-        #     `pnl_pct > 0` ("don't BOS out of a healthy retest that hasn't moved
-        #     yet"). That gate is exactly what would MISS the failure mode this is
-        #     for: measured 2026-07-31, 31 continuation trades ran from entry
-        #     straight to the -25% floor with MFE of only 2-3% — they never went
-        #     positive, so a profit-gated BOS would never have fired. Gates 4
-        #     (theta bleed) and 5 (trail) already require the trade to have worked
-        #     first; a third such gate would leave the same hole.
-        #
-        #     CHOSEN OVER THE FVG STOP. `underlying_stop` is stamped on the record
-        #     (gap.bottom - 0.5*atr for longs) and has never been read, but a gap
-        #     fill is NOT trend failure — gaps fill routinely inside healthy
-        #     trends. The FVG level is also STATIC, fixed at entry, so it protects
-        #     nothing once the trade works. BOS is dynamic: the protected level
-        #     ratchets up as the trend makes new highs, so it invalidates on
-        #     actual structure failure and trails the gain structurally. The FVG
-        #     remains the ENTRY (proven repeatedly on 2026-07-31); it is not the
-        #     exit.
-        # v4.14 — `_bos` is created unconditionally so gate 2c can read its
-        # `protected_level`. Previously it was constructed inside the df_1m
-        # guard; leaving it there would make 2c reference an unbound name on a
-        # tick with no 1m frame — the same NameError class as defect W.
-        # v4.15 — floor the protected level at BOS_MIN_DIST_ATR * ATR from
-        # entry, so it can never be seeded inside the symbol's own noise band.
-        _bm, _batr = self._midline_atr(vol_state, df_5m)
-        _bos_min = (BOS_MIN_DIST_ATR * float(_batr)) if (_batr and _batr > 0) else 0.0
-        _bos = self._get_bos_tracker(trade_id, str(record.get("direction", "")).lower(),
-                                     float(record.get("underlying_entry", 0.0) or 0.0),
-                                     min_dist=_bos_min)
-        if df_1m is not None:
-            if _bos.update(df_1m):
-                decision.should_exit = True
-                decision.exit_reason = f"bos_exit pnl={pnl_pct:.1%}"
-                return decision
-
-        # 2c. INSURANCE (v4.14, CNT.2) — the ONLY gate that covers BOS's blind
-        #     window. `BOSTracker.protected_level` starts None and is set only
-        #     when the trade makes a new CLOSING HIGH past entry, so 2b above
-        #     cannot fire on a trade that went wrong from the first tick — which
-        #     is precisely the population that runs to the floor at −29% with
-        #     MFE +1%.
-        #
-        #     ARMED ONLY WHILE `protected_level is None`, so the handoff is
-        #     EXACT and needs no time window: the instant BOS has a level to
-        #     defend, BOS owns the trade and this disarms permanently. No
-        #     overlap, no double jeopardy.
-        #
-        #     THE LEVEL IS STRUCTURAL, NOT PREMIUM. `underlying_stop` is stamped
-        #     at entry by continuation_strategy:447/450 as
-        #     gap.bottom − 0.5*atr (long) / gap.top + 0.5*atr (short) and until
-        #     now was read ONLY by query.py for display. A premium-percent stop
-        #     on 0DTE measures gamma, not thesis — the floor sweep proved a
-        #     tighter one nets ~zero because it cuts winners that merely dip.
-        #     This is the ENTRY PREMISE INVERTED: continuation enters on a
-        #     pullback INTO an unfilled 5m FVG expecting resumption, so a close
-        #     beyond the far edge plus a half-ATR buffer means the pullback was
-        #     the reversal continuing.
-        #
-        #     Uses iloc[-2] — the last FULLY CLOSED 1m candle — the same bar BOS
-        #     reads, so the two gates can never disagree about what price did.
-        if (CONT_INSURANCE_STOP and df_1m is not None and len(df_1m) >= 2
-                and _bos.protected_level is None):
-            _ins = float(record.get("underlying_stop", 0.0) or 0.0)
-            if _ins > 0:
-                _dirn = str(record.get("direction", "")).lower()
-                _close = float(df_1m["close"].iloc[-2])
-                _broke = (_close < _ins) if _dirn == "long" else (_close > _ins)
-                if _broke:
-                    decision.should_exit = True
-                    decision.exit_reason = (
-                        f"insurance_stop pnl={pnl_pct:.1%} "
-                        f"close={_close:.2f} lvl={_ins:.2f}")
-                    return decision
-
-        # 3. HARD FLOOR — 25% premium loss (v4.0; was the blanket 40%).
-        #    Disaster backstop only: regime-flip above is the real stop and
-        #    normally fires first. Existing rows keep the stop_premium written
-        #    at entry; the fallback is the continuation-specific pct.
-        stop_prem = record.get("stop_premium", 0.0) or (entry_prem * (1 - CONTINUATION_STOP_LOSS_PCT))
-        if stop_prem > 0 and current_premium <= stop_prem:
-            decision.should_exit = True
-            floor_pct = 1 - (stop_prem / entry_prem) if entry_prem > 0 else MAX_LOSS_PCT
-            decision.exit_reason = f"max_loss_floor_{int(floor_pct*100)}pct"
-            return decision
-
-        # ── EXHAUSTION SIGNALS ────────────────────────────────────────────────
-        underlying = self._underlying_from_5m(df_5m)   # last close, or None
-
-        # (1) EXTENSION-FROM-MIDLINE
-        midline, atr = self._midline_atr(vol_state, df_5m)
-        extended = False
-        if underlying is not None and midline is not None and atr and atr > 0:
-            stretch_atr = abs(underlying - midline) / atr
-            extended = stretch_atr >= CONTINUATION_EXHAUST_EXT_ATR
-
-        # (2) MOMENTUM DIVERGENCE — new favorable price extreme on weaker momentum
-        diverging = self._momentum_divergence(trade_id, record, underlying,
-                                              direction, trend, df_5m)
-
-        # ── COMBINE (v1 two-stage) ────────────────────────────────────────────
-        # Only manage exhaustion once the trade has a real gain to protect (mirror
-        # the runner philosophy — don't exhaust-exit a trade that hasn't worked).
-        if pnl_pct >= CONTINUATION_EXHAUST_MIN_GAIN:
-            if diverging:
-                # CONFIRMATION → exit. (mode-3 hook: `and extended`)
-                decision.should_exit = True
-                decision.exit_reason = "exhaustion_divergence" + ("_extended" if extended else "")
-                return decision
-            if extended:
-                # FIRST TIER → tighten the trail hard, keep riding.
-                new_trail = current_premium * CONTINUATION_EXHAUST_TRAIL_LOCK
-                cur = self._trail_stops.get(trade_id, entry_prem)
-                if new_trail > cur:
-                    self._trail_stops[trade_id] = new_trail
-                    decision.new_trail_stop = new_trail
-
-        # 4. THETA BLEED (v4.0) — the stalled-winner exit. Four gates live
-        #    inside _theta_bleed and are unchanged, including the 20-MINUTE
-        #    MIN-HOLD blackout the user asked for. Its active window is a gain
-        #    in [THETA_MIN_GAIN_PCT, FVG_TRAIL_ARM_PCT) with the trail not yet
-        #    armed — i.e. a small winner going nowhere while the clock eats it.
-        #    Sits AFTER exhaustion on purpose: where the two windows overlap, a
-        #    momentum divergence is the more informative reason to leave, and
-        #    it gives the L3 ledger the better exit_reason.
-        if self._theta_bleed(record, current_premium, pnl_pct):
-            decision.should_exit = True
-            decision.exit_reason = f"theta_bleed pnl={pnl_pct:.1%}"
-            return decision
-
-        # 5. STANDARD RUNNER TRAIL — arms on the resumption gain, then owns the
-        #    trade (this is also what silences theta via the v1.5 trail ceiling).
-        #    v4.0: anchored to 5m FVGs via _fvg_frame (was raw df_1m).
-        trail_stop = self._update_fvg_trail(trade_id, current_premium, record,
-                                            self._fvg_frame(df_1m, df_5m),
-                                            direction)
-        if trail_stop is not None:
-            decision.new_trail_stop = max(decision.new_trail_stop or 0.0, trail_stop)
-            if current_premium <= trail_stop:
-                decision.should_exit = True
-                decision.exit_reason = "continuation_trail"
-                return decision
-
-        return decision
-
-    # ─── Exhaustion helpers (self-contained; live-state-preferred) ────────────
     def _underlying_from_5m(self, df_5m: Optional[pd.DataFrame]) -> Optional[float]:
         if df_5m is None or len(df_5m) == 0:
             return None

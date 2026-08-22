@@ -1,5 +1,9 @@
 """
-execution/position_manager.py  v4.1
+execution/position_manager.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Open-position tracking, pricing and lifecycle.
 
 v4.1  2026-08-20  AUDIT F9: mark filters gain a 1e6 ceiling - NaN was already
@@ -64,7 +68,6 @@ use live chain marks in paper mode for accurate P&L display;
         butterfly mark computed from lower + upper - 2×center legs
 notify ORB engine when an ORB trade closes so it re-arms
         and watches for the next breakout attempt this session
-pass current regime to exit_engine.evaluate() so regime-flip
         exits can fire for butterfly and condor leg positions
 multi-position support for legged condors: hold up to two
         verticals at once (condor ONLY; every other strategy stays single),
@@ -232,7 +235,6 @@ class PositionManager:
     def manage_open_position(self,
                               df_1m: Optional[pd.DataFrame] = None,
                               chain=None,
-                              regime: Optional[str] = None,
                               df_5m: Optional[pd.DataFrame] = None,
                               vol_state=None, trend=None) -> bool:
         """Manage every open position this tick. Normally one; for a legged
@@ -246,14 +248,14 @@ class PositionManager:
 
         still_open: List[TradeRecord] = []
         for record in list(self._open_records):
-            if self._manage_one(record, df_1m, chain, regime, df_5m, vol_state, trend):
+            if self._manage_one(record, df_1m, chain, df_5m, vol_state, trend):
                 still_open.append(record)
         self._open_records = still_open
         return len(self._open_records) > 0
 
     def _manage_one(self, record: TradeRecord,
                     df_1m: Optional[pd.DataFrame],
-                    chain, regime: Optional[str],
+                    chain,
                     df_5m: Optional[pd.DataFrame] = None,
                     vol_state=None, trend=None) -> bool:
         """Manage one record. Returns True if it should remain open."""
@@ -269,8 +271,7 @@ class PositionManager:
         self._trade_logger.update_current_premium(trade_id, current_premium)
 
         exit_eng = get_exit_engine(self.paper_trading)
-        decision = exit_eng.evaluate(record, current_premium, df_1m=df_1m,
-                                     regime=regime, df_5m=df_5m,
+        decision = exit_eng.evaluate(record, current_premium, df_1m=df_1m, df_5m=df_5m,
                                      vol_state=vol_state, trend=trend)
 
         if decision.new_trail_stop is not None:

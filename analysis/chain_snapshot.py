@@ -1,5 +1,9 @@
 """
-analysis/chain_snapshot.py  v4.0
+analysis/chain_snapshot.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 Archives the full option chain per snapshot to disk.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -124,14 +128,13 @@ def _bucket(now: datetime) -> str:
     return f"{now.strftime('%Y-%m-%d')}#{slot}"
 
 
-def snapshot(chain, underlying_price=None, regime=None, force: bool = False):
+def snapshot(chain, underlying_price=None, force: bool = False):
     """
     Archive one full chain snapshot if the cadence bucket has advanced.
 
     Args:
         chain:            an OptionsChain (needs .calls / .puts iterables)
         underlying_price: spot at snapshot time, if the caller has it
-        regime:           optional regime label string, purely for convenience
                           when slicing the archive later
         force:            bypass the cadence (used by tests)
 
@@ -161,7 +164,6 @@ def snapshot(chain, underlying_price=None, regime=None, force: bool = False):
             "event":   "chain_snapshot",
             "expiry":  getattr(chain, "expiry", "") or "",
             "underlying": _round(underlying_price, 4) if underlying_price else None,
-            "regime":  regime if isinstance(regime, str) else None,
             "n_calls": len(calls),
             "n_puts":  len(puts),
             "contracts": [_contract_row(c) for c in calls]

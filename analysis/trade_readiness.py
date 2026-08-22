@@ -1,5 +1,9 @@
 """
-analysis/trade_readiness.py  v4.1
+analysis/trade_readiness.py  v4.2
+v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 
 v4.1  2026-08-21  PHASE B (r58): every label arm rebuilt on MEASURED inputs or
       made honestly constant. The arms all took else on every tick since the
@@ -59,7 +63,6 @@ this block be read before the file is edited.
 #         geometry; 0.155 warming at 10:45; 0.000 once the window shuts.
 #         ⚠️ LOG-ONLY. Nothing gates on readiness — this changes what the score
 #         SAYS, not what fires. Promotion was already solved by CNT.6 removing
-#         continuation from the premium regimes.
 #         ⚠️ PIN DISTANCE FALLS BACK TO ATR when no chain is on ctx, because
 #         expected move needs one and a chainless tick must not silently zero
 #         the term carrying the whole thesis. `pin_dist_unit` records WHICH unit
@@ -141,7 +144,6 @@ this block be read before the file is edited.
 #         "premium rich" at TR_EXT_FIRE_FRAC (0.80) of that EM. Wired as the
 #         shared W_VERT_EXT corroborator into BOTH the condor sides (range
 #         adapter, per-side up/down) and the trend credit spread (trend adapter)
-#         — the two are the same short-premium family, split only by regime.
 #         `_expected_move_now` derives EM from the ATM straddle on ctx["chain"].
 #         Bounds OT_TR_EXT_* / OT_TR_W_VERT_* overridable. 0.80 is a PRIOR — the
 #         point of shipping live+logged is to discover the right number.
@@ -194,7 +196,6 @@ this block be read before the file is edited.
 #         (0.62 spike -> 0.16 delta -> unreachable) is the failure class this
 #         measures. Condor/butterfly staged ladders deferred (multi-leg).
 # NEW FILE. Trade-trigger READINESS engine (LOG-ONLY).
-#   The L1 excavation (regime_confluence v1.3) made the REGIME scores honest
 #   graded evidence. This module applies the same thinking one layer up, to the
 #   TRADE TRIGGERS: each strategy's pre-trigger confluence becomes a graded
 #   readiness R in [0,1] evaluated every ~15s tick, with a dt-aware SLOPE so
@@ -217,7 +218,6 @@ this block be read before the file is edited.
 #   will eventually gate. It does not validate the Layer-1 data — it gives
 #   clues about what the Layer-1 data believes, per tick, per strategy.
 #   LAYER BOUNDARY: this is L3/strategy-level. Referencing tradability context
-#   is legal here. It reads L1/L2 OUTPUTS (regime label, conviction) and engine
 #   states; it writes nothing back. L1 stays instantaneous and frozen.
 #   TICK-VS-BAR RULE (July-20 audit): all temporal math is WALL-CLOCK dt-aware.
 #   No per-evaluate counters anywhere in this file — the 15s loop can call
@@ -241,13 +241,11 @@ from utils.time_utils import now_et      # v1.8 — the butterfly entry window
 log = logging.getLogger(__name__)
 
 # ── Engine idiom: same grammar as the confluence scorer ───────────────────────
-try:
-    from analysis.regime_confluence import ramp, _combine, momentum_val
-except Exception:                              # pragma: no cover — isolation
-    def ramp(x, lo, hi):
-        if hi <= lo:
-            return 1.0 if x >= hi else 0.0
-        return min(max((x - lo) / (hi - lo), 0.0), 1.0)
+# ghost import removed (module never existed in v4); these ARE the engine idiom
+def ramp(x, lo, hi):
+    if hi <= lo:
+        return 1.0 if x >= hi else 0.0
+    return min(max((x - lo) / (hi - lo), 0.0), 1.0)
 
     def _combine(hard_vetoes, soft_necessary, corroborators):
         for v in hard_vetoes:
@@ -373,7 +371,6 @@ W_VERT_CONV      = _envf("W_VERT_CONV", 0.30)
 DORMANT, STAGING, ARMED = "DORMANT", "STAGING", "ARMED"
 
 # Corroborator weights (PRIOR; sum ≈ 1.0 per strategy). Same design-derived
-# convention as regime_confluence v1.3: each block states the minimum evidence
 # that should just barely stage, and a lone factor stays under TR_ARM_BAR.
 W_CONT_CONV, W_CONT_PULL, W_CONT_MOM = 0.40, 0.35, 0.25
 # ── SWP.3 (2026-08-13) — THE APPROACH TERM'S SIGN IS REFUTED ─────────────────
@@ -502,7 +499,7 @@ class TradeReadinessEngine:
 
     # ── factor computation (READ-ONLY over already-computed state) ───────────
 
-    def _continuation(self, ctx, regime) -> Tuple[float, dict]:
+    def _continuation(self, ctx, ms) -> Tuple[float, dict]:
         """Trend pullback: trending label, conviction, midline proximity, resumption."""
         # PHASE B (r58): label/conviction retired — nothing computes either.
         label, conv = "", 0.0
@@ -545,7 +542,7 @@ class TradeReadinessEngine:
                                 else round(abs(px - mid) / atr, 3)),
                    "pull_val": round(pull_val, 3), "mom": mom, "mom_val": mom_val}
 
-    def _sweep(self, ctx, regime) -> Tuple[float, dict]:
+    def _sweep(self, ctx, ms) -> Tuple[float, dict]:
         """Exhaustion reversal: sweep label conviction, freshness, trend spent."""
         label, conv = "", 0.0   # PHASE B (r58): retired fields
         liq   = ctx.get("liq_map"); trend = ctx.get("trend")
@@ -627,7 +624,7 @@ class TradeReadinessEngine:
                    # swept" becomes answerable from data instead of recollection
                    "appr_name": (None if _best is None else _best[3])}
 
-    def _condor_side(self, ctx, regime, side: str) -> Tuple[float, dict]:
+    def _condor_side(self, ctx, ms, side: str) -> Tuple[float, dict]:
         """
         One condor side. The graded approach fraction the entry trigger already
         computes and then collapses at CONDOR_TRIGGER_APPROACH — here it is
@@ -681,7 +678,7 @@ class TradeReadinessEngine:
                    "ext_fires": ext_fires, "origin_px": round(getattr(tr_state, "origin_price", 0.0), 2) if tr_state else 0.0,
                    "origin_em": round(getattr(tr_state, "origin_em", 0.0), 3) if tr_state else 0.0}
 
-    def _butterfly(self, ctx, regime) -> Tuple[float, dict]:
+    def _butterfly(self, ctx, ms) -> Tuple[float, dict]:
         """Compression play: coil conviction, squeeze, narrowness degree."""
         label, conv = "", 0.0   # PHASE B (r58): retired fields
         vol   = ctx.get("vol")
@@ -864,7 +861,7 @@ class TradeReadinessEngine:
         except Exception:
             return 0.0, None
 
-    def _trend_credit_spread(self, ctx, regime) -> Tuple[float, dict]:
+    def _trend_credit_spread(self, ctx, ms) -> Tuple[float, dict]:
         """
         Trend credit spread readiness (PCS in TRENDING_BULL, CCS in
         TRENDING_BEAR). Short-premium trend participation: sell a spread BEYOND
@@ -876,7 +873,7 @@ class TradeReadinessEngine:
         damper     : parabolic over-extension (exhaustion -> snapback risk)
         """
         label = ""   # PHASE B (r58): retired field — the vote below decides
-        conv  = float(getattr(regime, "conviction", 0.0) or 0.0)
+        conv  = float(getattr(ms, "conviction", 0.0) or 0.0)
         vol   = ctx.get("vol"); trend = ctx.get("trend")
         px    = float(ctx.get("price") or 0.0)
         df_1m = ctx.get("df_1m")
@@ -1055,7 +1052,7 @@ class TradeReadinessEngine:
 
     # ── public entry point ───────────────────────────────────────────────────
 
-    def assess_all(self, ctx: dict, regime) -> Dict[str, ReadinessState]:
+    def assess_all(self, ctx: dict, ms) -> Dict[str, ReadinessState]:
         """
         Evaluate every strategy's readiness for this tick. Never raises.
         Call every tick, including while halted or holding a position — the
@@ -1066,17 +1063,17 @@ class TradeReadinessEngine:
         self._mkt = self._market_snapshot(ctx)
         try:
             computed = {
-                "continuation": self._continuation(ctx, regime),
-                "sweep":        self._sweep(ctx, regime),
-                "condor_call":  self._condor_side(ctx, regime, "call"),
-                "condor_put":   self._condor_side(ctx, regime, "put"),
-                "butterfly":    self._butterfly(ctx, regime),
-                "trend_credit_spread": self._trend_credit_spread(ctx, regime),
+                "continuation": self._continuation(ctx, ms),
+                "sweep":        self._sweep(ctx, ms),
+                "condor_call":  self._condor_side(ctx, ms, "call"),
+                "condor_put":   self._condor_side(ctx, ms, "put"),
+                "butterfly":    self._butterfly(ctx, ms),
+                "trend_credit_spread": self._trend_credit_spread(ctx, ms),
             }
         except Exception as e:                    # noqa: BLE001
             log.debug(f"readiness assess skipped: {e}")
             return self.tracks
-        conv_now = float(getattr(regime, "conviction", 0.0) or 0.0)
+        conv_now = float(getattr(ms, "conviction", 0.0) or 0.0)
         # v1.4: price + expected move for the arm-origin snapshot. EM from the
         # ATM straddle if a chain is on ctx; else 0 (origin still stamps price,
         # extension just can't be computed until an EM is available — logged).
@@ -1172,8 +1169,8 @@ if __name__ == "__main__":                        # pragma: no cover
         trend.primary_momentum = mom
         ctx = {"vol": vol, "trend": trend, "liq_map": None, "price": px}
         # PHASE B (r58): the harness feeds the VOTE, not a label
-        regime = NS(primary_regime="", conviction=conv)
-        eng.assess_all(ctx, regime)
+        ms = NS(conviction=conv)
+        eng.assess_all(ctx, ms)
         return eng.tracks["continuation"]
 
     # RISING confluence: pullback approaches the midline, conviction firms,
@@ -1238,8 +1235,8 @@ if __name__ == "__main__":                        # pragma: no cover
         df = _mkdf(target_sd)
         ctx = {"vol": vol2, "trend": trend2, "liq_map": None,
                "price": 100.5, "df_1m": df}
-        regime = NS(primary_regime="", conviction=conv)   # PHASE B (r58)
-        r, f = eng2._trend_credit_spread(ctx, regime)
+        ms = NS(conviction=conv)   # PHASE B (r58)
+        r, f = eng2._trend_credit_spread(ctx, ms)
         return r, f
 
     # hold prior-range SD ~= 1.0, vary the impulse candle's range to hit SD tiers
@@ -1268,7 +1265,7 @@ if __name__ == "__main__":                        # pragma: no cover
     df = _mkdf(2.80)
     r_v, f_v = eng2._trend_credit_spread(
         {"vol": vol2, "trend": trend2, "liq_map": None, "price": 100.5, "df_1m": df},
-        NS(primary_regime="", conviction=0.0))
+        NS(conviction=0.0))
     assert r_v == 0.0, "a NEUTRAL trend vote must veto the trend credit spread to 0"
     print(f"  veto(neutral)    R={r_v:.3f}  (correctly stood down)")
 
@@ -1278,7 +1275,7 @@ if __name__ == "__main__":                        # pragma: no cover
     r_ext, f_ext = eng2._trend_credit_spread(
         {"vol": vol2, "trend": trend2, "liq_map": None,
          "price": 99.5 + 5.0 * 1.0, "df_1m": df},   # 5 ATR above midline = parabolic
-        NS(primary_regime="", conviction=0.7))   # PHASE B (r58)
+        NS(conviction=0.7))   # PHASE B (r58)
     print(f"  parabolic(5ATR)  ext_damp={f_ext['ext_damp']:.2f} R={r_ext:.3f} "
           f"(damped vs screaming R={r_scream:.3f})")
     assert r_ext < r_scream, "parabolic over-extension must damp readiness (snapback risk)"

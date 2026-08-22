@@ -1,5 +1,9 @@
 """
-analysis/rejection_ledger.py  v4.0
+analysis/rejection_ledger.py  v4.1
+v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
+      system removed - identifiers, comments, docstrings, schema. The word
+      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
+
 What a gate REFUSED — the other half of every measurement.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -42,7 +46,6 @@ ruleset that produced it. **The journal does not stamp one** — the same gap no
 on 2026-07-29 about engine identity. So rows carry `analysis_hash` (the HEAD this
 ledger ran under) and NOT a decision hash, and any row older than the last
 behaviour change is pooling decisions from different rulesets. 2026-08-07 alone
-changed the emission law, the regime set, two dispatch gates, an exit gate and
 two floors. **The fix is upstream: stamp the ruleset onto the journal event.**
 Until then, read cross-date pooling with that caveat.
 Read-only, stdlib only, always exits 0.
@@ -61,9 +64,9 @@ import subprocess
 import sys
 
 JOURNAL_GLOB = "~/day_trader_pro/signal_journal/*/*.jsonl"
-REPLAY_GLOB = "~/day_trader_pro/reports/regime_replay_*.jsonl"
+REPLAY_GLOB = "~/day_trader_pro/reports/replay_*.jsonl"
 OUT_DIR = "~/day_trader_pro/reports"
-DATE_RE = re.compile(r"regime_replay_(20\d\d-\d\d-\d\d)\.jsonl$")
+DATE_RE = re.compile(r"replay_(20\d\d-\d\d-\d\d)\.jsonl$")
 JDATE_RE = re.compile(r"/signal_journal/(20\d\d-\d\d-\d\d)/")
 
 LONGISH = ("long", "call", "bull")
