@@ -153,6 +153,102 @@ def main() -> int:
           f"am={em_am} pm={em_pm} — a constant atm_iv scalar cannot express "
           f"this, which is why the afternoon looked identically sized")
 
+    # ── C8 THE ENGINES: a broken deriver must not stop the others ────────
+    # ⚠️ ADVERSARIAL. A subclass that raises on every call is planted into the
+    # middle of the set; the engines AFTER it must still run. One deriver's
+    # failure taking the rest with it would make "which derived port went
+    # dark" unanswerable — the exact blindness that cost Friday.
+    from derived.base import DerivedEngine, run_all
+
+    class Exploding(DerivedEngine):
+        name = "exploding"
+        def derive(self, ctx):
+            raise RuntimeError("planted")
+
+    class Counting(DerivedEngine):
+        name = "counting"
+        def __init__(self):
+            super().__init__(None)
+            self.calls = 0
+        def derive(self, ctx):
+            self.calls += 1
+            return 7
+
+    boom, after = Exploding(None), Counting()
+
+    # ⚠️ THE TWO GUARDS ARE TESTED SEPARATELY, ON PURPOSE. `run()` wraps
+    # derive() and `run_all()` wraps run() — so testing only through run_all
+    # lets EITHER guard alone carry the assertion, and the check goes green
+    # with half the protection removed. Mutation-proven 2026-08-22: removing
+    # either wrapper individually left an earlier draft of this check PASSING.
+    # Inner guard: call run() DIRECTLY, no outer net beneath it.
+    raised = None
+    try:
+        direct = boom.run({})
+    except Exception as exc:                                    # noqa: BLE001
+        raised, direct = exc, None
+    check("C8 INNER: engine.run() swallows a raising derive()", raised is None,
+          f"raised {type(raised).__name__} — derive() is unwrapped, so a "
+          f"deriver can throw straight into the tick loop")
+    check("C8 INNER: run() reports 0 rows", direct == 0, f"got {direct!r}")
+
+    # Outer guard: an engine whose run() ITSELF raises, so only run_all can
+    # save the loop.
+    class BadRun(DerivedEngine):
+        name = "badrun"
+        def run(self, ctx):
+            raise RuntimeError("run itself is broken")
+        def derive(self, ctx):
+            return 0
+
+    raised = None
+    try:
+        res_outer = run_all([BadRun(None), Counting()], {})
+    except Exception as exc:                                    # noqa: BLE001
+        raised, res_outer = exc, {}
+    check("C8 OUTER: run_all survives an engine with a broken run()",
+          raised is None,
+          f"raised {type(raised).__name__} — one engine breaking its own "
+          f"wrapper would stop every engine after it")
+    check("C8 OUTER: engines after the broken one still ran",
+          res_outer.get("counting") == 7, f"got {res_outer!r}")
+
+    raised = None
+    try:
+        res = run_all([boom, after], {})
+    except Exception as exc:                                    # noqa: BLE001
+        raised, res = exc, {}
+    check("C8 a raising deriver does not propagate", raised is None,
+          f"raised {type(raised).__name__}")
+    check("C8 it reports 0 rows for itself", res.get("exploding") == 0,
+          f"got {res.get('exploding')!r}")
+    check("C8 the NEXT engine still ran", after.calls == 1 and res.get("counting") == 7,
+          f"calls={after.calls} result={res.get('counting')!r}")
+    # `boom` has been run twice by now (once directly for the INNER guard,
+    # once through run_all), so the assertion is "every run failed and the
+    # reason is retained" — not a hardcoded count that breaks when the test
+    # above it grows.
+    _st = boom.status()
+    check("C8 every failure is counted, with its reason retained",
+          _st["failures"] == _st["runs"] and _st["runs"] >= 2
+          and "planted" in (_st["last_error"] or ""),
+          str(_st))
+
+    # ── C9 the registry degrades to [] rather than raising ───────────────
+    import derived.registry as reg
+    os.environ["OT_DERIVED_DB"] = "/proc/cannot/exist/d.db"
+    import data.derived_store as ds2
+    importlib.reload(ds2)
+    importlib.reload(reg)
+    raised = None
+    try:
+        eng = reg.build_engines("NVDA")
+    except Exception as exc:                                    # noqa: BLE001
+        raised, eng = exc, None
+    check("C9 an unopenable store yields NO engines, not an exception",
+          raised is None and eng == [],
+          f"raised={raised!r} engines={eng!r} — the box must trade unchanged")
+
     print("=" * 68)
     if PROBLEMS:
         print(f"  {len(PROBLEMS)} problem(s): {PROBLEMS}")
