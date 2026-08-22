@@ -109,7 +109,23 @@ class SnapshotEngine(DerivedEngine):
             "session_fraction_remaining": _f(ctx.get("session_fraction_remaining")),
             # ── context
             "trend_direction": getattr(trend, "overall_direction", None) if trend else None,
-            "gap_pct": _f(ctx.get("gap_pct")),
+            # ── CONTEXT FOR THE JOINS THIS TABLE EXISTS TO ENABLE ───────────
+            # ⚠️ CHARACTER AND GAP ARE CONDITIONERS, NOT SIGNALS. Neither is a
+            # finding on its own; both qualify a finding about something else.
+            # 🔴 THE ORB QUESTION THIS MAKES ASKABLE: in the v3 book ORB Long
+            # ran 4 trades / +$332.50 while ORB Short ran 14 / -$3,812.30, and
+            # that asymmetry has never been conditioned on anything. With
+            # gap_class on the fire row the question becomes "were the shorts
+            # losing ON GAP-UP DAYS — fading a gap that kept going — while the
+            # longs happened to align with theirs?" Two columns, one join, and
+            # it may reframe the flagship trade's one weak side.
+            "character": ctx.get("character"),
+            "character_held_s": _f(ctx.get("character_held_s")),
+            "gap_pct": _f((ctx.get("gap") or {}).get("gap_pct")
+                          if isinstance(ctx.get("gap"), dict)
+                          else ctx.get("gap_pct")),
+            "gap_class": ((ctx.get("gap") or {}).get("gap_class")
+                          if isinstance(ctx.get("gap"), dict) else None),
         }
 
         # The level walk WITH PROVENANCE — nearest levels each way and their

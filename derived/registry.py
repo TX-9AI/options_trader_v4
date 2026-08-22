@@ -43,6 +43,7 @@ def build_engines(symbol: str) -> List:
         from derived.counterfactual import CounterfactualExitEngine
         from derived.notes import NotesEngine
         from derived.plan_ledger import PlanLedger
+        from derived.character_engine import CharacterEngine
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("derived registry: engine import failed: %s", exc)
         return []
@@ -63,6 +64,9 @@ def build_engines(symbol: str) -> List:
         # EVALUATION — fired AND declined — written from main's
         # dispatch hook after the decision is already made.
         NotesEngine(store, symbol),
+        # ⚠️ CHARACTER IS A STATE WITH DURATION — it records
+        # TRANSITIONS, not per-tick samples, and gates nothing.
+        CharacterEngine(store, symbol),
     ]
 
 
@@ -84,6 +88,7 @@ def plan_ledger(symbol: str):
     try:
         from data.derived_store import get_derived_store
         from derived.plan_ledger import PlanLedger
+        from derived.character_engine import CharacterEngine
         store = get_derived_store()
         return PlanLedger(store, symbol) if store is not None else None
     except Exception:                                           # noqa: BLE001

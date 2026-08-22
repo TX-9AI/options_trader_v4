@@ -1171,6 +1171,10 @@ def run_analysis(state: BotState) -> dict:
     # no derived store trades EXACTLY as it does today.
     # ⚠️ EVERY KEY IS SET EVEN WHEN None. A consumer must be able to tell
     # "measured as absent" from "this port does not exist in this build".
+    # r75 — character: the tape's state, with how long it has held. ⚠️ It
+    # INFORMS and gates nothing, like every other derived port.
+    ctx.setdefault("character", None)
+    ctx.setdefault("character_held_s", None)
     ctx.setdefault("charm", None)
     ctx.setdefault("vanna", None)
     ctx.setdefault("levels", None)
@@ -1224,6 +1228,19 @@ def _apply_derived_ports(ctx: dict, state: "BotState", engines) -> None:
                 ctx[k] = v
     except Exception as exc:                                   # noqa: BLE001
         logger.debug("vol measures unavailable: %s", exc)
+
+    # Character — current state and its duration, read from the engine that
+    # owns the ledger so status and the strategy notes see the same value.
+    try:
+        for e in engines:
+            if getattr(e, "name", "") == "character":
+                _c = e.current()
+                if _c:
+                    ctx["character"] = _c.get("character")
+                    ctx["character_held_s"] = _c.get("held_s")
+                break
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("character port unavailable: %s", exc)
 
     # Nearest levels each way, WITH PROVENANCE and touch score — the
     # operator's own framing of what price is trading into.

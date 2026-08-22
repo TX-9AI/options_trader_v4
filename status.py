@@ -372,6 +372,25 @@ def main():
         _live = _led.live_plans() if _led else []
     except Exception:                                          # noqa: BLE001
         _live = []
+    # ── r75 — CHARACTER: what the tape is doing, and for how long ────────
+    # ⚠️ A DESCRIPTION, NOT A SIGNAL. It gates nothing and carries no score.
+    # A character that has held all session is a different session from one
+    # that has flipped six times, which is why the duration is on the line.
+    try:
+        from derived.registry import build_engines as _be
+        _ce = None
+        for _e in (_be(INSTRUMENT) or []):
+            if getattr(_e, "name", "") == "character":
+                _ce = _e
+                break
+        _cur = _ce.current() if _ce else {}
+        if _cur.get("character"):
+            _mins = (_cur.get("held_s") or 0) / 60.0
+            print(f"  \U0001F30A Character:   {_cur['character'].upper()}"
+                  f"  (held {_mins:.0f} min)")
+    except Exception:                                          # noqa: BLE001
+        pass
+
     if _live:
         for _p in _live:
             _what = _p.get("short_strike") or _p.get("trigger_price")

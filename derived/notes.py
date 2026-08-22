@@ -104,6 +104,13 @@ class NoteWriter:
             "vanna": _f(ctx.get("vanna")),
             "gex": _f(ctx.get("gex")),
             "levels": ctx.get("levels"),
+            # ⚠️ CHARACTER IS CONTEXT ON THE NOTE, NOT A FACTOR IN IT. It says
+            # what the tape was doing when this engine looked — it does not
+            # score, weight or gate anything.
+            "character": ctx.get("character"),
+            "character_held_s": ctx.get("character_held_s"),
+            "gap_pct": _f((ctx.get("gap") or {}).get("gap_pct")),
+            "gap_class": (ctx.get("gap") or {}).get("gap_class"),
         }
 
     def _specific(self, strategy: str, ctx: dict) -> dict:
