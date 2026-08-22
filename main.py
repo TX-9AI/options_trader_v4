@@ -918,6 +918,16 @@ class BotState:
         self.orb_range_established_today: bool = False  # today's ORB range ESTABLISHED
         self.hard_close_alerted: bool = False   # alerted once on a failed 15:45 flatten
         self.last_reconcile_slot: Optional[str] = None  # last intraday broker-reconcile slot done
+        # r63 — the derived engines, built ONCE per process. [] when the
+        # derived store will not open, which is a normal degraded state and
+        # not an error: derivers are contributors, never gates.
+        try:
+            from derived.registry import build_engines
+            self.derived_engines = build_engines(INSTRUMENT)
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning("derived engines unavailable: %s — trading is "
+                           "unaffected", exc)
+            self.derived_engines = []
         # v4.11: pages once per outage when the bot cannot see, and once when
         # sight returns. Instantiated here so the latch state survives ticks.
         self.blind_latch = BlindnessLatch()
@@ -1181,7 +1191,100 @@ def run_analysis(state: BotState) -> dict:
         state.prev_trend_direction = getattr(ctx.get("trend"), "overall_direction", "") or ""
     except Exception:                                          # noqa: BLE001
         pass
+
+    # ── 🔴 THE DERIVED LAYER (r63, 2026-08-22) ───────────────────────────────
+    # raw port -> home -> deriver -> derived home -> ctx -> engine.
+    # Every derived port is assembled HERE, once, so it is present on every
+    # tick for every consumer.
+    # ⚠️ THIS IS THE FIX FOR THE ctx["chain"]/ctx["gex"] SHAPE. Those are
+    # written mid-dispatch at ~line 2746, so their availability depends on
+    # where in the tick you stand — an input present for one consumer and
+    # absent for another. No derived port may be built that way.
+    # ⚠️ CONTRIBUTORS, NEVER GATES — operator's ruling. `run_all` and every
+    # engine's `run()` are wrapped so nothing here can raise into the tick
+    # loop, and the whole block is belt-and-braces wrapped again. A box with
+    # no derived store trades EXACTLY as it does today.
+    # ⚠️ EVERY KEY IS SET EVEN WHEN None. A consumer must be able to tell
+    # "measured as absent" from "this port does not exist in this build".
+    ctx.setdefault("charm", None)
+    ctx.setdefault("vanna", None)
+    ctx.setdefault("levels", None)
+    ctx.setdefault("atm_iv", None)
+    ctx.setdefault("iv_slope", None)
+    ctx.setdefault("realised_vol_cc", None)
+    ctx.setdefault("realised_vol_parkinson", None)
+    ctx.setdefault("variance_risk_premium", None)
+    ctx.setdefault("expected_move_iv", None)
+    ctx.setdefault("expected_move_straddle", None)
+    ctx.setdefault("session_fraction_remaining", None)
+    try:
+        engines = getattr(state, "derived_engines", None)
+        # Published on ctx so the fire-snapshot path can reach them from any
+        # call site without a module global.
+        ctx["derived_engines"] = engines
+        if engines:
+            from derived.base import run_all
+            run_all(engines, ctx)
+            _apply_derived_ports(ctx, state, engines)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("derived layer skipped this tick: %s", exc)
     return ctx
+
+
+def _apply_derived_ports(ctx: dict, state: "BotState", engines) -> None:
+    """Lift derived values into ctx. NEVER raises — see the block above.
+
+    ⚠️ CHARM, VANNA AND GEX ARE UNIVERSAL PORTS — operator, 2026-08-22: they
+    must contribute to every strategy where they could meaningfully
+    contribute. They are derived ONCE and offered to all engines rather than
+    recomputed per strategy, because two consumers computing the same quantity
+    at different points in a tick can legitimately disagree, and that is a bug
+    nobody would ever find.
+    """
+    from analysis import volatility_measures as _vm
+
+    # Volatility measures — realised, VRP and an EXPECTED MOVE THAT DECAYS.
+    # ⚠️ THE DECAY IS THE POINT. A constant atm_iv scalar gave one expected
+    # move all day, so an afternoon entry looked identically sized to a
+    # morning one. This term is the fraction of the SESSION remaining.
+    try:
+        df5 = ctx.get("df_5m")
+        bars = []
+        if df5 is not None and not getattr(df5, "empty", True):
+            bars = df5.tail(120).to_dict("records")
+        summ = _vm.summarise(bars, "5m", spot=ctx.get("price"),
+                             atm_iv=ctx.get("atm_iv"))
+        for k, v in summ.items():
+            if v is not None or ctx.get(k) is None:
+                ctx[k] = v
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("vol measures unavailable: %s", exc)
+
+    # Nearest levels each way, WITH PROVENANCE and touch score — the
+    # operator's own framing of what price is trading into.
+    try:
+        for e in engines:
+            if getattr(e, "name", "") == "levels":
+                ctx["levels"] = e.walk(ctx.get("price"), limit=3)
+                break
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("level walk unavailable: %s", exc)
+
+    # Second-order greeks, ATM-nearest, from the series this box has kept.
+    try:
+        store = None
+        for e in engines:
+            store = getattr(e, "_store", None) or store
+        price = ctx.get("price")
+        if store is not None and price:
+            row = store.conn.execute(
+                "SELECT charm, vanna FROM surface_series"
+                " WHERE symbol=? ORDER BY ABS(strike-?) ASC, ts_epoch DESC"
+                " LIMIT 1", (INSTRUMENT, float(price))).fetchone()
+            if row:
+                ctx["charm"], ctx["vanna"] = row[0], row[1]
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("second-order ports unavailable: %s", exc)
 
 
 def assemble_market_state(ctx: dict, trigger: str, state: BotState) -> RegimeState:
@@ -1312,6 +1415,42 @@ def _capture_entry_contract(ctx: dict, record: dict) -> bool:
             "the premium-decomposition read (direction vs theta vs IV); logged "
             "once per reason per process.", reason, trade_id[:8])
     return False
+
+
+def _capture_fire_snapshot(ctx: dict, record: dict) -> None:
+    """r63 — freeze EVERY derived value at the instant this trade fired.
+
+    🔴 THE EDGE STUDY IS A JOIN: fire_snapshot JOIN trades ON trade_id.
+    Derived indicators on one side, outcome and excursion on the other, so
+    "did high charm at fire predict a larger MFE?" becomes one query. Today
+    that question cannot be asked at all.
+
+    ⚠️ EXCURSION TELEMETRY IS UNAFFECTED. mfe/mae live on `trades` because
+    they are properties of the trade's LIFE; this is one frozen instant at
+    entry. Different clocks, different tables — and the join makes excursion
+    work BETTER than it does now.
+
+    ⚠️ SNAPSHOT EVERYTHING, NOT WHAT WE THINK MATTERS. regime_ctx() recorded
+    label plus conviction and dropped every term that decided the entry — a
+    vocabulary of two for a decision made on twenty. Pre-selecting the columns
+    defeats a study whose whole purpose is DISCOVERING which indicator
+    separates outcomes.
+
+    ⚠️ NEVER RAISES. A study artifact must not be able to fail a fill.
+    """
+    # ⚠️ THE ENGINES COME FROM ctx, NOT A MODULE GLOBAL. The first draft
+    # reached for a `_bot_state` global that DOES NOT EXIST in this module —
+    # so it would have found nothing on every fill and written no snapshots at
+    # all, silently, forever. Exactly the shape of defect this whole weekend
+    # has been about; caught by grepping for the name instead of assuming it.
+    try:
+        from derived.registry import snapshot_engine
+        eng = snapshot_engine((ctx or {}).get("derived_engines"))
+        tid = (record or {}).get("trade_id", "")
+        if eng is not None and tid:
+            eng.capture(tid, ctx)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("fire snapshot skipped: %s", exc)
 
 
 def _capture_entry_snapshot(ctx: dict, record: dict, direction: str) -> bool:
@@ -1603,6 +1742,7 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
     # cannot supply one degrades to no capture rather than to a raise.
     if ctx is not None:
         _capture_entry_snapshot(ctx, record, "neutral")
+        _capture_fire_snapshot(ctx, record)
         _capture_entry_contract(ctx, record)          # v5.5 (N.9)
     get_position_manager(state.paper_trading).add_condor_leg(record)
 
@@ -2477,6 +2617,7 @@ def attempt_new_entry(ctx: dict, regime: RegimeState, state: BotState):
         # v5.1 — capture BEFORE anything else touches the row, but AFTER the
         # fill: the picture we want is the one that produced this entry.
         _capture_entry_snapshot(ctx, record, signal.direction)
+        _capture_fire_snapshot(ctx, record)
         _capture_entry_contract(ctx, record)          # v5.5 (N.9)
         get_position_manager(state.paper_trading).set_open_position(record)
         get_alert_manager().send_entry_alert(record)
