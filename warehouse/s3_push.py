@@ -1039,7 +1039,20 @@ def main(argv=None) -> int:
 
         if do_reconcile:
             _fixed = reconcile(s3, BUCKET, counters)
-            save_ledger(counters, LEDGER_PATH)
+            # 🔴 THIS WROTE THE PREFIX COUNTERS OVER `chain_ledger.json` — the
+            # FILE-OFFSET ledger — instead of `prefix_counters.json`. Found
+            # 2026-08-23 after three reconcile/verify cycles made the numbers
+            # WORSE each time (222 -> 300 while S3 held 74).
+            # ⚠️ THE MECHANISM: chain_ledger maps SOURCE PATH -> lines already
+            # pushed. Overwriting it with {prefix: {n, bytes}} means the next
+            # `push_file` looks up its path, FINDS NOTHING, starts at line 0 and
+            # RE-PUSHES THE WHOLE FILE. So every reconcile destroyed the record
+            # of what had been sent, and the next verify re-sent everything —
+            # which is what inflated the counter reconcile had just fixed.
+            # ⚠️ NOTHING WAS LOST: keys are content-hashed, so the re-pushes
+            # overwrote identical objects. The cost was PUTs and a counter that
+            # climbed every cycle.
+            save_ledger(counters, COUNTERS_PATH)
             print("reconcile: {} prefix counter(s) reset to the S3 truth"
                   .format(len(_fixed)))
             for _p2, (_was, _now) in sorted(_fixed.items())[:10]:
