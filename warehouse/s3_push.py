@@ -1,5 +1,16 @@
 """
-warehouse/s3_push.py  v4.1
+warehouse/s3_push.py  v4.2
+v4.2  2026-08-23  R-PROJECT: THE SERIES TABLES ARE NOW PUSHED. retention_purge
+      v1.0 calls its 3 days on greeks/quotes/prints/etc "a RE-PUSH window" —
+      but no push stage existed for any of the seven series tables, so the
+      moment OT_RETENTION_APPLY=1 lands, the manifold's series data would be
+      deleted having NEVER been warehoused: "pruned before you knew you
+      needed it", the exact loss the manifold was built to end. Found while
+      building tests/exit_replay.py, whose premium paths read quote_series on
+      control. push_series batches each table's rows since a per-table
+      high-water mark into ONE object per run (push_candles' pattern — a
+      per-row object at ~250 chain symbols × 15s would be tens of thousands
+      of PUTs/hour). Guarded by tests/check_purge_pushed.py, born red at r84.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -834,6 +845,58 @@ def push_candles(s3, bucket, db_path, ledger, me, counters=None):
 
 
 
+SERIES_TABLES = ("greeks_series", "quote_series", "prints", "last_trade",
+                 "session_summary", "theo_series", "underlying_series")
+SERIES_BATCH_ROWS = int(os.environ.get("OT_S3_SERIES_BATCH", "50000"))
+
+
+def push_series(s3, bucket, db_path, ledger, me, counters=None):
+    """The seven manifold series tables — batched, high-water per table.
+
+    Same contract as push_candles: rows are append-only and keyed on
+    ts_epoch, so a per-table high-water mark pushes only what is new, as ONE
+    object per table per run (capped at SERIES_BATCH_ROWS; a backlog drains
+    over successive runs, tail-safe like every other stage). Key carries the
+    batch's top ts + content hash, so a retry overwrites the same object.
+
+    ⚠️ THE LEDGER KEY IS NAMESPACED `series|<table>` — the candle ledger holds
+    `SYM|interval` in the same file, and two shapes in one dict is the r82
+    class. The namespace makes a collision impossible rather than unlikely.
+    """
+    pushed = failed = 0
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True, timeout=5)
+        con.row_factory = sqlite3.Row
+    except Exception:
+        return 0, 0
+    day = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    for table in SERIES_TABLES:
+        lk = "series|%s" % table
+        hwm = float(ledger.get(lk, 0) or 0)
+        try:
+            rows = [dict(r) for r in con.execute(
+                "SELECT * FROM %s WHERE ts_epoch > ? ORDER BY ts_epoch"
+                " LIMIT ?" % table, (hwm, SERIES_BATCH_ROWS))]
+        except Exception:
+            continue                     # table absent on an older schema
+        if not rows:
+            continue
+        top = float(rows[-1]["ts_epoch"])
+        sha = _sha256(_canon(rows))
+        body = _wrap(table, rows, me or "UNKNOWN", day,
+                     {"n_rows": len(rows), "ts_from": float(rows[0]["ts_epoch"]),
+                      "ts_to": top})
+        key = "%s/%s/dt=%s/sym=%s/%d-%s.json" % (
+            PREFIX, table, day, me or "UNKNOWN", int(top * 1000), sha[:16])
+        if put_and_verify(s3, bucket, key, body, counters):
+            ledger[lk] = top
+            pushed += 1
+        else:
+            failed += 1
+    con.close()
+    return pushed, failed
+
+
 def _push_chain_tree(s3, ledger, counters, files):
     """Chain snapshots across every day-file, as one stage."""
     pushed = failed = 0
@@ -976,6 +1039,10 @@ def main(argv=None) -> int:
             ("ohlc", lambda: push_whole_files(
                 s3, BUCKET, discover(OHLC_ROOT, ".csv"), "ohlc", misc, counters)),
             ("candles", lambda: push_candles(s3, BUCKET, FEED_DB, c_ledger, me, counters)),
+            # v4.2 — after candles (same store, same perishability), before the
+            # bulk streams so a timeout cannot starve the only copy of the
+            # greeks/quote tape. Batched: one object per table per run.
+            ("series", lambda: push_series(s3, BUCKET, FEED_DB, c_ledger, me, counters)),
             ("liquidity_ledger", lambda: push_whole_files(
                 s3, BUCKET, discover(LIQ_ROOT, ".json"), "liquidity_ledger",
                 misc, counters)),

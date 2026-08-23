@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-137 Python modules across 13 local packages.
+142 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -482,7 +482,15 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/check_purge_pushed.py`
+- **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/s3_push.py`
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/check_singletons.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/edge_scan.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
@@ -495,6 +503,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/exit_record.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/exit_replay.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
@@ -526,11 +538,19 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/r_ledger.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/rejection_ledger.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/scrub_headers.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/stop_sweep.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
@@ -592,15 +612,15 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/__init__.py`
 - **calls:** (none)
-- **called by:** `tests/check_audit_20260823.py`, `warehouse/self_close.py`
+- **called by:** `tests/check_audit_20260823.py`, `tests/check_purge_pushed.py`, `warehouse/self_close.py`
 
 ### `warehouse/retention_purge.py`
 - **calls:** (none)
-- **called by:** `warehouse/self_close.py`
+- **called by:** `tests/check_purge_pushed.py`, `warehouse/self_close.py`
 
 ### `warehouse/s3_push.py`
 - **calls:** (none)
-- **called by:** (entry point)
+- **called by:** `tests/check_purge_pushed.py`
 
 ### `warehouse/self_close.py`
 - **calls:** `config.py`, `notifications/alert_manager.py`, `warehouse/__init__.py`, `warehouse/retention_purge.py`
