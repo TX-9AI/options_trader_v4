@@ -1,5 +1,11 @@
 """
-data/candle_feed.py  v4.7
+data/candle_feed.py  v4.8
+v4.8  2026-08-23  AUDIT F3: the rescue tested for ANY 5m bar at or after
+    09:30, not for THE 09:30 bar. A feed that came up late (first bar
+    09:45) passed the check, the opening bar stayed missing, and
+    get_orb_range carried yesterday's range as EXPIRED - the exact
+    failure the rescue was built for. The query is now bounded to the
+    09:30 bar's own five-minute slot.
 v4.7  2026-08-25  OPENING-RANGE RESCUE. If today's 09:30 5m bar is
     missing between 09:36 and the 11:00 ORB cutoff, UNSUBSCRIBE 5m and
     resubscribe it from the open — once per session, guarded by date.
@@ -1164,11 +1170,13 @@ class CandleFeed:
                     and ((now.hour == 9 and now.minute >= 36)
                          or (10 <= now.hour < 11))):
                 return False
+            # v4.8 — THE 09:30 BAR ITSELF, not "anything since the open".
+            _open_ms = int(datetime.combine(
+                now.date(), dtime(9, 30), tzinfo=ET).timestamp() * 1000)
             row = self.store.conn.execute(
                 "SELECT COUNT(*) FROM candles WHERE symbol=? AND interval='5m'"
-                " AND ts_epoch_ms >= ?",
-                (INSTRUMENT, int(datetime.combine(
-                    now.date(), dtime(9, 30), tzinfo=ET).timestamp() * 1000))
+                " AND ts_epoch_ms >= ? AND ts_epoch_ms < ?",
+                (INSTRUMENT, _open_ms, _open_ms + 300_000)
             ).fetchone()
             if row and row[0]:
                 return False                    # the bar is there; nothing to do

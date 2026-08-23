@@ -1,5 +1,13 @@
 """
-analysis/gate_report.py  v4.0
+analysis/gate_report.py  v4.1
+v4.1  2026-08-23  AUDIT F9: `cleared()` had ZERO callers, so the CLEARED event
+the docstring calls "as important as the block" could never be written, and
+snapshot() reported a strategy blocked with a growing held_s forever - after
+it fired, after the candidate vanished, all session. Dispatch now reports a
+fire through `fired(dispatch_name)`, which maps main.py's dispatch labels onto
+the reporter's strategy names and clears. Also `_write` never committed: rows
+rode the shared connection until some other engine committed. It commits.
+v4.0  2026-08-25
 Every gate that can kill an entry says so — ONCE, at INFO, with its reason.
 
 v4.0  2026-08-25  The r61 observability item, and the class fix for
@@ -44,6 +52,14 @@ logger = logging.getLogger(__name__)
 # Re-announce a still-unchanged refusal at most this often, so a long block is
 # visible in the log without being spammed. 15 min ~= 60 ticks.
 REANNOUNCE_S = 900.0
+
+# main.py dispatches under short labels; strategies report under their class
+# names. One map, so a fire can find the block it clears.
+DISPATCH_ALIAS = {
+    "GEXPinButterfly": "GexPinButterfly",
+    "CondorPlan": "IronCondorStrategy",
+    "CondorLeg": "IronCondorStrategy",
+}
 
 
 class GateReporter:
@@ -91,8 +107,17 @@ class GateReporter:
                 " VALUES (?,?,?,?,?,?,?,?,?)",
                 (time.time(), self.symbol, strategy, gate, reason, detail,
                  event, held, ticks))
+            self._store.commit()                                # v4.1
         except Exception as exc:                                # noqa: BLE001
             logger.debug("gate write: %s", exc)
+
+    def fired(self, dispatch_name: str) -> None:
+        """v4.1 — a strategy produced a signal: whatever was blocking it has
+        cleared. Resolves dispatch labels to reporter names. Never raises."""
+        try:
+            self.cleared(DISPATCH_ALIAS.get(dispatch_name, dispatch_name))
+        except Exception:                                       # noqa: BLE001
+            pass
 
     def blocked(self, strategy: str, gate: str, reason: str = "",
                 detail: str = "") -> None:

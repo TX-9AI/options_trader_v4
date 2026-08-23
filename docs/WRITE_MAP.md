@@ -13,7 +13,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 | table | created by | written by | read by |
 |---|---|---|---|
-| `gate_disposition` | `analysis/gate_report.py` | `analysis/gate_report.py` (insert) | — |
+| `gate_disposition` | `analysis/gate_report.py` | `analysis/gate_report.py` (insert) | `tests/check_audit_20260823.py` |
 
 ## derived_store.db
 
@@ -33,7 +33,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 | table | created by | written by | read by |
 |---|---|---|---|
-| `candles` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert), `tools/segregate_nonrth_bars.py` (delete/update), `warehouse/retention_purge.py` (delete) | `data/candle_logger.py`, `data/market_data.py`, `tools/manifold_health.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
+| `candles` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert), `tests/check_audit_20260823.py` (insert), `tools/segregate_nonrth_bars.py` (delete/update), `warehouse/retention_purge.py` (delete) | `data/candle_logger.py`, `data/market_data.py`, `tools/manifold_health.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `chain_marks` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert) | `data/options_chain.py`, `tools/manifold_status.py` |
 | `chain_subs` | `data/candle_feed.py`, `data/options_chain.py` | `data/options_chain.py` (insert) | — |
 | `chain_subs_aux` | `analysis/tenor_publish.py` | `analysis/tenor_publish.py` (delete/insert) | — |
@@ -56,6 +56,6 @@ Regenerated in the land gate; a stale map fails `--check`.
 ## Flags
 
 - **No writer** (0): none
-- **No external reader** (14): `chain_subs_aux`, `character_ledger`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `gate_disposition`, `indicator_series`, `last_trade`, `plan_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
+- **No external reader** (13): `chain_subs_aux`, `character_ledger`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `indicator_series`, `last_trade`, `plan_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
 
 ⚠️ *No external reader* is not automatically a defect — a table written today for a study run in a month is exactly the point of the derived layer. It IS a defect when nobody ever intends to read it, and this list is where that question gets asked.

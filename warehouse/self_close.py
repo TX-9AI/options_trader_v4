@@ -1,7 +1,22 @@
 #!/usr/bin/env python3
 """
-warehouse/self_close.py  v1.1
+warehouse/self_close.py  v1.2
 The box closes ITSELF: drain to S3, verify it landed, then shut down.
+
+v1.2  2026-08-23  AUDIT F1: THE VERIFIER WAS SPAWNED UNDER THE BOT VENV, WHICH
+HAS NO boto3. The unit runs this file under `venv/bin/python` and v1.1 passed
+`sys.executable` on to `s3_push.py`, whose late `import boto3` then raised
+inside its rule-1 handler: it printed "run aborted, nothing confirmed", exited
+0, and there was no DRAIN line. That parses as SHORT -> every box stayed up and
+paged, every night, and the purge never ran. `deploy/s3-push.service` and
+`install_s3_push_timer.sh` both state the constraint ("boto3 is present in
+SYSTEM python fleet-wide and absent from the bot venv"); this file did not
+carry it across. The verifier now runs under the SAME interpreter the s3-push
+unit uses (`/usr/bin/python3`), so the two paths cannot disagree about the
+environment either. Fail direction unchanged: a verifier that cannot run
+still reads as unverified and the box stays up. Also: a verifier TIMEOUT
+(`subprocess.TimeoutExpired`) was an uncaught raise - box held with no alert.
+It is now held AND alerted like any other unverified close.
 
 v1.1  2026-08-25  Runs the RETENTION PURGE after verification and before the
 halt. Placed there deliberately: the purge must never touch unverified data,
@@ -52,6 +67,11 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
+# The interpreter `deploy/s3-push.service` uses. boto3 lives HERE, not in the
+# bot venv. Falls back to the current interpreter only if system python is
+# absent, which is not a fleet configuration that exists.
+WAREHOUSE_PY = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
+
 
 def _log(msg: str) -> None:
     print(f"[self-close] {msg}", flush=True)
@@ -76,12 +96,20 @@ def main(argv=None) -> int:
     # ── 2. drain + verify, one call ─────────────────────────────────────────
     # ⚠️ THE SAME `--verify` THE CONDUCTOR USES. One verification path, so the
     # two close routes cannot disagree about what "landed" means.
-    cmd = [sys.executable, os.path.join(HERE, "warehouse", "s3_push.py"), "--verify"]
+    # ⚠️ F1: SYSTEM python, never `sys.executable`. This file runs under the
+    # bot venv (it needs config + the alert manager); the verifier needs boto3,
+    # which lives only in system python. Same interpreter as s3-push.service.
+    cmd = [WAREHOUSE_PY, os.path.join(HERE, "warehouse", "s3_push.py"), "--verify"]
     if dry:
         _log(f"[dry] would run: {' '.join(cmd)}")
         return 0
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-    out = (r.stdout or "") + (r.stderr or "")
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        out = (r.stdout or "") + (r.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        out = ((exc.stdout or b"").decode("utf-8", "replace")
+               if isinstance(exc.stdout, bytes) else (exc.stdout or ""))
+        out += "\n[self-close] VERIFIER TIMED OUT after 1800s - unverified"
     print(out)
 
     line = next((l for l in out.splitlines() if l.startswith("DRAIN ")), "")

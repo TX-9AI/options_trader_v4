@@ -1,5 +1,14 @@
 """
-strategy/iron_condor_strategy.py  v4.1
+strategy/iron_condor_strategy.py  v4.2
+v4.2  2026-08-23  AUDIT F6: three plan transitions never reached the ledger.
+      Leg-2 fill -> COMPLETE, fork-invalidation -> CANCELLED, and the
+      end-of-session/new-day drop all mutated `self._plan` and left the row
+      open. A COMPLETED condor therefore sat in plan_ledger as LEG1_FILLED
+      with closed_ts NULL forever - and because mark_restart_wipe deliberately
+      skips LEG1_FILLED, the row was immortal and status.py showed an active
+      plan that did not exist. Every in-memory terminal move now has its
+      ledger move; reset_plan/new-day record EXPIRED(session_end) rather than
+      letting the next boot stamp them WIPED_BY_RESTART, which was a lie.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -390,6 +399,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
     def _reset_if_new_day(self):
         today = datetime.now(ET).strftime("%Y-%m-%d")
         if self._last_reset_date != today:
+            self._expire_in_ledger("new_day")                   # v4.2
             self._plan            = None
             self._last_reset_date = today
             self._orphan_said     = False   # A2.2: a NEW day's orphan announces too
@@ -987,6 +997,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
                 )
                 self._journal_abandon(plan, _a, "fork_invalidated")
                 plan.state = CondorState.CANCELLED
+                self._ledger_move("CANCELLED", "fork_invalidated", plan=plan)  # v4.2
                 self._plan = None
                 return None
             elif plan.state == CondorState.LEG1_FILLED:
@@ -1072,6 +1083,8 @@ class IronCondorStrategy(BaseOptionsStrategy):
             # COMPLETE only when BOTH independent sides are filled
             plan.state       = (CondorState.COMPLETE if (plan.call_filled and plan.put_filled)
                                 else CondorState.LEG1_FILLED)
+            if plan.state == CondorState.COMPLETE:
+                self._ledger_move("COMPLETE", "both_legs_filled", plan=plan)  # v4.2
             plan.leg2_credit = credit
             plan.leg2_short  = short_contract
             plan.leg2_long   = long_contract
@@ -1167,7 +1180,17 @@ class IronCondorStrategy(BaseOptionsStrategy):
 
     def reset_plan(self):
         """Clear the active plan (e.g. end of session)."""
+        self._expire_in_ledger("session_end")                    # v4.2
         self._plan = None
+
+    def _expire_in_ledger(self, reason: str) -> None:
+        """v4.2 — a plan dropped by the day boundary is EXPIRED, not wiped."""
+        try:
+            if self._plan is not None and self._plan_id:
+                if self._plan.state in (CondorState.DECIDED, CondorState.LEG1_FILLED):
+                    self._ledger_move("EXPIRED", reason, plan=self._plan)
+        except Exception:                                       # noqa: BLE001
+            pass
 
     # generate_signal required by ABC — routes to decide() for initial call
     def generate_signal(self, *args, **kwargs) -> Optional[OptionsSignal]:

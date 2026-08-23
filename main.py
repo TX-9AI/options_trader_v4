@@ -1,5 +1,7 @@
 """
-main.py  v4.5
+main.py  v4.6
+v4.6  2026-08-23  AUDIT F9: _safe_strategy reports a FIRE to the gate
+      reporter, which is the only way a block ever clears (gate_report v4.1).
 v4.5  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -1858,6 +1860,15 @@ def _safe_strategy(name: str, fn, ctx=None):
         # note can never influence what it records.
         if ctx is not None:
             _note_evaluation(name, ctx, sig)
+        if sig is not None:
+            # v4.6 — the fire clears the block. Reporting only; wrapped.
+            try:
+                from analysis.gate_report import get_gate_reporter
+                _r = get_gate_reporter(INSTRUMENT)
+                if _r is not None:
+                    _r.fired(name)
+            except Exception:                                  # noqa: BLE001
+                pass
         return sig
     except Exception as exc:                       # noqa: BLE001
         logger.error("%s raised during dispatch — SKIPPED, continuing to the "
