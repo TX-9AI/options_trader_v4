@@ -1,5 +1,5 @@
 """
-derived/character_engine.py  v4.0
+derived/character_engine.py  v4.1
 Owns `character_ledger`. Transitions, not per-tick values.
 
 v4.0  2026-08-25  See analysis/character.py for the measurement and the
@@ -37,7 +37,15 @@ from derived.base import DerivedEngine
 logger = logging.getLogger(__name__)
 
 # Vol baseline window: how many prior readings define "normal for this symbol".
-BASELINE_N = 40
+# 🔴 F5: BASELINE_N=40 AT A 15s CADENCE SPANNED TEN MINUTES — and the value it
+# sampled is a 120-bar realised vol, so the "baseline" was two bars deep. A
+# tripling of volatility showed vol_ratio 1.000 for the next 150 ticks because
+# the spike had already walked into the baseline it was being compared against.
+# ⚠️ THE FIX IS A STRIDE, NOT A BIGGER N. Sampling every tick makes the window
+# short in TIME however many samples it holds; sampling every Nth tick makes 60
+# samples span a session.
+BASELINE_STRIDE_S = 300.0        # one sample per 5 minutes
+BASELINE_N = 60                  # 60 samples x 5 min = ~5 hours, a session
 
 
 def _f(v) -> Optional[float]:
@@ -62,7 +70,9 @@ class CharacterEngine(DerivedEngine):
         self._since: float = 0.0
         self._row_id: Optional[int] = None
         self._vol_hist: list = []
+        self._last_sample_ts: float = 0.0
         self._made = False
+        self._hydrated = False
 
     def _ensure(self):
         if self._made or self._store is None:
@@ -107,6 +117,25 @@ class CharacterEngine(DerivedEngine):
             self._store.conn.execute(
                 "CREATE INDEX IF NOT EXISTS ix_char_sym "
                 "ON character_ledger(symbol, entered_ts)")
+            # ⚠️ THE SAMPLE TABLE IS SEPARATE FROM THE LEDGER ON PURPOSE. The
+            # ledger holds TRANSITIONS (a state with a duration); this holds
+            # raw axis readings. Merging them would put two different objects
+            # in one table and make "how many character changes today" a query
+            # that has to filter.
+            self._store.conn.execute("""
+                CREATE TABLE IF NOT EXISTS character_axis_sample (
+                    symbol     TEXT NOT NULL,
+                    ts_epoch   REAL NOT NULL,
+                    efficiency REAL,
+                    vol_ratio  REAL,
+                    close_capture REAL,
+                    realised_vol_cc REAL,
+                    realised_vol_parkinson REAL,
+                    adx        REAL,
+                    atr_normalized REAL,
+                    price      REAL,
+                    PRIMARY KEY (symbol, ts_epoch)
+                );""")
             self._made = True
         except Exception as exc:                                # noqa: BLE001
             logger.debug("character_ledger table: %s", exc)
@@ -138,9 +167,37 @@ class CharacterEngine(DerivedEngine):
         except Exception:                                       # noqa: BLE001
             return []
 
+    def _hydrate(self) -> None:
+        """Adopt today's open row as the incumbent. Runs once.
+
+        🔴 F5: `_state`, `_row_id` and `_vol_hist` were PROCESS MEMORY. A
+        restart left the open row's `held_s` NULL forever and inserted a
+        margin-free spurious transition, because the displacement check
+        compares against an incumbent the new process does not have.
+        ⚠️ THE LEDGER IS THE INCUMBENT, not the process. Same rule the plan
+        ledger already follows.
+        """
+        if self._hydrated or self._store is None:
+            return
+        self._hydrated = True
+        try:
+            self._ensure()
+            row = self._store.conn.execute(
+                "SELECT id, character, entered_ts FROM character_ledger"
+                " WHERE symbol=? AND exited_ts IS NULL"
+                " ORDER BY entered_ts DESC LIMIT 1", (self.symbol,)).fetchone()
+            if row:
+                self._row_id, self._state, self._since = row[0], row[1], row[2]
+                logger.info("[character] resumed %s from the ledger "
+                            "(open since %.0f)", self._state, self._since)
+        except Exception as exc:                                # noqa: BLE001
+            logger.debug("character hydrate: %s", exc)
+
     def derive(self, ctx: dict) -> int:
-        from analysis.character import (persistence, volatility_state,
-                                        read_character, qualifies_to_displace)
+        self._hydrate()
+        from analysis.character import (efficiency, close_capture,
+                                        volatility_state, read_character,
+                                        qualifies_to_displace)
         if self._store is None:
             return 0
         cc = _f(ctx.get("realised_vol_cc"))
@@ -150,7 +207,11 @@ class CharacterEngine(DerivedEngine):
         # ⚠️ NOT AN ABSOLUTE THRESHOLD — see analysis/character.py. A rolling
         # median is used rather than a mean so one spike cannot redefine
         # "normal" for the rest of the session.
-        if cc is not None:
+        # ⚠️ STRIDED. See BASELINE_STRIDE_S — appending every tick made the
+        # baseline a ten-minute window wearing a 40-sample costume.
+        now_s = time.time()
+        if cc is not None and (now_s - self._last_sample_ts) >= BASELINE_STRIDE_S:
+            self._last_sample_ts = now_s
             self._vol_hist.append(cc)
             if len(self._vol_hist) > BASELINE_N:
                 self._vol_hist.pop(0)
@@ -159,9 +220,46 @@ class CharacterEngine(DerivedEngine):
             s = sorted(self._vol_hist)
             base = s[len(s) // 2]
 
-        p = persistence(cc, pk)
+        # ⚠️ EFFICIENCY NEEDS THE CLOSES, not two vol estimates. df_5m is on
+        # ctx from `assemble_market_state`; a missing frame yields None, which
+        # the ledger records as "not measurable" rather than a midpoint.
+        _closes = None
+        try:
+            _df = ctx.get("df_5m")
+            if _df is not None and len(_df):
+                _closes = list(_df["close"].tail(120))
+        except Exception:                                       # noqa: BLE001
+            _closes = None
+        p = efficiency(_closes) if _closes else None
+        cap = close_capture(cc, pk)
         vr = volatility_state(cc, base)
         challenger = read_character(p, vr)
+
+        # 🔴 THE AXES ARE SAMPLED EVEN WHEN NO STATE IS EMITTED. With
+        # BANDS_SET=False `challenger` is always None, so the transition path
+        # below never runs — and without this the ledger would record NOTHING,
+        # which defeats the whole reason for holding the bands back. **The
+        # sample IS the deliverable right now**: one session of real efficiency
+        # values is what the bands get derived from.
+        # ⚠️ STRIDED, NOT PER TICK. A 15s cadence would write ~1,560 rows per
+        # symbol-day to answer a question a few hundred answers just as well.
+        try:
+            if p is not None or vr is not None:
+                if (now_s - getattr(self, "_last_axis_ts", 0.0)) >= BASELINE_STRIDE_S:
+                    self._last_axis_ts = now_s
+                    self._ensure()
+                    self._store.conn.execute(
+                        "INSERT INTO character_axis_sample (symbol, ts_epoch,"
+                        " efficiency, vol_ratio, close_capture, realised_vol_cc,"
+                        " realised_vol_parkinson, adx, atr_normalized, price)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (self.symbol, now_s, p, vr, cap, cc, pk,
+                         _f(getattr(ctx.get("trend"), "primary_adx", None)),
+                         _f(getattr(ctx.get("vol"), "atr_normalized", None)),
+                         _f(ctx.get("price"))))
+                    self._store.commit()
+        except Exception as exc:                                # noqa: BLE001
+            logger.debug("axis sample: %s", exc)
 
         if not qualifies_to_displace(self._state, challenger, p, vr):
             return 0
