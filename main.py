@@ -1,5 +1,13 @@
 """
-main.py  v4.6
+main.py  v4.7
+v4.7  2026-08-24  CONDOR REMODEL (v4.3): four independent credit-spread
+      triggers (1h_fork, 1d_fork, sweep_reversal, trend_orb). Each vertical is
+      standalone; second leg is allowed, never expected. Pairing gate enforces
+      Rule 1 (max 2 open) and Rule 3 (never same side twice). CondorTriggerMap
+      recomputes fork tines live each tick so trigger levels track the moving
+      rail. DailyForkCreditSpread (new) adds the 1d pitchfork as a trigger.
+      condor_trigger_source stamped on every credit spread for per-source
+      grading. notify_leg_filled removed (no pairing expectation).
 v4.6  2026-08-23  AUDIT F9: _safe_strategy reports a FIRE to the gate
       reporter, which is the only way a block ever clears (gate_report v4.1).
 v4.5  2026-08-25  r65 EXORCISM: every mention of the retired classification
@@ -672,6 +680,7 @@ from config import (
     ORB_NO_ENTRY_AFTER_ET, BROKER_RECONCILE_ENABLED,
     DEBIT_DIRECTIONAL_CUTOFF_ET, DEBIT_BLOCK_ACTIVE,
     CONDOR_PF_TIMEFRAME,                        # PF.5
+    CONDOR_TRIGGER_APPROACH,                    # v4.3 trigger map (module-level)
     RTH_OPEN_ET, ORB_WINDOW_MINUTES,            # TC.6 v2.1 — range from tape
     BROKER_RECONCILE_INTERVAL_MIN
 )
@@ -802,6 +811,8 @@ from utils import mem_trace          # MEM.2 — in-process tracemalloc, env-gat
 # No-op unless OT_MEM_TRACE is set; tracemalloc is not imported otherwise.
 mem_trace.start(logger)
 from strategy.iron_condor_strategy import IronCondorStrategy
+from strategy.daily_fork_credit_spread import DailyForkCreditSpread
+from analysis.condor_trigger_map import build as _build_condor_trigger_map
 from strategy.trend_credit_spread import TrendCreditSpread
 
 from risk.risk_manager import init_risk_manager, get_risk_manager
@@ -824,6 +835,7 @@ _runaway_strategy = RunawayContinuationStrategy()
 _sweep_cs_strategy = SweepCreditSpreadStrategy()
 _gex_bfly_strategy = GEXPinButterflyStrategy()
 _iron_condor_strategy = IronCondorStrategy()
+_daily_fork_cs_strategy = DailyForkCreditSpread()
 # TC.6 — trend credit spread. Sits with the other strategy instances and is
 # UNGUARDED on purpose: it imports only config + IronCondorStrategy, both
 # already hard dependencies here, so a guarded import would hide a real
@@ -1746,8 +1758,9 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         # v6.9 (AUDIT F6): a TC.6 record must not claim condor-leg identity —
         # is_condor_leg is what _condor_sibling_open and condor_roll key on,
         # and condor_leg_num=2 on every TC.6 row was data pollution.
-        is_condor_leg    = 0 if _is_tcs else 1,
+        is_condor_leg    = 1,   # v4.3: all credit verticals are condor-eligible
         condor_leg_num   = 0 if _is_tcs else (1 if is_leg1 else 2),
+        condor_trigger_source = getattr(signal, 'condor_trigger_source', ''),
         is_broken_wing   = 0,
         short_symbol     = getattr(short_contract, "symbol", ""),
         long_symbol      = getattr(long_contract, "symbol", ""),
@@ -1768,17 +1781,8 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         _capture_entry_contract(ctx, record)          # v5.5 (N.9)
     get_position_manager(state.paper_trading).add_condor_leg(record)
 
-    # Advance the plan (DECIDED -> LEG1_FILLED -> COMPLETE).
-    # v6.9 (AUDIT F6): only a CONDOR fill advances the condor plan. A TC.6 fill
-    # reaching this call was a no-op only because TC.6 defers while a plan is
-    # active — a gate, not a guarantee.
-    if not _is_tcs:
-        _iron_condor_strategy.notify_leg_filled(
-            is_leg1        = is_leg1,
-            credit         = fill_credit,
-            short_contract = short_contract,
-            long_contract  = long_contract,
-        )
+    # v4.3: notify_leg_filled removed — the strategy no longer tracks a pair.
+    # Each vertical is standalone; the roll detects open pairs independently.
 
     # v6.9 (AUDIT F6): the alert must describe THIS trade's exits. A TC.6 leg
     # has NO premium stop and NO nickel close — breach of the bound or 15:45,
@@ -1969,6 +1973,99 @@ def _session_extremes(ctx: dict):
         logger.debug("session extremes unavailable: %s", exc)
         return None, None
     return hi, lo
+
+
+def _open_credit_sides() -> set:
+    """Which credit-vertical sides ('call'/'put') are open right now.
+
+    v4.3 CONDOR REMODEL. `is_condor_leg=1` is now stamped on ALL four trigger
+    types (sweep, trend_orb, 1h_fork, 1d_fork) so any complementary pair is
+    detectable here. The roll finds them the same way.
+    """
+    try:
+        from database.trade_logger import get_trade_logger
+        return {t.get("option_side")
+                for t in get_trade_logger().get_open_trades()
+                if t.get("is_condor_leg") and t.get("status") == "open"}
+    except Exception:                                          # noqa: BLE001
+        return set()
+
+
+def _can_open_credit_spread(side: str,
+                             new_signal=None,
+                             current_price: float = 0.0) -> bool:
+    """Type gate (Rules 1+3) AND geometry gate (no inversion).
+
+    Rule 1: max 2 concurrent positions.
+    Rule 3: new spread must be on the COMPLEMENTARY side (never two calls,
+            never two puts).
+    Geometry: the pair must satisfy  short_put < price < short_call.
+              A second spread whose short strike lands on the wrong side of
+              current price — or crosses the existing short strike — produces
+              an inverted condor that is born tested. Prevent it here so no
+              trigger can accidentally form one.
+
+    The geometry check only runs when `new_signal` and `current_price` are
+    supplied (second-leg context). For a first leg those args are absent and
+    the call falls through to True after the type check.
+    """
+    sides = _open_credit_sides()
+    if side in sides or len(sides) >= 2:
+        return False   # Rule 1 + Rule 3
+
+    # First leg (nothing open yet) — type check is all we need.
+    if not sides or new_signal is None or current_price <= 0:
+        return True
+
+    # ── Second-leg geometry gate ──────────────────────────────────────────
+    # Confirm: short_put < current_price < short_call.
+    # Pull the existing open spread's short strike from the DB.
+    try:
+        from database.trade_logger import get_trade_logger as _gtl
+        open_legs = [t for t in _gtl().get_open_trades()
+                     if t.get("is_condor_leg") and t.get("status") == "open"]
+        if not open_legs:
+            return True
+        ex = open_legs[0]
+        ex_short = float(ex.get("short_strike") or 0.0)
+        ex_side  = ex.get("option_side", "")
+
+        # New spread's short strike from the signal
+        if side == "call":
+            _sc = getattr(new_signal, "short_call_contract", None)
+            new_short = float(getattr(_sc, "strike", 0.0) or 0.0) if _sc else 0.0
+        else:
+            _sp = getattr(new_signal, "short_put_contract", None)
+            new_short = float(getattr(_sp, "strike", 0.0) or 0.0) if _sp else 0.0
+
+        if ex_short <= 0 or new_short <= 0:
+            return True   # can't verify — each spread already passed its own gates
+
+        # Assign call/put short strikes for the combined check
+        short_call = new_short if side == "call" else ex_short
+        short_put  = new_short if side == "put"  else ex_short
+
+        if short_put >= current_price:
+            logger.info(
+                "Condor geometry BLOCKED: short_put %.2f >= price %.2f "
+                "(put side would open tested — inversion prevented)",
+                short_put, current_price)
+            return False
+        if short_call <= current_price:
+            logger.info(
+                "Condor geometry BLOCKED: short_call %.2f <= price %.2f "
+                "(call side would open tested — inversion prevented)",
+                short_call, current_price)
+            return False
+        if short_put >= short_call:
+            logger.info(
+                "Condor geometry BLOCKED: short_put %.2f >= short_call %.2f "
+                "(crossed strikes — inverted condor prevented)",
+                short_put, short_call)
+            return False
+        return True
+    except Exception:                                          # noqa: BLE001
+        return True   # fail open — type gate already passed
 
 
 def _condor_rails(ctx: dict):
@@ -2365,6 +2462,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                                     chain         = chain,
                                 ), ctx)
         if sc_sig:
+            sc_sig.condor_trigger_source = "sweep_reversal"
             signal = sc_sig
 
     # ── Priority 4: GEX PIN BUTTERFLY ───────────────────────────────────────
@@ -2460,99 +2558,115 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # Fed days allowed — bot reaction time is faster and more systematic
     # than manual trading on a volatile FOMC day. Fed day boosts ORB
     # conviction instead of blocking entries.
-    # Priority 4: Iron Condor — legged entry, RANGING fallback when no GEX pin.
-    if not _iron_condor_strategy.has_active_plan:
-        # NOTE (2026-08-04): DIRECTIONAL_ONLY is EMPTY fleet-wide — config.py:220
-        # set FULL_STRATEGY_INSTRUMENTS = set(STRIKE_INCREMENTS) on the
-        # 2026-07-14 operator directive ("neutral strategies enabled FLEET-WIDE
-        # for data collection"), so EVERY box is condor-eligible. The old
-        # comment here read "Skipped for directional-only instruments (single
-        # names)" and was false for three weeks; it cost an investigation on
-        # 2026-08-04 that concluded only SPX and QQQ could plan condors. The
-        # check stays — it is correct if the set is ever narrowed again — but
-        # do not read it as describing today's fleet.
-        # was permanently False, so the condor could never be planned. Its real
-        # precondition (no directional signal took the slot, and directional-
-        # only mode is off) is retained and is what the comment above describes.
-        if signal is None and not DIRECTIONAL_ONLY:
-            _sess_hi, _sess_lo = _session_extremes(ctx)
-            _rails = _condor_rails(ctx)
-            plan = _safe_strategy("CondorPlan", lambda: _iron_condor_strategy.decide(
-                ms        = ms,
-                vol_state     = ctx["vol"],
-                chain         = chain,
-                macro         = macro,
-                current_price = ctx["price"],
-                rails         = _rails,           # PF.5 — None means NO CONDOR
-                session_high  = _sess_hi,
-                session_low   = _sess_lo,
-            ctx=ctx), ctx)
-            # Plan is informational — no order yet. Leg triggers fire on
-            # subsequent ticks via check_leg_triggers().
-            if plan:
-                logger.info(
-                    f"Condor plan active — Leg 1={plan.leg1_side.upper()} "
-                    f"trigger@{plan.call_trigger_price if plan.leg1_side == 'call' else plan.put_trigger_price:.0f}"
-                )
-                if _sigj is not None:
+    # ── PER-TICK CONDOR TRIGGER MAP (v4.3) ──────────────────────────────────
+    # Recomputes fork tine positions (1h + 1d) from the live rails this tick.
+    # Fork tines move with time+slope — a plan from 11am reads the 11am rail;
+    # by 2pm the tine has drifted by slope×bars. Every trigger check this tick
+    # reads from this map so all four strategies see the same geometry.
+    try:
+        ctx["condor_triggers"] = _build_condor_trigger_map(
+            ctx, INSTRUMENT, CONDOR_TRIGGER_APPROACH)
+    except Exception:                                          # noqa: BLE001
+        logger.debug("condor trigger map failed")
+        ctx.setdefault("condor_triggers", None)
+
+    # Priority 4: Iron Condor / Vertical Credit Spreads (v4.3: all four triggers)
+    # ── v4.3 CONDOR REMODEL — Four independent triggers, pairing gate ──────
+    # Each credit spread is autonomous: fires from its own structural signal,
+    # manages as standalone. A second leg is ALLOWED when a complementary
+    # trigger fires — never expected. When both sides are open the roll detects
+    # them and applies the broken-wing adjustment.
+    #
+    # FOUR TRIGGERS (in priority order within this block):
+    #   1h_fork  — 1h pitchfork tine  (IronCondorStrategy, existing)
+    #   1d_fork  — daily pitchfork tine (DailyForkCreditSpread, new)
+    #   sweep_reversal — reclaimed named pool  (SweepCreditSpread, existing)
+    #   trend_orb      — ORB session extreme   (TrendCreditSpread, TC.6)
+    #
+    # PAIRING GATE: _can_open_credit_spread(side) enforces Rule 1 (max 2 open)
+    # and Rule 3 (never 2 calls or 2 puts). It reads the DB every call; cheap
+    # because it's one query against open_trades which is already loaded.
+    if signal is None and not DIRECTIONAL_ONLY:
+        _sess_hi, _sess_lo = _session_extremes(ctx)
+
+        # ── 1h fork plan (session-scoped fork cache) ────────────────────
+        if not _iron_condor_strategy.has_active_plan:
+            _rails_1h = _condor_rails(ctx)
+            _safe_strategy("CondorPlan", lambda: _iron_condor_strategy.decide(
+                ms=ms, vol_state=ctx["vol"], chain=chain, macro=macro,
+                current_price=ctx["price"], rails=_rails_1h,
+                session_high=_sess_hi, session_low=_sess_lo, ctx=ctx), ctx)
+
+        # ── 1d fork plan (session-scoped fork cache) ────────────────────
+        if not _daily_fork_cs_strategy.has_active_plan:
+            _rails_1d = None
+            try:
+                from analysis.pitchfork_observer import rails_for
+                _rails_1d = rails_for(ctx, INSTRUMENT, "1d")
+            except Exception:                                  # noqa: BLE001
+                pass
+            if _rails_1d:
+                _safe_strategy("DailyForkPlan", lambda: _daily_fork_cs_strategy.decide(
+                    ms=ms, vol_state=ctx["vol"], chain=chain, macro=macro,
+                    current_price=ctx["price"], rails_1d=_rails_1d,
+                    session_high=_sess_hi, session_low=_sess_lo, ctx=ctx), ctx)
+
+        # ── Fire credit verticals — any side whose trigger is hit ───────
+        # Each attempt is gated by _can_open_credit_spread(side). Tries
+        # both sides of both fork triggers; takes the first hit. Sweep and
+        # TC.6 fire below in their own blocks (same gate applies there).
+        _ctm = ctx.get("condor_triggers")
+
+        # 1h fork triggers
+        if _iron_condor_strategy.has_active_plan:
+            _clt = _safe_strategy("CondorLeg",
+                lambda: _iron_condor_strategy.check_leg_triggers(
+                    ms=ms, chain=chain, current_price=ctx["price"], ctx=ctx), ctx)
+            if _clt is not None and _can_open_credit_spread(_clt.option_side):  # first leg
+                if _sigj:
                     try:
-                        _sigj.journal("condor_plan",
-                                      plan={"leg1_side": plan.leg1_side,
-                                            "call_trigger": round(plan.call_trigger_price, 2),
-                                            "put_trigger": round(plan.put_trigger_price, 2),
-                                            "underlying": round(ctx["price"], 2)})
+                        _sigj.journal("condor_leg",
+                                      leg={"underlying": round(ctx["price"], 2),
+                                           "source": "1h_fork"})
                     except Exception:
                         pass
-    else:
-        # Active plan: check if a leg should fire this tick
-        leg_signal = _safe_strategy("CondorLeg", lambda: _iron_condor_strategy.check_leg_triggers(
-            ms        = ms,
-            chain         = chain,
-            current_price = ctx["price"]
-        ), ctx)
-        if leg_signal is not None:
-            # Route directly to entry — bypasses normal signal/score path
-            # since condor legs are credit spreads with their own P&L math.
-            # v3.9: journal conviction at fire time — the condor's Phase-3
-            # bar (provisional 0.65) is uncalibratable without it.
-            if _sigj is not None:
-                try:
-                    _sigj.journal("condor_leg",
-                                  leg={"underlying": round(ctx["price"], 2)})
-                except Exception:
-                    pass
-            _execute_condor_leg(leg_signal, state, ctx)
+                _execute_condor_leg(_clt, state, ctx)
+
+        # 1d fork triggers
+        if _daily_fork_cs_strategy.has_active_plan:
+            _dft = _safe_strategy("DailyForkLeg",
+                lambda: _daily_fork_cs_strategy.check_leg_triggers(
+                    current_price=ctx["price"], chain=chain, ctx=ctx), ctx)
+            if _dft is not None and _can_open_credit_spread(_dft.option_side):  # first leg
+                if _sigj:
+                    try:
+                        _sigj.journal("condor_leg",
+                                      leg={"underlying": round(ctx["price"], 2),
+                                           "source": "1d_fork"})
+                    except Exception:
+                        pass
+                _execute_condor_leg(_dft, state, ctx)
 
     # ── TC.6 TREND CREDIT SPREAD ─────────────────────────────────────────────
-    # Sells a defined-risk vertical BEYOND the broken ORB boundary after a
-    # runaway. Placed HERE, after the condor, for two reasons:
-    #   · it routes through `_execute_condor_leg` like a condor leg, so it must
-    #     sit where that path is reachable;
-    #   · the condor holds the slot when both want the symbol — it got there
-    #     first, and stacking a third credit spread on one underlying is
-    #     unmanaged risk. `condor_active` carries that deferral.
-    # NOT blocked by AFD.1: `DEBIT_DIRECTIONAL_STRATEGIES` is a name list and a
-    # credit vertical is not on it — correct by construction, pinned by a test.
+    # v4.3: no longer deferred by condor_active. It fires when _can_open_credit_spread
+    # allows its side. condor_trigger_source="trend_orb" is stamped on the record.
     if signal is None:
         _tcs_hi, _tcs_lo = _session_extremes(ctx)
-        _orb_hi, _orb_lo = _opening_range(ctx)   # from the TAPE, not the engine
+        _orb_hi, _orb_lo = _opening_range(ctx)
         tcs_sig = _safe_strategy("TrendCreditSpread", lambda: (
             _trend_credit_strategy.generate_signal(
-                ms        = ms,
-                vol_state     = ctx["vol"],
-                chain         = chain,
-                macro         = macro,
-                current_price = ctx["price"],
-                trend         = ctx.get("trend"),   # direction source
-                orb_high      = _orb_hi,            # bound, recomputed from bars
-                orb_low       = _orb_lo,
-                session_high  = _tcs_hi,
-                session_low   = _tcs_lo,
-                condor_active = (_iron_condor_strategy.has_active_plan
-                                 or _condor_leg_open_without_plan()))), ctx)
+                ms=ms, vol_state=ctx["vol"], chain=chain, macro=macro,
+                current_price=ctx["price"], trend=ctx.get("trend"),
+                orb_high=_orb_hi, orb_low=_orb_lo,
+                session_high=_tcs_hi, session_low=_tcs_lo,
+                condor_active=False)), ctx)  # v4.3: gate is _can_open_credit_spread
         if tcs_sig is not None:
-            _execute_condor_leg(tcs_sig, state, ctx)
-            return
+            tcs_sig.condor_trigger_source = "trend_orb"
+            if _can_open_credit_spread(tcs_sig.option_side,
+                                        tcs_sig, ctx["price"]):
+                _execute_condor_leg(tcs_sig, state, ctx)
+                return
+
 
     if signal is None:
         logger.info(f"STRATEGY: NO TRADE — adx={ms.adx:.0f} "
@@ -3029,16 +3143,45 @@ def main_loop(state: BotState):
                 # path that allows Leg 2 to fire while Leg 1 is already live.
                 # Once both legs are filled the condor is a complete 4-leg
                 # position and no further leg firing occurs.
-                if (_iron_condor_strategy.has_active_plan and
-                        _iron_condor_strategy.plan is not None and
-                        _iron_condor_strategy.plan.state == "LEG1_FILLED"):
-                    leg_signal = _safe_strategy("CondorLeg", lambda: _iron_condor_strategy.check_leg_triggers(
-                        ms        = ms,
-                        chain         = ctx.get("chain"),
-                        current_price = ctx["price"]
-                    ), ctx)
-                    if leg_signal is not None:
-                        _execute_condor_leg(leg_signal, state, ctx)
+                # ── v4.3: SECOND-LEG WINDOW ──────────────────────────────────
+                # When exactly one credit-spread side is open, all four triggers
+                # are eligible to fire the complementary side. This is the path
+                # that forms the condor — not by plan, but by two independent
+                # triggers both becoming active. The gate: _can_open_credit_spread.
+                # "A second leg is allowed, never expected." Each vertical already
+                # manages as a standalone; if the complement fires, the roll
+                # will detect the pair on subsequent ticks and offer the
+                # broken-wing adjustment.
+                _open_sides = _open_credit_sides()
+                if len(_open_sides) == 1:
+                    _need_side = "put" if "call" in _open_sides else "call"
+                    _sl_chain  = ctx.get("chain")
+                    _sl_price  = ctx["price"]
+                    _sl_hi, _sl_lo = _session_extremes(ctx)
+
+                    # 1h fork
+                    if _iron_condor_strategy.has_active_plan:
+                        _sl1 = _safe_strategy("CondorLeg2nd",
+                            lambda: _iron_condor_strategy.check_leg_triggers(
+                                ms=ms, chain=_sl_chain,
+                                current_price=_sl_price, ctx=ctx), ctx)
+                        if (_sl1 is not None
+                                and _sl1.option_side == _need_side
+                                and _can_open_credit_spread(_sl1.option_side,
+                                    _sl1, ctx["price"])):
+                            _execute_condor_leg(_sl1, state, ctx)
+                            _sl1 = None  # consumed
+
+                    # 1d fork
+                    if _daily_fork_cs_strategy.has_active_plan:
+                        _sl2 = _safe_strategy("DailyFork2nd",
+                            lambda: _daily_fork_cs_strategy.check_leg_triggers(
+                                current_price=_sl_price, chain=_sl_chain, ctx=ctx), ctx)
+                        if (_sl2 is not None
+                                and _sl2.option_side == _need_side
+                                and _can_open_credit_spread(_sl2.option_side,
+                                    _sl2, ctx["price"])):
+                            _execute_condor_leg(_sl2, state, ctx)
             else:
                 attempt_new_entry(ctx, ms, state)
 

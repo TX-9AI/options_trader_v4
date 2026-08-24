@@ -1,5 +1,9 @@
 """
-strategy/base_strategy.py  v4.1
+strategy/base_strategy.py  v4.2
+v4.2  2026-08-24  CONDOR REMODEL: add condor_trigger_source to OptionsSignal
+      so every credit spread records which trigger fired it (1h_fork, 1d_fork,
+      sweep_reversal, trend_orb) enabling per-source grading. Paired with the
+      same column in trades (trade_logger v4.2).
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -116,6 +120,13 @@ class OptionsSignal:
     vix_at_signal:  float = 0.0
     is_fed_day:     bool  = False
     notes:          str   = ""
+
+    # ── Condor / vertical pairing ─────────────────────────────────────────
+    # Which trigger produced this spread. Written to the trades row so each
+    # leg can be graded independently (the point of this remodel).
+    # Values: "1h_fork", "1d_fork", "sweep_reversal", "trend_orb", "".
+    # Empty on non-credit-spread signals.
+    condor_trigger_source: str = ""
 
     @property
     def is_orb(self) -> bool:

@@ -193,9 +193,31 @@ def main(argv):
         check("leg 1 alone stops at 15%, like the sweep credit spread "
               "(EXECUTED: -16%% on a lone leg exits)",
               d_16_alone.should_exit and "condor_stop" in d_16_alone.exit_reason)
-        check("the stop only widens once there is offsetting credit "
-              "(EXECUTED: -16%% hedged holds, -26%% hedged exits)",
-              (not d_16_hedged.should_exit) and d_26_hedged.should_exit)
+        # 🔴 REWRITTEN 2026-08-24 TO THE OPERATOR'S RULING. This asserted the
+        # OLD 15/25 split — a hedged leg held at -16%% and EXITED at -26%%.
+        # The ruling supersedes it: *"the 25%% stop should only apply to a lone
+        # vertical spread — never the condor"*, and the management ladder for a
+        # FORMED condor is *"roll the untested side, if false then inverted
+        # butterfly, if false then close the position"* — structural decisions,
+        # not a premium percentage.
+        # ⚠️ THE OLD ASSERTION WAS NOT MERELY OUTDATED, IT ENCODED THE HARM. A
+        # per-leg stop on a formed condor closes the TESTED side, which is the
+        # side the roll needs — so the stop guillotined the adjustment before it
+        # could act, and 5 of 14 condor symbol-days had BOTH sides stopped.
+        # ⚠️ AND IT MUST STILL BE ABLE TO FAIL: a hedged leg deep underwater
+        # must NOT exit on premium, and a lone leg at the same depth MUST. Both
+        # directions are asserted, so "no stop at all anywhere" fails this too.
+        d_40_hedged = eng._evaluate_condor_leg(_leg(True), 1.40)
+        d_26_alone  = eng._evaluate_condor_leg(_leg(False), 1.26)
+        check("a FORMED condor has NO per-leg premium stop "
+              "(EXECUTED: hedged holds at -16%%, -26%% and -40%%)",
+              (not d_16_hedged.should_exit) and (not d_26_hedged.should_exit)
+              and (not d_40_hedged.should_exit),
+              f"16={d_16_hedged.should_exit} 26={d_26_hedged.should_exit} "
+              f"40={d_40_hedged.should_exit}")
+        check("a LONE leg still stops — the floor is not removed everywhere "
+              "(EXECUTED: -26%% alone exits)",
+              d_26_alone.should_exit and "condor_stop" in d_26_alone.exit_reason)
     finally:
         XE.datetime = _real_dt
 

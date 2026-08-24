@@ -130,29 +130,47 @@ def a3():
     strat._orphan_said = False
     strat._last_reset_date = None
     strat._ledger = lambda: led                      # inject, no registry
-    # a plan with the PUT side already filled; the CALL fill completes it
-    plan = types.SimpleNamespace(state=ics.CondorState.LEG1_FILLED, pending_side="call",
-                                 leg1_side="put", leg2_side="call", call_filled=False,
-                                 put_filled=True, leg1_credit=0.5, max_price_seen=None,
-                                 min_price_seen=None, short_call_strike=0, long_call_strike=0,
+    # ⚠️ REWRITTEN 2026-08-24 FOR THE CONDOR REMODEL. The original drove
+    # `notify_leg_filled` on a LEG1_FILLED plan with leg1_side/leg2_side — the
+    # PAIR-EXPECTATION MACHINERY, which the remodel deliberately deleted
+    # because the legs are now independently gated and a second leg is ALLOWED,
+    # NEVER EXPECTED. The test referenced `CondorState`, which no longer
+    # exists, so it failed on an AttributeError rather than on the invariant.
+    # 🔑 THE INVARIANT SURVIVES THE REMODEL AND IS WHAT F6 ACTUALLY PROTECTS:
+    # a plan that is abandoned MUST close its ledger row. An unclosed row means
+    # status.py shows a plan that does not exist, forever — the immortal
+    # LEG1_FILLED rows Fable found. The remodel renamed the mechanism to
+    # `_ledger_expire`; the requirement is unchanged.
+    plan = types.SimpleNamespace(max_price_seen=None, min_price_seen=None,
+                                 short_call_strike=0, long_call_strike=0,
                                  short_put_strike=0, long_put_strike=0,
                                  underlying_at_decision=0, expected_move=0)
     strat._plan = plan
     strat._ledger_open(plan, {})
     pid = strat._plan_id
-    led.transition(pid, "LEG1_FILLED")
-    strat.notify_leg_filled(False, 0.4, None, None)
+    strat._ledger_expire("past_cutoff")
     row = store.conn.execute("SELECT state, closed_ts FROM plan_ledger WHERE plan_id=?",
                              (pid,)).fetchone()
-    check("A3a leg-2 fill reaches the ledger as COMPLETE with closed_ts",
-          row is not None and row[0] == "COMPLETE" and row[1] is not None,
+    check("A3a an abandoned plan closes its ledger row (no immortal rows)",
+          row is not None and row[1] is not None,
           f"row={row}")
+    # ⚠️ AND THE ID IS RELEASED, or the next expire silently re-closes the old
+    # row while the new plan stays open forever.
+    check("A3a2 _plan_id is released after expire",
+          strat._plan_id is None, f"_plan_id={strat._plan_id}")
     # fork-invalidation cancel path: the DECIDED branch must record CANCELLED
     src = open(os.path.join(ROOT, "strategy", "iron_condor_strategy.py"), encoding="utf-8").read()
-    i = src.find('self._journal_abandon(plan, _a, "fork_invalidated")')
-    seg = src[i:i + 400] if i >= 0 else ""
-    check("A3b fork-invalidation cancel calls _ledger_move(\"CANCELLED\"",
-          '_ledger_move("CANCELLED"' in seg, "no ledger move in the fork_invalidated branch")
+    # ⚠️ EVERY abandon path must close the row, not just the one that had a
+    # bug. The remodel has four: new day, fork invalidated, past cutoff,
+    # session end. A path that clears `self._plan` without telling the ledger
+    # is the immortal-row bug returning by a different door.
+    import re as _re
+    abandons = _re.findall(r"\n(.{0,400}?self\._plan = None)", src, _re.S)
+    unclosed = [a.strip().splitlines()[0][:60] for a in abandons
+                if "_ledger_expire" not in a and "_ledger_move" not in a
+                and "def " not in a.split("self._plan = None")[0][-80:]]
+    check("A3b every abandon path closes the ledger row",
+          not unclosed, f"paths clearing _plan without a ledger close: {unclosed}")
 
 
 # ── A4 ─────────────────────────────────────────────────────────────────

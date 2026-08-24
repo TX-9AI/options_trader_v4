@@ -7,7 +7,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 ⚠️ **A table with no writer is an orphan. A table nobody reads is dead weight.** Both are visible here and in neither the schema nor the call graph alone.
 
-**24 tables.**
+**25 tables.**
 
 ## (unattributed)
 
@@ -19,6 +19,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 | table | created by | written by | read by |
 |---|---|---|---|
+| `character_axis_sample` | `derived/character_engine.py` | `derived/character_engine.py` (insert) | — |
 | `character_ledger` | `derived/character_engine.py` | `derived/character_engine.py` (insert/update) | — |
 | `exit_counterfactual` | `derived/counterfactual.py` | `derived/counterfactual.py` (insert) | — |
 | `fire_snapshot` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
@@ -51,11 +52,11 @@ Regenerated in the land gate; a stale map fails `--check`.
 | table | created by | written by | read by |
 |---|---|---|---|
 | `circuit_breaker_events` | `database/trade_logger.py` | `database/trade_logger.py` (insert) | — |
-| `trades` | `database/trade_logger.py` | `database/trade_logger.py` (insert/update) | `derived/counterfactual.py`, `notifications/alert_manager.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py` |
+| `trades` | `database/trade_logger.py`, `tests/check_condor_stop_suppression.py` | `database/trade_logger.py` (insert/update), `tests/check_condor_pairing.py` (insert) | `derived/counterfactual.py`, `notifications/alert_manager.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py` |
 
 ## Flags
 
 - **No writer** (0): none
-- **No external reader** (15): `chain_subs_aux`, `character_ledger`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `fork_series`, `gate_disposition`, `indicator_series`, `last_trade`, `level_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
+- **No external reader** (16): `chain_subs_aux`, `character_axis_sample`, `character_ledger`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `fork_series`, `gate_disposition`, `indicator_series`, `last_trade`, `level_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
 
 ⚠️ *No external reader* is not automatically a defect — a table written today for a study run in a month is exactly the point of the derived layer. It IS a defect when nobody ever intends to read it, and this list is where that question gets asked.

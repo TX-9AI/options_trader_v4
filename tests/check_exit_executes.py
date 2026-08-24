@@ -107,8 +107,27 @@ def main(argv):
         check("a LONE leg stops at 15% (-16% exits)",
               d16_alone.should_exit and "condor_stop" in d16_alone.exit_reason,
               f"reason={getattr(d16_alone, 'exit_reason', None)}")
-        check("a HEDGED leg holds -16% and stops at 25% (-26% exits)",
-              (not d16_hedged.should_exit) and d26_hedged.should_exit)
+        # 🔴 REWRITTEN v4.5, 2026-08-24. This asserted the PRE-RULING 15/25
+        # split. The operator's spec is not a WIDER stop on a formed condor,
+        # it is NO PREMIUM STOP AT ALL: "the only stops on a formed condor
+        # should be roll the untested side, if false then inverted butterfly,
+        # if false then close the position."
+        # ⚠️ -26% MUST HOLD TOO — checking only -16% would pass a 25% floor,
+        # which is exactly what the ruling removes.
+        check("a FORMED condor has NO premium stop at any depth "
+              "(-16% and -26% both hold)",
+              (not d16_hedged.should_exit) and (not d26_hedged.should_exit),
+              f"-16%={d16_hedged.should_exit} -26%={d26_hedged.should_exit}")
+        # ⚠️ AND NO RATCHET ON A CREDIT SPREAD. Operator: "ratchet stops are for
+        # debits" — a ratchet protects unrealised gain on something you PAID
+        # for; a credit spread already collected the money and the trade IS the
+        # decay, so tightening because it decays well closes winners early. The
+        # ORB debit path keeps it (trail +50%, ratchet past +100%).
+        eng._condor_sibling_open = lambda r, default=True: False
+        d_win = eng._evaluate_condor_leg(leg(), 0.55)          # +45%
+        check("a profitable LONE leg emits no ratchet",
+              d_win.new_trail_stop is None and not d_win.should_exit,
+              f"trail={d_win.new_trail_stop} exit={d_win.should_exit}")
         # ── 3. the flagship routes to the ORB family (AUDIT F10) ────────────
         sentinel = []
         real_orb = eng._evaluate_orb

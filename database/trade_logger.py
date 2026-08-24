@@ -1,5 +1,19 @@
 """
-database/trade_logger.py  v4.1
+database/trade_logger.py  v4.3
+v4.3  2026-08-24  CONDOR STOP SUPPRESSION: stop_suppressed_ts /
+      stop_suppressed_by columns (schema + migration). Written by exit_engine
+      v4.4 while a complementary condor leg is open, cleared on re-arm.
+      While stop_suppressed_ts is set, condor_stop cannot be the exit —
+      forensics should treat any contrary row as a defect. stop_premium is
+      untouched and remains the immutable entry-time floor.
+
+v4.2  2026-08-24  CONDOR REMODEL: condor_trigger_source column (schema +
+      migration) — which of the four independent triggers produced the
+      credit spread. BACKFILLED BUMP: this change shipped in the r89b
+      archive without a version bump (base_strategy v4.2's changelog even
+      pointed at a literal "trade_logger v(+1)"); recorded here so the
+      header stops lying about the schema.
+
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -306,7 +320,10 @@ class TradeLogger:
         paper_trade       INTEGER DEFAULT 1,
         entry_time        TEXT,
         exit_time         TEXT,
-        notes             TEXT
+        notes             TEXT,
+        condor_trigger_source TEXT DEFAULT '',
+        stop_suppressed_ts TEXT DEFAULT '',
+        stop_suppressed_by TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS circuit_breaker_events (
@@ -404,6 +421,13 @@ class TradeLogger:
             ("exit_ask",          "REAL"),
             ("exit_iv",           "REAL"),
             ("chain_iv_rank",     "REAL"),
+            # v4.3 condor remodel — which trigger produced this credit spread
+            ("condor_trigger_source", "TEXT DEFAULT ''"),
+            # v4.3 condor stop suppression (exit_engine v4.4) — set while a
+            # complement is open, cleared on re-arm. SEPARATE fields, never a
+            # mutation of stop_premium (see update_trail_stop's v3.1 lesson).
+            ("stop_suppressed_ts", "TEXT DEFAULT ''"),
+            ("stop_suppressed_by", "TEXT DEFAULT ''"),
         ]
         for col, definition in _MIGRATION_ADDS:
             try:

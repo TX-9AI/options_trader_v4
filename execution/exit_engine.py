@@ -1,5 +1,21 @@
 """
-execution/exit_engine.py  v4.3
+execution/exit_engine.py  v4.4
+v4.4  2026-08-24  CONDOR STOP SUPPRESSION (operator ruling: "The 25% stop
+      should only apply to a lone vertical spread — never the condor").
+      _evaluate_condor_leg: the per-leg premium stop and ratchet now run ONLY
+      when no complement is open; while the condor is formed they are
+      SUPPRESSED and RE-ARM the moment the leg is alone again (one-way
+      suppression = naked full-sized position). Suppress/re-arm persist as
+      NEW row fields stop_suppressed_ts / stop_suppressed_by (trade_logger
+      v4.3) — stop_premium stays the immutable entry-time floor per the v3.1
+      trail lesson — and are announced edge-triggered at INFO. Lone
+      calibration unchanged at 15% (TRADES.md §5 / F6). The formed structure
+      keeps 15:45 close, nickel close, and the roll; its further loss
+      boundary is an open operator decision (docs/HANDOFF_CONDOR_STOP_
+      20260824.md). Stale CONDOR_STOP_LOSS_PCT import removed (unused here
+      now; main.py still stamps the row floor with it). exit_reason gains
+      "(lone 15%)".
+
 v4.3  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -67,7 +83,7 @@ v4.21 — Strategy-aware exit logic for all options positions.
         below the nickel. The dispatch now routes any record structure.py
         recognises as a credit vertical — both strategy names, legacy rows,
         and the rolled broken wing — to `_evaluate_condor_leg`.
-        (F4) the ratchet high-water lived ONLY in self._condor_ratchet, so
+        (F4, HISTORICAL — the condor ratchet was deleted in v4.5) the
         every bake reset an earned breakeven/+20% lock to the base -25% and
         re-opened the round-trip v4.1 exists to close. The earned level now
         rides the SAME persistence the directional trails use: emitted via
@@ -752,7 +768,7 @@ class ExitEngine:
     def __init__(self, paper_trading: bool = PAPER_TRADING):
         self.paper_trading  = paper_trading
         self._trail_stops:  dict = {}
-        self._condor_ratchet: dict = {}   # v4.1 condor ratcheting stop
+        # v4.5: `self._condor_ratchet` deleted with the ratchet itself.
         self._exhaust_state: dict = {}   # per-trade {ext, mom} for continuation divergence
         self._trail_active: dict = {}
         self._bos_trackers: dict = {}   # trade_id \u2192 BOSTracker (sweep only)
@@ -1474,6 +1490,68 @@ class ExitEngine:
         except Exception:
             return True
 
+    def _condor_sibling_id(self, record) -> str:
+        """v4.4 — trade_id of the open complementary leg, '' if none/unknown.
+        Forensics only; never raises, never drives the suppression decision
+        (that is `_condor_sibling_open`)."""
+        try:
+            from database.trade_logger import get_trade_logger
+            tl = get_trade_logger()
+            if tl is None:
+                return ""
+            me = record.get("option_side", "")
+            for t in tl.get_open_trades():
+                if (t.get("is_condor_leg")
+                        and t.get("symbol") == record.get("symbol")
+                        and t.get("trade_id") != record.get("trade_id")
+                        and t.get("option_side") and t.get("option_side") != me):
+                    return str(t.get("trade_id") or "")
+            return ""
+        except Exception:                                       # noqa: BLE001
+            return ""
+
+    def _sync_stop_suppression(self, record, hedged: bool) -> None:
+        """v4.4 — edge-triggered bookkeeping for the condor stop suppression.
+
+        Writes stop_suppressed_ts / stop_suppressed_by on the SUPPRESS edge
+        and clears them on the RE-ARM edge. NEW FIELDS, not a mutation of
+        stop_premium — trade_logger v3.1 records why overwriting the floor
+        mislabels exits, and this must not re-create that bug in a new
+        disguise. Edge detection reads the persisted field itself, so it is
+        restart-safe with no in-memory state (same reasoning as F4). A
+        suppression and a re-arm are decisions with money attached: both are
+        announced at INFO, once per flip. Bookkeeping failure must never kill
+        the exit evaluation — everything here is best-effort."""
+        try:
+            suppressed = bool(record.get("stop_suppressed_ts"))
+            if hedged and not suppressed:
+                from utils.time_utils import ET
+                ts  = datetime.now(ET).isoformat(timespec="seconds")
+                sib = self._condor_sibling_id(record)
+                record["stop_suppressed_ts"] = ts
+                record["stop_suppressed_by"] = sib
+                if self._trade_logger:
+                    self._trade_logger.update_fields(
+                        record["trade_id"],
+                        stop_suppressed_ts=ts, stop_suppressed_by=sib)
+                logger.info(
+                    "CONDOR STOP SUPPRESSED %s: complement %s open — per-leg "
+                    "premium stop off (operator ruling 2026-08-24); structure "
+                    "managed by roll / nickel / 15:45 close",
+                    str(record.get("trade_id", ""))[:8], (sib or "?")[:8])
+            elif (not hedged) and suppressed:
+                record["stop_suppressed_ts"] = ""
+                record["stop_suppressed_by"] = ""
+                if self._trade_logger:
+                    self._trade_logger.update_fields(
+                        record["trade_id"],
+                        stop_suppressed_ts="", stop_suppressed_by="")
+                logger.info(
+                    "CONDOR STOP RE-ARMED %s: leg is alone again — lone 15%% "
+                    "floor active", str(record.get("trade_id", ""))[:8])
+        except Exception as exc:                                # noqa: BLE001
+            logger.debug("stop-suppression bookkeeping: %s", exc)
+
     @staticmethod
     def _held_minutes(record) -> float:
         try:
@@ -1500,10 +1578,10 @@ class ExitEngine:
           - Leg 2 cancellation on favorable flips handled by check_leg_triggers().
 
         """
-        from config import (CONDOR_NICKEL_CLOSE, CONDOR_STOP_LOSS_PCT,
-                            CONDOR_RATCHET_BE_AT, CONDOR_RATCHET_LOCK_AT,
-                            CONDOR_RATCHET_LOCK_PCT, CONDOR_TP_PCT,
-                            CONDOR_RATCHET_STANDALONE_ONLY,
+        # v4.5: the CONDOR_RATCHET_* imports are gone with the ratchet. A dead
+        # import is this repo's most-repeated bug shape — a guard outliving the
+        # thing it guarded — so it goes in the same commit, not the next one.
+        from config import (CONDOR_NICKEL_CLOSE, CONDOR_TP_PCT,
                             VERTICAL_HOLD_TO_ET, VERTICAL_HOLD_TO_CLOSE,
                             CONDOR_TP_MIN_HOLD_MIN, CONDOR_ENTRY_CUTOFF_ET)
         from utils.time_utils import ET
@@ -1621,69 +1699,61 @@ class ExitEngine:
         # widest bound and is not rewritten. Fail direction: sibling probe
         # error → default False → the TIGHTER stop on a lone leg — less loss,
         # stated per AUDIT.md 5.2.
-        _hedged    = self._condor_sibling_open(record, default=False)
-        _stop_mult = CONDOR_STOP_LOSS_PCT if _hedged else 0.15
-        base_stop  = entry_prem * (1 + _stop_mult)
-        stop_level = base_stop
-        tier = ""
-        if pnl_pct >= CONDOR_RATCHET_LOCK_AT:
-            stop_level = min(stop_level, entry_prem * (1 - CONDOR_RATCHET_LOCK_PCT))
-            tier = f" [locked +{CONDOR_RATCHET_LOCK_PCT:.0%}]"
-        elif pnl_pct >= CONDOR_RATCHET_BE_AT:
-            stop_level = min(stop_level, entry_prem)
-            tier = " [breakeven]"
-        # ── RATCHET SCOPE (v4.2, 2026-08-13 operator ruling) ──────────────
-        # "the ratchet is inappropriate for this trade if the condor is fully
-        #  formed. It should only be in effect if there's one side open."
-        # THE BASE STOP ONLY FIRES ON THE TESTED SIDE — spread value rises as
-        # price approaches your short. The RATCHET is the opposite: it tightens
-        # the UNTESTED side precisely BECAUSE it is winning, so on a reversal
-        # the tested leg stops at -25% and the untested leg hits its ratcheted
-        # stop too. A leg price never went near, closed by a stop that exists
-        # only because it was profitable. That is the double-stop (5 of 14
-        # condor symbol-days), and it fires BEFORE the roll can be used because
-        # the roll needs a tested side.
-        # `_condor_sibling_open` FAILS CLOSED (True on error) — treating a leg
-        # as part of a structure is the safe error here, and it is the same
-        # interlock the take-profit already uses.
-        _formed = (CONDOR_RATCHET_STANDALONE_ONLY
-                   and self._condor_sibling_open(record))
-        if _formed:
-            # base floor ONLY. No tier, no stored high-water — and the stored
-            # value is deliberately NOT updated while formed, so a leg returning
-            # to standalone resumes from the high-water it genuinely earned
-            # rather than one set while the structure was intact.
-            stop_level, tier = base_stop, " [formed: base only]"
-        else:
-            prev = self._condor_ratchet.get(trade_id)
-            if prev is None:
-                # v4.21 (AUDIT F4) — RESTART RECOVERY. The earned ratchet lived
-                # ONLY in this dict; every bake reset an earned breakeven/+20%
-                # lock to the base -25% stop. Seed from the trail_stop column
-                # (written via new_trail_stop below). Only a value BELOW
-                # base_stop can be a real condor ratchet — anything else is
-                # stale/foreign and ignored.
-                try:
-                    _persisted = float(record.get("trail_stop", 0.0) or 0.0)
-                except (TypeError, ValueError):
-                    _persisted = 0.0
-                if 0.0 < _persisted < base_stop:
-                    prev = _persisted
-            if prev is not None:
-                stop_level = min(stop_level, prev)  # ratchet only ever tightens
-            self._condor_ratchet[trade_id] = stop_level
-            if stop_level < base_stop and (prev is None or stop_level < prev):
-                # v4.21 (F4): persist the earned level through the SAME channel
-                # the directional trails use. Emitted only when it tightened,
-                # and only on this standalone branch — the formed branch above
-                # deliberately neither applies nor updates the stored value.
-                decision.new_trail_stop = stop_level
+        # ── v4.4 (2026-08-24) — PER-LEG PREMIUM STOP: LONE VERTICAL ONLY ──
+        # Operator ruling: "The 25% stop should only apply to a lone vertical
+        # spread — never the condor." The offset is the whole reason
+        # full-sizing is safe (risk_manager.compute_condor_leg_size): the pair
+        # cannot lose max on both ends, and a stop that closes one end
+        # converts the structure back into a single full-sized directional
+        # position with the hedge gone — 5 of 14 condor symbol-days had BOTH
+        # sides stopped on a whipsaw. So while a complement is open the
+        # per-leg premium stop (and its ratchet) is SUPPRESSED, and it RE-ARMS
+        # the moment the leg is alone again — one-way suppression would leave
+        # a naked full-sized position with no premium stop.
+        # ⚠️ SUPPRESSED IS NOT UNMANAGED: the formed structure keeps the 15:45
+        # close above, the nickel close below, and the roll. Any loss boundary
+        # beyond those is an OPEN OPERATOR DECISION (see
+        # docs/HANDOFF_CONDOR_STOP_20260824.md) — nothing here invents one.
+        # Suppress/re-arm persist on the row as stop_suppressed_ts /
+        # stop_suppressed_by (NEW FIELDS, trade_logger v4.3 — stop_premium
+        # stays the immutable entry-time floor, per the v3.1 trail lesson) and
+        # are announced edge-triggered in the log. Fail direction: sibling
+        # probe error → default False → treated as LONE → the 15% stop stays
+        # armed; a spurious stop on a formed leg loses less than a stopless
+        # ride toward max loss (AUDIT.md 5.2: state the fail direction).
+        _hedged = self._condor_sibling_open(record, default=False)
+        self._sync_stop_suppression(record, _hedged)
+        if not _hedged:
+          # Lone calibration is 15%, UNCHANGED — TRADES.md §5 ("leg 1 manages
+          # exactly like the sweep credit spread: a 15% stop"), applied by
+          # AUDIT F6. The ruling removes the stop from the CONDOR; it does not
+          # re-litigate the lone number.
+          # 🔴 THE RATCHET IS GONE — v4.5, 2026-08-24, operator: "I didn't
+          # request any ratchet... the standalone vertical spread had a stop
+          # Floor, but I don't recall anything about spec'ing a ratchet in
+          # there."
+          # ⚠️ SPEC.1 CLASS: AN ENCODING NOBODY CHOSE. Traced before removing —
+          # `CONDOR_RATCHET_*` dates to "Condor leg management, v2"
+          # (2026-07-23) and its comment justifies a ratchet OVER a take-profit,
+          # which answers a question the operator never asked. No directive is
+          # cited anywhere. It is not a TC.6 remnant either: TC.6 postdates it
+          # and explicitly carries NO premium stop and NO ratchet.
+          # ⚠️ AND IT WAS THE MECHANISM BEHIND THE DOUBLE-STOP. The ratchet
+          # tightens the UNTESTED leg precisely BECAUSE it is winning, so a
+          # reversal stopped the tested leg on the floor and the untested leg on
+          # its ratchet — "a leg price never went near, closed by a stop that
+          # exists only because it was profitable." Scoping it to standalones
+          # narrowed that; deleting it ends it.
+          # THE SPEC, in full: a STANDALONE vertical has a stop FLOOR and
+          # nothing else. A FORMED condor has no premium stop at all — it rolls
+          # the untested side, failing that inverts, failing that closes.
+          stop_level = entry_prem * (1 + 0.15)
+          tier = ""
 
-        if current_premium >= stop_level:
-            decision.should_exit = True
-            decision.exit_reason = (f"condor_stop pnl={pnl_pct:.1%}{tier}"
-                                    + ("" if _hedged else " (unhedged 15%)"))
-            return decision
+          if current_premium >= stop_level:
+              decision.should_exit = True
+              decision.exit_reason = f"condor_stop pnl={pnl_pct:.1%}{tier} (lone 15%)"
+              return decision
 
         # ── TIME-GATED TAKE PROFIT (v4.1) ─────────────────────────────────
         # ONLY after the entry cutoff (structure definitively dead) and ONLY on
