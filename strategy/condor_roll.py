@@ -1,5 +1,11 @@
 """
-strategy/condor_roll.py  v4.3
+strategy/condor_roll.py  v4.4
+v4.4  2026-08-24  r105: the roll's OPEN half walks the ladder WITHIN THIS CALL.
+      It cannot walk across ticks — by the time the open runs, the old untested
+      vertical is already closed, so check_and_execute_roll sees len(legs)!=2
+      next tick and never re-enters; an unfilled rung would strand the position
+      half-rolled with the tested side unhedged. Bounded rungs in-line, ending
+      at mark (the pre-r105 price), each with a short deadline.
 v4.3  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -230,11 +236,11 @@ def check_and_execute_roll(pos_mgr, chain, current_price: float, state) -> bool:
         # No roll available that removes tested-side risk — manage normally.
         return False
 
-    return _execute_roll(pos_mgr, tested, untested, plan, state)
+    return _execute_roll(pos_mgr, tested, untested, plan, state, chain)
 
 
 def _execute_roll(pos_mgr, tested: dict, untested: dict,
-                  plan: RollPlan, state) -> bool:
+                  plan: RollPlan, state, chain=None) -> bool:
     """Close the old untested vertical, open the rolled vertical, and flag the
     whole structure a broken wing (final form — no further adjustments)."""
     from database.trade_logger import make_record, get_trade_logger
@@ -296,24 +302,68 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
                     symbol=plan.new_long_symbol,
                     action=OrderAction.BUY_TO_OPEN, quantity=contracts),
             ]
-            order = NewOrder(
-                time_in_force = OrderTimeInForce.DAY,
-                order_type    = OrderType.LIMIT,
-                price         = Decimal(str(round(plan.roll_credit, 2))),  # + = credit
-                legs          = legs,
-            )
-            response = account.place_order(session, order, dry_run=False)
-            if response.errors:
+            # ── 🔴 r105 — THE ROLL'S OPEN HALF WALKS, AND IT WALKS *HERE* ────
+            # Every other order in this system walks ACROSS ticks: post a rung,
+            # return unfilled, resume next tick. THE ROLL CANNOT. By the time
+            # this line runs the old untested vertical is already CLOSED, so
+            # `check_and_execute_roll` sees `len(legs) != 2` on the next tick
+            # and never re-enters — a walk that returned unfilled here would
+            # strand the position half-rolled with the tested side no longer
+            # hedged and nothing scheduled to finish the job.
+            # ⚠️ SO THE WALK IS BOUNDED AND IN-LINE. Rungs are tried in one
+            # call, terminating at mark, which is the price the pre-r105 code
+            # posted immediately. Worst case is the old behaviour plus a few
+            # seconds; best case is the extra credit the ladder exists to win,
+            # on the order that is trying to make the tested side FREE.
+            from execution.entry_ladder import rungs as _rungs
+            _rc = float(plan.roll_credit)
+            _ladder = [_rc]
+            try:
+                _ul = (chain.puts if plan.untested_side == "put"
+                       else chain.calls) if chain is not None else []
+                _short_c = _contract_at(_ul, plan.new_short_strike)
+                _long_c  = _contract_at(_ul, plan.new_long_strike)
+                if _short_c is not None and _long_c is not None:
+                    _sb = (getattr(_short_c, "bid", 0.0) or 0.0) - (getattr(_long_c, "ask", 0.0) or 0.0)
+                    _sa = (getattr(_short_c, "ask", 0.0) or 0.0) - (getattr(_long_c, "bid", 0.0) or 0.0)
+                    if _sa > 0:
+                        _t = _rungs(max(0.0, _sb), _sa, "sell", INSTRUMENT)
+                        if _t:
+                            _ladder = _t
+            except Exception as _lex:                          # noqa: BLE001
+                logger.debug("roll ladder pricing skipped: %s", _lex)
+            logger.info("[ladder] ROLL open — %d rung(s) %s (plan credit %.2f)",
+                        len(_ladder), [round(x, 2) for x in _ladder], _rc)
+
+            response = None
+            for _rung in _ladder:
+                order = NewOrder(
+                    time_in_force = OrderTimeInForce.DAY,
+                    order_type    = OrderType.LIMIT,
+                    price         = Decimal(str(round(float(_rung), 2))),  # + = credit
+                    legs          = legs,
+                )
+                response = account.place_order(session, order, dry_run=False)
+                if response.errors:
+                    break
+                ofill = confirm_order_fill(
+                    session, account, response.order,
+                    [(plan.new_short_symbol, 1, +1), (plan.new_long_symbol, 1, -1)],
+                    what=f"rolled-vertical entry @ {float(_rung):.2f}",
+                    deadline_s=6.0)
+                if ofill.filled and ofill.net_price is not None and ofill.quantity > 0:
+                    break
+                if ofill.working_order_id:
+                    break      # cannot cancel — do not stack a second order
+                logger.info("[ladder] ROLL rung %.2f refused (%s)",
+                            float(_rung), ofill.detail)
+            if response is not None and response.errors:
                 logger.error(f"Rolled vertical order failed: {response.errors}")
                 get_alert_manager()._send(
                     f"\U0001F6A8 [{mode}] ROLL HALF-COMPLETE: closed old "
                     f"{plan.untested_side} vertical but the rolled open was "
                     f"REJECTED — tested side is NOT risk-free; will re-evaluate")
                 return False
-            ofill = confirm_order_fill(
-                session, account, response.order,
-                [(plan.new_short_symbol, 1, +1), (plan.new_long_symbol, 1, -1)],
-                what="rolled-vertical entry")
             if not ofill.filled or ofill.net_price is None or ofill.quantity <= 0:
                 if ofill.working_order_id:
                     get_alert_manager()._send(

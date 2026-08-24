@@ -101,5 +101,55 @@ from execution.order_confirm import confirm_order_fill
 check("L6c confirm_order_fill accepts a per-call deadline",
       "deadline_s" in inspect.signature(confirm_order_fill).parameters)
 
+# ── L7 (r105) — the EXIT policy table, per TRADES.md §6 ──────────────────────
+from execution.exit_engine import ExitEngine
+_ee = ExitEngine.__new__(ExitEngine)
+_credit = {"strategy": "IronCondorStrategy", "setup_type": "1h_fork_call_credit_spread",
+           "is_condor_leg": 1}
+_debit  = {"strategy": "ORBStrategy", "setup_type": "orb_long"}
+cases = [
+    (_credit, "hard_close_15:45_ET", "credit_hard_close"),
+    (_debit,  "hard_close_15:45_ET", "debit_hard_close"),
+    (_credit, "condor_stop pnl=-15.2% (lone 15%)", "floor"),
+    (_debit,  "hard_stop_25% pnl=-25.0%", "floor"),
+    (_debit,  "orb_structure_stop: 1m close 99.10 below 99.50", "floor"),
+    (_credit, "nickel_close pnl=91.0%", "walk"),
+    (_debit,  "target_hit pnl=100.0%", "walk"),
+    (_debit,  "orb_trail_stop pnl=42.0%", "walk"),
+    (_credit, "rolled_to_broken_wing", "walk"),
+]
+for rec, reason, want in cases:
+    got = ExitEngine._exit_policy(rec, reason)
+    check(f"L7 {want:<18} <- {reason[:34]}", got == want, f"got {got}")
+
+# ── L8 (r105) — the floor does NOT walk, and the credit close never crosses ──
+src_x = open(os.path.join(ROOT, "execution/exit_engine.py")).read()
+tx = ast.parse(src_x)
+fx = {n.name: ast.unparse(n) for n in ast.walk(tx) if isinstance(n, ast.FunctionDef)}
+check("L8a the floor goes to mark, no walk",
+      "no walk" in fx.get("_exit_limit", ""))
+check("L8b force_market is refused for a credit vertical",
+      "is_credit_vertical(record)" in fx.get("_submit_live_close", ""))
+check("L8c the credit hard close posts the NICKEL, not the width",
+      "CONDOR_NICKEL_CLOSE" in fx.get("_close_vertical", ""))
+check("L8d a booked exit clears its walk",
+      "_exit_walk_done" in fx.get("_book_from_fills", ""))
+
+# ── L9 (r105) — the roll's open half walks IN-LINE (it cannot cross ticks) ───
+src_r = open(os.path.join(ROOT, "strategy/condor_roll.py")).read()
+fr = {n.name: ast.unparse(n) for n in ast.walk(ast.parse(src_r))
+      if isinstance(n, ast.FunctionDef)}
+check("L9a the roll open walks rungs", "rungs" in fr.get("_execute_roll", ""))
+check("L9b in ONE call — a half-rolled position is never left to next tick",
+      "for _rung in _ladder" in fr.get("_execute_roll", ""))
+
+# ── L10 (r105) — the second-leg window tries all FOUR triggers ───────────────
+src_m = open(os.path.join(ROOT, "main.py")).read()
+lm = next(n for n in ast.walk(ast.parse(src_m))
+          if isinstance(n, ast.FunctionDef) and n.name == "main_loop")
+lsrc = ast.unparse(lm)
+for tag in ("CondorLeg2nd", "DailyFork2nd", "SweepCS2nd", "TrendCS2nd"):
+    check(f"L10 second leg tries {tag}", tag in lsrc)
+
 print(f"\n{'PASS' if not FAILURES else 'FAIL'}: {len(FAILURES)} problem(s) {FAILURES}")
 sys.exit(1 if FAILURES else 0)

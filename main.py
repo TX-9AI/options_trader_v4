@@ -1,5 +1,10 @@
 """
-main.py  v4.11
+main.py  v4.12
+v4.12 2026-08-24  r105: the SECOND-LEG WINDOW tries all four credit triggers.
+      Its own header said "all four triggers are eligible to fire the
+      complementary side"; the code tried the two forks, so a sweep or TC.6
+      first leg could never pair and the condor could only ever form from a
+      fork. "A second leg is allowed, never expected" was true by omission.
 v4.11 2026-08-24  r103: orb_state.json is READ at startup, authoritative
       (operator: "if it wrote it, trust it"), and written from the engine's own
       snapshot so writer and reader cannot drift. A resumed engine still owes a
@@ -3546,6 +3551,61 @@ def main_loop(state: BotState):
                                 and _can_open_credit_spread(_sl2.option_side,
                                     _sl2, ctx["price"])):
                             _execute_condor_leg(_sl2, state, ctx)
+                            _sl2 = None  # consumed
+
+                    # ── 🔴 r105 — THE SWEEP AND TC.6 CAN COMPLETE A CONDOR TOO
+                    # This block's own header says "all four triggers are
+                    # eligible to fire the complementary side" and the code
+                    # tried TWO. A sweep or a TC.6 could open a FIRST leg and
+                    # then never pair, so "a second leg is allowed, never
+                    # expected" was true by omission rather than by design —
+                    # the condor could only ever form from a fork.
+                    if True:
+                        # ⚠️ THESE ARE LOCALS OF `attempt_new_entry`, NOT of this
+                        # loop — the same ATR unit that cost every ORB trade on
+                        # 08-24, so it is derived here the same way rather than
+                        # referenced across a scope it does not cross.
+                        _sl_hhmm = now_et().strftime("%H:%M")
+                        try:
+                            _sl_atr = float(
+                                getattr(ctx["vol"], "atr_pct", None)
+                                or (float(getattr(ctx["vol"], "atr_normalized", 0.0)
+                                          or 0.0) * 100.0))
+                        except Exception:                      # noqa: BLE001
+                            _sl_atr = 0.0
+                        _sl3 = _safe_strategy("SweepCS2nd",
+                            lambda: _sweep_cs_strategy.generate_signal(
+                                liq_map=ctx["liq_map"], price_now=_sl_price,
+                                now_et=_sl_hhmm, atr_pct=_sl_atr,
+                                chain=_sl_chain), ctx)
+                        if (_sl3 is not None and _sl3.is_valid
+                                and _sl3.option_side == _need_side
+                                and _can_open_credit_spread(_sl3.option_side,
+                                    _sl3, ctx["price"])):
+                            _sl3.condor_trigger_source = "sweep_reversal"
+                            _execute_condor_leg(_sl3, state, ctx)
+                        else:
+                            _t_hi, _t_lo = _session_extremes(ctx)
+                            _o_hi, _o_lo = _opening_range(ctx)
+                            _sl4 = _safe_strategy("TrendCS2nd", lambda: (
+                                _trend_credit_strategy.generate_signal(
+                                    ms=None, vol_state=ctx["vol"], chain=_sl_chain,
+                                    # ⚠️ ctx, not a local: `macro` and `ms` are
+                                    # locals of attempt_new_entry and this block
+                                    # is in main_loop. Referencing them here is
+                                    # a NameError the loop catch-all would have
+                                    # swallowed as an ordinary tick failure.
+                                    macro=ctx.get("macro"), current_price=_sl_price,
+                                    trend=ctx.get("trend"),
+                                    orb_high=_o_hi, orb_low=_o_lo,
+                                    session_high=_t_hi, session_low=_t_lo,
+                                    condor_active=False)), ctx)
+                            if (_sl4 is not None
+                                    and _sl4.option_side == _need_side
+                                    and _can_open_credit_spread(_sl4.option_side,
+                                        _sl4, ctx["price"])):
+                                _sl4.condor_trigger_source = "trend_orb"
+                                _execute_condor_leg(_sl4, state, ctx)
             else:
                 attempt_new_entry(ctx, ms, state)
 

@@ -119,6 +119,22 @@ from notifications.alert_manager import get_alert_manager
 from config import PAPER_TRADING, CONTRACT_MULTIPLIER
 
 
+def _stash_quote(record, bid: float, ask: float) -> None:
+    """r105 — put a two-sided quote on the record for the exit ladder.
+
+    ⚠️ IN-MEMORY, NOT A COLUMN. It is read on the same tick it is written and
+    is meaningless one tick later; persisting a stale quote would be worse than
+    having none. A missing stash makes the exit post at mark, which is exactly
+    the pre-r105 behaviour.
+    """
+    try:
+        if ask and ask > 0:
+            record["_exit_bid"] = round(float(bid), 4)
+            record["_exit_ask"] = round(float(ask), 4)
+    except (TypeError, ValueError):
+        pass
+
+
 def _vertical_close_due() -> bool:
     """r99 — True once credit verticals are due to close. Reads config at call
     time so a test can pin the clock; fails toward FLATTEN on any error."""
@@ -357,9 +373,27 @@ class PositionManager:
                 if _is_credit_vertical(record):
                     short_s = record.get("short_strike", 0)
                     long_s  = record.get("long_strike",  0)
-                    short_m = next((c.mark for c in contracts_list if c.strike == short_s and 0 < c.mark < 1e6), None)
-                    long_m  = next((c.mark for c in contracts_list if c.strike == long_s  and 0 < c.mark < 1e6), None)
+                    _sc = next((c for c in contracts_list if c.strike == short_s and 0 < c.mark < 1e6), None)
+                    _lc = next((c for c in contracts_list if c.strike == long_s  and 0 < c.mark < 1e6), None)
+                    short_m = _sc.mark if _sc is not None else None
+                    long_m  = _lc.mark if _lc is not None else None
                     if short_m is not None and long_m is not None:
+                        # ── r105 — STASH THE STRUCTURE'S BID/ASK FOR THE EXIT
+                        # LADDER. The exit path has only ever received a MARK,
+                        # so it could post at mark and nothing else; a ladder
+                        # needs a two-sided quote. CLOSING a short vertical is a
+                        # BUY of the spread: we pay short.ask - long.bid at the
+                        # touch and receive short.bid - long.ask at the far
+                        # side. Built conservatively, per leg, never from the
+                        # combined mark ± a guess (limit_ladder v1.1's lesson:
+                        # "the shade was guesswork about a spread we cannot
+                        # see" — now we can see it).
+                        _stash_quote(
+                            record,
+                            bid=max(0.0, (getattr(_sc, "bid", 0.0) or 0.0)
+                                    - (getattr(_lc, "ask", 0.0) or 0.0)),
+                            ask=max(0.0, (getattr(_sc, "ask", 0.0) or 0.0)
+                                    - (getattr(_lc, "bid", 0.0) or 0.0)))
                         return short_m - long_m   # current spread value (credit basis)
                 elif is_butterfly:
                     lower_s  = record.get("lower_strike",  0)
@@ -377,6 +411,10 @@ class PositionManager:
                         None
                     )
                     if match:
+                        # r105 — the single-leg quote, for the exit ladder.
+                        _stash_quote(record,
+                                     bid=float(getattr(match, "bid", 0.0) or 0.0),
+                                     ask=float(getattr(match, "ask", 0.0) or 0.0))
                         # stash live theta so the exit engine's theta-bleed
                         # detector can see it (single-leg longs only)
                         record["current_theta"] = float(getattr(match, "theta", 0.0) or 0.0)

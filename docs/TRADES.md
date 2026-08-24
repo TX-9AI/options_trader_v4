@@ -458,6 +458,15 @@ price it.
 | inverted butterfly | full walk |
 | structural / profit-side close | full walk |
 | **15% floor stop** | **escalate straight to MARK**, reprice at mark each tick |
+
+**WIRED r104 (entries) / r105 (exits, roll).** Debit hard close KEEPS the cross:
+§6's prose and its table disagreed, and the assignment argument is about SHORT
+verticals — a long that does not close does not assign, it EXPIRES WORTHLESS, so
+there is no assignment tradeoff to take and paying the spread beats losing the
+premium. Credits take the nickel or take assignment, and never cross. The roll's
+open half walks WITHIN its call: by the time it runs the old untested vertical is
+already closed, so `check_and_execute_roll` sees `len(legs) != 2` next tick and
+never re-enters — an unfilled rung would strand the position half-rolled.
 | **debit hard close (15:40)** | the existing flatten ladder |
 | **credit hard close (15:45)** | nickel close, else **ASSIGNMENT** |
 

@@ -1,5 +1,17 @@
 """
-execution/exit_engine.py  v4.4
+execution/exit_engine.py  v4.6
+v4.6  2026-08-24  r105 THE EXIT LADDER, per TRADES.md §6. Structural and
+      profit-side closes WALK (25% in from best, one increment toward mark,
+      ratcheted, never worse than mark); the 15% FLOOR goes straight to MARK and
+      re-prices there (a thesis-invalidated stop is not a negotiation); the
+      CREDIT hard close takes the nickel or takes ASSIGNMENT and never crosses,
+      reversing hard_close_order_mode for credits only; DEBITS keep the cross
+      because a long that does not close expires worthless rather than assigning.
+      A refused rung advances; a booked fill clears the walk. Quote comes from
+      position_manager's per-tick structure stash — the exit path had only ever
+      been handed a mark.
+v4.5  2026-08-24  (title corrected — the body carried r90's v4.5 content while
+      the header still read v4.4)
 v4.4  2026-08-24  CONDOR STOP SUPPRESSION (operator ruling: "The 25% stop
       should only apply to a lone vertical spread — never the condor").
       _evaluate_condor_leg: the per-leg premium stop and ratchet now run ONLY
@@ -2298,6 +2310,12 @@ class ExitEngine:
             if sum(q for q, _ in prior) >= total:
                 return self._book_from_fills(record, prior, total, order_id)
             return self._partial_result(record, prior, total, order_id, trade_id)
+        # r105 — the rung did not fill: refuse it so the next tick posts the
+        # NEXT rung rather than re-offering a price the book already declined.
+        try:
+            self._exit_walk_refused(record, float(record.get("_exit_last_limit") or 0.0))
+        except Exception:                                      # noqa: BLE001
+            pass
         self._alert_live_exit_once(
             trade_id, "unfilled",
             f"LIVE close NOT FILLED by deadline {trade_id[:8]} (order {order_id} "
@@ -2321,8 +2339,10 @@ class ExitEngine:
         fill price (the broker's, never the mark) and clear the exit state."""
         qty = sum(q for q, _ in fills)
         wavg = sum(q * p for q, p in fills) / qty
-        for k in ("_live_exit_fills", "_live_exit_order_id", "_live_exit_last_order_id"):
+        for k in ("_live_exit_fills", "_live_exit_order_id", "_live_exit_last_order_id",
+                  "_exit_last_limit"):
             record.pop(k, None)
+        self._exit_walk_done(record)      # r105 — no stale ratchet outlives a fill
         logger.info(f"LIVE exit {record['trade_id'][:8]}: CONFIRMED fill "
                     f"{qty:g}/{total} @ net {wavg:.4f} (order {order_id})")
         return FillResult(confirmed=True, fill_price=round(float(wavg), 4),
@@ -2342,6 +2362,96 @@ class ExitEngine:
 
     # ── Order construction / submission (live only) ──────────────────────────
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # r105 — THE EXIT LADDER. TRADES.md §6, per-transaction policy.
+    # ═══════════════════════════════════════════════════════════════════════
+    # Every close has posted a single limit at mark since v3.8 and re-priced it
+    # each tick. That is right for SOME exits and wrong for others, and §6 says
+    # which is which:
+    #
+    #   structural / profit-side close   FULL WALK
+    #   15% floor stop                   STRAIGHT TO MARK, re-priced at mark
+    #   debit hard close (15:40)         the existing flatten ladder (crosses)
+    #   credit hard close (15:45)        NICKEL, else ASSIGNMENT — never cross
+    #
+    # ⚠️ THE FLOOR DOES NOT WALK, AND THAT IS A RISK RULING NOT AN OPTIMISATION.
+    # Operator: a thesis-invalidated stop that spends six ticks hunting a better
+    # fill has turned a floor into a negotiation.
+    # ⚠️ AND THE CREDIT CROSS IS REVERSED. `hard_close_order_mode` returns
+    # 'market' from 15:45 — "the position MUST close; cross and be done". For a
+    # CREDIT vertical the operator's ruling replaces that: "I'll take assignment
+    # over a shitty market order fill." The overnight/margin cost is accepted
+    # with the price known. DEBITS KEEP THE CROSS: a long that does not close
+    # does not assign, it EXPIRES WORTHLESS — there is no assignment tradeoff
+    # to take, so paying the spread beats losing the premium.
+    _FLOOR_REASONS = ("condor_stop", "hard_stop", "stop_hit", "adopted_stop",
+                      "structure_stop", "tcs_breach", "orb_structure_stop")
+
+    @classmethod
+    def _exit_policy(cls, record: TradeRecord, reason: str) -> str:
+        """'floor' | 'credit_hard_close' | 'debit_hard_close' | 'walk'."""
+        r = (reason or "").lower()
+        if "hard_close" in r:
+            return ("credit_hard_close" if is_credit_vertical(record)
+                    else "debit_hard_close")
+        if any(k in r for k in cls._FLOOR_REASONS):
+            return "floor"
+        return "walk"
+
+    @staticmethod
+    def _exit_quote(record: TradeRecord) -> Tuple[float, float]:
+        """The two-sided quote position_manager stashed this tick, or (0,0)."""
+        try:
+            return (float(record.get("_exit_bid") or 0.0),
+                    float(record.get("_exit_ask") or 0.0))
+        except (TypeError, ValueError):
+            return (0.0, 0.0)
+
+    def _exit_limit(self, record: TradeRecord, reason: str, mark: float,
+                    side: str, structure: str) -> Tuple[float, str]:
+        """The price to post for THIS close attempt, and why.
+
+        `side` is what we are doing to the STRUCTURE: closing a short vertical
+        or a long single is a 'buy' of it back / a 'sell' of it out.
+        """
+        policy = self._exit_policy(record, reason)
+        bid, ask = self._exit_quote(record)
+        if policy == "floor" or ask <= 0:
+            # No walk: mark, re-priced at mark every tick until it fills.
+            return limit_at_mark(mark, floor=self._tick_for(record)),                 f"{policy} — mark, no walk"
+        try:
+            from execution import ladder_registry as _lr
+            key = _lr.intent_key(str(record.get("trade_id", ""))[:12],
+                                 "close", structure)
+            got = _lr.price_for(key, side, bid, ask,
+                                str(record.get("symbol", "")))
+            if got:
+                record["_exit_walk_key"] = key
+                return float(got[0]), f"{policy} — {got[1]}"
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning("[ladder] exit pricing failed (%s) — mark", exc)
+        return limit_at_mark(mark, floor=self._tick_for(record)), f"{policy} — mark"
+
+    def _exit_walk_refused(self, record: TradeRecord, price: float) -> None:
+        key = record.get("_exit_walk_key")
+        if not key:
+            return
+        try:
+            from execution import ladder_registry as _lr
+            _lr.refuse(key, price)
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("[ladder] exit refuse failed: %s", exc)
+
+    def _exit_walk_done(self, record: TradeRecord) -> None:
+        key = record.pop("_exit_walk_key", None)
+        if not key:
+            return
+        try:
+            from execution import ladder_registry as _lr
+            _lr.clear(key)
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("[ladder] exit clear failed: %s", exc)
+
     def _submit_live_close(self, record: TradeRecord, contracts: int,
                            mark_price: Optional[float],
                            reason: str = "") -> Optional["object"]:
@@ -2360,8 +2470,11 @@ class ExitEngine:
         # close (an unfilled 0DTE at the bell is an expiry / assignment, not an
         # overnight hold), so force_market crosses. 15:40-15:44 still tries the
         # mark. See execution/limit_ladder.py.
+        # r105 — THE CROSS IS FOR DEBITS ONLY. A credit vertical at 15:45 takes
+        # the nickel or takes assignment; it never crosses. See _exit_policy.
         force_market = ("hard_close" in (reason or "").lower()
-                        and hard_close_order_mode(now_et()) == "market")
+                        and hard_close_order_mode(now_et()) == "market"
+                        and not is_credit_vertical(record))
         try:
             session = get_session()
             account = get_account()
@@ -2373,9 +2486,10 @@ class ExitEngine:
                            or (record.get("short_symbol") and record.get("long_symbol")))
             if is_vertical:
                 return self._close_vertical(session, account, record,
-                                            contracts, mark_price, force_market)
+                                            contracts, mark_price, force_market,
+                                            reason=reason)
             return self._close_single_leg(session, account, record, contracts,
-                                          mark_price, force_market)
+                                          mark_price, force_market, reason=reason)
         except Exception as e:
             logger.error(f"Live close submit failed for {record['trade_id'][:8]}: {e}")
             return None
@@ -2405,7 +2519,7 @@ class ExitEngine:
 
     def _close_single_leg(self, session, account, record, contracts,
                           mark_price: Optional[float] = None,
-                          force_market: bool = False):
+                          force_market: bool = False, reason: str = ""):
         """v3.8: posts a LIMIT AT THE MARK, not a market order.
 
         A single-leg market order paid the touch on every exit — combined with
@@ -2438,7 +2552,14 @@ class ExitEngine:
             return self._place(session, account, order,
                                f"Single-leg close (MARKET — {why})")
         tick  = self._tick_for(record)
-        limit = self._round_to_tick(limit_at_mark(mark_price, floor=tick), record)
+        # r105 — selling a long OUT is the ladder's "sell" side: start 25% in
+        # from the ask, walk down toward mark, never accept below mark. A FLOOR
+        # stop skips the walk and goes to mark (see _exit_limit).
+        _lim, _why = self._exit_limit(record, reason, mark_price, "sell", "single")
+        limit = self._round_to_tick(_lim, record)
+        record["_exit_last_limit"] = limit
+        logger.info("[ladder] single CLOSE %s @ %.2f — %s",
+                    str(record.get("trade_id", ""))[:8], limit, _why)
         # SDK signed convention: SELL_TO_CLOSE receives a CREDIT (positive);
         # BUY_TO_CLOSE on an adopted short PAYS a debit (negative).
         signed = limit if action == OrderAction.SELL_TO_CLOSE else -limit
@@ -2453,7 +2574,7 @@ class ExitEngine:
 
     def _close_vertical(self, session, account, record, contracts,
                         mark_price: Optional[float],
-                        force_market: bool = False):
+                        force_market: bool = False, reason: str = ""):
         """Close a condor-leg vertical as ONE 2-leg spread order: BUY_TO_CLOSE
         the short strike, SELL_TO_CLOSE the long strike. tastytrade rejects
         MARKET on spreads, so this is a marketable LIMIT: debit capped at the
@@ -2475,22 +2596,41 @@ class ExitEngine:
         # 15:45 "market order" for a vertical is a maximally-marketable limit:
         # the debit capped at the spread WIDTH, which a vertical can never
         # exceed — guaranteed to fill, bounded, and safe.
-        if force_market:
+        _policy = self._exit_policy(record, reason)
+        _why = _policy
+        if _policy == "credit_hard_close":
+            # 🔴 NICKEL, ELSE ASSIGNMENT. Operator: "I'll take assignment over a
+            # shitty market order fill." This REPLACES the width-bounded
+            # marketable limit that guaranteed a fill at any price. If the
+            # nickel is not taken the spread expires and the short assigns —
+            # deliberate, with the overnight/margin cost known.
+            from config import CONDOR_NICKEL_CLOSE as _NICKEL
+            limit = float(_NICKEL)
+            _why = "credit hard close — nickel, else assignment (never cross)"
+        elif force_market:
             if width <= 0:
                 logger.error("Hard-close vertical: no spread_width to bound the "
                              "cross — cannot price")
                 return None
             limit = width
+            _why = "debit hard close — bounded cross"
         elif mark_price is not None and mark_price >= 0:
-            limit = limit_at_mark(mark_price,
-                                  cap=(width if width > 0 else None),
-                                  floor=self._tick_for(record))
+            # r105 — closing a short vertical BUYS it back: the ladder's "buy"
+            # side, starting 25% in from the bid and never paying above mark.
+            limit, _why = self._exit_limit(record, reason, mark_price,
+                                           "buy", "vertical")
+            if width > 0:
+                limit = min(limit, width)      # a vertical cannot exceed its width
         elif width > 0:
             limit = width   # max possible value of the vertical — bounded marketable
+            _why = "no mark — bounded marketable"
         else:
             logger.error("Cannot price vertical close: no mark and no spread_width")
             return None
         limit = self._round_to_tick(limit, record)
+        record["_exit_last_limit"] = limit
+        logger.info("[ladder] vertical CLOSE %s @ %.2f — %s",
+                    str(record.get("trade_id", ""))[:8], limit, _why)
         legs = [
             Leg(instrument_type=InstrumentType.EQUITY_OPTION,
                 symbol=short_sym, action=OrderAction.BUY_TO_CLOSE,  quantity=contracts),
