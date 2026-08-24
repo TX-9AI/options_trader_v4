@@ -255,7 +255,22 @@ class ORBStrategy(BaseOptionsStrategy):
         if signal.entry_premium <= 0:
             logger.warning("ORB: option has zero premium - skipping")
             return None
-        _atr_pct = float(getattr(vol_state, "atr_normalized", 0.0) or 0.0)
+        # 🔴 r96 — READ THE PERCENT FIELD, NOT THE FRACTION. This line read
+        # `atr_normalized` (atr/price, a FRACTION) and compared it against
+        # ORB_ATR_FLOOR_PCT, which is 0.05 meaning 0.05 PERCENT. The gate
+        # therefore demanded a 5% intraday ATR and REFUSED EVERY ORB THE FLEET
+        # EVER CONFIRMED. NFLX 2026-08-24: clean break+retest at 09:58 ET, strike
+        # priced, then "ATR 0.004% below the reachable floor" every tick to the
+        # cutoff — true ATR 0.4%, eight times ABOVE the floor.
+        # ⚠️ FALLBACK IS ×100 OF THE FRACTION, NOT 0.0. A box part-way through a
+        # bake has the old VolatilityState without `atr_pct`; defaulting to 0.0
+        # would make `_atr_pct` falsy, skip the gate entirely, and let a trade
+        # through on an UNMEASURED ATR — turning a feasibility veto into a
+        # silent pass. The conversion is exact, so the fallback is the same
+        # number by another route.
+        _atr_pct = float(getattr(vol_state, "atr_pct", None)
+                         or (float(getattr(vol_state, "atr_normalized", 0.0) or 0.0)
+                             * 100.0))
         if _atr_pct and _atr_pct < ORB_ATR_FLOOR_PCT:
             logger.info(
                 "ORB: NO TRADE - ATR %.3f%% is below the reachable floor "

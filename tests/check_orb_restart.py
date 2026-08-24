@@ -128,6 +128,29 @@ SECOND_SETUP_TAPE = CONFIRM_TAPE + [
 ]
 
 
+# 🔴 THE NFLX 2026-08-24 SHAPE, AND THE ONE MY FIRST FIXTURES ALL MISSED.
+# Break, close back inside (re-arm #2), break, close back inside (re-arm #3),
+# break, retest, CONFIRM. Three attempts, TWO re-arms before the confirmation.
+# `_rearm()` REPLACES self._data, so any binding held across the replay is an
+# orphan after the first one — which is precisely why C1-C11 stayed green over
+# a live bug. Every earlier tape confirmed on attempt #1 and never re-armed.
+REARM_TWICE_TAPE = [
+    _bar(9, 30, 700.5, 702.0, 700.0, 701.0),
+    _bar(9, 31, 701.0, 701.8, 700.2, 700.6),
+    _bar(9, 32, 700.6, 701.5, 700.1, 701.2),
+    _bar(9, 33, 701.2, 701.9, 700.4, 701.5),
+    _bar(9, 34, 701.5, 702.0, 701.0, 701.7),
+    _bar(9, 35, 701.7, 701.9, 701.1, 701.4),
+    _bar(9, 36, 701.6, 702.5, 701.5, 702.2),      # BREAK #1
+    _bar(9, 37, 702.2, 702.4, 701.5, 701.6),      # close INSIDE -> re-arm #2
+    _bar(9, 38, 701.6, 702.4, 701.5, 702.1),      # BREAK #2
+    _bar(9, 39, 702.1, 702.3, 701.4, 701.5),      # close INSIDE -> re-arm #3
+    _bar(9, 40, 701.5, 702.5, 701.4, 702.4),      # BREAK #3
+    _bar(9, 41, 702.3, 702.6, 701.7, 702.3),      # RETEST -> CONFIRMED
+    _bar(9, 42, 702.3, 702.7, 702.2, 702.5),
+]
+
+
 def _frame(rows):
     return pd.DataFrame(
         [{"open": o, "high": h, "low": l, "close": c} for _, o, h, l, c in rows],
@@ -348,6 +371,37 @@ def main() -> int:
           late.data.state == oe.ORBState.EXPIRED,
           f"state={late.data.state}")
     CLOCK["t"] = datetime(2026, 8, 24, 9, 45, 10)
+
+    # ── C12: THE REPLAY MUST NOT READ A CORPSE ───────────────────────────────
+    # 🔴 FOUND IN A LIVE LOG, NOT BY A TEST (NFLX 2026-08-24). The reach-back
+    # summary printed `state=INVALIDATED attempt=1` one line after logging
+    # `CONFIRMED LONG (attempt #3)`. `_rearm()` swaps self._data for a new
+    # object, so the local binding was an orphan from the first re-arm onward.
+    # The consume check read that orphan, never saw OPEN, wrote no MISSED row,
+    # and left the live engine CONFIRMED and tradeable.
+    CLOCK["t"] = datetime(2026, 8, 24, 9, 45, 10)
+    ra = _armed(oe.ORBEngine())
+    ra.rebuild_from_tape(_frame(REARM_TWICE_TAPE))
+
+    check("C12 a replay that re-arms twice still sees the confirmation",
+          ra.data.attempt_number == 3,
+          f"attempt={ra.data.attempt_number} (expected 3)")
+
+    check("C12b and CONSUMES it — the ruling survives a re-arm",
+          ra.data.state == oe.ORBState.WAITING_FOR_BREAK,
+          f"state={ra.data.state}")
+
+    check("C12c the miss is recorded, not swallowed",
+          ra._last_missed is not None
+          and ra._last_missed.get("state") == oe.ORBState.OPEN_LONG,
+          f"missed={ra._last_missed}")
+
+    # The failure this actually prevents, stated as its own case: a live engine
+    # left CONFIRMED by a broken consume would hand the dispatch a reconstructed
+    # setup to trade.
+    check("C12d the engine is NOT left tradeable after the replay",
+          ra.data.state not in (oe.ORBState.OPEN_LONG, oe.ORBState.OPEN_SHORT),
+          f"state={ra.data.state}")
 
     print()
     if FAILURES:

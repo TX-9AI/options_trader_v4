@@ -1,5 +1,23 @@
 """
-analysis/volatility_engine.py  v4.1
+analysis/volatility_engine.py  v4.2
+v4.2  2026-08-24  r96 THE ATR UNIT MISMATCH THAT COST EVERY ORB TRADE.
+      `atr_normalized` is atr/price - a FRACTION - and its own comment called it
+      "ATR as % of price". Every strategy threshold is in PERCENT
+      (ORB_ATR_FLOOR_PCT 0.05, RUNAWAY_ATR_FLOOR_PCT 0.08, the ATR->delta map,
+      SWEEP_CS_ATR_MAX_PCT 0.20), all traceable to measurements stated in
+      percent. So the ORB floor demanded atr_normalized >= 0.05, i.e. a FIVE
+      PERCENT intraday ATR, which never happens: ORB could not fire on any box
+      on any day. Observed live 2026-08-24 on NFLX - a textbook break+retest
+      confirmed at 09:58 ET, strike picked (C 81.0 @ 0.85, delta 0.389), then
+      "ATR 0.004% is below the reachable floor (0.05%)" once per tick for 62
+      minutes until the 11:00 cutoff. True ATR was 0.4%, EIGHT TIMES ABOVE the
+      floor. The same mismatch failed OPEN on the sweep, whose 0.20 ceiling is a
+      MAX: fed 0.004 it never tripped, so "too hot for a boundary to hold" has
+      been dead since the split.
+      FIX: add `atr_pct` (percent) derived from atr_normalized, and point the
+      GATES at it. atr_normalized keeps its fraction semantics because five
+      tables already hold fractions and rescaling the producer would change what
+      that column means mid-stream with nothing marking the seam.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -47,7 +65,18 @@ class VolatilityState:
 
     # ATR metrics
     atr_current:        float = 0.0    # Current ATR in USD
-    atr_normalized:     float = 0.0    # ATR as % of price
+    # 🔴 r96 — atr_normalized IS A FRACTION, NOT A PERCENT, AND THE OLD COMMENT
+    # HERE SAID OTHERWISE. That one wrong word cost the fleet every ORB trade it
+    # ever confirmed: the producer writes atr/price (0.004 on NFLX), while EVERY
+    # strategy threshold — ORB_ATR_FLOOR_PCT 0.05, RUNAWAY_ATR_FLOOR_PCT 0.08,
+    # the ATR->delta map, SWEEP_CS_ATR_MAX_PCT 0.20 — is expressed in PERCENT and
+    # traceable to measurements in percent (magnitude_estimator, chain_feasibility).
+    # ⚠️ THE NAME AND THE COMMENT ARE THE WHOLE BUG. Nothing computed wrongly.
+    atr_normalized:     float = 0.0    # ATR / price — a FRACTION (0.004 = 0.4%)
+    # ⚠️ THIS is what every strategy gate compares against. Same measurement,
+    # stated in the units the thresholds are written in, so a reader cannot pick
+    # the wrong one by accident.
+    atr_pct:            float = 0.0    # ATR as PERCENT of price (0.4 = 0.4%)
     atr_avg_20:         float = 0.0    # 20-period ATR average
     atr_state:          str   = "STABLE"  # EXPANDING / CONTRACTING / STABLE
 
@@ -110,6 +139,15 @@ class VolatilityEngine:
         state.atr_current    = float(atr_s.iloc[-1])
         state.atr_avg_20     = float(atr_s.iloc[-20:].mean()) if len(atr_s) >= 20 else state.atr_current
         state.atr_normalized = state.atr_current / current_price if current_price else 0
+        # r96 — DERIVED, never separately computed, so the two can never disagree.
+        # ⚠️ atr_normalized is DELIBERATELY LEFT AS A FRACTION. It is written to
+        # indicator_series, character_ledger, fire_snapshot, strategy_note and the
+        # shadow primitives, and every row banked to date holds a fraction.
+        # Rescaling the producer would change what that column MEANS mid-stream
+        # with nothing marking the seam — the failure the RTH backfill taught us
+        # was WORSE than the hole it replaced, because a gap announces itself and
+        # a character change does not.
+        state.atr_pct = state.atr_normalized * 100.0
 
         # ATR trend: compare last 5 bars
         if len(atr_s) >= 10:

@@ -2478,7 +2478,17 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     _now_et_hhmm = _now_disp.strftime("%H:%M") if _now_disp else ""
     _atr_pct = 0.0
     try:
-        _atr_pct = float(getattr(ctx["vol"], "atr_normalized", 0.0) or 0.0)
+        # 🔴 r96 — PERCENT, NOT THE FRACTION. This value is handed to
+        # RunawayContinuation (ATR floor 0.08, hard veto 0.05, the ATR->delta
+        # map) and to SweepCreditSpread (ATR ceiling 0.20) — every one of them a
+        # PERCENT threshold. Fed the fraction, the runaway's floor refused
+        # everything and the sweep's ceiling refused nothing, so the SAME defect
+        # failed closed on one strategy and open on the other.
+        # Fallback is ×100 of the fraction so a part-baked box gets the right
+        # number rather than a falsy 0.0 that would skip the veto.
+        _atr_pct = float(getattr(ctx["vol"], "atr_pct", None)
+                         or (float(getattr(ctx["vol"], "atr_normalized", 0.0) or 0.0)
+                             * 100.0))
     except Exception:                                          # noqa: BLE001
         _atr_pct = 0.0
 

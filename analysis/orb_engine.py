@@ -597,7 +597,21 @@ class ORBEngine:
                 self._rebuilt_date = today
                 return False
 
-            before = d.state
+            # ⚠️ r96 — `d` IS NOT SAFE TO HOLD ACROSS THIS LOOP. `_rearm()` does
+            # `self._data = ORBData()` — it REPLACES the dataclass rather than
+            # mutating it — so a local binding taken before a re-arm becomes an
+            # orphan pointing at the discarded object. This replay re-arms on
+            # every close-inside invalidation, and NFLX did so twice on
+            # 2026-08-24: the summary reported `state=INVALIDATED attempt=1` one
+            # line after logging `CONFIRMED LONG (attempt #3)`, because it was
+            # reading the corpse of the first attempt.
+            # 🔴 AND IT WAS NOT COSMETIC. The consume check read the stale
+            # object, never saw OPEN, wrote NO MISSED ROW, and left the LIVE
+            # engine CONFIRMED — which before 11:00 would have offered a
+            # reconstructed setup to the dispatch as tradeable, the exact thing
+            # the operator's ruling forbids. It was past the cutoff on the day
+            # this was found, so nothing was taken.
+            before = self._data.state
             # Walk the tape one closed bar at a time. `_check_for_break` and
             # `_check_for_retest` both read `iloc[-2]`, so slicing to i+1 makes
             # bar i-1 the "newest closed bar" — exactly what the live loop hands
@@ -607,10 +621,11 @@ class ORBEngine:
             for i in range(2, len(sess) + 1):
                 sub = sess.iloc[:i]
                 self._update_break_latches(sub)      # same order as update()
-                was = d.state
+                was = self._data.state
                 self._advance_state(sub, ms)
                 if (was not in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)
-                        and d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)):
+                        and self._data.state in (ORBState.OPEN_LONG,
+                                                 ORBState.OPEN_SHORT)):
                     # The CONFIRMING bar is the one the state machine just read,
                     # i.e. iloc[-2] — not the newest bar in the frame. Measuring
                     # from the frame's end would report the age of the REPLAY
@@ -669,6 +684,7 @@ class ORBEngine:
             # moves. `tests/check_orb_restart.py` C5/C9b caught this leak on its
             # first run, which is the only reason the scoping can be trusted.
             _missed = None
+            d = self._data          # r96 — RE-BIND: the loop may have re-armed
             if (before not in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)
                     and d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)):
                 _missed = d.state
@@ -689,6 +705,7 @@ class ORBEngine:
                     # row, which are the records that should carry it.
                     self._rearm()
 
+            d = self._data          # r96 — _rearm() replaced it again
             after = d.state
 
             age_s = None

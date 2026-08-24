@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-152 Python modules across 13 local packages.
+153 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -54,7 +54,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `data/tasty_client.py` | 8 | candle_feed.py, condor_roll.py, entry_engine.py, exit_engine.py |
 | `execution/exit_engine.py` | 8 | check_condor_spec.py, check_condor_stop_suppression.py, check_exit_executes.py, condor_roll.py |
 | `notifications/alert_manager.py` | 8 | condor_roll.py, entry_engine.py, eod_summary.py, exit_engine.py |
-| `data/candle_feed.py` | 7 | candle_logger.py, check_audit_20260823.py, check_ext_polarity.py, check_feed_always_on.py |
+| `analysis/market_state.py` | 7 | check_atr_units.py, daily_fork_credit_spread.py, iron_condor_strategy.py, main.py |
 
 ## Every module
 
@@ -104,11 +104,11 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/market_state.py`
 - **calls:** (none)
-- **called by:** `main.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`
+- **called by:** `main.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `tests/check_atr_units.py`
 
 ### `analysis/orb_engine.py`
 - **calls:** `analysis/signal_journal.py`, `config.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `execution/position_manager.py`, `main.py`, `strategy/base_strategy.py`, `strategy/orb_strategy.py`, `tests/check_orb_restart.py`
+- **called by:** `execution/position_manager.py`, `main.py`, `strategy/base_strategy.py`, `strategy/orb_strategy.py`, `tests/check_atr_units.py`, `tests/check_orb_restart.py`
 
 ### `analysis/order_flow.py`
 - **calls:** (none)
@@ -156,7 +156,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/volatility_engine.py`
 - **calls:** `config.py`, `utils/math_utils.py`
-- **called by:** `main.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`
+- **called by:** `main.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `tests/check_atr_units.py`
 
 ### `analysis/volatility_measures.py`
 - **calls:** (none)
@@ -408,7 +408,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/orb_strategy.py`
 - **calls:** `analysis/liquidity_mapper.py`, `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `strategy/base_strategy.py`, `utils/math_utils.py`
-- **called by:** `main.py`
+- **called by:** `main.py`, `tests/check_atr_units.py`
 
 ### `strategy/relaxed.py`
 - **calls:** `config.py`
@@ -416,7 +416,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/runaway_continuation.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`
-- **called by:** `main.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
+- **called by:** `main.py`, `tests/check_atr_units.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/structure.py`
 - **calls:** (none)
@@ -424,7 +424,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/sweep_credit_spread.py`
 - **calls:** `analysis/gate_report.py`, `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`
-- **called by:** `main.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
+- **called by:** `main.py`, `tests/check_atr_units.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/trend_credit_spread.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`
@@ -436,6 +436,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/chain_feasibility.py`
 - **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_atr_units.py`
+- **calls:** `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/volatility_engine.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_audit_20260823.py`
