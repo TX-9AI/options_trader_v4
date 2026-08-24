@@ -1,5 +1,13 @@
 """
-execution/entry_engine.py  v4.3
+execution/entry_engine.py  v4.4
+v4.4  2026-08-24  r104 THE LADDER IS WIRED FOR ENTRIES. entry_ladder.py has
+      been complete and UNCALLED since 2026-08-20 while every live fill posted a
+      single limit at mark — by FRC.1 that is ~$31/trade given away against a
+      +$2.70 gross edge. Single-leg and butterfly entries now post ONE RUNG per
+      tick through ladder_registry (25% in from best, one venue increment toward
+      mark, ratcheted, never worse than mark), with the walk keyed to the intent
+      so the next tick resumes it. A refusal advances the rung; a fill clears
+      the walk. Paper is untouched — limit_ladder stays the one paper authority.
 v4.3  2026-08-24  r101: enter() refuses before ENTRY_OPEN_ET — the debit choke
       point for the 09:35 gate (single leg and butterfly). No broker call, no
       record; the strategy re-signals next tick.
@@ -262,6 +270,87 @@ class EntryEngine:
         )
         return record
 
+    # ─── THE LADDER (r104) ────────────────────────────────────────────────────
+    # 🔴 `execution/entry_ladder.py` HAS BEEN COMPLETE AND UNCALLED SINCE
+    # 2026-08-20. Every live fill has posted a single limit at mark and walked
+    # away. By FRC.1 the fleet's gross edge is +$2.70/trade against $126/trade
+    # of round-trip friction; capturing half the half-spread is worth on the
+    # order of $31/trade — an order of magnitude more than anything on the
+    # trade-selection list. The file's own header says so and nothing read it.
+    #
+    # ⚠️ ONE RUNG PER TICK, AND THAT IS WHY A REGISTRY EXISTS. The walk is
+    # multi-tick by construction: this method posts ONE price, gives it a short
+    # deadline, and returns unfilled. The strategy re-signals next tick and the
+    # walk RESUMES at the next rung against a FRESH quote — repricing (rule 2)
+    # and ratcheting (rule 1) both come out of that. A ladder that restarted
+    # every tick would re-offer rung 1 forever, which is v3's exact defect.
+    #
+    # ⚠️ THE DEADLINE IS PER RUNG, NOT PER ENTRY. LIVE_ENTRY_DEADLINE_SECONDS
+    # (20s) was sized for a single mark-limit that either fills or is abandoned.
+    # Spending all of it on rung 1 would mean one rung per 20s against a 15s
+    # tick — the walk would never reach mark inside a fill window. Each rung
+    # gets a slice; the ladder collapses to mark on its own when the market
+    # moves our way (rule 3), so the terminal rung is reached by price, not by
+    # waiting.
+    #
+    # ⚠️ PAPER NEVER TOUCHES THIS. Paper pricing stays limit_ladder.paper_fill_*
+    # — one paper authority. A ladder in paper would model fills we have no
+    # evidence for, and the ladder's value is measured in LIVE fills or not at
+    # all (ladder_registry's header).
+    @staticmethod
+    def _rung_deadline() -> float:
+        """Seconds to give ONE rung. A slice of the entry deadline, floored so a
+        rung is never so short that a fillable price is abandoned unseen."""
+        try:
+            import config as _c
+            total = float(getattr(_c, "LIVE_ENTRY_DEADLINE_SECONDS", 20.0))
+        except Exception:                                      # noqa: BLE001
+            total = 20.0
+        return max(4.0, total / 4.0)
+
+    @staticmethod
+    def _quote_of(contract) -> Tuple[float, float]:
+        """(bid, ask) off a contract, 0.0 when absent. A zero BID is a real,
+        routine 0DTE quote and the ladder handles it (r98/r99); a missing ASK
+        is what makes a quote unusable."""
+        try:
+            return (float(getattr(contract, "bid", 0.0) or 0.0),
+                    float(getattr(contract, "ask", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            return (0.0, 0.0)
+
+    def _walk_price(self, key: str, side: str, bid: float, ask: float,
+                    symbol: str, mark_fallback: float) -> Tuple[float, str]:
+        """The price to post THIS attempt, and why. Falls back to the mark when
+        the quote is unusable — never to a guess, and never worse than mark."""
+        try:
+            from execution import ladder_registry as _lr
+            got = _lr.price_for(key, side, bid, ask, symbol)
+            if got:
+                return float(got[0]), str(got[1])
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning("[ladder] pricing failed (%s) — posting at mark", exc)
+        return limit_at_mark(mark_fallback, floor=0.01), "mark (no usable quote)"
+
+    @staticmethod
+    def _walk_refused(key: str, price: float) -> None:
+        """Record that this rung did not COMPLETELY fill. The next tick resumes
+        one rung further in and never re-offers this price."""
+        try:
+            from execution import ladder_registry as _lr
+            _lr.refuse(key, price)
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("[ladder] refuse failed: %s", exc)
+
+    @staticmethod
+    def _walk_done(key: str) -> None:
+        """Filled or abandoned — never leave a walk to rot (stale ratchet)."""
+        try:
+            from execution import ladder_registry as _lr
+            _lr.clear(key)
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("[ladder] clear failed: %s", exc)
+
     # ─── Order Placement ──────────────────────────────────────────────────────
 
     def _place_single_leg(self, signal: OptionsSignal,
@@ -298,7 +387,16 @@ class EntryEngine:
                 logger.warning("Single-leg entry: no mark to price the limit — "
                                "skipping this pass")
                 return None, "", 0
-            limit = limit_at_mark(mid, floor=0.01)
+            # r104 — THE RUNG, NOT THE MARK. Buying a debit: start 25% in from
+            # the BID, step one venue increment toward mark, never pay worse
+            # than mark. The walk is keyed to the INTENT (this contract, opened)
+            # so the next tick resumes it rather than restarting at rung 1.
+            from execution import ladder_registry as _lr
+            _bid, _ask = self._quote_of(signal.contract)
+            _key = _lr.intent_key(symbol, "open", "single")
+            limit, _why = self._walk_price(_key, "buy", _bid, _ask, symbol, mid)
+            logger.info("[ladder] %s BUY %s @ %.2f — %s (bid %.2f / ask %.2f)",
+                        symbol, "single", limit, _why, _bid, _ask)
             order = NewOrder(
                 time_in_force = OrderTimeInForce.DAY,
                 order_type    = OrderType.LIMIT,
@@ -312,11 +410,19 @@ class EntryEngine:
 
             fill = confirm_order_fill(session, account, response.order,
                                       [(symbol, 1, +1)],
-                                      what=f"single-leg entry (LIMIT @ mark {limit:.2f})")
+                                      what=f"single-leg entry (LADDER {limit:.2f} — {_why})",
+                                      deadline_s=self._rung_deadline())
             if not fill.filled or fill.net_price is None:
                 self._page_if_working(fill, "single-leg entry")
-                logger.warning(f"Single-leg entry NOT filled ({fill.detail})")
+                # ⚠️ A REFUSAL, NOT AN ABANDONMENT. The rung did not fill, so
+                # it is off the table for good (rule 1) and the next tick posts
+                # the next rung against a fresh quote (rule 2). An entry that
+                # never fills still costs nothing.
+                self._walk_refused(_key, limit)
+                logger.info("[ladder] %s rung %.2f REFUSED (%s) — next rung on "
+                            "the next tick", symbol, limit, fill.detail)
                 return None, "", 0
+            self._walk_done(_key)
             return fill.net_price, fill.order_id or "", fill.quantity
 
         except Exception as e:
@@ -341,6 +447,7 @@ class EntryEngine:
             return self._paper_fill_butterfly(signal, contracts)
 
         try:
+            from execution import ladder_registry as _lr_bf
             session = get_session()
             account = get_account()
             mid     = signal.net_debit
@@ -348,8 +455,29 @@ class EntryEngine:
                        (signal.center_contract.symbol, 2, -1),
                        (signal.upper_contract.symbol,  1, +1)]
 
+            # r104 — THE STRUCTURE'S OWN QUOTE, BUILT CONSERVATIVELY. A fly's
+            # debit is `lower + upper - 2*center`; the price WE would pay uses
+            # the ask on what we buy and the bid on what we sell, and the price
+            # we could receive mirrors it. Anything looser prices a fill the
+            # book would not give.
+            _lo_b, _lo_a = self._quote_of(signal.lower_contract)
+            _ce_b, _ce_a = self._quote_of(signal.center_contract)
+            _up_b, _up_a = self._quote_of(signal.upper_contract)
+            _fly_ask = (_lo_a + _up_a) - 2.0 * _ce_b      # worst: pay up
+            _fly_bid = (_lo_b + _up_b) - 2.0 * _ce_a      # best: paid down
+            _fly_key = _lr_bf.intent_key(
+                getattr(signal.center_contract, "symbol", "fly"),
+                "open", "butterfly")
             for attempt in range(2):
-                limit_price = round(mid + attempt * LIMIT_IMPROVE_TICKS * 0.01, 2)
+                if attempt == 0 and _fly_ask > 0:
+                    limit_price, _bwhy = self._walk_price(
+                        _fly_key, "buy", max(0.0, _fly_bid), _fly_ask,
+                        getattr(signal.center_contract, "symbol", ""), mid)
+                    logger.info("[ladder] BUTTERFLY @ %.2f — %s (structure "
+                                "%.2f / %.2f, mark %.2f)", limit_price, _bwhy,
+                                _fly_bid, _fly_ask, mid)
+                else:
+                    limit_price = round(mid + attempt * LIMIT_IMPROVE_TICKS * 0.01, 2)
                 legs = [
                     Leg(instrument_type=InstrumentType.EQUITY_OPTION,
                         symbol=signal.lower_contract.symbol,
@@ -378,7 +506,10 @@ class EntryEngine:
                 fill = confirm_order_fill(session, account, response.order,
                                           basis, what=f"butterfly entry #{attempt+1}")
                 if fill.filled and fill.net_price is not None and fill.quantity > 0:
+                    self._walk_done(_fly_key)
                     return fill.net_price, fill.order_id or "", fill.quantity
+                if attempt == 0:
+                    self._walk_refused(_fly_key, limit_price)
                 if fill.working_order_id:
                     # Attempt 1 may still fill — placing attempt 2 now is the
                     # double-position race. STOP the ladder; page; reconcile

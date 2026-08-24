@@ -1,5 +1,8 @@
 """
-execution/order_confirm.py  v4.0
+execution/order_confirm.py  v4.1
+v4.1  2026-08-24  r104: confirm_order_fill takes an optional per-call
+      deadline_s so the entry ladder can give ONE RUNG a slice of the entry
+      budget. Default unchanged.
 Order acknowledgement and fill confirmation.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -117,7 +120,8 @@ def net_from_fills(placed, basis: Basis) -> Optional[Tuple[int, float]]:
 
 
 def confirm_order_fill(session, account, placed, basis: Basis,
-                       what: str = "entry") -> EntryFill:
+                       what: str = "entry",
+                       deadline_s: Optional[float] = None) -> EntryFill:
     """Poll `placed` (a just-submitted PlacedOrder) to a bounded deadline and
     return what ACTUALLY filled. Never invents a price; never reports more
     than the broker confirms. Cancels the remainder at deadline."""
@@ -126,7 +130,13 @@ def confirm_order_fill(session, account, placed, basis: Basis,
         return EntryFill(filled=False, detail=f"{what}: no order id in response")
 
     poll     = max(0.0, float(getattr(_cfg, "LIVE_FILL_POLL_SECONDS", 2.0)))
-    deadline = time.monotonic() + float(getattr(_cfg, "LIVE_ENTRY_DEADLINE_SECONDS", 20.0))
+    # r104 — THE CALLER MAY OWN THE DEADLINE. The ladder posts ONE RUNG per
+    # tick and needs a slice of the entry budget, not all of it: spending 20s on
+    # rung 1 against a 15s tick means the walk never reaches mark inside a fill
+    # window. Default unchanged for every existing caller.
+    deadline = time.monotonic() + float(
+        deadline_s if deadline_s is not None
+        else getattr(_cfg, "LIVE_ENTRY_DEADLINE_SECONDS", 20.0))
     cancel_requested = False
     cancel_attempts  = 0
 
