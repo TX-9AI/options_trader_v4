@@ -1,5 +1,13 @@
 """
-strategy/sweep_credit_spread.py  v4.2
+strategy/sweep_credit_spread.py  v4.3
+v4.3  2026-08-24  r107 THE SHORT STRIKE IS THE FIRST STRIKE BEYOND THE SWEEP
+      EXTREME — pierced if there is one, the next one out if there is not, never
+      one inside. Operator, 2026-08-24: "It swept. That's legitimately a sweep.
+      Sell the 7635." The old rule required a strike to have been TRADED
+      THROUGH, which collides with §2's preference for a SHALLOW pierce and
+      silently disabled the sweep on the seven 5-wide symbols. Strikes now come
+      from the LIVE CHAIN, not STRIKE_INCREMENT: SPX 0DTE is 5-wide near the
+      money and 25-wide in the tails, so one constant cannot be right.
 v4.2  2026-08-24  r100 — the short-strike anchor no longer falls back to the
       POOL when the pierce cleared no strike. The pool is a price level, so the
       anchor could not resolve against the chain and every SPX fire died at
@@ -233,6 +241,110 @@ GATES = {
 }
 
 
+def strike_beyond_sweep(sweep_price: float, pool_price: float, ceiling: bool,
+                        contracts=None, increment: float = 0.0) -> Optional[float]:
+    """🔴 r107 — THE FIRST STRIKE BEYOND THE SWEEP EXTREME. Operator's ruling,
+    2026-08-24: "It swept. That's legitimately a sweep. Sell the 7635."
+
+    ⚠️ WHY THE OLD RULE DECLINED A GOOD TRADE. `pierced_strike` returned the
+    nearest strike price actually TRADED THROUGH, and None when the pierce
+    cleared none — reasonable prose that collided with the selection spec on
+    every wide-strike symbol. SPX 2026-08-24: NY Low 7639.01, price traded to
+    7638.17 and closed back inside — a valid sweep of a named pool by 0.84 pts.
+    The strikes below are 7635 and 7630; price never reached either, so no
+    strike was pierced and a fully-qualified setup was declined. 608 fires died
+    that way on one box in one session.
+    ⚠️ AND THE TWO RULES PULL OPPOSITE WAYS. §2 PREFERS a shallow pierce —
+    ceiling 0.25%, and "a deep pierce means a WEAK level, not a strong
+    rejection" (1.28% median adverse vs 0.46%). A strike rule that requires a
+    DEEP pierce therefore refuses exactly the sweeps the selection rule likes,
+    and it refuses them only on 5-wide symbols: seven of the fifteen boxes. A
+    selection effect invisible as "no setups".
+    ⚠️ THE OPERATOR'S RULE KEEPS THE INTENT AND DROPS THE PRECONDITION. The
+    short strike is the first strike BEYOND the sweep extreme — the pierced one
+    when the sweep cleared it, the next one out when it did not. Either way it
+    sits FURTHER from spot than anything price reached, so the position is
+    threatened only by price going somewhere it has not been. Never a strike
+    INSIDE the pierce: that is a level that already failed, and selling it is
+    the "worst version of this" §2 warns about.
+
+    ⚠️ STRIKES COME FROM THE LIVE CHAIN, NOT FROM A CONSTANT. `STRIKE_INCREMENT`
+    is one number per symbol from a hardcoded map; SPX 0DTE is 5-wide near the
+    money and 25-wide in the tails, so no single number is right everywhere —
+    and FRC.2's own notes call that class of list "unverified — a broker/OCC
+    fact, not derivable here". The chain is the fact. `increment` remains as the
+    fallback for a caller with no chain.
+
+    Returns None only when there is genuinely no strike beyond the sweep — an
+    extreme past the end of the chain, which is a missing chain, not a trade.
+    """
+    sweep_price = safe_float(sweep_price)
+    pool_price = safe_float(pool_price)
+    if not sweep_price or not pool_price:
+        return None
+
+    ks = []
+    for c in (contracts or []):
+        try:
+            k = float(getattr(c, "strike", 0.0) or 0.0)
+            if k > 0:
+                ks.append(k)
+        except (TypeError, ValueError):
+            continue
+    # THE RULE, ONE LINE: among strikes AT OR BEYOND THE POOL, take the one
+    # NEAREST THE SWEEP EXTREME.
+    # ⚠️ IT UNIFIES BOTH CASES AND CHANGES ONLY THE ONE THE OPERATOR RULED ON.
+    # Deep pierce, pool 7639.01, extreme 7633: strikes beyond the pool are
+    # 7635, 7630, ...; nearest to 7633 is 7635 — the strike price traded
+    # THROUGH, which is the original rule, unchanged. Shallow pierce, extreme
+    # 7638.17: nearest is still 7635, which is now the first strike BEYOND
+    # rather than a decline. One expression, both readings.
+    # ⚠️ "AT OR BEYOND THE POOL" IS THE GUARD THAT MATTERS. Without it the
+    # nearest strike to a shallow extreme could be 7640 — INSIDE the pool, on
+    # the spot side of a boundary price never broke. Selling that is selling a
+    # level the sweep did not establish.
+    def _pick(strikes):
+        if ceiling:
+            cand = [k for k in strikes if k >= pool_price - 1e-9]
+        else:
+            cand = [k for k in strikes if k <= pool_price + 1e-9]
+        if not cand:
+            return None
+        best = min(cand, key=lambda k: abs(k - sweep_price))
+        # ⚠️ A TRUNCATED CHAIN MUST NOT BECOME A WILD STRIKE. "Nearest" always
+        # returns something; if the extreme lies past the end of the chain the
+        # nearest strike can be hundreds of points away, and selling it would be
+        # a trade nobody described. Bound it to a few grid steps of the extreme
+        # and decline beyond that — a chain that does not reach the tape is a
+        # DATA problem and says so.
+        gaps = [b - a for a, b in zip(cand, cand[1:])] if len(cand) > 1 else []
+        step = min(gaps) if gaps else (safe_float(increment) or 0.0)
+        if step and abs(best - sweep_price) > 3.0 * step:
+            logger.warning(
+                "[sweep_cs] nearest strike %.2f is %.2f from the sweep extreme "
+                "%.2f (grid ~%.2f) — the chain does not reach the tape; "
+                "declining rather than selling a strike nobody chose",
+                best, abs(best - sweep_price), sweep_price, step)
+            return None
+        return round(best, 4)
+
+    if ks:
+        return _pick(sorted(set(ks)))
+
+    # No chain — fall back to the grid. Same rule, one assumed increment.
+    increment = safe_float(increment)
+    if not increment or increment <= 0:
+        return None
+    import math as _m
+    if ceiling:
+        grid = [_m.floor(sweep_price / increment) * increment,
+                _m.ceil(sweep_price / increment) * increment]
+    else:
+        grid = [_m.floor(sweep_price / increment) * increment,
+                _m.ceil(sweep_price / increment) * increment]
+    return _pick(sorted(set(grid)))
+
+
 def pierced_strike(sweep_price: float, pool_price: float, ceiling: bool,
                    increment: float) -> Optional[float]:
     """The NEAREST STRIKE PRICE ACTUALLY PIERCED. Operator's rule, 2026-08-20.
@@ -426,7 +538,15 @@ class SweepCreditSpreadStrategy:
         # which IS the pool on a shallow pierce, by construction.
         _inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
         _swept_px = float(getattr(sweep, "sweep_price", 0.0) or 0.0)
-        _ps = pierced_strike(_swept_px, pool, boundary == "ceiling", _inc)
+        # r107 — the FIRST STRIKE BEYOND the sweep extreme, read off the LIVE
+        # chain. `pierced_strike` is kept below for the studies that cite it,
+        # but it is no longer what selects the short.
+        try:
+            _side_contracts = chain.puts if side == "put" else chain.calls
+        except Exception:                                      # noqa: BLE001
+            _side_contracts = None
+        _ps = strike_beyond_sweep(_swept_px, pool, boundary == "ceiling",
+                                  contracts=_side_contracts, increment=_inc)
         # 🔴 r100 — NO FALLBACK TO THE POOL. The pool is a PRICE LEVEL, not a
         # strike: SPX's NY Low sat at 7639.01 on a 5-wide chain, so the anchor
         # could never resolve and r97's exact-strike lookup reported "no priced
@@ -440,13 +560,19 @@ class SweepCreditSpreadStrategy:
         # is now declined with its own reason instead of dying downstream on a
         # confusing one. Counted, so the frequency is a fact rather than a guess.
         if _ps is None:
-            logger.info("[sweep_cs] %s swept but the pierce cleared NO strike "
-                        "(pool %.2f, sweep extreme %.2f, increment %g) - SKIP. "
-                        "The short strike is the nearest strike ACTUALLY "
-                        "pierced; the pool is a price, not a strike.",
-                        name, pool, _swept_px, _inc)
+            # r107 — this is now a MISSING CHAIN, not a shallow sweep. There is
+            # always a strike beyond the extreme unless the chain does not
+            # reach it.
+            logger.warning("[sweep_cs] %s swept to %.2f and the %s chain has no "
+                           "strike beyond it - SKIP. This is a chain problem, "
+                           "not a setup problem.", name, _swept_px, side)
             return None
         sig.short_anchor = _ps
+        if abs(_ps - _swept_px) > 1e-9:
+            logger.info("[sweep_cs] %s: sweep extreme %.2f cleared no strike; "
+                        "short is the first strike BEYOND it at %.2f "
+                        "(further from spot than anything price reached)",
+                        name, _swept_px, _ps)
         sig.pierced_strike = _ps
         sig.pool_price = pool
         sig.boundary = boundary

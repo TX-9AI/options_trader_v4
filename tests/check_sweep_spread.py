@@ -96,5 +96,42 @@ fsrc = ast.unparse(fn)
 check("S6a _execute_condor_leg names SweepCreditSpread as a strategy identity", "SweepCreditSpread" in fsrc)
 check("S6b _execute_condor_leg reads the signal's max_loss_pct for the stop", "max_loss_pct" in fsrc)
 
+# ── S7 (r107) — THE SHORT STRIKE IS THE FIRST STRIKE BEYOND THE EXTREME ─────
+# Operator, 2026-08-24: "It swept. That's legitimately a sweep. Sell the 7635."
+from strategy.sweep_credit_spread import (strike_beyond_sweep as _S,
+                                          pierced_strike as _P)
+class _K:
+    def __init__(self, k): self.strike = k
+_spx = [_K(k) for k in range(7500, 7800, 5)]      # 5-wide
+_qqq = [_K(k) for k in range(700, 720, 1)]        # 1-wide
+
+check("S7a SPX shallow sweep (the operator's case) sells the 7635",
+      _S(7638.17, 7639.01, False, contracts=_spx) == 7635.0,
+      f"{_S(7638.17, 7639.01, False, contracts=_spx)}")
+check("S7b and the OLD rule declined it outright",
+      _P(7638.17, 7639.01, False, 5) is None)
+# every case the old rule COULD answer must be unchanged — this ruling widens
+# the strategy, it does not re-price the trades it was already taking.
+for name, sw, pool, ceil_, inc, chain in (
+        ("deep floor",   7633.0, 7639.01, False, 5, _spx),
+        ("deeper floor", 7628.0, 7639.01, False, 5, _spx),
+        ("shallow ceil", 7661.2, 7660.0,  True,  5, _spx),
+        ("deep ceil",    7667.0, 7660.0,  True,  5, _spx)):
+    _new, _old = _S(sw, pool, ceil_, contracts=chain), _P(sw, pool, ceil_, inc)
+    check(f"S7c {name}: unchanged from the old rule", _new == _old, f"{_new} vs {_old}")
+
+check("S7d 1-wide symbols also resolve (they mostly did before)",
+      _S(706.3, 706.8, False, contracts=_qqq) == 706.0)
+check("S7e NEVER a strike inside the pool (the level price never broke)",
+      _S(7638.17, 7639.01, False, contracts=_spx) <= 7639.01)
+check("S7f a truncated chain DECLINES rather than selling a wild strike",
+      _S(7000.0, 7639.01, False, contracts=_spx) is None)
+check("S7g no chain falls back to the grid, same answer",
+      _S(7638.17, 7639.01, False, increment=5) == 7635.0)
+
+_ssrc = open(os.path.join(ROOT, "strategy/sweep_credit_spread.py")).read()
+check("S7h the strategy selects via the CHAIN, not the config constant",
+      "strike_beyond_sweep(" in _ssrc and "contracts=_side_contracts" in _ssrc)
+
 print(f"\n{'PASS' if not FAILURES else 'FAIL'}: {len(FAILURES)} problem(s) {FAILURES}")
 sys.exit(1 if FAILURES else 0)

@@ -71,9 +71,19 @@ move to pay that after the spread, and the tape delivers it in a specified
 direction on 22% of windows. **A credit spread needs the level to hold**, and
 two thirds of 90-minute windows produce no 0.5% move at all.
 
-**Short strike** — the **nearest strike price actually pierced**, not the pool.
-Further from spot than the boundary: less credit, more room, and the position is
-threatened only if price returns to a level it already failed at.
+**Short strike** — the **first strike beyond the sweep extreme**: the one price
+pierced when it cleared one, the next one out when it did not. Never a strike
+inside the pool. Further from spot than the boundary: less credit, more room, and
+the position is threatened only if price returns to a level it already failed at.
+
+⚠️ **AMENDED r107 (operator, 2026-08-24: "It swept. That's legitimately a sweep.
+Sell the 7635").** The old wording required a strike to have been TRADED
+THROUGH, which collides with this section's own preference for a SHALLOW pierce:
+SPX swept the NY Low by 0.84 pts on a 5-wide chain, cleared no strike, and a
+fully-qualified setup was declined 608 times in one session. The collision only
+bites on wide-strike symbols — seven of the fifteen boxes — so it read as "no
+setups" rather than as a rule. **Strikes are read from the LIVE CHAIN**, not
+`STRIKE_INCREMENT`: SPX 0DTE is 5-wide near the money and 25-wide in the tails.
 
 **FOUNDATIONAL**
 · the pool is **NAMED**. An unnamed swing high is not a liquidity pool.
