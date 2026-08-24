@@ -1,5 +1,11 @@
 """
-strategy/sweep_credit_spread.py  v4.1
+strategy/sweep_credit_spread.py  v4.2
+v4.2  2026-08-24  r100 — the short-strike anchor no longer falls back to the
+      POOL when the pierce cleared no strike. The pool is a price level, so the
+      anchor could not resolve against the chain and every SPX fire died at
+      "no priced put contract at the pierced strike 7639.01" — a strike that
+      does not exist. pierced_strike's own contract says None means there is
+      nothing to sell; now that is what happens, with its own log line.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -421,7 +427,26 @@ class SweepCreditSpreadStrategy:
         _inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
         _swept_px = float(getattr(sweep, "sweep_price", 0.0) or 0.0)
         _ps = pierced_strike(_swept_px, pool, boundary == "ceiling", _inc)
-        sig.short_anchor = _ps if _ps is not None else pool
+        # 🔴 r100 — NO FALLBACK TO THE POOL. The pool is a PRICE LEVEL, not a
+        # strike: SPX's NY Low sat at 7639.01 on a 5-wide chain, so the anchor
+        # could never resolve and r97's exact-strike lookup reported "no priced
+        # put contract at the pierced strike 7639.01" on 230 consecutive ticks
+        # (2026-08-24) — a log line naming a strike that does not exist.
+        # ⚠️ AND `pierced_strike` ALREADY SAYS WHAT None MEANS: "the sweep
+        # cleared NO strike ... there is nothing to sell, and inventing a strike
+        # here would sell a level that was never tested." The fallback
+        # contradicted the function it called, one line later.
+        # ⚠️ THIS REMOVES TRADES, DELIBERATELY. A sweep that pierces no strike
+        # is now declined with its own reason instead of dying downstream on a
+        # confusing one. Counted, so the frequency is a fact rather than a guess.
+        if _ps is None:
+            logger.info("[sweep_cs] %s swept but the pierce cleared NO strike "
+                        "(pool %.2f, sweep extreme %.2f, increment %g) - SKIP. "
+                        "The short strike is the nearest strike ACTUALLY "
+                        "pierced; the pool is a price, not a strike.",
+                        name, pool, _swept_px, _inc)
+            return None
+        sig.short_anchor = _ps
         sig.pierced_strike = _ps
         sig.pool_price = pool
         sig.boundary = boundary

@@ -1,5 +1,8 @@
 """
-strategy/iron_condor_strategy.py  v4.3
+strategy/iron_condor_strategy.py  v4.4
+v4.4  2026-08-24  r100 — `is_iron_condor=True` in the constructor is not a field
+      (it is a property alias); the 1h fork leg raised TypeError on every fire.
+      Now sets is_credit_vertical.
 v4.3  2026-08-24  CONDOR REMODEL. The plan-and-pair state machine is removed.
       Each vertical spread is INDEPENDENT — it fires when its fork tine is hit,
       manages as a standalone, and if a complementary spread happens to fire later
@@ -454,7 +457,13 @@ class IronCondorStrategy(BaseOptionsStrategy):
             setup_type             = f"1h_fork_{side}_credit_spread",
             direction              = "neutral",
             option_side            = side,
-            is_iron_condor         = True,
+            # 🔴 r100 — WAS `is_iron_condor=True`, WHICH IS NOT A FIELD. It is a
+            # read/write PROPERTY on OptionsSignal, so the dataclass __init__
+            # rejected it and this leg builder raised TypeError on EVERY fire —
+            # the 1h fork credit spread could never produce a signal. The alias
+            # exists so a caller setting EITHER name gets identical behaviour;
+            # that only holds for ATTRIBUTE assignment, never in the constructor.
+            is_credit_vertical         = True,
             short_call_contract    = short_contract if side == "call" else None,
             long_call_contract     = long_contract  if side == "call" else None,
             short_put_contract     = short_contract if side == "put"  else None,

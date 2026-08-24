@@ -1,5 +1,8 @@
 """
-strategy/daily_fork_credit_spread.py  v1.0
+strategy/daily_fork_credit_spread.py  v1.1
+v1.1  2026-08-24  r100 — `is_iron_condor=True` in the constructor is not a field
+      (it is a property alias); the 1d fork leg raised TypeError on every fire.
+      Now sets is_credit_vertical.
 v1.0  2026-08-24  NEW. The fourth credit-spread trigger: a call or put vertical
       sold when price reaches a DAILY pitchfork tine.
 
@@ -331,7 +334,13 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
             setup_type            = f"1d_fork_{side}_credit_spread",
             direction             = "neutral",
             option_side           = side,
-            is_iron_condor        = True,
+            # 🔴 r100 — WAS `is_iron_condor=True`, WHICH IS NOT A FIELD. It is a
+            # read/write PROPERTY on OptionsSignal, so the dataclass __init__
+            # rejected it and this leg builder raised TypeError on EVERY fire —
+            # the 1d fork credit spread could never produce a signal. The alias
+            # exists so a caller setting EITHER name gets identical behaviour;
+            # that only holds for ATTRIBUTE assignment, never in the constructor.
+            is_credit_vertical        = True,
             short_call_contract   = short_c if side == "call" else None,
             long_call_contract    = long_c  if side == "call" else None,
             short_put_contract    = short_c if side == "put"  else None,

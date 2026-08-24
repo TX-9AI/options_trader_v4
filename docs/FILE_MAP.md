@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-156 Python modules across 13 local packages.
+157 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -47,7 +47,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `utils/time_utils.py` | 20 | alert_manager.py, broker_reconcile.py, check_condor_spec.py, check_exit_executes.py |
 | `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
 | `derived/base.py` | 12 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
-| `strategy/base_strategy.py` | 11 | check_sweep_spread.py, daily_fork_credit_spread.py, entry_engine.py, gex_pin_butterfly.py |
+| `strategy/base_strategy.py` | 12 | check_signal_kwargs.py, check_sweep_spread.py, daily_fork_credit_spread.py, entry_engine.py |
 | `database/trade_logger.py` | 9 | check_condor_pairing.py, check_condor_stop_suppression.py, condor_roll.py, counterfactual.py |
 | `strategy/__init__.py` | 9 | check_audit_20260823.py, check_condor_spec.py, daily_fork_credit_spread.py, gex_pin_butterfly.py |
 | `analysis/pitchfork.py` | 8 | check_condor_rails.py, check_condor_spec.py, forks.py, iron_condor_strategy.py |
@@ -388,7 +388,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/base_strategy.py`
 - **calls:** `analysis/orb_engine.py`, `data/options_chain.py`
-- **called by:** `execution/entry_engine.py`, `main.py`, `risk/setup_scorer.py`, `strategy/daily_fork_credit_spread.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_sweep_spread.py`
+- **called by:** `execution/entry_engine.py`, `main.py`, `risk/setup_scorer.py`, `strategy/daily_fork_credit_spread.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_signal_kwargs.py`, `tests/check_sweep_spread.py`
 
 ### `strategy/condor_roll.py`
 - **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/exit_engine.py`, `execution/limit_ladder.py`, `execution/order_confirm.py`, `notifications/alert_manager.py`, `utils/time_utils.py`
@@ -532,6 +532,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_purge_pushed.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/s3_push.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_signal_kwargs.py`
+- **calls:** `strategy/base_strategy.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_singletons.py`

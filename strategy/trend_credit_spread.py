@@ -1,5 +1,8 @@
 """
-strategy/trend_credit_spread.py  vv4.1
+strategy/trend_credit_spread.py  v4.2
+v4.2  2026-08-24  r100 — REMOVED `ms=""` from the OptionsSignal constructor. Not
+      a field; TC.6 raised TypeError on every fire and has never produced a
+      signal since r65.
 
 v4.1  2026-08-21  r60: reads TCS_ENTRY_END_ET (inert while parked) - the
       global cutoff it used to read is deleted.
@@ -429,7 +432,16 @@ class TrendCreditSpread:
             # THE INVALIDATION LEVEL, and the exit. A close beyond the broken
             # boundary is thesis death — the same event orb_structure_stop names.
             underlying_stop=boundary,
-            ms="",   # PHASE B (r58): the label field is not written
+            # 🔴 r100 — `ms=""` REMOVED. OptionsSignal HAS NO SUCH FIELD, so this
+            # constructor raised TypeError on EVERY fire and `_safe_strategy`
+            # logged it as a strategy failure: "[tcs] generate_signal failed:
+            # OptionsSignal.__init__() got an unexpected keyword argument 'ms'",
+            # 160 times on NFLX on 2026-08-24 alone. TC.6 HAS NEVER PRODUCED A
+            # SIGNAL since r65 renamed the retired label kwarg here without
+            # checking that the field it renamed to exists. Same class as
+            # main.py's `manage_open_position(ms=None)` (r99). Pinned repo-wide
+            # by tests/check_signal_kwargs.py, which checks every dataclass
+            # construction against its real fields.
         )
         sig.is_credit_vertical = True         # credit-spread math, not debit
         sig.is_trend_credit = True            # exit_engine: breach-or-nickel ONLY
