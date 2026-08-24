@@ -1,5 +1,7 @@
 """
-utils/time_utils.py  v4.1
+utils/time_utils.py  v4.2
+v4.2  2026-08-24  r101: entries_open() — the 09:35 order gate (config
+      ENTRY_OPEN_ET), fail-closed. Openings only; no exit path reads it.
 
 v4.1  2026-08-21  r60: is_past_entry_cutoff + NO_ENTRY deleted with the
       unauthorized global cutoff.
@@ -95,6 +97,25 @@ try:
     FLATTEN_WINDOW_OPEN = dtime(*_FWO)
 except Exception:
     FLATTEN_WINDOW_OPEN = HARD_CLOSE
+
+
+def entries_open(now: Optional[datetime] = None) -> bool:
+    """r101 — True once ORDERS MAY BE PLACED (config.ENTRY_OPEN_ET, 09:35 ET).
+
+    The deciding logic runs whenever the service is up; this is the only thing
+    that stops it from placing. OPENINGS ONLY — every exit path ignores it.
+
+    ⚠️ FAILS CLOSED. A bad clock read or a malformed override returns False:
+    a missed entry costs a trade, an entry placed against a range that does not
+    exist costs a position nobody anchored.
+    """
+    try:
+        import config as _cfg
+        h, m = tuple(getattr(_cfg, "ENTRY_OPEN_ET", (9, 35)))[:2]
+        n = now or now_et()
+        return (n.hour, n.minute) >= (int(h), int(m))
+    except Exception:                                          # noqa: BLE001
+        return False
 
 
 def is_hard_close_time() -> bool:

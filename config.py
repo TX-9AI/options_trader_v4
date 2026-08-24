@@ -1,5 +1,8 @@
 """
-config.py  v4.4
+config.py  v4.5
+v4.5  2026-08-24  r101: ENTRY_OPEN_ET (09:35) — nothing OPENS before the opening
+      range exists. Operator directive, dated, with its reason recorded beside
+      the GLOBAL_NO_ENTRY_ET tombstone so the two are distinguishable.
 v4.4  2026-08-25  LOCAL RETENTION POLICY DECLARED, NOT ENFORCED. Per-tenor day
     counts written down in config BEFORE any purge exists to read them, and
     COMMENTED OUT so nothing acts on them yet. The binding consumer is
@@ -687,6 +690,27 @@ DEBIT_DIRECTIONAL_CUTOFF_ET = tuple(int(x) for x in
 #                 butterfly that arises from an aggressive condor roll, which
 #                 is a MANAGEMENT step on a live position rather than a new
 #                 entry at all
+# ── ENTRY OPEN — NO ORDER IS PLACED BEFORE 09:35 ET (r101, 2026-08-24) ──────
+# OPERATOR DIRECTIVE, VERBATIM, 2026-08-24: "I want the executing logic running
+# as long as the service is up. But one gate that blocks it from placing orders
+# until 0935 (orb range established)."
+# ⚠️ THE PROVENANCE IS THE POINT, and it is written here because the section
+# below is the tombstone of the last global entry gate. GLOBAL_NO_ENTRY_ET was
+# an encoding NOBODY CHOSE — a bare dtime hardcoded in v3, promoted to a
+# constant by a pass whose own changelog said "NOT a behaviour change", and it
+# cost a 15-box session. This one is a dated instruction with a stated reason
+# (the opening range is not established until 09:35, so nothing before it can
+# be anchored to a range that does not yet exist). A future audit should be
+# able to tell the two apart WITHOUT asking.
+# ⚠️ IT GATES OPENINGS ONLY. Exits, rolls, inversions and the flatten are NEVER
+# gated: a blocked exit is a stuck position, and a restart holding an adopted
+# leg must be able to close it at 09:31.
+# ⚠️ AND IT IS A FLOOR, NOT A WINDOW. Each structure keeps its own cutoffs
+# (ORB 11:00, sweep 14:00, TCS 11:31, the afternoon debit block); this only
+# says nothing opens before it.
+ENTRY_OPEN_ET = tuple(int(x) for x in
+                      os.environ.get("OT_ENTRY_OPEN_ET", "9,35").split(","))
+
 DEBIT_BLOCKED_STRUCTURES = {"long_debit"}
 DEBIT_BLOCK_ACTIVE          = os.environ.get("OT_DEBIT_BLOCK_ACTIVE", "1") == "1"
 

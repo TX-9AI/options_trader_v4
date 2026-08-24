@@ -1,5 +1,12 @@
 """
-main.py  v4.8
+main.py  v4.9
+v4.9  2026-08-24  r101 DECIDE ALWAYS, PLACE AFTER 09:35 (operator directive).
+      The trading half of the loop was never executed until the bell, so a box
+      baked at 07:40 ran clean for two hours and died on its first decision at
+      09:30:01. The pre-RTH branch now runs assemble_market_state +
+      attempt_new_entry with live inputs, and a dispatch failure pages on the
+      FIRST occurrence instead of the thirtieth. ENTRY_OPEN_ET gates the two
+      order choke points; exits are never gated.
 v4.8  2026-08-24  r99 — THREE DEFECTS THAT COST TRADES OR WOULD HAVE. (1) P0:
       `manage_open_position(ms=None)` — r65 renamed the retired label kwarg
       to `ms=` while deleting the parameter, so every tick with an open position
@@ -694,6 +701,7 @@ from config import (
     DEBIT_DIRECTIONAL_CUTOFF_ET, DEBIT_BLOCK_ACTIVE,
     CONDOR_PF_TIMEFRAME,                        # PF.5
     CONDOR_TRIGGER_APPROACH,                    # v4.3 trigger map (module-level)
+    ENTRY_OPEN_ET,                              # r101 — nothing opens before 09:35
     RTH_OPEN_ET, ORB_WINDOW_MINUTES,            # TC.6 v2.1 — range from tape
     BROKER_RECONCILE_INTERVAL_MIN
 )
@@ -727,7 +735,7 @@ logger = logging.getLogger(__name__)
 
 from utils.time_utils import (
     now_utc, now_et, fmt_et_short, minutes_since, is_rth,
-    seconds_until_rth_open, is_hard_close_time
+    seconds_until_rth_open, is_hard_close_time, entries_open
 )
 from data.data_cache import get_cache
 from data.macro_data import get_macro_manager
@@ -1625,6 +1633,17 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
     import uuid
 
     mode = "PAPER" if state.paper_trading else "LIVE"
+
+    # ── 🔴 r101 — NOTHING OPENS BEFORE ENTRY_OPEN_ET (09:35 ET) ─────────────
+    # The credit half of the pair of choke points; the debit half is
+    # `entry_engine.enter`. All four triggers (1h fork, 1d fork, sweep, TC.6)
+    # and the second-leg window route through here, so one test covers them.
+    if not entries_open():
+        logger.info("[entry-gate] %s %s HELD — entries open at %02d:%02d ET "
+                    "(opening range not established)", mode,
+                    getattr(signal, "strategy_name", "credit vertical"),
+                    *ENTRY_OPEN_ET[:2])
+        return
 
     # Short/long contracts for this leg live on the call- or put-side fields.
     if signal.option_side == "call":
@@ -3098,6 +3117,36 @@ def _check_blindness(state: BotState):
             state.blind_latch.last_outage_cause)
 
 
+_DISPATCH_PAGED: set = set()
+
+
+def _page_dispatch_failure(state, err: Exception, where: str) -> None:
+    """r101 — a tick that cannot complete is a BLINDING CONDITION and it pages
+    on the first occurrence, once per process per error signature.
+
+    ⚠️ THE STANDING RULE ALREADY COVERED THIS AND NOTHING IMPLEMENTED IT. The
+    2026-08-01 requirement is that ANY blinding condition notifies immediately.
+    On 2026-08-24 the loop raised on EVERY tick for fourteen minutes across all
+    fifteen boxes and no page went out: the error counter only acts at thirty
+    (shutdown), and `_check_blindness` watches the DATA, not the loop. Process
+    alive, feed green, decisions impossible — an uncovered middle inside the
+    uncovered middle.
+    """
+    sig = f"{where}:{type(err).__name__}:{err}"[:200]
+    logger.error("DISPATCH FAILED (%s): %s", where, err, exc_info=True)
+    if sig in _DISPATCH_PAGED:
+        return
+    _DISPATCH_PAGED.add(sig)
+    try:
+        get_alert_manager()._send(
+            f"\U0001F6A8 {os.environ.get('OT_INSTRUMENT', INSTRUMENT)} "
+            f"DISPATCH FAILED ({where}) — the bot cannot reach a trading "
+            f"decision this tick: {type(err).__name__}: {err}. Feed and "
+            f"process are fine; DECISIONS ARE NOT HAPPENING. {fmt_et_short()}")
+    except Exception as _alert_err:                            # noqa: BLE001
+        logger.error("dispatch-failure page could not be sent: %s", _alert_err)
+
+
 def main_loop(state: BotState):
     pos_mgr = get_position_manager(state.paper_trading)
 
@@ -3133,10 +3182,45 @@ def main_loop(state: BotState):
                     # Day ended — reset flag so it fires again tomorrow
                     state.session_reset_done = False
                 try:
-                    run_analysis(state)          # derives; trades nothing
+                    _ctx = run_analysis(state)   # derives; trades nothing
                 except Exception as _obs_err:                   # noqa: BLE001
                     logger.debug("pre-RTH observation pass skipped: %s",
                                  _obs_err)
+                    _ctx = None
+                # ── 🔴 r101 — RUN THE DECIDING PATH OUTSIDE RTH TOO ─────────
+                # Operator, 2026-08-24: "I want the executing logic running as
+                # long as the service is up. But one gate that blocks it from
+                # placing orders until 0935."
+                # ⚠️ WHY: THE TRADING HALF OF THIS PROGRAM WAS NEVER EXECUTED
+                # UNTIL THE BELL. A box baked at 07:40 ran clean for two hours
+                # and then died on its FIRST decision at 09:30:01 —
+                # `MarketState() takes no arguments`, every tick for fourteen
+                # minutes, through the ORB definition window. QQQ confirmed a
+                # short at 09:40:03 and the same tick raised. A green pre-open
+                # box proved nothing about the code that runs at the open, and
+                # four defects of the same class (a call never made) survived
+                # two code audits precisely because reading cannot find them
+                # and calling finds them instantly.
+                # ⚠️ THE CHAIN IS AVAILABLE HERE. Verified on the manifold board
+                # 2026-08-24 08:57 and 09:19: chain marks / greeks / quotes all
+                # green at age 22s. The log shows no pre-open chain builds
+                # because the LOOP NEVER ASKED, not because the data was
+                # missing — so this pass exercises the strategies for real,
+                # from boot, rather than only from 09:30.
+                # ⚠️ IT PLACES NOTHING. `entries_open()` refuses at both order
+                # choke points, so this is a rehearsal with live inputs. Exits
+                # are not reached: management runs only in the RTH branch, and
+                # a position cannot exist before entries open.
+                # ⚠️ AND IT FAILS LOUD, unlike the observation pass above. A
+                # failure HERE is the failure that costs the session, so it
+                # pages on the FIRST occurrence — see `_page_dispatch_failure`.
+                if _ctx is not None:
+                    try:
+                        _pms = assemble_market_state(_ctx, "pre_open", state)
+                        if _pms is not None:
+                            attempt_new_entry(_ctx, _pms, state)
+                    except Exception as _dry_err:               # noqa: BLE001
+                        _page_dispatch_failure(state, _dry_err, "pre-open")
                 secs = seconds_until_rth_open()
                 if secs > 120:
                     logger.info(

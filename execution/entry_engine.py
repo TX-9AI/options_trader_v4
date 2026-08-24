@@ -1,5 +1,8 @@
 """
-execution/entry_engine.py  v4.2
+execution/entry_engine.py  v4.3
+v4.3  2026-08-24  r101: enter() refuses before ENTRY_OPEN_ET — the debit choke
+      point for the 09:35 gate (single leg and butterfly). No broker call, no
+      record; the strategy re-signals next tick.
 v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -103,7 +106,17 @@ from config import (
     CONTRACT_MULTIPLIER, INSTRUMENT,
     LIMIT_IMPROVE_TICKS
 )
-from utils.time_utils import ts_for_db, fmt_et_short
+from utils.time_utils import ts_for_db, fmt_et_short, entries_open
+
+
+def _cfg_entry_open():
+    """The configured entry-open time, read at CALL time so an env change needs
+    no restart of this module and a test can move the clock."""
+    try:
+        import config as _c
+        return tuple(getattr(_c, "ENTRY_OPEN_ET", (9, 35)))[:2]
+    except Exception:                                          # noqa: BLE001
+        return (9, 35)
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +137,25 @@ class EntryEngine:
         Returns TradeRecord on success, None on failure.
         """
         mode = "PAPER" if self.paper_trading else "LIVE"
+
+        # ── 🔴 r101 — NOTHING OPENS BEFORE ENTRY_OPEN_ET (09:35 ET) ─────────
+        # Operator, 2026-08-24: the deciding logic runs as long as the service
+        # is up; ONE gate stops it placing until the opening range exists.
+        # ⚠️ IT SITS HERE, AT THE ORDER, AND NOT IN THE STRATEGIES. A gate per
+        # strategy is a gate the NEXT strategy does not have — the AFD.1 shape,
+        # twice over. Two choke points cover every opening in the system: this
+        # one (single leg + butterfly) and `main._execute_condor_leg` (all four
+        # credit verticals).
+        # ⚠️ AND IT REFUSES BEFORE THE ORDER, NOT AFTER THE FILL. Returning None
+        # here means no broker call, no record, no position — the caller logs a
+        # no-trade and the strategy re-signals next tick.
+        if not entries_open():
+            _h, _m = _cfg_entry_open()
+            logger.info(
+                "[entry-gate] %s %s HELD — entries open at %02d:%02d ET "
+                "(opening range not established). The setup was fully formed; "
+                "it re-signals next tick.", mode, signal.strategy_name, _h, _m)
+            return None
 
         if signal.is_butterfly:
             logger.info(
