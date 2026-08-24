@@ -2966,16 +2966,42 @@ def main_loop(state: BotState):
         state.tick_count += 1
 
         try:
-            # ── Pre-RTH: sleep until open ──────────────────────────────────
+            # ── OUTSIDE RTH: OBSERVE, DO NOT TRADE ─────────────────────────
+            # 🔴 v4.7, 2026-08-24 — TRADING AND OBSERVATION WERE THE SAME GATE.
+            # Operator: "TRADING can only occur during RTH, the feed should be
+            # ALWAYS." The feed gate was lifted in r53 and the raw streams have
+            # been healthy ever since — but the DERIVED LAYER runs at the end
+            # of `run_analysis`, and this branch `continue`d before ever
+            # reaching it. So every deriver inherited a gate that belongs only
+            # to trading.
+            # ⚠️ MEASURED 2026-08-24 07:42: greeks 3024 rows age=676s, quotes
+            # 3024, prints age=1s — the inputs were abundant and fresh — while
+            # indicators / pitchfork / levels / surface all read rows=0 on all
+            # fifteen boxes. The operator's read was exactly right: "there is
+            # enough information there to derive those artifacts."
+            # 🔑 THE PRINCIPLE THIS RESTORES: derivers are CONTRIBUTORS and
+            # never gate trading — so nothing about them should be gated BY
+            # trading. `run_analysis` IS the observation pass; everything after
+            # it in this tick is the trading pass. The gate belongs between
+            # them, not in front of both.
+            # ⚠️ AND IT FAILS SOFT. A pre-market pass that raises is logged at
+            # DEBUG and skipped — thin frames outside RTH are arithmetic, not
+            # faults (the 08-01 warnings-are-RTH-only rule), and an observation
+            # failure must never keep a box from opening for business.
             if not is_rth():
                 if state.session_reset_done:
                     # Day ended — reset flag so it fires again tomorrow
                     state.session_reset_done = False
+                try:
+                    run_analysis(state)          # derives; trades nothing
+                except Exception as _obs_err:                   # noqa: BLE001
+                    logger.debug("pre-RTH observation pass skipped: %s",
+                                 _obs_err)
                 secs = seconds_until_rth_open()
                 if secs > 120:
                     logger.info(
-                        f"Market closed. Next RTH open in "
-                        f"{secs/60:.0f} min. Sleeping 60s."
+                        f"Market closed (observing, not trading). Next RTH "
+                        f"open in {secs/60:.0f} min. Sleeping 60s."
                     )
                     time.sleep(60)
                     continue
