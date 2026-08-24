@@ -1,8 +1,40 @@
 #!/usr/bin/env python3
 """
-tools/manifold_health.py  v4.0
+tools/manifold_health.py  v4.1
 
 One bulb per stream. All green = manifold green.
+
+v4.1  2026-08-24  r95 AFTER-HOURS IS ITS OWN SECTION, AND `prints` ON AN INDEX
+IS n/a. Operator: "those sections will never be green during RTH & if used in
+the dashboard, it would never show green."
+
+🔴 THE BOARD COULD NOT REACH GREEN DURING RTH, AND THAT IS A DESIGN FAULT IN
+THE BOARD RATHER THAN A FAULT IN THE FEED. `<SYM>_EXT` is the NON-RTH route:
+every bar outside 09:30-16:00 is segregated to it, which means that during RTH
+it correctly receives nothing and ages. VIX_EXT/1m read age=4868s at 10:36 —
+a 09:15 bar, exactly as designed. A permanently-amber row is not observability;
+it is how a reader is trained to stop looking (WORKING_AGREEMENT 17, and the
+CV.1 failure).
+
+⚠️ SO FRESHNESS IS NOW JUDGED IN THE STREAM'S OWN WINDOW. An RTH stream is
+judged during RTH and idles after the close; an after-hours stream is judged
+outside RTH and idles during it. The rollup only ever considers what is in its
+window. This is the SAME rule the file already applied in one direction — it
+just never applied it in the other.
+
+⚠️ `prints` ON A CASH INDEX RENDERS n/a, NOT RED. An index is a calculated
+value with no order flow, so TimeAndSale can never deliver — empty BY
+CONSTRUCTION, not by failure. 🔴 THE SUBSCRIPTION IS UNTOUCHED. Operator's
+standing instruction: "DO NOT unsubscribe to ANYTHING. You can choose not to
+write it or not to display it, but we subscribe to EVERYTHING, period." That is
+docs/FEED_MANIFOLD.md's governing rule, and an unsubscribe is unrecoverable in
+a way a suppressed bulb is not — DXFeed history is same-evening only.
+
+⚠️ `underlying` AND `theo price` ARE LEFT ALONE AND STAY RED AT ZERO ROWS.
+They are option-chain events an index legitimately has; whether they arrive is
+an ENTITLEMENT question this tool cannot answer, and dressing "did not arrive"
+up as "cannot exist" is the precise error the board exists to prevent. The
+legend now says so out loud.
 
 v4.0  2026-08-25  Operator's design: "every data stream that it's splitting
 should have its own red light or green light, and if they're all green,
@@ -47,6 +79,11 @@ from datetime import datetime, time as dtime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 GREEN, AMBER, RED, GREY = "🟢", "🟡", "🔴", "⚪"
+# ⚫ = NOT APPLICABLE to this instrument. A THIRD FACT, distinct from both
+# "missing" and "idle": the stream cannot exist here, so no operator action
+# will ever change it. RED would be a standing false alarm; GREY would imply it
+# is merely resting and might return.
+NA = "⚫"
 
 # Freshness budgets, seconds. Generous — this asks "did the pipe break", not
 # "is latency good".
@@ -56,16 +93,26 @@ CANDLE_BUDGET = {"1m": 180, "5m": 900, "15m": 2700, "1h": 9000, "1d": 200000}
 # ⚠️ `critical` MARKS WHAT TRADING ACTUALLY DEPENDS ON. prints and theo are
 # rich and new; the bot does not yet require them, so their absence must not
 # paint the rollup red and teach the operator to ignore it.
+# (table, ts column, budget seconds, label, critical, after_hours)
+# ⚠️ `after_hours` MEANS "JUDGED OUTSIDE RTH, IDLE DURING IT". `session_summary`
+# is a SESSION-BOUNDARY datum carrying prev_day_close_price — it lands once and
+# its freshness during the session is meaningless, so at a 3600s budget it went
+# amber every day from roughly 10:45 onward and stayed there.
 STREAMS = [
-    ("greeks_series",     "ts_epoch",      300,  "greeks (series)",   True),
-    ("quote_series",      "ts_epoch",      300,  "quotes (series)",   True),
-    ("chain_marks",       "updated_epoch", 300,  "chain marks",       True),
-    ("prints",            "ts_epoch",      600,  "prints (T&S)",      False),
-    ("last_trade",        "ts_epoch",      600,  "last trade",        False),
-    ("session_summary",   "ts_epoch",     3600,  "session summary",   False),
-    ("underlying_series", "ts_epoch",     3600,  "underlying",        False),
-    ("theo_series",       "ts_epoch",     3600,  "theo price",        False),
+    ("greeks_series",     "ts_epoch",      300,  "greeks (series)",   True,  False),
+    ("quote_series",      "ts_epoch",      300,  "quotes (series)",   True,  False),
+    ("chain_marks",       "updated_epoch", 300,  "chain marks",       True,  False),
+    ("prints",            "ts_epoch",      600,  "prints (T&S)",      False, False),
+    ("last_trade",        "ts_epoch",      600,  "last trade",        False, False),
+    ("underlying_series", "ts_epoch",     3600,  "underlying",        False, False),
+    ("theo_series",       "ts_epoch",     3600,  "theo price",        False, False),
+    ("session_summary",   "ts_epoch",     3600,  "session summary",   False, True),
 ]
+
+# Streams that CANNOT EXIST for a cash index — no order flow in the index
+# itself, so no time-and-sale. Deliberately NOT extended to underlying/theo:
+# see the header.
+INDEX_NA_TABLES = {"prints"}
 
 DERIVED = [
     ("indicator_series", "ts_epoch",  600, "indicators (ADX/ATR/VWAP)"),
@@ -89,17 +136,32 @@ def _q1(conn, sql, args=()):
         return None
 
 
-def _bulb(rows, age, budget, in_rth) -> str:
+def _bulb(rows, age, budget, in_window) -> str:
+    """GREEN/AMBER/RED, where AMBER only fires INSIDE the stream's own window.
+
+    ⚠️ `in_window` IS NOT `in_rth`. For an RTH stream they are the same thing;
+    for an after-hours stream (`*_EXT`, session summary) it is the INVERSE. A
+    stream that is legitimately idle must never paint amber, in either
+    direction — that was the whole reason the board could not go green during
+    RTH.
+    """
     if not rows:
         return RED
     if budget and age is not None and age > budget:
-        return AMBER if in_rth else GREY
+        return AMBER if in_window else GREY
     return GREEN
 
 
-def collect(feed_db: str, derived_db: str, in_rth: bool) -> dict:
+def _is_after_hours_candle(label: str) -> bool:
+    """`<SYM>_EXT/<tenor>` is the non-RTH route — see candle_feed's RTH guard."""
+    return label.split("/", 1)[0].endswith("_EXT")
+
+
+def collect(feed_db: str, derived_db: str, in_rth: bool,
+            is_index: bool = False) -> dict:
     now = time.time()
-    out = {"streams": [], "candles": [], "derived": [], "in_rth": in_rth}
+    out = {"streams": [], "candles": [], "derived": [], "in_rth": in_rth,
+           "is_index": is_index}
 
     fc = None
     if os.path.exists(feed_db):
@@ -109,14 +171,21 @@ def collect(feed_db: str, derived_db: str, in_rth: bool) -> dict:
         out["fatal"] = f"no feed store at {feed_db}"
         return out
 
-    for tbl, tscol, budget, label, critical in STREAMS:
+    for tbl, tscol, budget, label, critical, after_hours in STREAMS:
         r = _q1(fc, f"SELECT COUNT(*), MAX({tscol}) FROM {tbl}")
         rows = (r[0] if r else 0) or 0
         age = (now - r[1]) if (r and r[1]) else None
+        # A stream that cannot exist for this instrument is n/a, and n/a is
+        # NOT a degraded green — it is the absence of a question.
+        if is_index and tbl in INDEX_NA_TABLES:
+            bulb = NA
+        else:
+            bulb = _bulb(rows, age, budget,
+                         (not in_rth) if after_hours else in_rth)
         out["streams"].append({
             "label": label, "table": tbl, "rows": rows,
             "age_s": round(age) if age is not None else None,
-            "bulb": _bulb(rows, age, budget, in_rth), "critical": critical})
+            "bulb": bulb, "critical": critical, "after_hours": after_hours})
 
     r = _q1(fc, "SELECT symbol, interval, COUNT(*), MAX(ts_epoch_ms)"
                 " FROM candles GROUP BY symbol, interval")
@@ -127,9 +196,13 @@ def collect(feed_db: str, derived_db: str, in_rth: bool) -> dict:
         rows = []
     for sym, iv, n, newest in rows:
         age = now - (newest or 0) / 1000.0
+        label = f"{sym}/{iv}"
+        ah = _is_after_hours_candle(label)
         out["candles"].append({
-            "label": f"{sym}/{iv}", "rows": n, "age_s": round(age),
-            "bulb": _bulb(n, age, CANDLE_BUDGET.get(iv, 3600), in_rth)})
+            "label": label, "rows": n, "age_s": round(age),
+            "after_hours": ah,
+            "bulb": _bulb(n, age, CANDLE_BUDGET.get(iv, 3600),
+                          (not in_rth) if ah else in_rth)})
 
     if os.path.exists(derived_db):
         dc = sqlite3.connect(f"file:{derived_db}?mode=ro", uri=True)
@@ -162,13 +235,34 @@ def collect(feed_db: str, derived_db: str, in_rth: bool) -> dict:
     return out
 
 
+def _in_window(row: dict, in_rth: bool) -> bool:
+    """True when this row is in the window where its freshness MEANS anything."""
+    return (not in_rth) if row.get("after_hours") else in_rth
+
+
 def rollup(rep: dict) -> str:
-    """One bulb for status.py. RED only when something TRADING needs is gone."""
+    """One bulb for status.py. RED only when something TRADING needs is gone.
+
+    ⚠️ AFTER-HOURS ROWS NEVER PAINT THE RTH ROLLUP, AND VICE VERSA. `<SYM>_EXT`
+    is the non-RTH route and receives nothing during the session BY DESIGN, so
+    counting its staleness against the session rollup made GREEN unreachable
+    during RTH — the board could only ever say DEGRADED. A rollup that cannot
+    reach its own good state is not a rollup.
+
+    ⚠️ AND n/a IS NOT A FAULT. A stream that cannot exist for this instrument
+    is excluded outright rather than being counted as a soft red.
+    """
     if rep.get("fatal"):
         return RED
-    crit = [s for s in rep["streams"] if s["critical"]]
-    cand = rep["candles"]
-    if any(s["bulb"] == RED for s in crit) or not cand:
+    in_rth = rep.get("in_rth", True)
+    crit = [s for s in rep["streams"]
+            if s["critical"] and s["bulb"] != NA and _in_window(s, in_rth)]
+    cand = [c for c in rep["candles"] if _in_window(c, in_rth)]
+    # ⚠️ "no candles AT ALL" stays RED — that is a dead store, not a window
+    # question — but an empty IN-WINDOW set outside RTH is normal.
+    if not rep["candles"]:
+        return RED
+    if any(s["bulb"] == RED for s in crit):
         return RED
     if any(c["bulb"] == RED for c in cand):
         return RED
@@ -182,6 +276,9 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--bulb", action="store_true",
                     help="one line for status.py")
+    ap.add_argument("--symbol", default=os.environ.get("OT_INSTRUMENT", ""),
+                    help="instrument, for per-instrument applicability "
+                         "(a cash index has no time-and-sale)")
     ap.add_argument("--feed-db",
                     default=os.path.expanduser("~/options-trader/data/feed_store.db"))
     ap.add_argument("--derived-db",
@@ -191,7 +288,12 @@ def main() -> int:
     a = ap.parse_args()
 
     in_rth = _rth_now()
-    rep = collect(a.feed_db, a.derived_db, in_rth)
+    try:
+        from config import is_cash_index
+        _is_index = is_cash_index(a.symbol)
+    except Exception:                                           # noqa: BLE001
+        _is_index = False
+    rep = collect(a.feed_db, a.derived_db, in_rth, _is_index)
     r = rollup(rep)
 
     if a.bulb:
@@ -221,13 +323,35 @@ def main() -> int:
 
     print("  RAW STREAMS")
     for s in rep["streams"]:
+        if s.get("after_hours"):
+            continue
         age = "—" if s["age_s"] is None else f"{s['age_s']}s"
         star = "*" if s["critical"] else " "
-        print(f"   {s['bulb']}{star} {s['label']:<22} rows={s['rows']:<8} age={age}")
+        note = "  n/a — cash index has no tape" if s["bulb"] == NA else ""
+        print(f"   {s['bulb']}{star} {s['label']:<22} rows={s['rows']:<8} age={age}{note}")
 
     print("\n  CANDLES")
     for c in sorted(rep["candles"], key=lambda x: x["label"]):
+        if c.get("after_hours"):
+            continue
         print(f"   {c['bulb']}  {c['label']:<22} rows={c['rows']:<8} age={c['age_s']}s")
+
+    # 🔴 AFTER-HOURS — JUDGED OUTSIDE RTH, IDLE DURING IT. These rows are not
+    # second-class: outside the session they are the ONLY live ones, and they
+    # drive the rollup then. Splitting them out is what lets the RTH board
+    # reach GREEN instead of sitting permanently DEGRADED on rows that are
+    # behaving exactly as designed.
+    ah_s = [s for s in rep["streams"] if s.get("after_hours")]
+    ah_c = [c for c in rep["candles"] if c.get("after_hours")]
+    if ah_s or ah_c:
+        print("\n  AFTER-HOURS  " +
+              ("(idle now — judged outside RTH)" if rep["in_rth"]
+               else "(LIVE now — these drive the rollup outside RTH)"))
+        for s in ah_s:
+            age = "—" if s["age_s"] is None else f"{s['age_s']}s"
+            print(f"   {s['bulb']}  {s['label']:<22} rows={s['rows']:<8} age={age}")
+        for c in sorted(ah_c, key=lambda x: x["label"]):
+            print(f"   {c['bulb']}  {c['label']:<22} rows={c['rows']:<8} age={c['age_s']}s")
 
     if rep["derived"]:
         print("\n  DERIVED  (contributors — never gate trading)")
@@ -254,6 +378,13 @@ def main() -> int:
 
     print("=" * 62)
     print(f"  ROLLUP: {r}   (* = trading depends on it)")
+    if any(x["bulb"] == NA for x in rep["streams"]):
+        print(f"  {NA} = not applicable to this instrument — still SUBSCRIBED "
+              f"and stored, simply cannot arrive")
+    if any(x["bulb"] == RED and not x["critical"] for x in rep["streams"]):
+        print(f"  {RED} on a non-* row = no rows yet. CAUSE UNESTABLISHED — "
+              f"entitlement or feed. Check: grep -c 'subscribed .* Underlying' "
+              f"bot.log")
     return 0 if r == GREEN else 1
 
 

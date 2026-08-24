@@ -52,11 +52,28 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ⚠️ `MISSED` IS ITS OWN STATE AND NOT A FLAVOUR OF `WIPED_BY_RESTART` (r95).
+# They are different facts and they cost different things:
+#   WIPED_BY_RESTART — the plan was still WAITING on its trigger when the
+#       process died. Nothing was lost that the tape can prove; the setup may
+#       simply not have happened.
+#   MISSED           — the trigger DID fire, on the tape, while we were down.
+#       This is a real setup the fleet did not take, and it is the number that
+#       answers "what do mid-session deploys and crash-loops actually cost us".
+# Collapsing the two would bury the second inside the first, which is exactly
+# the plausible-silence class this repo keeps finding.
+#
+# ⚠️ RECORDED, NEVER RESUMED — operator's ruling, 2026-08-24: "An interrupted
+# firing sequence should never attempt a late entry. Log it as missed. But
+# normal entries that weren't filled and weren't interrupted should keep
+# trying." A MISSED row is a headstone, not a queue.
+#
 # Terminal reasons. ⚠️ `WIPED_BY_RESTART` IS ITS OWN CATEGORY — on 2026-08-21
 # four boxes held confirmed break+retest setups at 10:20-10:24 and the 10:39
 # deploy erased them. Folding that into CANCELLED would hide the cost of
 # deploying mid-session, which is exactly the number worth knowing.
-TERMINAL = {"FIRED", "EXPIRED", "CANCELLED", "WIPED_BY_RESTART", "COMPLETE"}
+TERMINAL = {"FIRED", "EXPIRED", "CANCELLED", "WIPED_BY_RESTART", "COMPLETE",
+            "MISSED"}
 LIVE = {"DECIDED", "LEG1_FILLED", "CONFIRMED", "ARMED"}
 
 

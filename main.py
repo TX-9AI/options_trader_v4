@@ -678,6 +678,7 @@ from config import (
     REASSESS_MINUTES, INSTRUMENT, SessionConfig, DIRECTIONAL_ONLY,
     DEBIT_BLOCKED_STRUCTURES,
     ORB_NO_ENTRY_AFTER_ET, BROKER_RECONCILE_ENABLED,
+    ORB_REBUILD_1M_BARS,                        # r95 restart tape reach-back
     DEBIT_DIRECTIONAL_CUTOFF_ET, DEBIT_BLOCK_ACTIVE,
     CONDOR_PF_TIMEFRAME,                        # PF.5
     CONDOR_TRIGGER_APPROACH,                    # v4.3 trigger map (module-level)
@@ -1094,7 +1095,68 @@ def run_analysis(state: BotState) -> dict:
     # v4.3 — the ORB engine no longer receives a label. It was handed
     # therefore never varied. Passing None makes the absence explicit rather
     # than dressing it as a measurement.
-    orb = get_orb_engine().update(df_5m, df_1m, price, None)
+    # ── r95 — TAPE REACH-BACK BEFORE THE STATE MACHINE RUNS ─────────────────
+    # 🔴 A RESTART USED TO ERASE THE SESSION. The engine reloads its RANGE from
+    # orb_range.json; nothing reloaded its STATE, so a restarted engine came
+    # back to WAITING_FOR_BREAK with no break latches, no attempt count, and no
+    # memory of a runaway invalidation.
+    #
+    # ⚠️ THE POINT IS NOT TO RECOVER THE MISSED TRADE — the operator has ruled
+    # that a fired trigger is not re-enterable, and the engine enforces it. The
+    # payoff is that a restarted box stops taking trades it should refuse: after
+    # a runaway the ORB is DORMANT by design, and a forgetful restart would arm
+    # on a later break the design exists to reject.
+    #
+    # ⚠️ IT MUST RUN BEFORE update(), NOT AFTER. Replaying the session on top of
+    # a state machine that has already advanced would hand 09:31 bars to a
+    # retest check armed from the newest bar. The engine loads its own range for
+    # exactly this reason.
+    #
+    # ⚠️ AND IT MUST NOT BE HANDED ctx["df_1m"]. That frame is capped at 60 bars
+    # by TIMEFRAMES, so at 10:37 it begins at 09:37 and cannot see a 09:40 break
+    # at all — the same left-edge trap that killed `_opening_range` every
+    # session until TCS.3. `fetch_candles` is the one definition of a
+    # session-scoped read and already filters poison bars, so the reach-back
+    # uses it rather than growing a second reader.
+    _orb_eng = get_orb_engine()
+    if _orb_eng.needs_tape_rebuild:
+        try:
+            from data.market_data import fetch_candles as _fetch_deep_1m
+            _deep_1m = _fetch_deep_1m(INSTRUMENT, "1m", ORB_REBUILD_1M_BARS)
+            if _deep_1m is not None and not _deep_1m.empty:
+                _orb_eng.rebuild_from_tape(_deep_1m)
+                # ── r95 — A MISSED SETUP IS A ROW, NOT A LOG LINE ───────────
+                # Operator's ruling, 2026-08-24: an interrupted firing sequence
+                # is never re-entered — it is LOGGED AS MISSED. The log is not
+                # where that becomes countable: PLANS is, which is where the
+                # 08-24 QQQ loss was actually seen. One row per missed setup,
+                # opened and closed in the same breath because it was over
+                # before this process existed.
+                _miss = _orb_eng.take_missed_confirmation()
+                if _miss:
+                    try:
+                        from derived.registry import plan_ledger as _plg_m
+                        _ledm = _plg_m(INSTRUMENT)
+                        if _ledm is not None:
+                            _mid = _ledm.open_plan(
+                                "ORBStrategy", "CONFIRMED", ctx,
+                                direction=_miss.get("direction"),
+                                trigger_price=_miss.get("trigger_price"),
+                                underlying_at_decision=price)
+                            if _mid:
+                                _ledm.transition(
+                                    _mid, "MISSED",
+                                    "TRIGGER_FIRED_WHILE_DOWN"
+                                    f" bar={_miss.get('confirmed_bar')}"
+                                    f" age_s={_miss.get('age_s')}")
+                    except Exception as _mexc:                 # noqa: BLE001
+                        logger.debug("missed-plan record: %s", _mexc)
+        except Exception as _exc:                              # noqa: BLE001
+            # Never let the reach-back take the tick with it: without it the
+            # engine simply behaves as it did before r95.
+            logger.warning("ORB tape reach-back skipped: %s", _exc)
+
+    orb = _orb_eng.update(df_5m, df_1m, price, None)
 
     # Write ORB state to JSON file so status.py can read it directly
     # without parsing bot.log — eliminates all log-parsing timing issues.

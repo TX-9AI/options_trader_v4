@@ -741,3 +741,61 @@ the foundational conditions — the named pool and its reclaim, the held 50% TP,
 PINNING with the apex on the pin — are tested inline against no constant. There
 is nothing to pass to `relaxed.widen()`, so they cannot be loosened even by
 mistake.
+
+## 37. AN INTERRUPTED FIRING SEQUENCE IS NEVER RE-ENTERED. IT IS LOGGED AS MISSED.
+Added 2026-08-24, operator's ruling, after r95 restored ORB state across a
+restart and the first instinct was to let the recovered setup trade.
+
+**"DO NOT TAKE A MISSED ENTRY as permission to enter LATE. If we missed it due
+to an unexpected crash loop or restart, it's fine. The edge lies in the entry &
+invalidation logic. Jumping in after it has left the station is not a remedy
+for missing it."**
+
+**THE TEST IS WHERE THE TRIGGER SITS, NOT HOW OLD THE PLAN IS.**
+- **Trigger already fired while we were down** → the sequence is SPENT.
+  Record it, consume the attempt, never fire it. The entry price is stale while
+  the stop still anchors to the original structure, so chasing widens the risk
+  leg by exactly the distance chased — an ORB in name only.
+- **Trigger still ahead of us** → NORMAL. ARMED-awaiting-retest, a condor plan
+  whose tine has not been touched, a runaway awaiting its pullback: these are
+  observed LIVE, on our own tape, by the same code that would have judged them
+  anyway. That is not a chase and must not be treated as one.
+
+⚠️ **AND THE SECOND HALF IS THE ONE THAT GETS IMPLEMENTED WRONG.** Operator,
+same day: *"normal entries that weren't filled and weren't interrupted should
+keep trying"*, and *"all subsequent triggers not time gated should continue to
+look for entries."*
+- A LIVE confirmation that simply has not filled — chain fetch failed, thin
+  liquidity, the dispatch slot taken — **keeps being offered every tick until
+  its own window closes.** Nothing about a restart-recovery mechanism may touch
+  it.
+- Consuming a missed attempt means **RE-ARMING**, not parking. Price can come
+  back into the range and break out again; that second setup is a normal entry
+  and is taken normally.
+- The only thing allowed to stop the hunting is a **genuine time gate** the
+  strategy already owns — ORB's 11:00, the sweep window, the debit cutoff.
+
+⚠️ **THE CONDOR IS SPECIAL: LEG 2 IS PERMITTED, NOT IMPLIED.** Operator:
+*"A miss of one firing sequence does not take another valid entry off the
+table."* A missed leg-2 sequence removes nothing. Each credit vertical is
+autonomous and fires from its own structural trigger; the pairing gate counts
+OPEN TRADES and asks nothing about history.
+
+⚠️ **SO THE RECORD MUST BE INERT.** `MISSED` is a terminal plan state — it
+CLOSES the row, leaves `live_plans()`, and is read by nobody in the entry path.
+**A miss is a headstone, not a lock.** The failure this guards against would
+look like caution and read like a bug fix: a ledger row quietly becoming a
+reason to refuse the next trade, costing trades silently, which is precisely
+the plausible-silence class in `docs/PORT_STATE.md`.
+
+⚠️ **AND `MISSED` IS NOT A FLAVOUR OF `WIPED_BY_RESTART`.** They cost different
+things. `WIPED_BY_RESTART` = the plan was still WAITING on its trigger when the
+process died; nothing provable was lost. `MISSED` = the trigger DID fire, on
+the tape, while we were down. Only the second answers *"what do mid-session
+deploys and crash-loops actually cost us"*, and collapsing it into the first
+buries that number inside a bigger one.
+
+Pinned by `tests/check_orb_restart.py` (C2b the ruling, C9/C9b the boundary,
+C10 subsequent triggers, C11 the time gate) and `tests/check_missed_inert.py`
+(M3 nothing in the entry path reads the ledger). Both mutation-proven in both
+directions.

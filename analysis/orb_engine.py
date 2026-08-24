@@ -1,5 +1,31 @@
 """
-analysis/orb_engine.py  v4.2
+analysis/orb_engine.py  v4.3
+v4.3  2026-08-24  r95 TAPE REACH-BACK ON RESTART. The engine reloaded its
+      RANGE from orb_range.json after a restart but never its STATE. A restart
+      therefore returned to WAITING_FOR_BREAK carrying none of the session's
+      history: no break latches, no attempt count, and no memory of a runaway.
+      rebuild_from_tape() replays the session's closed 1m bars through the SAME
+      _advance_state() the live loop uses, so the reconstruction cannot diverge
+      from the live path. It is RE-QUALIFICATION AGAINST THE TAPE, not
+      restoration of a stale file — the distinction r70 asked for. One-shot per
+      session, date-guarded, self-disarming.
+
+      ⚠️ WHAT IT DOES **NOT** DO — operator's ruling, 2026-08-24: a completed
+      entry trigger is NOT re-enterable. A reconstructed OPEN_LONG/OPEN_SHORT is
+      RECORDED and then CONSUMED (_rearm), never fired. ARMED and a runaway
+      INVALIDATION are kept, because in those the trigger is still ahead of us
+      or the point is to REFUSE a trade. See rebuild_from_tape().
+
+      ⚠️ AND THE ORIGINAL DIAGNOSIS WAS OVERSTATED — corrected here so the next
+      reader is not misled. It is NOT true that the pre-r95 engine could never
+      re-arm "on any tape". _check_for_break requires a candle that OPENS INSIDE
+      the range and CLOSES OUTSIDE it, so a restart is blind only for as long as
+      price stays OUTSIDE the range; if price re-enters and breaks again, a
+      restarted engine detects it normally. The real costs are narrower and both
+      survive scrutiny: (1) a runaway invalidation is forgotten, so a restarted
+      engine will arm on a break the design deliberately refuses — a WRONG trade,
+      not a missed one; and (2) broke_high/broke_low, which are session-level
+      facts the sweep gate reads, come back False.
 v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -298,6 +324,16 @@ class ORBEngine:
         # only cleared by reset_for_session().
         self._broke_high = False
         self._broke_low  = False
+        # r95 — the date this engine last reconstructed its state from the
+        # tape. One rebuild per session; a continuously-live process sets it on
+        # its first pass and never replays again.
+        self._rebuilt_date = None
+        # r95 — the confirmation the reach-back found ALREADY FIRED while this
+        # process was down, consumed rather than taken. Read ONCE by main.py to
+        # write the plan-ledger row, then cleared: a missed setup that only
+        # exists in bot.log is not a countable population, and the operator
+        # reads PLANS, not the log.
+        self._last_missed = None
 
     @property
     def data(self) -> ORBData:
@@ -318,6 +354,7 @@ class ORBEngine:
         self._range_date = None
         self._broke_high = False
         self._broke_low  = False
+        self._rebuilt_date = None
         logger.info("ORB engine reset for new session")
 
     def _rearm(self):
@@ -410,10 +447,30 @@ class ORBEngine:
                 )
             return d
 
+        self._advance_state(df_1m, ms)
+        return d
+
+    # ── r95 — ONE DEFINITION OF THE STATE MACHINE ─────────────────────────────
+    def _advance_state(self, df_1m: pd.DataFrame, ms: Optional[str] = None):
+        """Advance the state machine by the newest CLOSED bar in `df_1m`.
+
+        ⚠️ EXTRACTED VERBATIM FROM update() AT r95 AND CALLED FROM BOTH PATHS.
+        The live loop and `rebuild_from_tape()` must not be able to disagree
+        about what a break or a retest IS — a second lineage of this logic is
+        exactly the failure WORKING_AGREEMENT 7 exists to prevent, and it would
+        be invisible because both versions would look correct in isolation.
+
+        The LATCH is deliberately NOT called here: update() maintains it above
+        the 11:00 early-return because a break is a session-level fact that
+        outlives the ORB entry window (v1.9). `rebuild_from_tape()` calls it
+        per bar in the same order update() does.
+        """
+        d = self._data
+
         # Before the cutoff, a confirmed OPEN is left untouched (a live ORB
         # trade is being managed elsewhere; the engine doesn't re-fire).
         if d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT):
-            return d
+            return
 
         if d.state == ORBState.WAITING_FOR_BREAK:
             self._check_for_break(df_1m)
@@ -437,7 +494,259 @@ class ORBEngine:
                     f"(ms={ms}) — deferring to sweep reversal"
                 )
 
-        return d
+    @property
+    def needs_tape_rebuild(self) -> bool:
+        """True while this session's tape reach-back is still owed.
+
+        Exists so the caller can skip fetching a DEEP 1m frame on every tick —
+        the reach-back needs the whole session, which `ctx["df_1m"]` (60 bars)
+        cannot supply. Cleared for the day by the first successful replay and
+        re-armed by `reset_for_session()`.
+        """
+        return self._rebuilt_date != now_et().strftime("%Y-%m-%d")
+
+    # ── r95 — THE RESTART REACH-BACK ─────────────────────────────────────────
+    def rebuild_from_tape(self, df_1m: pd.DataFrame,
+                          ms: Optional[str] = None) -> bool:
+        """Reconstruct this session's ORB state by replaying the closed 1m tape.
+
+        🔴 WHY THIS EXISTS. `_load_range_from_file()` restores the RANGE across a
+        restart. Nothing restored the STATE, so a restarted engine came back to
+        WAITING_FOR_BREAK with the whole session's history erased.
+
+        ⚠️ THE COST IS NOT MAINLY THE MISSED SETUP — and that matters, because
+        the operator has ruled the missed setup is not to be recovered anyway.
+        The costs that survive that ruling are:
+
+          1. **A FORGOTTEN RUNAWAY BECOMES A WRONG TRADE.** After a runaway
+             invalidation the engine is deliberately DORMANT — it never re-arms
+             and defers to sweep reversal. A restart forgets that, sits in
+             WAITING_FOR_BREAK, and will arm on a later break the design exists
+             to refuse. This is the reach-back earning its place: it REMOVES a
+             trade, it does not add one.
+          2. **THE SESSION BREAK LATCHES COME BACK FALSE.** `broke_high` /
+             `broke_low` are session-level facts (v1.9) that the sweep gate
+             reads, and a restart silently reset them to False.
+          3. **THE RECORD LIES.** `attempt_number` restarts at 0, so the diary
+             and the plan ledger disagree with the tape about what the session
+             actually did.
+
+        Measured 2026-08-24 (QQQ): the ORB plan was recorded CANCELLED /
+        WIPED_BY_RESTART @ 706.00 at 09:40 by the crash-loop. Proven in
+        `tests/check_orb_restart.py`, which is born red against the pre-r95
+        engine.
+
+        ⚠️ WHAT IT WILL NOT DO. See the ruling block in the body: a reconstructed
+        OPEN_* is recorded and consumed, never fired. There is no path from this
+        function to a late entry.
+
+        ⚠️ THIS IS RE-QUALIFICATION AGAINST THE TAPE, NOT RESTORATION OF A FILE.
+        r70 declined to restore a confirmation from `orb_state.json` and it was
+        right to: "resuming a stale confirmation blind after an outage is a
+        different decision and needs re-qualification against the current tape."
+        Nothing is read from a state file here. Every transition is RE-DERIVED
+        from bars, by `_advance_state()` — the same function the live loop calls,
+        in the same order, with the same latch. A continuously-running process
+        and a restarted one therefore reach an IDENTICAL state from an identical
+        tape, which is the whole property that was missing.
+
+        ⚠️ `orb_reentry_age_s` IS STILL MEASURED AND LOGGED even though nothing
+        acts on it. It is the age of the CONFIRMING BAR, not of the replay, and
+        it is how "how much ORB did restarts actually cost us" becomes a
+        countable number rather than an argument.
+
+        ⚠️ THE CALLER MUST SUPPLY A DEEP FRAME. `ctx["df_1m"]` is capped at 60
+        bars by `TIMEFRAMES` — at 10:37 it starts at 09:37 and cannot see a 09:40
+        break at all. This is the same left-edge trap that killed `_opening_range`
+        for every session until TCS.3. Pass a frame fetched for the session, not
+        the cached trigger frame.
+
+        One-shot per session, date-guarded and self-disarming: a process that has
+        been live all morning rebuilds on its first pass (a no-op, because its
+        state already matches the tape) and never replays again.
+
+        Returns True if a replay ran, False if it was skipped or not possible.
+        """
+        d = self._data
+        today = now_et().strftime("%Y-%m-%d")
+        if self._rebuilt_date == today:
+            return False
+        # ⚠️ THE REBUILD LOADS ITS OWN RANGE AND THAT ORDERING IS LOAD-BEARING.
+        # It must run BEFORE update() has advanced the state machine by even one
+        # bar. Replaying the session on top of a state that has already moved
+        # would feed 09:31 bars to a retest check that is ARMED from 10:15 —
+        # instant close_inside, instant re-arm, and a fabricated attempt count.
+        # So it cannot wait for update() to populate the range for it.
+        if d.orb_high <= 0 or d.orb_low <= 0:
+            self._load_range_from_file()
+        if d.orb_high <= 0 or d.orb_low <= 0:
+            # No established range yet — nothing to replay against. NOT marked
+            # done, so the rebuild still runs on the tick the range establishes.
+            return False
+        if df_1m is None or len(df_1m) < 3:
+            return False
+
+        try:
+            # Replay only TODAY'S bars. A frame that reaches into yesterday would
+            # break out of today's range on yesterday's tape.
+            try:
+                sess = df_1m[df_1m.index.date == df_1m.index[-1].date()]
+            except Exception:                                  # noqa: BLE001
+                sess = df_1m
+            if len(sess) < 3:
+                self._rebuilt_date = today
+                return False
+
+            before = d.state
+            # Walk the tape one closed bar at a time. `_check_for_break` and
+            # `_check_for_retest` both read `iloc[-2]`, so slicing to i+1 makes
+            # bar i-1 the "newest closed bar" — exactly what the live loop hands
+            # them, one tick at a time.
+            replayed = 0
+            confirm_ts = None
+            for i in range(2, len(sess) + 1):
+                sub = sess.iloc[:i]
+                self._update_break_latches(sub)      # same order as update()
+                was = d.state
+                self._advance_state(sub, ms)
+                if (was not in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)
+                        and d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)):
+                    # The CONFIRMING bar is the one the state machine just read,
+                    # i.e. iloc[-2] — not the newest bar in the frame. Measuring
+                    # from the frame's end would report the age of the REPLAY
+                    # rather than the age of the SETUP, which is the number that
+                    # matters and the one that would quietly read ~0 forever.
+                    confirm_ts = sub.index[-2]
+                replayed += 1
+
+            self._rebuilt_date = today
+
+            # ── 🔴 THE OPERATOR'S RULING, 2026-08-24 ─────────────────────────
+            # **"DO NOT TAKE A MISSED ENTRY as permission to enter LATE. If we
+            # missed it due to an unexpected crash loop or restart, it's fine.
+            # The edge lies in the entry & invalidation logic. Jumping in after
+            # it has left the station is not a remedy for missing it."**
+            #
+            # So the reach-back restores state UP TO BUT NOT INCLUDING A
+            # COMPLETED ENTRY TRIGGER, and the line falls exactly where the
+            # edge does:
+            #
+            #   ARMED_LONG / ARMED_SHORT  → KEPT. The break happened while we
+            #       were down, but the RETEST — the trigger — is still ahead of
+            #       us and will be observed LIVE, on our own tape, by the same
+            #       code that would have judged it anyway. That is not a chase.
+            #   INVALIDATED (runaway)     → KEPT, and this is the case that
+            #       prevents a WRONG trade rather than recovering a missed one.
+            #       A runaway NEVER re-arms; it defers to sweep reversal. A
+            #       restart that forgot the runaway would sit in
+            #       WAITING_FOR_BREAK and happily arm on a later break the
+            #       pre-restart engine was designed to refuse.
+            #   OPEN_LONG / OPEN_SHORT    → RECORDED, THEN CONSUMED. The
+            #       trigger already fired while the process was down. Price has
+            #       left the station. Entering now would be an ORB in name only:
+            #       the entry price is stale, while `stop_level` still anchors
+            #       to the break candle's wick — so the risk leg silently widens
+            #       by exactly the distance we chased.
+            #
+            # ⚠️ CONSUMED MEANS RE-ARMED, NOT KILLED. `_rearm()` is what the
+            # engine already does after a real ORB position closes: the attempt
+            # is spent, the range and attempt count are preserved, and the
+            # engine goes back to watching for a FRESH break. A genuinely new
+            # break+retest later in the window is still tradeable, and it is
+            # tradeable on its own merits rather than on a memory.
+            # ⚠️ SCOPED TO WHAT THE REPLAY PRODUCED, NOT TO WHATEVER IS OPEN.
+            # Operator, 2026-08-24: the no-late-entry ruling is "for a recovered
+            # orb state only. It does not apply to normal entries. Those should
+            # keep trying." A LIVE confirmation that has not been filled yet —
+            # chain fetch failed, thin liquidity, the dispatch slot taken — must
+            # stay OPEN and keep being offered until the 11:00 cutoff.
+            # `before` is the state this engine held when the reach-back
+            # started; if it was already OPEN, the confirmation is THIS
+            # process's own and the reach-back has no business touching it.
+            # ⚠️ NOT LEFT TO THE ONE-SHOT GUARD. In production the guard makes
+            # this unreachable (the rebuild runs at boot, before anything is
+            # live), but a guard is exactly the kind of thing a later edit
+            # moves. `tests/check_orb_restart.py` C5/C9b caught this leak on its
+            # first run, which is the only reason the scoping can be trusted.
+            _missed = None
+            if (before not in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)
+                    and d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)):
+                _missed = d.state
+                if now_et().time() >= _dtime(*_ORB_CUT):
+                    # Past ORB's own 11:00 window. EXPIRED is the LEGITIMATE
+                    # TIME GATE, not a consequence of the miss — the same state
+                    # a healthy engine reaches at 11:00 having done nothing.
+                    d.state = ORBState.EXPIRED
+                    d.invalidation_reason = "missed_while_down"
+                else:
+                    # ⚠️ THE REASON IS DELIBERATELY NOT SET HERE. `_rearm()`
+                    # rebuilds ORBData from scratch and would discard it
+                    # anyway, and a stale "missed_while_down" hanging off a
+                    # WAITING_FOR_BREAK engine would surface in orb_state.json
+                    # and status.py as though the CURRENT attempt were tainted.
+                    # It is not: this engine is hunting a fresh break on equal
+                    # terms. The miss lives in the log and in the plan-ledger
+                    # row, which are the records that should carry it.
+                    self._rearm()
+
+            after = d.state
+
+            age_s = None
+            if confirm_ts is not None:
+                try:
+                    _now = pd.Timestamp(now_et())
+                    _cts = pd.Timestamp(confirm_ts)
+                    if _now.tzinfo is None and _cts.tzinfo is not None:
+                        _cts = _cts.tz_localize(None)
+                    elif _now.tzinfo is not None and _cts.tzinfo is None:
+                        _cts = _cts.tz_localize(_now.tzinfo)
+                    age_s = int((_now - _cts).total_seconds())
+                except Exception:                              # noqa: BLE001
+                    age_s = None
+
+            if after != before or replayed:
+                logger.info(
+                    "ORB TAPE REACH-BACK: replayed %d closed 1m bars %s..%s -> "
+                    "state=%s (was %s) attempt=%d broke_high=%s broke_low=%s "
+                    "orb_reentry_age_s=%s",
+                    replayed, sess.index[0], sess.index[-1], after, before,
+                    d.attempt_number, self._broke_high, self._broke_low, age_s)
+            if _missed is not None:
+                self._last_missed = {
+                    "state": _missed,
+                    "direction": "LONG" if "LONG" in _missed else "SHORT",
+                    "confirmed_bar": str(confirm_ts) if confirm_ts else "",
+                    "age_s": age_s,
+                    "attempt": d.attempt_number,
+                    "trigger_price": (d.orb_high if "LONG" in _missed
+                                      else d.orb_low),
+                }
+                logger.warning(
+                    "ORB MISSED WHILE DOWN: the tape shows a confirmed "
+                    "break+retest (%s) at %s that this process never saw live "
+                    "(orb_reentry_age_s=%s). NOT TAKEN — a fired trigger is not "
+                    "re-enterable. Attempt #%d consumed; engine now %s and "
+                    "watching for a fresh break in %.2f-%.2f.",
+                    _missed, confirm_ts, age_s, d.attempt_number, after,
+                    d.orb_low, d.orb_high)
+            return True
+        except Exception as exc:                                # noqa: BLE001
+            # A reach-back that raises must never take the tick with it: the
+            # engine simply continues from WAITING_FOR_BREAK, which is exactly
+            # the pre-r95 behaviour. Not marked done, so it retries next tick.
+            logger.warning("ORB tape reach-back failed (continuing live): %s", exc)
+            return False
+
+    def take_missed_confirmation(self):
+        """Return-and-clear the confirmation the reach-back consumed, if any.
+
+        ⚠️ TAKE, NOT PEEK. The caller writes ONE plan-ledger row per missed
+        setup; leaving the value in place would write a duplicate row on every
+        tick for the rest of the session, and a count that inflates is worse
+        than no count at all.
+        """
+        m, self._last_missed = self._last_missed, None
+        return m
 
     def notify_position_closed(self):
         d = self._data

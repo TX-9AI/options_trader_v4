@@ -683,6 +683,65 @@ ORB_WINDOW_MINUTES          = 5
 
 ORB_MAX_RETEST_BARS         = 12
 ORB_TP_MULTIPLIER           = 1.0
+
+# ─── r95 (2026-08-24) — THE RESTART TAPE REACH-BACK ──────────────────────────
+# How many 1-minute bars `orb_engine.rebuild_from_tape()` asks for when it
+# replays the session after a restart.
+#
+# ⚠️ IT CANNOT USE ctx["df_1m"], AND THAT IS THE WHOLE REASON THIS CONSTANT
+# EXISTS. `TIMEFRAMES["1m"]["candles"]` is 60, so the cached trigger frame is a
+# 60-bar ROLLING WINDOW: at 10:37 it begins at 09:37 and cannot see a 09:40
+# break at all. That left edge is the same trap that made `_opening_range`
+# structurally dead every session until TCS.3, and it would have made this
+# reach-back look like it worked while quietly failing on exactly the late
+# restarts it exists for.
+#
+# 420 = an RTH session (390 minutes) with margin, so the frame reaches 09:30
+# from any point in the day. `fetch_candles` scopes intraday frames to the most
+# recent session, so a larger number cannot drag in yesterday's tape — it only
+# costs a slightly wider read on the ONE tick per session that replays.
+ORB_REBUILD_1M_BARS         = 420
+
+
+# ─── r95 (2026-08-24) — CASH INDICES HAVE NO TIME-AND-SALE TAPE ──────────────
+# A cash index is a CALCULATED VALUE, not a traded instrument: there is no
+# order flow in SPX itself, so DXFeed has no TimeAndSale to send and the
+# `prints` table on an index box is empty BY CONSTRUCTION. That is not an
+# outage and it is not an entitlement gap — it is the instrument.
+#
+# 🔴 THIS IS A DISPLAY FACT, NOT A SUBSCRIPTION RULE. Operator's standing
+# instruction, 2026-08-24: **"DO NOT unsubscribe to ANYTHING. You can choose
+# not to write it or not to display it, but we subscribe to EVERYTHING,
+# period."** That is `docs/FEED_MANIFOLD.md`'s governing rule — capture
+# everything the wire offers, give it a home, let consumers subscribe — and an
+# unsubscribe is unrecoverable in a way a suppressed bulb is not: DXFeed
+# history is same-evening only, so a stream nobody wanted today cannot be
+# fetched back tomorrow. `candle_feed` still subscribes TimeAndSale on every
+# symbol including indices. This constant is read ONLY by the health board.
+#
+# ⚠️ WHY THE BOARD NEEDS IT. Before this, SPX's manifold board painted
+# `prints (T&S)` RED every session, forever, for a reason no operator action
+# could ever clear. A board carrying a permanent red teaches the reader to skim
+# past reds — precisely the failure the board was built to prevent
+# (WORKING_AGREEMENT 17). A permanent red is worse than no bulb at all.
+#
+# ⚠️ THIS SET IS ABOUT THE TAPE ONLY. It says nothing about `Underlying` or
+# `TheoPrice` on an index — those are option-chain events an index legitimately
+# has, and whether they arrive is an ENTITLEMENT question this constant has no
+# business answering. Conflating "cannot exist" with "did not arrive" is the
+# exact error the manifold board exists to avoid.
+CASH_INDEX_SYMBOLS = {"SPX", "XSP", "VIX", "NDX", "RUT", "DJX", "SPXW"}
+
+
+def is_cash_index(symbol: str = None) -> bool:
+    """True when `symbol` is a cash index with no time-and-sale tape.
+
+    Read by `tools/manifold_health.py` to render `prints` as n/a rather than
+    RED. NEVER used to skip a subscription — see the block above.
+    """
+    sym = (symbol if symbol is not None else INSTRUMENT) or ""
+    return sym.strip().upper().lstrip("$") in CASH_INDEX_SYMBOLS
+
 FED_DAY_ORB_BOOST           = 0.20
 
 # including UNKNOWN and SWEEP_REVERSAL. The ORB engine's break+retest is self-
