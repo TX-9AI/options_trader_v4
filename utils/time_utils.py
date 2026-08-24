@@ -1,5 +1,9 @@
 """
-utils/time_utils.py  v4.2
+utils/time_utils.py  v4.3
+v4.3  2026-08-24  r102: entries_open() defers to is_orb_complete() — the floor
+      session_guard has enforced since v3 — instead of carrying a rival
+      constant, and now carries the RTH test (a bare time floor is True all
+      evening). is_rth/is_orb_complete take an optional clock.
 v4.2  2026-08-24  r101: entries_open() — the 09:35 order gate (config
       ENTRY_OPEN_ET), fail-closed. Openings only; no exit path reads it.
 
@@ -81,9 +85,13 @@ def ts_for_db(dt: Optional[datetime] = None) -> str:
     return dt.isoformat()
 
 
-def is_rth() -> bool:
-    """True if current ET time is within RTH (9:30–16:00 ET, weekdays)."""
-    now = now_et()
+def is_rth(now: Optional[datetime] = None) -> bool:
+    """True if ET time is within RTH (9:30–16:00 ET, weekdays).
+
+    r102: takes an OPTIONAL clock so a caller (and a check) can ask about a
+    specific moment. No argument = now, which is every existing call site.
+    """
+    now = now or now_et()
     if now.weekday() >= 5:   # Saturday=5, Sunday=6
         return False
     t = now.time()
@@ -109,11 +117,27 @@ def entries_open(now: Optional[datetime] = None) -> bool:
     a missed entry costs a trade, an entry placed against a range that does not
     exist costs a position nobody anchored.
     """
+    # 🔴 r102 — DEFERS TO is_orb_complete(), WHICH IS THE RULE THAT ALREADY
+    # EXISTED. r101 added ENTRY_OPEN_ET without grepping first; session_guard
+    # line ~98 has enforced the same floor since v3 and its comment already
+    # calls it "the universal floor for EVERY strategy". Two constants for one
+    # rule is how two gates come to disagree, so this one is now a WRAPPER: the
+    # ORB close decides, and ENTRY_OPEN_ET only survives as an override for a
+    # caller passing an explicit clock (tests) or an operator moving the floor.
+    # ⚠️ AND IT CARRIES THE RTH TEST. A time-of-day floor is TRUE at 16:53, so
+    # on its own it would have permitted an outside-RTH fill the moment the RTH
+    # short-circuit above was loosened. The floor answers "is it late enough";
+    # it must also answer "is the market open".
     try:
-        import config as _cfg
-        h, m = tuple(getattr(_cfg, "ENTRY_OPEN_ET", (9, 35)))[:2]
         n = now or now_et()
-        return (n.hour, n.minute) >= (int(h), int(m))
+        if not is_rth(n):
+            return False
+        import config as _cfg
+        _override = getattr(_cfg, "ENTRY_OPEN_ET", None)
+        if _override is not None and now is not None:
+            h, m = tuple(_override)[:2]
+            return (n.hour, n.minute) >= (int(h), int(m))
+        return is_orb_complete(n)
     except Exception:                                          # noqa: BLE001
         return False
 
@@ -148,9 +172,15 @@ def is_orb_window() -> bool:
     return RTH_OPEN <= t < ORB_END
 
 
-def is_orb_complete() -> bool:
-    """True if the ORB window has closed and we can look for setups."""
-    now = now_et()
+def is_orb_complete(now: Optional[datetime] = None) -> bool:
+    """True if the ORB window has closed and we can look for setups.
+
+    r102: THIS IS THE AUTHORITY FOR THE 09:35 ENTRY FLOOR. `entries_open()`
+    wraps it rather than carrying a second constant — session_guard has
+    enforced this same floor since v3 and calls it "the universal floor for
+    EVERY strategy". Optional clock, as is_rth.
+    """
+    now = now or now_et()
     return now.time() >= ORB_END
 
 

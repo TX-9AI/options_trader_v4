@@ -129,5 +129,49 @@ check("E5a pre-RTH branch runs the deciding path", ok5)
 check("E5b and pages on the first failure",
       pre is not None and "_page_dispatch_failure" in pre)
 
+# ── E6 (r102) — the gate carries the RTH test ────────────────────────────────
+check("E6a 16:53 outside RTH — CLOSED even though 09:35 has passed",
+      entries_open(at(16, 53)) is False,
+      "a bare time floor is True all evening; it must also ask if the market is open")
+check("E6b Sunday 10:00 — CLOSED", entries_open(datetime(2026, 8, 30, 10, 0, tzinfo=ET)) is False)
+
+# ── E7 (r102) — one rule, one number: entries_open defers to is_orb_complete ──
+from utils.time_utils import is_orb_complete
+_src = open(os.path.join(ROOT, "utils/time_utils.py")).read()
+_fn = next(n for n in ast.walk(ast.parse(_src))
+           if isinstance(n, ast.FunctionDef) and n.name == "entries_open")
+_body = ast.unparse(_fn)
+check("E7 entries_open defers to is_orb_complete (not a rival constant)",
+      "is_orb_complete" in _body and "is_rth" in _body)
+
+# ── E8 (r102) — can_enter rehearses instead of short-circuiting at RTH ───────
+from risk.session_guard import get_session_guard
+_g = get_session_guard()
+_real2 = tu.now_et
+try:
+    tu.now_et = lambda: at(16, 53)          # outside RTH, ORB long since closed
+    _ok, _why = _g.can_enter(None, rehearsal=True)
+    check("E8a rehearsal=True evaluates past the RTH gate", _ok is True, _why)
+    check("E8b and reports itself as a rehearsal, never as permission",
+          "rehearsal" in _why.lower(), _why)
+    _ok2, _why2 = _g.can_enter(None)
+    check("E8c rehearsal=False still refuses outside RTH", _ok2 is False, _why2)
+    tu.now_et = lambda: at(9, 34)           # inside RTH, range still forming
+    _ok3, _why3 = _g.can_enter(None, rehearsal=True)
+    check("E8d a rehearsal still honours the 09:35 floor", _ok3 is False, _why3)
+finally:
+    tu.now_et = _real2
+
+# ── E9 (r102) — the rehearsal cannot place, even with every gate passing ────
+_real3 = tu.now_et
+try:
+    tu.now_et = lambda: at(16, 53)
+    eng2 = ee.EntryEngine(paper_trading=True)
+    eng2._trade_logger = _Boom()
+    check("E9 16:53 — enter() still refuses (choke point, not the gate)",
+          eng2.enter(sig, _Score(), _Sizing()) is None)
+finally:
+    tu.now_et = _real3
+
 print(f"\n{'PASS' if not FAILURES else 'FAIL'}: {len(FAILURES)} problem(s) {FAILURES}")
 sys.exit(1 if FAILURES else 0)

@@ -348,7 +348,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `risk/session_guard.py`
 - **calls:** `config.py`, `data/macro_data.py`, `utils/time_utils.py`
-- **called by:** `main.py`
+- **called by:** `main.py`, `tests/check_entry_gate.py`
 
 ### `risk/setup_scorer.py`
 - **calls:** `analysis/__init__.py`, `analysis/liquidity_mapper.py`, `analysis/market_state.py`, `analysis/signal_journal.py`, `analysis/structure_analyzer.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `strategy/base_strategy.py`, `utils/time_utils.py`
@@ -483,7 +483,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_entry_gate.py`
-- **calls:** `config.py`, `data/options_chain.py`, `execution/entry_engine.py`, `strategy/base_strategy.py`, `utils/time_utils.py`
+- **calls:** `config.py`, `data/options_chain.py`, `execution/entry_engine.py`, `risk/session_guard.py`, `strategy/base_strategy.py`, `utils/time_utils.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_exit_executes.py`

@@ -1,5 +1,10 @@
 """
-risk/session_guard.py  v4.1
+risk/session_guard.py  v4.2
+v4.2  2026-08-24  r102: can_enter(rehearsal=True) evaluates every gate instead
+      of short-circuiting at RTH, so the outside-RTH dispatch pass reaches the
+      strategies. The verdict stays honest — outside RTH a pass is reported as
+      "rehearsal", never as permission, and placement is refused at the order
+      choke points, not here.
 
 v4.1  2026-08-21  r60: the unauthorized global 14:00 entry cutoff deleted;
       butterfly keeps its own reviewed cutoff. See the doctrine at the site.
@@ -72,20 +77,49 @@ class SessionGuard:
     """
 
     def can_enter(self, macro: Optional[MacroSnapshot] = None,
-                  is_butterfly: bool = False) -> tuple:
+                  is_butterfly: bool = False,
+                  rehearsal: bool = False) -> tuple:
         """
         Check all pre-entry gates.
 
         Args:
             macro:        Current macro snapshot
             is_butterfly: True for butterfly — allowed until BUTTERFLY_ENTRY_CUTOFF_ET
+            rehearsal:    r102 — evaluate EVERY gate instead of stopping at the
+                          RTH one, for the outside-RTH dispatch pass. The verdict
+                          is still honest: a rehearsal that would be blocked
+                          reports blocked, and the RTH refusal is reported LAST
+                          so the caller learns what else would have stopped it.
 
         Returns:
             (allowed: bool, reason: str)
         """
         # ── RTH gate ──────────────────────────────────────────────────────────
+        # 🔴 r102 — THIS LINE ENDED THE REHEARSAL ONE CALL SHORT OF ANYTHING
+        # WORTH REHEARSING. r101 ran the dispatch outside RTH so a never-called
+        # path would surface at 07:40 instead of 09:30:01; the pass reached
+        # here, took the short-circuit, and returned at DEBUG. Measured on all
+        # 15 boxes 2026-08-24 16:53: decided=0 chain=0 — the pass was running
+        # and proving nothing.
+        # ⚠️ THE SHORT-CIRCUIT IS RIGHT FOR TRADING AND WRONG FOR REHEARSING.
+        # Under `rehearsal` the remaining gates are evaluated and reported; the
+        # RTH refusal is appended rather than substituted, so nothing reads a
+        # rehearsal as permission. ORDER PLACEMENT IS NOT GATED HERE AT ALL —
+        # it is refused at the two order choke points, which check is_rth()
+        # themselves. A gate that says "no" is not what stops a fill; the
+        # choke point is.
+        # ⚠️ ONLY THE CLOCK GATES ARE DEFERRED. A rehearsal exists precisely
+        # because the session is not running, so "outside RTH" and "past the
+        # hard close" are the two refusals it cannot honour and still test
+        # anything. They are COLLECTED and reported, never dropped. Every other
+        # gate below stays terminal — the 09:35 floor, the butterfly cutoff and
+        # the VIX crisis gate refuse a rehearsal exactly as they refuse a
+        # trading pass, because those are the answers we want tested.
+        _noted: list = []
         if not is_rth():
-            return False, f"outside RTH ({fmt_et_short()})"
+            if not rehearsal:
+                return False, f"outside RTH ({fmt_et_short()})"
+            _noted.append("outside RTH")
 
         # ── ORB-formation lockout ─────────────────────────────────────────────
         # No entries until the 9:30–9:35 ET opening-range candle has CLOSED.
@@ -100,7 +134,9 @@ class SessionGuard:
 
         # ── Hard close ────────────────────────────────────────────────────────
         if is_hard_close_time():
-            return False, "past 15:45 ET hard close — no new entries"
+            if not rehearsal:
+                return False, "past 15:45 ET hard close — no new entries"
+            _noted.append("past the hard close")
 
         # ── Entry cutoff ──────────────────────────────────────────────────────
         # r60 (2026-08-21): the GLOBAL 14:00 block is DELETED — an unauthorized
@@ -115,6 +151,13 @@ class SessionGuard:
         # ── Macro gates ───────────────────────────────────────────────────────
         if macro and not macro.new_entries_allowed:
             return False, f"VIX crisis ({macro.vix:.1f}) — no new entries"
+
+        # r102 — every substantive gate passed. If any CLOCK gate was deferred,
+        # this is a REHEARSAL PASS and never a permission: the reason names each
+        # deferral so neither a caller nor a log reader can mistake the two.
+        if _noted:
+            return True, ("rehearsal (%s — %s)"
+                          % (", ".join(_noted), fmt_et_short()))
 
         return True, ""
 

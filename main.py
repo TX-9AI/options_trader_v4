@@ -1,5 +1,10 @@
 """
-main.py  v4.9
+main.py  v4.10
+v4.10 2026-08-24  r102: the r101 rehearsal stopped one call short — can_enter
+      short-circuited on the RTH gate at DEBUG, so the outside-RTH pass reached
+      no strategy (measured fleet-wide 16:53: decided=0 chain=0). attempt_new_entry
+      now rehearses outside RTH and every skip on that path is INFO; the pass
+      narrates START/STOPPED/END so silence stops being a valid outcome.
 v4.9  2026-08-24  r101 DECIDE ALWAYS, PLACE AFTER 09:35 (operator directive).
       The trading half of the loop was never executed until the bell, so a box
       baked at 07:40 ran clean for two hours and died on its first decision at
@@ -2332,10 +2337,22 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         logger.info("Entry blocked: DAILY LOSS LIMIT reached — halted. Override via configure.sh.")
         return
 
-    can_enter, reason = session.can_enter(ctx["macro"])
+    # r102 — OUTSIDE RTH THIS IS A REHEARSAL, NOT A TRADING PASS. can_enter
+    # short-circuited on the RTH gate and returned at DEBUG, so r101's
+    # outside-RTH dispatch stopped one call before any strategy ran: measured
+    # on all 15 boxes 2026-08-24 16:53, decided=0 chain=0.
+    _rehearsing = not is_rth()
+    can_enter, reason = session.can_enter(ctx["macro"], rehearsal=_rehearsing)
     if not can_enter:
-        logger.debug(f"Entry blocked: {reason}")
+        # ⚠️ A REHEARSAL THAT DECLINES SILENTLY IS THE FAILURE IT EXISTS TO
+        # CATCH. Every skip on this path was DEBUG — that is why a pass that
+        # proved nothing looked identical to a pass that proved everything.
+        (logger.info if _rehearsing else logger.debug)(
+            "%sEntry blocked: %s", "[rehearsal] " if _rehearsing else "", reason)
         return
+    if _rehearsing:
+        logger.info("[rehearsal] gates PASS (%s) — running the full dispatch; "
+                    "the order choke points refuse outside RTH", reason)
 
     # The asymmetry is deliberate and is the other half of the hold above.
     # HOLDING a label on a stale tick is declining to act on unknown information.
@@ -3214,11 +3231,24 @@ def main_loop(state: BotState):
                 # ⚠️ AND IT FAILS LOUD, unlike the observation pass above. A
                 # failure HERE is the failure that costs the session, so it
                 # pages on the FIRST occurrence — see `_page_dispatch_failure`.
-                if _ctx is not None:
+                # r102 — SILENCE IS NOT A VALID OUTCOME HERE. Each branch says
+                # how far the pass got, at INFO, so "the rehearsal ran" and
+                # "the rehearsal proved something" stop looking alike.
+                if _ctx is None:
+                    logger.info("[rehearsal] SKIPPED — run_analysis produced no "
+                                "context this pass (see the DEBUG above for why)")
+                else:
                     try:
                         _pms = assemble_market_state(_ctx, "pre_open", state)
-                        if _pms is not None:
+                        if _pms is None:
+                            logger.info("[rehearsal] STOPPED at market state — "
+                                        "assemble_market_state returned None")
+                        else:
+                            logger.info("[rehearsal] dispatch START (price=%.2f)",
+                                        float(_ctx.get("price") or 0.0))
                             attempt_new_entry(_ctx, _pms, state)
+                            logger.info("[rehearsal] dispatch END — the trading "
+                                        "path completed without raising")
                     except Exception as _dry_err:               # noqa: BLE001
                         _page_dispatch_failure(state, _dry_err, "pre-open")
                 secs = seconds_until_rth_open()
