@@ -153,3 +153,4 @@ interleaved. Nothing after this table.
 | **r91** | Observation and trading were ONE gate. run_analysis ends in the derived layer and sat behind the pre-RTH continue, so every deriver inherited a trading gate. Now observe always, trade in RTH. |
 | **r92** | Engines persist their own status. runs/failures/last_rows/last_error to derived_engine_status every pass, shown on the health board. An engine that returns 0 without raising was invisible; now it is a fact on disk. |
 | **r92** | Engines persist their own status - runs/failures/last_rows/last_error to derived_engine_status every pass, shown on the health board. An engine returning 0 without raising was invisible; now it is a fact on disk. |
+| **r93** | indicator fallback keys on rows produced, not votes present. |

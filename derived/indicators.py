@@ -145,9 +145,20 @@ class IndicatorEngine(DerivedEngine):
                     _f(getattr(vote, "ema_anchor", None)),
                     _f(vwap), _f(pv), _f(v), anchor,
                 ))
-        else:
-            # No per-frame votes — still record the primary, so a gap in the
-            # trend engine shows up as thin rows rather than as no rows at all.
+        # 🔴 THE FALLBACK ASKED THE WRONG QUESTION — found live 2026-08-24.
+        # It was `if votes: ... else: <primary row>`, so it fired only when the
+        # list was EMPTY. But `TrendVote.timeframe` DEFAULTS TO "" and the loop
+        # above does `if not tf: continue` — so a non-empty list of votes that
+        # all lack a timeframe skipped every row, took the `if` branch, and
+        # left `rows` EMPTY. `_write` returns 0 on an empty list without
+        # touching the database: no exception, no write failure, nothing to
+        # grep. `indicator_series` held ZERO ROWS on all fifteen boxes while
+        # forks, levels and surface filled normally on the same pass.
+        # 🔑 KEY THE FALLBACK ON THE OUTCOME, NOT THE INPUT. The original
+        # comment states the intent exactly — "a gap in the trend engine shows
+        # up as thin rows rather than as no rows at all" — and asking "were
+        # there votes?" instead of "did we produce a row?" defeated it.
+        if not rows:
             rows.append((
                 sym, "primary", now, self._last_bar_ms,
                 _f(getattr(trend, "primary_adx", None)) if trend else None,
