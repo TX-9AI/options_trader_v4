@@ -50,6 +50,18 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 
+# 🔴 THE @dataclass DECORATOR WAS MISSING — every RTH tick died 2026-08-24 with
+# `TypeError: MarketState() takes no arguments`, on all fifteen boxes, from
+# 09:30 onward. Without it the annotations below are just class-level type
+# hints: no __init__ is generated, so the keyword construction in
+# assemble_market_state cannot bind a single field.
+# ⚠️ IT ONLY BIT AT RTH, which is why the morning looked clean. The pre-market
+# observation pass runs `run_analysis`; `assemble_market_state` sits in the
+# TRADING path after it, so the fault was invisible until the open.
+# ⚠️ AND `from dataclasses import dataclass` WAS STILL PRESENT — an import with
+# no user, which is the same shape as a guard outliving its producer. A decorator
+# removed while its import survives leaves nothing for a linter to catch.
+@dataclass
 class MarketState:
     """Structural facts about the tape, plus a descriptive label slot.
 

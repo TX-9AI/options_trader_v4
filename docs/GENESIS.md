@@ -154,3 +154,4 @@ interleaved. Nothing after this table.
 | **r92** | Engines persist their own status. runs/failures/last_rows/last_error to derived_engine_status every pass, shown on the health board. An engine that returns 0 without raising was invisible; now it is a fact on disk. |
 | **r92** | Engines persist their own status - runs/failures/last_rows/last_error to derived_engine_status every pass, shown on the health board. An engine returning 0 without raising was invisible; now it is a fact on disk. |
 | **r93** | indicator fallback keys on rows produced, not votes present. |
+| **r94** | MarketState lost its @dataclass decorator - every RTH tick died TypeError on all 15 boxes. |
