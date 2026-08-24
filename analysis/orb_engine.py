@@ -1,5 +1,13 @@
 """
-analysis/orb_engine.py  v4.3
+analysis/orb_engine.py  v4.4
+v4.4  2026-08-24  r103 STATE IS WRITTEN DOWN AND TRUSTED. state_snapshot() /
+      load_state_file() make orb_state.json resumable and AUTHORITATIVE — the
+      file has been written every tick since v3 and read by nobody, while r95
+      built a tape replay to reconstruct what it already held. The one-shot
+      rebuild latch becomes a gap test: a thin fetch no longer spends the
+      session's only attempt (the path that made a crash loop unrecoverable),
+      and a resumed engine owes a gap-fill replay. The missed payload carries
+      the setup's full geometry so a MISS records like a DECLINE.
 v4.3  2026-08-24  r95 TAPE REACH-BACK ON RESTART. The engine reloaded its
       RANGE from orb_range.json after a restart but never its STATE. A restart
       therefore returned to WAITING_FOR_BREAK carrying none of the session's
@@ -328,6 +336,12 @@ class ORBEngine:
         # tape. One rebuild per session; a continuously-live process sets it on
         # its first pass and never replays again.
         self._rebuilt_date = None
+        # r103 — the newest closed bar this engine has actually consumed, and
+        # whether a rebuild is still owed. Together they replace the one-shot
+        # date latch: knowledge is owed until it reaches the present.
+        self._last_bar_ts = None
+        self._rebuild_owed = False
+        self._resumed_from_file = False
         # r95 — the confirmation the reach-back found ALREADY FIRED while this
         # process was down, consumed rather than taken. Read ONCE by main.py to
         # write the plan-ledger row, then cleared: a missed setup that only
@@ -355,6 +369,9 @@ class ORBEngine:
         self._broke_high = False
         self._broke_low  = False
         self._rebuilt_date = None
+        self._last_bar_ts = None
+        self._rebuild_owed = False
+        self._resumed_from_file = False
         logger.info("ORB engine reset for new session")
 
     def _rearm(self):
@@ -494,15 +511,141 @@ class ORBEngine:
                     f"(ms={ms}) — deferring to sweep reversal"
                 )
 
+    # ── r103 — THE STATE FILE IS AUTHORITATIVE ───────────────────────────────
+    def state_snapshot(self, price: float = 0.0) -> dict:
+        """Everything needed to resume this engine, for orb_state.json.
+
+        🔴 THE FILE ALREADY EXISTED AND WAS WRITE-ONLY. main.py has written
+        orb_state.json every tick since v3 — state, attempt, latches, reason —
+        and NOTHING has ever read it back. r95 then built a tape REPLAY to
+        reconstruct what the file was already recording. Operator, 2026-08-24:
+        "if it HAD the orb state, but was interrupted, it should have written it
+        down. It can easily confirm orb state after any restart, so a 1x look
+        back function is grossly underpowered."
+        """
+        d = self._data
+        n = now_et()
+        return {
+            "high": d.orb_high if d.orb_high > 0 else None,
+            "low": d.orb_low if d.orb_low > 0 else None,
+            "width": d.orb_width,
+            "state": str(d.state),
+            "attempt": d.attempt_number,
+            "reason": d.invalidation_reason,
+            "broke_high": self._broke_high,
+            "broke_low": self._broke_low,
+            "price": price,
+            "past_cutoff": (n.hour, n.minute) >= _ORB_CUT,
+            "updated_at": n.strftime("%Y-%m-%d %H:%M:%S ET"),
+            # ── r103 additions: the parts that make it RESUMABLE ─────────────
+            "date": n.strftime("%Y-%m-%d"),
+            "break_direction": d.break_direction,
+            "break_candle_high": d.break_candle_high,
+            "break_candle_low": d.break_candle_low,
+            "break_candle_close": d.break_candle_close,
+            "bars_since_break": d.bars_since_break,
+            "last_retest_bar_ts": d.last_retest_bar_ts,
+            "confirmed_at": d.confirmed_at,
+            "stop_level": d.stop_level,
+            "target_50pct": d.target_50pct,
+            "target_100pct": d.target_100pct,
+            "target_strike": d.target_strike,
+            "retest_depth_px": d.retest_depth_px,
+            "last_bar_ts": self._last_bar_ts or "",
+        }
+
+    def load_state_file(self, path: str) -> bool:
+        """Resume from orb_state.json. AUTHORITATIVE — operator's ruling,
+        2026-08-24: "If it wrote it, trust it and act accordingly."
+
+        ⚠️ TODAY'S FILE ONLY. A dated file from a prior session is ignored
+        outright rather than half-trusted; yesterday's break latches on today's
+        range is the failure `_load_range_from_file` already guards against.
+        ⚠️ AND IT DOES NOT SUPPRESS THE REACH-BACK. The file says what the
+        engine knew at its last write; the tape covers the gap from there to
+        now. Trusting the file is what makes that gap SMALL — the replay stops
+        being the mechanism and becomes the patch.
+        """
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception as e:                                 # noqa: BLE001
+            logger.debug("ORB state file not readable: %s", e)
+            return False
+        today = now_et().strftime("%Y-%m-%d")
+        if str(data.get("date")) != today:
+            logger.info("ORB state file is not today's (%s) — ignored",
+                        data.get("date"))
+            return False
+        d = self._data
+        try:
+            _st = str(data.get("state") or "")
+            if not _st:
+                return False
+            d.state = _st.replace("ORBState.", "")
+            for _k, _attr in (("high", "orb_high"), ("low", "orb_low"),
+                              ("width", "orb_width"),
+                              ("break_candle_high", "break_candle_high"),
+                              ("break_candle_low", "break_candle_low"),
+                              ("break_candle_close", "break_candle_close"),
+                              ("stop_level", "stop_level"),
+                              ("target_50pct", "target_50pct"),
+                              ("target_100pct", "target_100pct"),
+                              ("retest_depth_px", "retest_depth_px")):
+                _v = data.get(_k)
+                if _v is not None:
+                    setattr(d, _attr, float(_v))
+            d.attempt_number     = int(data.get("attempt") or 0)
+            d.bars_since_break   = int(data.get("bars_since_break") or 0)
+            d.target_strike      = int(data.get("target_strike") or 0)
+            d.break_direction    = str(data.get("break_direction") or "")
+            d.last_retest_bar_ts = str(data.get("last_retest_bar_ts") or "")
+            d.confirmed_at       = str(data.get("confirmed_at") or "")
+            d.invalidation_reason = str(data.get("reason") or "")
+            self._broke_high = bool(data.get("broke_high"))
+            self._broke_low  = bool(data.get("broke_low"))
+            self._range_date = today if d.orb_high > 0 else None
+            self._last_bar_ts = str(data.get("last_bar_ts") or "") or None
+            self._resumed_from_file = True
+            logger.info(
+                "ORB STATE RESUMED from file: state=%s attempt=%d "
+                "latches(H/L)=%s/%s range=%.2f-%.2f last_bar=%s (written %s)",
+                d.state, d.attempt_number, self._broke_high, self._broke_low,
+                d.orb_low, d.orb_high, self._last_bar_ts or "-",
+                data.get("updated_at"))
+            return True
+        except Exception as e:                                 # noqa: BLE001
+            logger.warning("ORB state file unusable (%s) — falling back to the "
+                           "tape reach-back", e)
+            return False
+
+    def mark_rebuild_owed(self) -> None:
+        """r103 — a resumed engine owes a gap-fill replay. The state file is
+        authoritative for what it RECORDED; the bars written since are not in
+        it, and that window is exactly what the reach-back is for."""
+        self._rebuild_owed = True
+
     @property
     def needs_tape_rebuild(self) -> bool:
         """True while this session's tape reach-back is still owed.
 
         Exists so the caller can skip fetching a DEEP 1m frame on every tick —
         the reach-back needs the whole session, which `ctx["df_1m"]` (60 bars)
-        cannot supply. Cleared for the day by the first successful replay and
-        re-armed by `reset_for_session()`.
+        cannot supply.
+
+        🔴 r103 — WAS A ONE-SHOT DATE LATCH, AND THAT WAS THE UNDERPOWERED
+        PART. `_rebuilt_date = today` was set by the FIRST replay AND by a
+        replay that found fewer than three session bars, so a single thin or
+        failed fetch spent the session's only attempt and nothing retried. The
+        rebuild is now owed until the engine's knowledge REACHES THE PRESENT:
+        it is idempotent (replaying the same tape onto the same state is a
+        no-op), so there is no reason to ration it.
+        ⚠️ AND A RESUMED ENGINE STILL OWES ONE. The file is authoritative for
+        what it recorded; the bars since it was written are the gap, and the
+        gap is exactly what the reach-back is for.
         """
+        if self._rebuild_owed:
+            return True
         return self._rebuilt_date != now_et().strftime("%Y-%m-%d")
 
     # ── r95 — THE RESTART REACH-BACK ─────────────────────────────────────────
@@ -594,7 +737,15 @@ class ORBEngine:
             except Exception:                                  # noqa: BLE001
                 sess = df_1m
             if len(sess) < 3:
-                self._rebuilt_date = today
+                # 🔴 r103 — WAS `self._rebuilt_date = today`. A thin frame is a
+                # FETCH that came up short, not a session that has been
+                # replayed, and marking it done spent the only attempt on it.
+                # This is the path that made "a crash loop never recovers"
+                # true: one bad fetch and nothing retried for the rest of the
+                # day. Owed stays owed.
+                logger.info("ORB reach-back: only %d session bar(s) in the "
+                            "fetch — NOT marking the rebuild done; it retries "
+                            "next tick", len(sess))
                 return False
 
             # ⚠️ r96 — `d` IS NOT SAFE TO HOLD ACROSS THIS LOOP. `_rearm()` does
@@ -635,6 +786,11 @@ class ORBEngine:
                 replayed += 1
 
             self._rebuilt_date = today
+            self._rebuild_owed = False
+            try:
+                self._last_bar_ts = str(sess.index[-1])
+            except Exception:                                  # noqa: BLE001
+                pass
 
             # ── 🔴 THE OPERATOR'S RULING, 2026-08-24 ─────────────────────────
             # **"DO NOT TAKE A MISSED ENTRY as permission to enter LATE. If we
@@ -729,6 +885,17 @@ class ORBEngine:
                     replayed, sess.index[0], sess.index[-1], after, before,
                     d.attempt_number, self._broke_high, self._broke_low, age_s)
             if _missed is not None:
+                # ── 🔴 r103 — A MISS IS RECORDED LIKE A DECLINE ─────────────
+                # Operator, 2026-08-24: "'missed' should log the way a
+                # 'declined' is — with all the known parameters captured with
+                # it." A disposition carries the signal context, the score and
+                # the reason; a miss carried a timestamp and a direction. Both
+                # are refusals to trade and both are only worth having if they
+                # can be compared to each other later. Everything the engine
+                # knew at the confirming bar goes in the payload, so the
+                # question "what did the ones we MISSED look like next to the
+                # ones we DECLINED" is one query rather than a forensic pass
+                # over bot.log.
                 self._last_missed = {
                     "state": _missed,
                     "direction": "LONG" if "LONG" in _missed else "SHORT",
@@ -737,6 +904,25 @@ class ORBEngine:
                     "attempt": d.attempt_number,
                     "trigger_price": (d.orb_high if "LONG" in _missed
                                       else d.orb_low),
+                    # the setup's own geometry, as the strategy would have seen it
+                    "orb_high": d.orb_high,
+                    "orb_low": d.orb_low,
+                    "orb_width": d.orb_width,
+                    "break_direction": d.break_direction,
+                    "break_candle_high": d.break_candle_high,
+                    "break_candle_low": d.break_candle_low,
+                    "break_candle_close": d.break_candle_close,
+                    "bars_since_break": d.bars_since_break,
+                    "retest_depth_px": d.retest_depth_px,
+                    "stop_level": d.stop_level,
+                    "target_50pct": d.target_50pct,
+                    "target_100pct": d.target_100pct,
+                    "target_strike": d.target_strike,
+                    "confirmed_at": d.confirmed_at,
+                    "broke_high": self._broke_high,
+                    "broke_low": self._broke_low,
+                    "resumed_from_file": self._resumed_from_file,
+                    "replayed_bars": replayed,
                 }
                 logger.warning(
                     "ORB MISSED WHILE DOWN: the tape shows a confirmed "

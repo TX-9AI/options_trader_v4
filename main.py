@@ -1,5 +1,12 @@
 """
-main.py  v4.10
+main.py  v4.11
+v4.11 2026-08-24  r103: orb_state.json is READ at startup, authoritative
+      (operator: "if it wrote it, trust it"), and written from the engine's own
+      snapshot so writer and reader cannot drift. A resumed engine still owes a
+      gap-fill replay. A MISSED confirmation is ADJUDICATED against the trades
+      table before the row is closed — the tape cannot tell "never seen" from
+      "taken and recorded before the process died" — and is journalled as a
+      disposition with the setup's full geometry, like a decline.
 v4.10 2026-08-24  r102: the r101 rehearsal stopped one call short — can_enter
       short-circuited on the RTH gate at DEBUG, so the outside-RTH pass reached
       no strategy (measured fleet-wide 16:53: decided=0 chain=0). attempt_new_entry
@@ -1144,6 +1151,27 @@ def run_analysis(state: BotState) -> dict:
     # session-scoped read and already filters poison bars, so the reach-back
     # uses it rather than growing a second reader.
     _orb_eng = get_orb_engine()
+    # ── 🔴 r103 — THE STATE FILE IS READ, NOT JUST WRITTEN ───────────────────
+    # orb_state.json has been written every tick since v3 and read by NOBODY;
+    # r95 then built a tape replay to reconstruct exactly what it already held.
+    # Operator, 2026-08-24: "if it HAD the orb state, but was interrupted, it
+    # should have written it down. It can easily confirm orb state after any
+    # restart, so a 1x look back function is grossly underpowered."
+    # AUTHORITATIVE, per the operator's ruling: "If it wrote it, trust it."
+    # ⚠️ ONCE PER PROCESS. `_orb_state_loaded` on BotState, not a module global,
+    # so a restart is a fresh load and a live process never re-reads a file it
+    # is itself writing.
+    if not getattr(state, "_orb_state_loaded", False):
+        state._orb_state_loaded = True
+        try:
+            if _orb_eng.load_state_file(
+                    os.path.join(os.path.dirname(LOG_FILE), "orb_state.json")):
+                # The file is truth up to its last write; the bars since then
+                # are the GAP, and the reach-back exists to close it.
+                _orb_eng.mark_rebuild_owed()
+        except Exception as _lse:                              # noqa: BLE001
+            logger.warning("ORB state resume failed (%s) — the tape reach-back "
+                           "covers it", _lse)
     if _orb_eng.needs_tape_rebuild:
         try:
             from data.market_data import fetch_candles as _fetch_deep_1m
@@ -1159,6 +1187,44 @@ def run_analysis(state: BotState) -> dict:
                 # before this process existed.
                 _miss = _orb_eng.take_missed_confirmation()
                 if _miss:
+                    # ── 🔴 r103 — FIRED OR GENUINELY MISSED? ADJUDICATE FIRST.
+                    # Operator, 2026-08-24: "figure out if it fired or if we
+                    # genuinely missed it before closing out the row." The tape
+                    # cannot distinguish a setup this process never saw from one
+                    # a PREVIOUS process saw, took and recorded before it died —
+                    # both look identical in the bars. The trades table can.
+                    # ⚠️ A FALSE MISS IS WORSE THAN NO COUNT. The missed
+                    # population exists to measure what the fleet is losing to
+                    # outages; a row for a trade that actually filled inflates
+                    # that loss and would send us hunting a defect that isn't
+                    # there — the same reasoning as the r82 counter that "got
+                    # worse the harder we tried to fix it".
+                    try:
+                        _fired = get_trade_logger().orb_entry_since(
+                            _miss.get("confirmed_bar") or "")
+                    except Exception:                          # noqa: BLE001
+                        _fired = None
+                    if _fired is not None:
+                        logger.info(
+                            "ORB reach-back: the tape's confirmation at %s was "
+                            "TAKEN, not missed — trade %s is on the book "
+                            "(entry %s). No MISSED row written.",
+                            _miss.get("confirmed_bar"),
+                            str(_fired.get("trade_id", ""))[:8],
+                            _fired.get("entry_time"))
+                        _miss = None
+                if _miss:
+                    # ⚠️ AND IT IS JOURNALLED LIKE A DECLINE. Operator: "missed
+                    # should log the way a declined is — with all the known
+                    # parameters captured with it." Same file, same shape, so
+                    # missed and declined are one query apart.
+                    if _sigj is not None:
+                        try:
+                            _sigj.journal("disposition", outcome="missed",
+                                          orb=_miss,
+                                          reason="TRIGGER_FIRED_WHILE_DOWN")
+                        except Exception:                      # noqa: BLE001
+                            pass
                     try:
                         from derived.registry import plan_ledger as _plg_m
                         _ledm = _plg_m(INSTRUMENT)
@@ -1192,19 +1258,11 @@ def run_analysis(state: BotState) -> dict:
         import json as _json
         _eng = get_orb_engine()
         _now_et = now_et()
-        _orb_state = {
-            "high":       orb.orb_high if orb.orb_high > 0 else None,
-            "low":        orb.orb_low  if orb.orb_low  > 0 else None,
-            "width":      orb.orb_width,
-            "state":      orb.state,
-            "attempt":    orb.attempt_number,
-            "reason":     orb.invalidation_reason,
-            "broke_high": _eng.broke_high,
-            "broke_low":  _eng.broke_low,
-            "price":      price,
-            "past_cutoff": (_now_et.hour, _now_et.minute) >= ORB_NO_ENTRY_AFTER_ET,
-            "updated_at": _now_et.strftime("%Y-%m-%d %H:%M:%S ET"),
-        }
+        # r103 — THE ENGINE OWNS THE SNAPSHOT. It is now read back on restart,
+        # so the writer and the reader must be the same code; a dict assembled
+        # here would drift from `load_state_file` on the first field either one
+        # gained. Every key status.py consumes is still present.
+        _orb_state = _eng.state_snapshot(price)
         _state_path = os.path.join(os.path.dirname(LOG_FILE), "orb_state.json")
         with open(_state_path, "w") as _f:
             _json.dump(_orb_state, _f)

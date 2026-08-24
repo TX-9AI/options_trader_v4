@@ -1,5 +1,8 @@
 """
-database/trade_logger.py  v4.3
+database/trade_logger.py  v4.4
+v4.4  2026-08-24  r103: orb_entry_since() — did an ORB trade actually open at or
+      after a confirming bar? The adjudicator for fired-vs-missed, so a MISSED
+      row is never written for a setup a prior process took and recorded.
 v4.3  2026-08-24  CONDOR STOP SUPPRESSION: stop_suppressed_ts /
       stop_suppressed_by columns (schema + migration). Written by exit_engine
       v4.4 while a complementary condor leg is open, cleared on re-arm.
@@ -789,6 +792,34 @@ class TradeLogger:
                 (self._mode_flag,)
             ).fetchall()
         return [make_record(**dict(r)) for r in rows]
+
+    def orb_entry_since(self, since_ts: str) -> Optional[TradeRecord]:
+        """r103 — did an ORB trade actually OPEN at or after `since_ts` today?
+
+        🔴 THE QUESTION THE MISSED ROW COULD NOT ANSWER. Operator, 2026-08-24:
+        "figure out if it fired or if we genuinely missed it before closing out
+        the row." The tape reach-back sees a confirmed break+retest and calls it
+        MISSED — but the tape cannot tell a setup the PROCESS never saw from one
+        it saw, took, and recorded before it died. The trades table can: if a
+        row exists for this session at or after the confirming bar, the trigger
+        FIRED and calling it missed is a false negative in the one population
+        that is supposed to be countable.
+
+        Returns the record if found, else None. Fails toward None — an
+        unreadable DB reports nothing rather than inventing a fill.
+        """
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM trades WHERE strategy='ORBStrategy' "
+                    "AND COALESCE(paper_trade,1)=? AND entry_time >= ? "
+                    "ORDER BY entry_time ASC LIMIT 1",
+                    (self._mode_flag, since_ts)
+                ).fetchone()
+            return make_record(**dict(row)) if row else None
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug("orb_entry_since lookup failed: %s", exc)
+            return None
 
     def get_open_trades_today(self) -> List[TradeRecord]:
         """Deprecated alias — retained for safety. Prefer get_open_trades_live().
