@@ -111,7 +111,8 @@ from typing import Optional, List
 import pandas as pd
 
 from database.trade_logger import TradeRecord, get_trade_logger
-from strategy.structure import is_credit_vertical as _is_credit_vertical
+from strategy.structure import (is_credit_vertical as _is_credit_vertical,
+                                is_tent as _is_tent)
 from execution.exit_engine import get_exit_engine, ExitDecision
 from data.tasty_client import get_client, TastyClientError
 from risk.risk_manager import get_risk_manager
@@ -370,6 +371,33 @@ class PositionManager:
                 # v3.2 (AUDIT F6): structure-derived, matching exit_engine
                 # v4.21's dispatch — pricing and routing must never disagree
                 # about what a record IS.
+                # ── r106 — THE TENT PRICES ACROSS TWO CHAINS ────────────────
+                # short + same-type wing + an OPPOSITE-type hedge, so the hedge
+                # is not in `contracts_list` at all. Value = what it costs to
+                # close: buy back the short, sell both longs.
+                if _is_tent(record):
+                    _sc = next((c for c in contracts_list
+                                if c.strike == record.get("short_strike", 0)
+                                and 0 < c.mark < 1e6), None)
+                    _lc = next((c for c in contracts_list
+                                if c.strike == record.get("long_strike", 0)
+                                and 0 < c.mark < 1e6), None)
+                    _other = chain.puts if side == "call" else chain.calls
+                    _hc = next((c for c in _other
+                                if c.strike == record.get("lower_strike", 0)
+                                and 0 < c.mark < 1e6), None)
+                    if None not in (_sc, _lc, _hc):
+                        _stash_quote(
+                            record,
+                            bid=max(0.0, (getattr(_sc, "bid", 0.0) or 0.0)
+                                    - (getattr(_lc, "ask", 0.0) or 0.0)
+                                    - (getattr(_hc, "ask", 0.0) or 0.0)),
+                            ask=max(0.0, (getattr(_sc, "ask", 0.0) or 0.0)
+                                    - (getattr(_lc, "bid", 0.0) or 0.0)
+                                    - (getattr(_hc, "bid", 0.0) or 0.0)))
+                        return _sc.mark - _lc.mark - _hc.mark
+                    return None      # a leg we cannot see is not a price
+
                 if _is_credit_vertical(record):
                     short_s = record.get("short_strike", 0)
                     long_s  = record.get("long_strike",  0)

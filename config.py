@@ -926,7 +926,31 @@ CONDOR_PROXIMITY_STRIKES    = 2      # (legacy) strikes inside the short — sup
 # to the band before selling (richer premium, fewer fills). Env-tunable for A/B.
 CONDOR_TRIGGER_APPROACH     = float(os.environ.get("OT_CONDOR_TRIGGER_APPROACH", "0.65"))
                                      # (2 strikes = 10pt on SPX, $2 on QQQ — scales naturally)
-CONDOR_STOP_LOSS_PCT        = 0.25   # Exit if spread value rises to 125% of credit received
+# 🔴 r106 — THE LONE-VERTICAL FLOOR IS 15%, AND IT IS THE ONLY NUMBER WRITTEN.
+# TRADES.md §5: a vertical alone "manages exactly like the sweep credit spread:
+# a 15% stop", and names the 25% as "never validated ... calibrated for a
+# complete structure collecting credit on both sides — not for one naked leg"
+# (condor_stop measured 16 trades, 19% win, −$1,156, worst −$300).
+# ⚠️ THE 25% WAS STILL BEING WRITTEN ONTO EVERY ROW as stop_premium while the
+# LIVE arm evaluated 15% — so the row, the entry alert and any audit reading
+# either of them stated a rule the engine no longer applied.
+CONDOR_LONE_STOP_PCT        = float(os.environ.get("OT_CONDOR_LONE_STOP_PCT", "0.15"))
+
+# ── THE TENT (r106, operator 2026-08-24) ────────────────────────────────────
+# After a roll, a 1-min candle CLOSE beyond a short strike takes the PROFITABLE
+# vertical off and buys a long of the OPPOSITE type, equidistant from the
+# remaining short as its existing wing — "boxing in" the new price. Operator's
+# words: "leaving price under the tent."
+# ⚠️ PRICED BEFORE IT IS PAID. If the hedge's debit alone would put the position
+# at −TENT_FLOOR_PCT of cumulative credit, the tent is NOT bought and the whole
+# structure closes. A tent that cannot be afforded is a close.
+# ⚠️ AND THEN ONE EXIT. A 15% floor on CUMULATIVE credit — the original credit
+# plus every roll, minus the hedge debit — and nothing else. No TP, no trail,
+# no nickel: those belong to a vertical that is still collecting decay, and this
+# structure has already been adjusted twice.
+TENT_ENABLED                = os.environ.get("OT_TENT_ENABLED", "1") == "1"
+TENT_FLOOR_PCT              = float(os.environ.get("OT_TENT_FLOOR_PCT", "0.15"))
+CONDOR_STOP_LOSS_PCT        = CONDOR_LONE_STOP_PCT   # retired alias — one number
 # ── Condor leg management, v2 (2026-07-23) ────────────────────────────────
 # A RATCHET IS NOT A TAKE-PROFIT. A TP closes the position and so structurally
 # guarantees the condor never forms: the move that makes side one profitable IS

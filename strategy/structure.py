@@ -1,5 +1,9 @@
 """
-strategy/structure.py  v4.1
+strategy/structure.py  v4.2
+v4.2  2026-08-24  r106: Structure.TENT — the post-roll hedge (short + its wing +
+      an opposite-type long equidistant on the breached side). Tested FIRST
+      because it keeps the vertical's strategy string and every other test would
+      claim it; a misroute hands the hedge long to the directional trail.
 v4.1  2026-08-24  r99 — the sweep credit spread classifies as CONDOR_LEG (lone
       vertical: 15% floor, 15:45) instead of TREND_PARTICIPATION (TC.6: breach
       or hold, no premium stop). Its spec names exactly two exits and the TC.6
@@ -64,10 +68,15 @@ class Structure(str, Enum):
     BUTTERFLY = "butterfly"            # debit, three legs
     CONDOR_LEG = "condor_leg"          # credit vertical, sibling-aware
     TREND_PARTICIPATION = "trend_participation"   # credit vertical, ORB-bounded
+    TENT = "tent"                      # r106 — short + its wing + a HEDGE long
+                                       # of the OPPOSITE type, equidistant on
+                                       # the breached side. Three legs, two
+                                       # types; neither a vertical nor a fly.
 
 
 CREDIT_STRUCTURES = frozenset({Structure.CONDOR_LEG,
-                               Structure.TREND_PARTICIPATION})
+                               Structure.TREND_PARTICIPATION,
+                               Structure.TENT})
 
 
 def of(record: Optional[Mapping[str, Any]]) -> Structure:
@@ -88,6 +97,14 @@ def of(record: Optional[Mapping[str, Any]]) -> Structure:
     # identity fix carry `strategy="IronCondorStrategy"` with
     # `setup_type="trend_credit_short"`. Those rows are mislabelled at the
     # strategy level and the setup type is the only surviving truth.
+    # 🔴 r106 — TENT FIRST. It is built FROM a credit vertical and keeps the
+    # vertical's strategy string, so every test below would claim it. Its
+    # management is different from all of them: ONE exit, a 15% floor on
+    # CUMULATIVE credit. Misroute it and the hedge long gets handed to the
+    # directional trail, which is the 2026-08-14 identity bug exactly.
+    if setup.startswith("tent") or "tent" in strat.replace("_", ""):
+        return Structure.TENT
+
     if "trendcredit" in strat.replace("_", "") or setup.startswith("trend_credit"):
         return Structure.TREND_PARTICIPATION
 
@@ -123,6 +140,12 @@ def of(record: Optional[Mapping[str, Any]]) -> Structure:
 
 def is_credit_vertical(record: Optional[Mapping[str, Any]]) -> bool:
     return of(record) in CREDIT_STRUCTURES
+
+
+def is_tent(record: Optional[Mapping[str, Any]]) -> bool:
+    """r106 — the post-roll hedge structure. Credit-basis like a vertical (it
+    holds to 15:45, it prices as a credit), but three legs and ONE exit."""
+    return of(record) is Structure.TENT
 
 
 def is_trend_participation(record: Optional[Mapping[str, Any]]) -> bool:

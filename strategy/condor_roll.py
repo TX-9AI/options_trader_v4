@@ -1,5 +1,14 @@
 """
-strategy/condor_roll.py  v4.4
+strategy/condor_roll.py  v4.5
+v4.5  2026-08-24  r106 THE TENT — operator's post-roll escalation, combining his
+      rungs 2 and 3: on a 1-min CLOSE beyond a short strike of an already-rolled
+      structure, take the PROFITABLE side off (computed from marks, never
+      assumed) and buy a long of the OPPOSITE type, equidistant from the
+      remaining short as its wing — "leaving price under the tent". Priced
+      BEFORE it is paid: if the hedge's debit alone breaches the 15% floor on
+      cumulative credit, the tent is not built and the structure closes. The
+      survivor is re-booked as Structure.TENT carrying the CUMULATIVE credit, so
+      the floor measures the whole adjusted position.
 v4.4  2026-08-24  r105: the roll's OPEN half walks the ladder WITHIN THIS CALL.
       It cannot walk across ticks — by the time the open runs, the old untested
       vertical is already closed, so check_and_execute_roll sees len(legs)!=2
@@ -474,3 +483,288 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
     except Exception as e:
         logger.error(f"Broken-wing roll failed: {e}")
         return False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# r106 — THE TENT. Operator's spec, 2026-08-24, read back and confirmed.
+# ═════════════════════════════════════════════════════════════════════════════
+# "If we've already rolled & price breaches the new structure, take off the
+#  profitable side, leaving a lone vertical. Purchase a long position
+#  equidistant from the short strike as the other long strike, leaving price
+#  under the 'tent.' The only remaining adjustment after that should be a 15%
+#  floor of the total credit collected. If we can't achieve that, close the
+#  entire structure. Close it also if purchasing the new long strike gets us to
+#  -15% loss."
+#
+# WORKED EXAMPLE (the one this was read back against):
+#   condor 95/90 put + 105/110 call, price ~100. Call side tested, put side
+#   rolled up to 100/95. Price closes above 105 — the breach.
+#   → take off the profitable (rolled put) vertical
+#   → keep 105/110 call
+#   → existing wing is +5 from the short, so the hedge goes -5: a LONG PUT at
+#     100. Longs at 100 and 110 bracket price at ~106.
+#
+# ⚠️ THE HEDGE IS THE OPPOSITE TYPE, AND THAT IS THE WHOLE POINT. A long CALL at
+# 100 against short 105 / long 110 goes NET LONG above 110 — uncapped on the far
+# tail. A long PUT at 100 caps the upside at width−credit and PAYS if price
+# collapses back through. The operator chose the hedge after the payoff of both
+# was worked through; it is his ruling on my analysis, not his original spec,
+# and it is recorded that way deliberately.
+#
+# ⚠️ "PROFITABLE" IS COMPUTED, NOT ASSUMED. Which side is winning follows from
+# the marks. Deciding it from which side we LABELLED tested would encode a
+# reading of "breaches the new structure" that was never pinned down — price
+# continuing through the original short, or reversing through the rolled one.
+# Reading the book answers it for both cases and neither of us has to be right.
+# ⚠️ BREACH = A 1-MIN CANDLE CLOSE BEYOND A SHORT STRIKE. Operator's definition.
+# A wick is a touch, not a decision — the same rule the ORB structure stop uses.
+
+def _tent_breached(df_1m, legs: List[dict]) -> Optional[dict]:
+    """The leg whose short strike a CLOSED 1m candle has breached, or None."""
+    try:
+        if df_1m is None or len(df_1m) < 2:
+            return None
+        last_close = float(df_1m["close"].iloc[-2])   # newest CLOSED bar
+    except Exception:                                          # noqa: BLE001
+        return None
+    for leg in legs:
+        k = float(leg.get("short_strike") or 0.0)
+        if k <= 0:
+            continue
+        if leg.get("option_side") == "call" and last_close > k:
+            return leg
+        if leg.get("option_side") == "put" and last_close < k:
+            return leg
+    return None
+
+
+def _leg_value(leg: dict, chain) -> Optional[float]:
+    """Current cost to close this vertical (short mark − long mark)."""
+    lst = chain.puts if leg.get("option_side") == "put" else chain.calls
+    s = _mark_at(lst, leg.get("short_strike"))
+    l = _mark_at(lst, leg.get("long_strike"))
+    return None if s is None or l is None else max(0.0, s - l)
+
+
+def check_and_execute_tent(pos_mgr, chain, current_price: float, state,
+                           df_1m=None) -> bool:
+    """Rung 2+3 of the condor ladder, combined per the operator: on a breach of
+    an ALREADY-ROLLED structure, take the profitable side off and buy the hedge.
+
+    Returns True if the structure was adjusted or closed.
+    """
+    from config import TENT_ENABLED, TENT_FLOOR_PCT, INSTRUMENT, CONTRACT_MULTIPLIER
+    from database.trade_logger import make_record, get_trade_logger
+    from execution.exit_engine import get_exit_engine
+    from notifications.alert_manager import get_alert_manager
+    import uuid
+
+    if not TENT_ENABLED or chain is None:
+        return False
+    legs = [r for r in pos_mgr.get_open_records() if r.get("is_condor_leg")]
+    if len(legs) != 2:
+        return False
+    # ⚠️ ONLY AFTER A ROLL. The tent is the rung BELOW the roll, not an
+    # alternative to it: an unrolled condor still has the roll available and the
+    # roll is strictly better (it collects credit rather than paying a debit).
+    if not any(r.get("is_broken_wing") for r in legs):
+        return False
+
+    breached = _tent_breached(df_1m, legs)
+    if breached is None:
+        return False
+    keep = next((l for l in legs if l is not breached), None)
+    if keep is None:
+        return False
+
+    # Which side is actually winning? The book decides.
+    v_keep = _leg_value(keep, chain)
+    v_breach = _leg_value(breached, chain)
+    if v_keep is None or v_breach is None:
+        logger.info("[tent] a leg has no mark — declining this pass, position "
+                    "left as-is (the roll's silent-refusal lesson)")
+        return False
+    c_keep = float(keep.get("credit_received", keep.get("entry_premium", 0.0)))
+    c_breach = float(breached.get("credit_received", breached.get("entry_premium", 0.0)))
+    profit_keep, profit_breach = c_keep - v_keep, c_breach - v_breach
+    winner, loser = ((keep, breached) if profit_keep >= profit_breach
+                     else (breached, keep))
+    logger.info("[tent] BREACH beyond the %s short %.2f — winner is the %s side "
+                "(+%.2f vs +%.2f)", breached.get("option_side"),
+                float(breached.get("short_strike") or 0), winner.get("option_side"),
+                max(profit_keep, profit_breach), min(profit_keep, profit_breach))
+
+    # ── price the hedge BEFORE paying for it ────────────────────────────────
+    side = loser.get("option_side")
+    short_k = float(loser.get("short_strike") or 0.0)
+    long_k  = float(loser.get("long_strike") or 0.0)
+    width   = abs(short_k - long_k)
+    hedge_k = short_k - width if side == "call" else short_k + width
+    hedge_list = chain.puts if side == "call" else chain.calls   # OPPOSITE type
+    hedge = _contract_at(hedge_list, hedge_k)
+    hedge_ask = float(getattr(hedge, "ask", 0.0) or 0.0) if hedge else 0.0
+    cum_credit = c_keep + c_breach
+    winner_take = float(_leg_value(winner, chain) or 0.0)
+    # Cumulative credit AFTER buying back the winner and paying for the hedge.
+    net_after = cum_credit - winner_take - hedge_ask
+
+    if hedge is None or hedge_ask <= 0:
+        logger.warning("[tent] no priced %s hedge at %.2f — CLOSING the whole "
+                       "structure instead (a tent that cannot be built is a "
+                       "close)", "put" if side == "call" else "call", hedge_k)
+        return _tent_close_all(pos_mgr, legs, chain, state, "tent_unavailable")
+    if net_after <= cum_credit * (1.0 - TENT_FLOOR_PCT) - 1e-9:
+        logger.warning("[tent] the hedge at %.2f costs %.2f — that alone puts "
+                       "the structure at %.1f%% of cumulative credit %.2f, past "
+                       "the %.0f%% floor. NOT BUYING IT; closing instead.",
+                       hedge_k, hedge_ask,
+                       (net_after / cum_credit * 100.0) if cum_credit else 0.0,
+                       cum_credit, TENT_FLOOR_PCT * 100.0)
+        return _tent_close_all(pos_mgr, legs, chain, state, "tent_unaffordable")
+
+    logger.info("[tent] BUILDING: keep %s %.0f/%.0f, hedge LONG %s %.2f "
+                "(ask %.2f), cumulative credit %.2f -> %.2f after",
+                side, short_k, long_k, "put" if side == "call" else "call",
+                hedge_k, hedge_ask, cum_credit, net_after)
+    return _execute_tent(pos_mgr, winner, loser, hedge, hedge_ask,
+                         net_after, state, chain)
+
+
+def _tent_close_all(pos_mgr, legs: List[dict], chain, state, reason: str) -> bool:
+    """Close every open leg. Used when the tent cannot be built or afforded —
+    the operator's "if we can't achieve that, close the entire structure"."""
+    from execution.exit_engine import get_exit_engine
+    from database.trade_logger import get_trade_logger
+    tl, ok = get_trade_logger(), True
+    for leg in list(legs):
+        mark = _leg_value(leg, chain)
+        fill = get_exit_engine(state.paper_trading).place_exit_order(
+            leg, reason, mark_price=mark)
+        if not fill.confirmed or fill.fill_price is None:
+            logger.error("[tent] %s close NOT confirmed (%s) — leg stays OPEN",
+                         str(leg.get("trade_id", ""))[:8], fill.detail)
+            ok = False
+            continue
+        credit = float(leg.get("credit_received", leg.get("entry_premium", 0.0)))
+        tl.log_exit(leg["trade_id"], exit_price=float(fill.fill_price),
+                    pnl_usd=(credit - float(fill.fill_price))
+                    * int(leg.get("contracts", 1)) * CONTRACT_MULTIPLIER,
+                    exit_reason=reason)
+        pos_mgr.remove_record(leg["trade_id"])
+    return ok
+
+
+def _execute_tent(pos_mgr, winner: dict, keep: dict, hedge, hedge_ask: float,
+                  net_after: float, state, chain) -> bool:
+    """Close the winning vertical, buy the hedge, and re-book the survivor as a
+    TENT carrying the CUMULATIVE credit.
+
+    ⚠️ ORDER MATTERS AND IT IS THE RISK ORDERING. The winner comes off FIRST
+    (it is the profitable side and closing it is a credit), then the hedge is
+    bought. If the hedge fails after the winner is gone we are left with the
+    lone vertical the operator already manages on a floor — a known state, not
+    an orphan. Doing it the other way round would leave a bought hedge attached
+    to a structure we then failed to simplify.
+    """
+    from config import INSTRUMENT, CONTRACT_MULTIPLIER, TENT_FLOOR_PCT
+    from database.trade_logger import make_record, get_trade_logger
+    from execution.exit_engine import get_exit_engine
+    from notifications.alert_manager import get_alert_manager
+    import uuid
+
+    tl   = get_trade_logger()
+    mode = "PAPER" if state.paper_trading else "LIVE"
+    qty  = int(keep.get("contracts", 1))
+
+    # ── 1. take the profitable side off ─────────────────────────────────────
+    w_mark = _leg_value(winner, chain)
+    fill = get_exit_engine(state.paper_trading).place_exit_order(
+        winner, "tent_take_profitable_side", mark_price=w_mark)
+    if not fill.confirmed or fill.fill_price is None:
+        logger.error("[tent] the profitable side did not close (%s) — nothing "
+                     "adjusted, position left intact", fill.detail)
+        return False
+    w_credit = float(winner.get("credit_received", winner.get("entry_premium", 0.0)))
+    tl.log_exit(winner["trade_id"], exit_price=float(fill.fill_price),
+                pnl_usd=(w_credit - float(fill.fill_price)) * qty * CONTRACT_MULTIPLIER,
+                exit_reason="tent_take_profitable_side")
+    pos_mgr.remove_record(winner["trade_id"])
+
+    # ── 2. buy the hedge ────────────────────────────────────────────────────
+    hedge_fill, order_id = hedge_ask, "PAPER"
+    if not state.paper_trading:
+        from data.tasty_client import get_session, get_account
+        from execution.order_confirm import confirm_order_fill
+        from tastytrade.order import (NewOrder, Leg, OrderAction, OrderType,
+                                      OrderTimeInForce, InstrumentType)
+        from decimal import Decimal
+        session, account = get_session(), get_account()
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY, order_type=OrderType.LIMIT,
+            price=Decimal(str(-round(float(hedge_ask), 2))),   # − = debit paid
+            legs=[Leg(instrument_type=InstrumentType.EQUITY_OPTION,
+                      symbol=hedge.symbol, action=OrderAction.BUY_TO_OPEN,
+                      quantity=qty)])
+        resp = account.place_order(session, order, dry_run=False)
+        if getattr(resp, "errors", None):
+            get_alert_manager()._send(
+                f"\U0001F6A8 [{mode}] {INSTRUMENT} TENT HALF-BUILT: the winning "
+                f"side is closed but the hedge was REJECTED. The remaining "
+                f"vertical keeps its floor. {resp.errors}")
+            return False
+        hf = confirm_order_fill(session, account, resp.order,
+                                [(hedge.symbol, 1, +1)], what="tent hedge")
+        if not hf.filled or hf.net_price is None:
+            get_alert_manager()._send(
+                f"\U0001F6A8 [{mode}] {INSTRUMENT} TENT HALF-BUILT: hedge did "
+                f"not fill ({hf.detail}). The remaining vertical keeps its "
+                f"floor and is managed as a lone vertical.")
+            return False
+        hedge_fill, order_id = float(hf.net_price), (hf.order_id or "")
+
+    # ── 3. re-book the survivor AS A TENT, carrying cumulative credit ───────
+    # ⚠️ THE OLD ROW IS CLOSED AND A NEW ONE OPENED, rather than mutating in
+    # place. `structure.of` reads setup_type, the exit engine routes on it, and
+    # the P&L basis has changed from this vertical's own credit to the whole
+    # structure's — three things that must move together or not at all.
+    cum = float(keep.get("credit_received", keep.get("entry_premium", 0.0))) \
+        + w_credit - float(fill.fill_price) - float(hedge_fill)
+    tl.log_exit(keep["trade_id"], exit_price=float(keep.get("entry_premium", 0.0)),
+                pnl_usd=0.0, exit_reason="tent_rebooked")
+    pos_mgr.remove_record(keep["trade_id"])
+
+    side  = keep.get("option_side")
+    rec = make_record(
+        trade_id=str(uuid.uuid4()), symbol=INSTRUMENT,
+        strategy="IronCondorStrategy", setup_type=f"tent_{side}",
+        setup_grade="B", direction="neutral", option_side=side,
+        strike=keep.get("short_strike"), short_strike=keep.get("short_strike"),
+        long_strike=keep.get("long_strike"),
+        lower_strike=float(getattr(hedge, "strike", 0.0) or 0.0),
+        spread_width=float(keep.get("spread_width") or 0.0),
+        credit_received=cum, contracts=qty,
+        entry_premium=cum,                       # the floor's basis
+        stop_premium=cum * (1 + TENT_FLOOR_PCT),
+        total_cost=abs(cum) * qty * CONTRACT_MULTIPLIER,
+        max_loss=abs(float(keep.get("spread_width") or 0.0) - cum) * qty * CONTRACT_MULTIPLIER,
+        short_symbol=keep.get("short_symbol"), long_symbol=keep.get("long_symbol"),
+        lower_symbol=getattr(hedge, "symbol", ""),   # r106: the hedge leg
+        option_symbol=keep.get("short_symbol"),
+        is_condor_leg=1, condor_leg_num=0, is_broken_wing=1,
+        order_id=order_id, paper_trade=1 if state.paper_trading else 0,
+        status="open",
+    )
+    tl.log_entry(rec)
+    pos_mgr.add_condor_leg(rec)
+    get_alert_manager()._send(
+        f"\u26F0\uFE0F [{mode}] {INSTRUMENT} TENT BUILT | keep {side} "
+        f"{keep.get('short_strike')}/{keep.get('long_strike')} + hedge LONG "
+        f"{'put' if side == 'call' else 'call'} {getattr(hedge, 'strike', 0)} "
+        f"@ {hedge_fill:.2f} | cumulative credit ${cum:.2f} | "
+        f"floor ${cum * (1 + TENT_FLOOR_PCT):.2f} ({TENT_FLOOR_PCT:.0%}) | "
+        f"{fmt_et_short()}")
+    logger.info("[tent] BUILT: %s %s/%s + hedge %.2f, cumulative credit %.2f, "
+                "floor %.2f — one adjustment remains", side,
+                keep.get("short_strike"), keep.get("long_strike"),
+                getattr(hedge, "strike", 0), cum, cum * (1 + TENT_FLOOR_PCT))
+    return True

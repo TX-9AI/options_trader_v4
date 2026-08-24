@@ -385,6 +385,21 @@ which is exactly why this is acceptable where a naked roll would not be.
 measured against the *cumulative* credit (original condor + every roll), because
 after inversion the position is one structure, not two legs.
 
+**2b. THE TENT — operator's spec, 2026-08-24, BUILT r106.**
+If we have ALREADY ROLLED and a **1-min candle CLOSES beyond a short strike**,
+take the **profitable** vertical off (computed from marks, never assumed) and buy
+a long of the **OPPOSITE type**, equidistant from the remaining short as its
+existing wing — *"leaving price under the tent."* Worked example: condor 95/90p +
+105/110c, call side tested, put side rolled to 100/95, price closes above 105 →
+keep 105/110c, hedge is a **long put at 100**; the two longs bracket price.
+⚠️ **PRICED BEFORE IT IS PAID.** If the hedge's debit alone puts the structure at
+−15% of cumulative credit, the tent is NOT built and the whole thing closes.
+⚠️ **THEN ONE ADJUSTMENT ONLY** — a 15% floor on CUMULATIVE credit (original +
+every roll − the hedge debit). No TP, no trail, no nickel.
+⚠️ **PROVENANCE:** the rungs and the floor are the operator's; the OPPOSITE-TYPE
+hedge was one of two options surfaced by a payoff analysis (a same-type long
+leaves the far tail uncapped) and the operator chose it.
+
 **3. STOP AND PAGE — the fallback, and the page is the point.**
 Reaching this means **both risk-reduction steps were unavailable**: no roll
 cleared the width and no inversion was possible — an expensive buy-back, no

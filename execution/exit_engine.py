@@ -291,14 +291,17 @@ EXIT LADDER LATENCY (N.5, log-only). place_exit_order() —
         slow closes the study is about.
         NOTHING IN THE TRADING PATH READS ANY OF IT. No exit decision, no
         price, no size changes — the capture runs after the FillResult exists.
-CONDOR LEG MANAGEMENT v2 (user directive, data-driven).
-        (a) RATCHETING STOP: +20% -> breakeven, +40% -> lock +20%, tightens only.
-        (b) TIME-GATED TP at 25%, ONLY after CONDOR_ENTRY_CUTOFF_ET and ONLY
-            when the opposite side is not open. Backtest, 18 standalone legs:
-            TP@25% turned -$242.77 into -$8.43; on 28 condor legs a TP was WORSE
-            at every level, confirming a condor leg must never be closed on
-            profit — the only reason to close one is the roll.
-        (c) Min-hold before TP: a quote-noise filter, not a structure mechanism.
+CREDIT VERTICAL MANAGEMENT — the measurements, kept; the encodings, retired.
+        The RATCHET (r90) and the TIME-GATED TP (r106) are both GONE. What the
+        study actually established survives and is the reason they went:
+        on 18 lone verticals a TP@25% turned -$242.77 into -$8.43, and on 28
+        paired legs a TP was WORSE AT EVERY LEVEL — a credit vertical must never
+        be closed on profit. The v2 text drew the opposite conclusion from its
+        own numbers and shipped a TP anyway.
+        WHAT MANAGES A CREDIT VERTICAL NOW: a 15% floor while it is alone,
+        suppressed while a complement is open (closing one end of an offset pair
+        leaves a full-sized naked position), the nickel as a DISPOSAL preference,
+        the 15:45 close, and the roll. Nothing else.
 CONTINUATION EXIT REWORK (user directive). Three changes,
         all scoped to _evaluate_continuation — no other strategy touched:
         (a) TRAIL ANCHORS TO 5m FVGs. It was passing df_1m straight into
@@ -543,7 +546,8 @@ from execution.limit_ladder import limit_at_mark, hard_close_order_mode
 # v4.21 (AUDIT F1): the binding v4.20 forgot. `is_trend_participation` was
 # called in _evaluate_condor_leg and never imported — NameError on every condor
 # leg evaluation. `is_credit_vertical` routes the dispatch (F2).
-from strategy.structure import is_trend_participation, is_credit_vertical
+from strategy.structure import (is_trend_participation, is_credit_vertical,
+                                is_tent)
 
 logger = logging.getLogger(__name__)
 
@@ -849,6 +853,12 @@ class ExitEngine:
         # until the trail re-armed on its own.
         self._seed_trail_from_record(record)
         _track_excursion(record, current_premium)
+
+        # r106 — TENT FIRST: it is a credit structure and would otherwise be
+        # claimed by the condor arm below, which would apply a nickel close and
+        # a sibling probe to a structure that has neither.
+        if is_tent(record):
+            return self._evaluate_tent(record, current_premium)
 
         if record.get("is_butterfly"):
             return self._evaluate_butterfly(record, current_premium)
@@ -1593,9 +1603,8 @@ class ExitEngine:
         # v4.5: the CONDOR_RATCHET_* imports are gone with the ratchet. A dead
         # import is this repo's most-repeated bug shape — a guard outliving the
         # thing it guarded — so it goes in the same commit, not the next one.
-        from config import (CONDOR_NICKEL_CLOSE, CONDOR_TP_PCT,
-                            VERTICAL_HOLD_TO_ET, VERTICAL_HOLD_TO_CLOSE,
-                            CONDOR_TP_MIN_HOLD_MIN, CONDOR_ENTRY_CUTOFF_ET)
+        from config import (CONDOR_NICKEL_CLOSE,
+                            VERTICAL_HOLD_TO_ET, VERTICAL_HOLD_TO_CLOSE)
         from utils.time_utils import ET
 
         decision    = ExitDecision()
@@ -1767,22 +1776,77 @@ class ExitEngine:
               decision.exit_reason = f"condor_stop pnl={pnl_pct:.1%}{tier} (lone 15%)"
               return decision
 
-        # ── TIME-GATED TAKE PROFIT (v4.1) ─────────────────────────────────
-        # ONLY after the entry cutoff (structure definitively dead) and ONLY on
-        # a standalone. A TP before the cutoff would guarantee the condor never
-        # forms: the move that makes side one profitable IS the move that
-        # carries price to the far band to trigger side two.
-        if pnl_pct >= CONDOR_TP_PCT and not self._condor_sibling_open(record):
-            now_et = datetime.now(ET)
-            if ((now_et.hour, now_et.minute) >= CONDOR_ENTRY_CUTOFF_ET
-                    and self._held_minutes(record) >= CONDOR_TP_MIN_HOLD_MIN):
-                decision.should_exit = True
-                decision.exit_reason = f"condor_tp pnl={pnl_pct:.1%} (standalone, post-cutoff)"
-                return decision
+        # ── 🔴 r106 — THE TAKE-PROFIT IS RETIRED ─────────────────────────
+        # TRADES.md §5: "No take-profit, no trail, no BOS, ever." Measured: on
+        # 18 lone verticals a TP@25% turned −$242.77 into −$8.43, and on 28
+        # paired legs a TP was worse AT EVERY LEVEL. A credit vertical is
+        # EARNING from decay; closing it early buys back the theta it was
+        # opened to collect. The nickel close is always available — that is a
+        # win, not an abandonment.
+        # ⚠️ AND ITS GATE WAS THE GIVEAWAY. `not _condor_sibling_open(record)`
+        # read as "only on a standalone", written when a lone vertical was
+        # understood as HALF OF A PLANNED CONDOR waiting for its partner.
+        # Operator, 2026-08-24: "There is no longer a 'standalone leg' — we
+        # manage the 1st leg as an individual vertical spread now. There is no
+        # condor implied, it is merely PERMITTED." Under that reading the gate
+        # is true for essentially every vertical, so this was not a rare arm
+        # for an unusual case — it was the ordinary exit for the ordinary trade,
+        # and it contradicted the measurement it sat next to.
+        # CONDOR_TP_PCT / CONDOR_ENTRY_CUTOFF_ET / CONDOR_TP_MIN_HOLD_MIN are no
+        # longer read here; the import is trimmed with the arm, in the same
+        # commit, because a guard outliving the thing it guarded is this repo's
+        # most-repeated bug shape.
 
         if current_premium <= CONDOR_NICKEL_CLOSE:
             decision.should_exit = True
             decision.exit_reason = f"nickel_close pnl={pnl_pct:.1%}"
+            return decision
+
+        return decision
+
+    def _evaluate_tent(self, record: TradeRecord,
+                       current_premium: float) -> ExitDecision:
+        """r106 — THE TENT HAS EXACTLY ONE ADJUSTMENT LEFT.
+
+        Operator, 2026-08-24: "The only remaining adjustment after that should be
+        a 15% floor of the total credit collected. If we can't achieve that,
+        close the entire structure."
+
+        ⚠️ NO TP, NO TRAIL, NO NICKEL. Those belong to a vertical still
+        collecting decay. This structure has already been rolled once and
+        adjusted again; it is being held to a floor, not farmed.
+        ⚠️ THE BASIS IS CUMULATIVE CREDIT — original credit + every roll − the
+        hedge debit — which `entry_premium` carries (condor_roll writes it that
+        way). Measuring the floor against the ORIGINAL condor credit would move
+        the stop every time a roll added credit, which is the opposite of what a
+        floor is.
+        ⚠️ AND 15:45 STILL APPLIES. It is a credit structure: it decays toward
+        the holder and is held to the bell, then closed.
+        """
+        from config import (TENT_FLOOR_PCT, VERTICAL_HOLD_TO_ET,
+                            VERTICAL_HOLD_TO_CLOSE)
+        from utils.time_utils import ET as _ET
+
+        decision   = ExitDecision()
+        entry_prem = float(record.get("entry_premium", 0.0) or 0.0)
+        pnl_pct = ((entry_prem - current_premium) / entry_prem
+                   if entry_prem > 0 else 0.0)
+        decision.current_pnl_pct = pnl_pct
+        decision.current_pnl_usd = ((entry_prem - current_premium)
+                                    * record["contracts"] * CONTRACT_MULTIPLIER)
+
+        _n = datetime.now(_ET)
+        if ((_n.hour, _n.minute) >= VERTICAL_HOLD_TO_ET
+                if VERTICAL_HOLD_TO_CLOSE else is_hard_close_time()):
+            decision.should_exit = True
+            decision.exit_reason = "hard_close_15:45_ET"
+            return decision
+
+        if entry_prem > 0 and current_premium >= entry_prem * (1 + TENT_FLOOR_PCT):
+            decision.should_exit = True
+            decision.exit_reason = (
+                f"tent_floor pnl={pnl_pct:.1%} "
+                f"({TENT_FLOOR_PCT:.0%} of cumulative credit)")
             return decision
 
         return decision
@@ -2478,6 +2542,9 @@ class ExitEngine:
         try:
             session = get_session()
             account = get_account()
+            if is_tent(record):
+                return self._close_tent(session, account, record, contracts,
+                                        mark_price, reason=reason)
             if bool(record.get("is_butterfly", False)):
                 return self._close_butterfly(session, account, record,
                                              contracts, mark_price, force_market)
@@ -2647,6 +2714,54 @@ class ExitEngine:
                            f"Vertical close ({'MARKET-equiv @ width' if force_market else 'LIMIT @ mark'} "
                            f"{limit:.2f})")
 
+    def _close_tent(self, session, account, record, contracts,
+                    mark_price: Optional[float], reason: str = ""):
+        """r106 — close all three legs as ONE order: buy back the short, sell
+        the same-type wing, sell the opposite-type hedge.
+
+        ⚠️ ONE ORDER, NOT THREE. Legging out of a hedged structure re-opens the
+        risk it was built to cap: sell the hedge first and the short is bare on
+        the breached side for however long the rest takes.
+        ⚠️ AND IT NEVER CROSSES. Closing the tent PAYS a debit (we buy back a
+        short worth more than the two longs we sell, or we collect — either way
+        the sign is carried by the price). The ladder walks it; the floor stop
+        goes to mark. tastytrade rejects MARKET on spreads regardless.
+        """
+        short_sym = record.get("short_symbol", "")
+        long_sym  = record.get("long_symbol", "")
+        hedge_sym = record.get("lower_symbol", "")     # r106: the hedge leg
+        if not all([short_sym, long_sym, hedge_sym]):
+            logger.error("Cannot close tent: missing leg symbols "
+                         "(short=%s long=%s hedge=%s)",
+                         short_sym, long_sym, hedge_sym)
+            return None
+        if mark_price is None:
+            logger.warning("Tent close: no mark this pass — declining, will "
+                           "retry with a fresh mark")
+            return None
+        limit, _why = self._exit_limit(record, reason, float(mark_price),
+                                       "buy", "tent")
+        limit = self._round_to_tick(limit, record)
+        record["_exit_last_limit"] = limit
+        logger.info("[ladder] TENT CLOSE %s @ %.2f — %s",
+                    str(record.get("trade_id", ""))[:8], limit, _why)
+        legs = [
+            Leg(instrument_type=InstrumentType.EQUITY_OPTION,
+                symbol=short_sym, action=OrderAction.BUY_TO_CLOSE,  quantity=contracts),
+            Leg(instrument_type=InstrumentType.EQUITY_OPTION,
+                symbol=long_sym,  action=OrderAction.SELL_TO_CLOSE, quantity=contracts),
+            Leg(instrument_type=InstrumentType.EQUITY_OPTION,
+                symbol=hedge_sym, action=OrderAction.SELL_TO_CLOSE, quantity=contracts),
+        ]
+        order = NewOrder(
+            time_in_force = OrderTimeInForce.DAY,
+            order_type    = OrderType.LIMIT,
+            price         = Decimal(str(-limit)),   # negative = DEBIT paid to close
+            legs          = legs,
+        )
+        return self._place(session, account, order,
+                           f"Tent close (LIMIT {limit:.2f})")
+
     def _close_butterfly(self, session, account, record, contracts,
                          mark_price: Optional[float],
                          force_market: bool = False):
@@ -2717,6 +2832,19 @@ class ExitEngine:
                     p = sum(float(f.quantity) * float(f.fill_price) for f in fills) / q
                     return q, p
             return 0.0, None
+
+        # 🔴 r106 — TENT FIRST, and on the SAME basis its mark uses:
+        # short − wing − hedge. It would otherwise be claimed by the vertical
+        # branch below (it has short_symbol and long_symbol), which would read
+        # only two of its three legs and book a net that never existed.
+        if is_tent(record):
+            qs, ps = leg_stats(record.get("short_symbol", ""))
+            ql, pl = leg_stats(record.get("long_symbol", ""))
+            qh, ph = leg_stats(record.get("lower_symbol", ""))
+            qty = min(qs, ql, qh)
+            if qty <= 0 or None in (ps, pl, ph):
+                return None
+            return qty, round(ps - pl - ph, 4)
 
         if bool(record.get("is_butterfly", False)):
             ql, pl = leg_stats(record.get("lower_symbol", ""))

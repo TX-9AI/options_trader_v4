@@ -1,5 +1,10 @@
 """
-main.py  v4.12
+main.py  v4.13
+v4.13 2026-08-24  r106: the TENT is called after the roll (rung below it, only
+      on an already-rolled + breached structure). CONDOR_TP_PCT retired, the
+      stop written on every credit row is now the 15% floor the engine actually
+      evaluates, and condor_leg_num is always 0 — "no condor implied, merely
+      permitted", so there is no leg 1 and leg 2.
 v4.12 2026-08-24  r105: the SECOND-LEG WINDOW tries all four credit triggers.
       Its own header said "all four triggers are eligible to fire the
       complementary side"; the code tried the two forks, so a sweep or TC.6
@@ -1810,7 +1815,7 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         fill_credit = paper_fill_credit(net_credit)
         order_id    = "PAPER"
 
-    is_leg1  = "Leg 1" in signal.setup_type
+    is_leg1  = "Leg 1" in signal.setup_type      # r106: display only, not identity
     max_loss = (spread_width - fill_credit) * contracts * CONTRACT_MULTIPLIER
 
     # ── DELTA STREET-SIGN (v3.x, 2026-07-15) ──────────────────────────────────
@@ -1836,8 +1841,14 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
     # condor's 25%. Stamping "IronCondorStrategy" here is the 2026-08-14
     # identity bug — 108 trades attributed to a strategy that never fired them.
     _is_sweep = (getattr(signal, "strategy_name", "") == "SweepCreditSpread")
+    # r106 — ONE FLOOR, 15%, for every credit vertical. The sweep carries its
+    # own (identical) number; everything else takes the lone-vertical floor.
+    # The 25% that used to be written here is retired: the live arm evaluated
+    # 15% while the ROW said 25%, so the record and the alert both stated a rule
+    # the engine did not apply.
+    from config import CONDOR_LONE_STOP_PCT as _LONE
     _stop_pct = (float(getattr(signal, "max_loss_pct", 0.0) or 0.0)
-                 if _is_sweep else 0.0) or CONDOR_STOP_LOSS_PCT
+                 if _is_sweep else 0.0) or _LONE
     record = make_record(
         trade_id         = str(uuid.uuid4()),
         symbol           = INSTRUMENT,
@@ -1930,7 +1941,14 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         # is_condor_leg is what _condor_sibling_open and condor_roll key on,
         # and condor_leg_num=2 on every TC.6 row was data pollution.
         is_condor_leg    = 1,   # v4.3: all credit verticals are condor-eligible
-        condor_leg_num   = 0 if (_is_tcs or _is_sweep) else (1 if is_leg1 else 2),
+        # 🔴 r106 — ALWAYS 0. Operator, 2026-08-24: "There is no condor implied,
+        # it is merely PERMITTED." Leg 1 / leg 2 is plan vocabulary from the
+        # state machine r90 removed — it numbered verticals by FILL ORDER as if
+        # a pair were being assembled to a design. Two verticals that happen to
+        # coexist have no first and no second. The COLUMN stays (nothing that
+        # reads it breaks on 0, and dropping it would rewrite the table); it
+        # simply stops carrying a meaning nothing means.
+        condor_leg_num   = 0,
         condor_trigger_source = getattr(signal, 'condor_trigger_source', ''),
         is_broken_wing   = 0,
         short_symbol     = getattr(short_contract, "symbol", ""),
@@ -3474,6 +3492,20 @@ def main_loop(state: BotState):
                     check_and_execute_roll(pos_mgr, ctx.get("chain"), ctx["price"], state)
                 except Exception as _roll_err:
                     logger.warning(f"Roll check failed: {_roll_err}")
+
+                # ── r106 — THE TENT, THE RUNG BELOW THE ROLL ─────────────────
+                # Runs AFTER the roll and only bites on an ALREADY-ROLLED
+                # structure that has since been breached, so the two can never
+                # compete for the same tick: the roll collects credit, the tent
+                # pays a debit, and paying when collecting was available would
+                # be strictly worse. Same first-refusal ordering, one rung down.
+                try:
+                    from strategy.condor_roll import check_and_execute_tent
+                    check_and_execute_tent(pos_mgr, ctx.get("chain"),
+                                           ctx["price"], state,
+                                           df_1m=ctx.get("df_1m"))
+                except Exception as _tent_err:                 # noqa: BLE001
+                    logger.warning(f"Tent check failed: {_tent_err}")
 
                 # classification the engine cannot currently confirm. None is
                 # those three branches already honours; price-based exits are
