@@ -135,18 +135,18 @@ def collect(feed_db: str, derived_db: str, in_rth: bool) -> dict:
         dc = sqlite3.connect(f"file:{derived_db}?mode=ro", uri=True)
         # Engine self-reports, if the layer has run at all.
         try:
-            rows = conn.execute(
+            _st = dc.execute(
                 "SELECT name, runs, failures, last_rows, last_error"
                 " FROM derived_engine_status ORDER BY name").fetchall()
-            rep["engines"] = [{"name": r[0], "runs": r[1], "failures": r[2],
+            out["engines"] = [{"name": r[0], "runs": r[1], "failures": r[2],
                                "last_rows": r[3], "last_error": r[4]}
-                              for r in rows]
+                              for r in _st]
         except Exception:                                       # noqa: BLE001
             # ⚠️ NOT AN ERROR ON AN OLD BOX — the table only exists once a box
             # runs the build that writes it. None means "cannot say"; [] would
             # claim the layer ran and reported nothing, which is a real and
             # different finding.
-            rep["engines"] = None
+            out["engines"] = None
 
         for tbl, tscol, budget, label in DERIVED:
             r = _q1(dc, f"SELECT COUNT(*), MAX({tscol}) FROM {tbl}")
