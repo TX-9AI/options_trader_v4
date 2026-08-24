@@ -7,26 +7,25 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 ⚠️ **A table with no writer is an orphan. A table nobody reads is dead weight.** Both are visible here and in neither the schema nor the call graph alone.
 
-**25 tables.**
+**24 tables.**
 
 ## (unattributed)
 
 | table | created by | written by | read by |
 |---|---|---|---|
-| `gate_disposition` | `analysis/gate_report.py` | `analysis/gate_report.py` (insert) | `tests/check_audit_20260823.py` |
+| `gate_disposition` | `analysis/gate_report.py` | `analysis/gate_report.py` (insert) | — |
 
 ## derived_store.db
 
 | table | created by | written by | read by |
 |---|---|---|---|
-| `character_axis_sample` | `derived/character_engine.py` | `derived/character_engine.py` (insert) | — |
 | `character_ledger` | `derived/character_engine.py` | `derived/character_engine.py` (insert/update) | — |
 | `exit_counterfactual` | `derived/counterfactual.py` | `derived/counterfactual.py` (insert) | — |
-| `fire_snapshot` | `data/derived_store.py` | `data/derived_store.py` (insert) | `tests/edge_scan.py` |
-| `fork_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | `tests/check_derived_layer.py` |
+| `fire_snapshot` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
+| `fork_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `indicator_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
-| `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | `derived/levels.py` |
-| `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update) | — |
+| `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
+| `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `tests/check_audit_20260823.py`, `tests/edge_scan.py` |
 | `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | — |
 | `surface_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 
@@ -39,7 +38,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `chain_subs` | `data/candle_feed.py`, `data/options_chain.py` | `data/options_chain.py` (insert) | — |
 | `chain_subs_aux` | `analysis/tenor_publish.py` | `analysis/tenor_publish.py` (delete/insert) | — |
 | `feed_meta` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `data/market_data.py`, `tools/manifold_status.py` |
-| `greeks_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `analysis/second_order.py`, `derived/surface.py` |
+| `greeks_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `analysis/second_order.py` |
 | `last_trade` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |
 | `prints` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `analysis/order_flow.py` |
 | `quote_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/exit_replay.py` (insert) | `analysis/order_flow.py` |
@@ -52,11 +51,11 @@ Regenerated in the land gate; a stale map fails `--check`.
 | table | created by | written by | read by |
 |---|---|---|---|
 | `circuit_breaker_events` | `database/trade_logger.py` | `database/trade_logger.py` (insert) | — |
-| `trades` | `database/trade_logger.py` | `database/trade_logger.py` (insert/update) | `derived/counterfactual.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py` |
+| `trades` | `database/trade_logger.py` | `database/trade_logger.py` (insert/update) | `derived/counterfactual.py`, `notifications/alert_manager.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py` |
 
 ## Flags
 
 - **No writer** (0): none
-- **No external reader** (13): `chain_subs_aux`, `character_axis_sample`, `character_ledger`, `circuit_breaker_events`, `exit_counterfactual`, `indicator_series`, `last_trade`, `plan_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
+- **No external reader** (15): `chain_subs_aux`, `character_ledger`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `fork_series`, `gate_disposition`, `indicator_series`, `last_trade`, `level_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
 
 ⚠️ *No external reader* is not automatically a defect — a table written today for a study run in a month is exactly the point of the derived layer. It IS a defect when nobody ever intends to read it, and this list is where that question gets asked.

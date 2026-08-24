@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/stop_sweep.py  v1.0
+tests/stop_sweep.py  v1.1
+v1.1  2026-08-23  S3 default source (control-side, boxes untouched); --db is
+the explicit local escape hatch. SOURCE line always printed.
+v1.0  2026-08-23
 WHAT R WOULD THE BOOK HAVE HAD under a different stop / take-profit — swept
 against the recorded MFE/MAE excursions. The concrete R lever.
 
@@ -42,7 +45,7 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from r_ledger import position_dollars, _f, DEFAULT_DB  # noqa: E402
+from r_ledger import position_dollars, _f, DEFAULT_DB, load_s3  # noqa: E402
 
 STOP_GRID = [0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
 TP_GRID = [None, 0.25, 0.50, 0.75, 1.00, 1.50]
@@ -167,20 +170,31 @@ def selftest() -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=DEFAULT_DB)
+    ap.add_argument("--db", default=None, help="LOCAL sqlite escape hatch; "
+                    "default source is the S3 warehouse")
+    ap.add_argument("--date")
+    ap.add_argument("--from", dest="frm")
+    ap.add_argument("--to", dest="to")
     ap.add_argument("--strategy", default=None)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
         return selftest()
-    if not os.path.exists(a.db):
-        print(f"stop_sweep: no trades db at {a.db}")
-        return 0
-    con = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
-    con.row_factory = sqlite3.Row
-    rows = [dict(r) for r in con.execute(
-        "SELECT * FROM trades WHERE status='closed' AND COALESCE(relaxed_entry,0)=0")]
-    con.close()
+    if a.db:
+        if not os.path.exists(a.db):
+            print(f"  SOURCE: local {a.db} — 🔴 PATH DOES NOT EXIST")
+            return 1
+        print(f"  SOURCE: local sqlite {a.db}")
+        con = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        rows = [dict(r) for r in con.execute(
+            "SELECT * FROM trades WHERE status='closed' AND COALESCE(relaxed_entry,0)=0")]
+        con.close()
+    else:
+        a.include_relaxed = False
+        rows = load_s3(a)
+        if rows is None:
+            return 1
     groups = defaultdict(list)
     for r in rows:
         if a.strategy and (r.get("strategy") or "") != a.strategy:

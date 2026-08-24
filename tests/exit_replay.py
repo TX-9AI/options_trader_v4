@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/exit_replay.py  v1.0
+tests/exit_replay.py  v1.1
+v1.1  2026-08-23  S3 DEFAULT SOURCE: trades from raw/trades, quote paths from
+the raw/quote_series batches (push_series, r86) — loaded once per run and
+indexed per streamer symbol, so control replays without touching a box.
+--db/--feed remain the explicit local escape hatch. SOURCE lines always
+printed; the positive control and the named-refusal machinery are unchanged.
+v1.0  2026-08-23
 REPLAY EVERY CLOSED TRADE'S REAL PREMIUM PATH — rebuilt from `quote_series` —
 under alternative exit ladders. The manifold's first paying consumer.
 
@@ -82,14 +88,16 @@ def legs_of(row: dict):
     return [(s, sign * flip) for s, sign in legs], ""
 
 
-def path_for(feed_con, legs, t0, t1):
-    """Combined signed-mid path on the union clock, forward-filled per leg."""
+def path_for(fetch, legs, t0, t1):
+    """Combined signed-mid path on the union clock, forward-filled per leg.
+
+    v1.1 — `fetch(sym, t0, t1)` -> [(ts_epoch, bid, ask)] abstracts the
+    source: sqlite locally, the indexed S3 quote batches on control. One path
+    builder, two providers, so the two sources cannot drift apart.
+    """
     series = {}
     for sym, _sign in legs:
-        rows = feed_con.execute(
-            "SELECT ts_epoch, bid_price, ask_price FROM quote_series"
-            " WHERE streamer_symbol=? AND ts_epoch BETWEEN ? AND ?"
-            " ORDER BY ts_epoch", (sym, t0 - 60, t1 + 60)).fetchall()
+        rows = fetch(sym, t0 - 60, t1 + 60)
         pts = []
         for ts, b, a in rows:
             b, a = _f(b), _f(a)
@@ -145,12 +153,30 @@ def replay(path, entry_val, risk, rule):
     return path[-1][1] - entry_val if path else 0.0
 
 
-def run(db, feed) -> int:
-    tcon = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    tcon.row_factory = sqlite3.Row
-    fcon = sqlite3.connect(f"file:{feed}?mode=ro", uri=True)
-    rows = [dict(r) for r in tcon.execute(
-        "SELECT * FROM trades WHERE status='closed' AND COALESCE(relaxed_entry,0)=0")]
+def _sqlite_fetch(fcon):
+    def fetch(sym, lo, hi):
+        return fcon.execute(
+            "SELECT ts_epoch, bid_price, ask_price FROM quote_series"
+            " WHERE streamer_symbol=? AND ts_epoch BETWEEN ? AND ?"
+            " ORDER BY ts_epoch", (sym, lo, hi)).fetchall()
+    return fetch
+
+
+def _s3_fetch(qrows):
+    from collections import defaultdict as _dd
+    idx = _dd(list)
+    for r in qrows:
+        idx[r.get("streamer_symbol")].append(
+            (r.get("ts_epoch") or 0, r.get("bid_price"), r.get("ask_price")))
+    for v in idx.values():
+        v.sort()
+
+    def fetch(sym, lo, hi):
+        return [p for p in idx.get(sym, ()) if lo <= p[0] <= hi]
+    return fetch
+
+
+def run(rows, fetch) -> int:
     refused = defaultdict(int)
     totals = defaultdict(lambda: defaultdict(float))
     counts = defaultdict(int)
@@ -164,7 +190,7 @@ def run(db, feed) -> int:
         if legs is None:
             refused[why] += 1
             continue
-        path, why = path_for(fcon, legs, t0, t1)
+        path, why = path_for(fetch, legs, t0, t1)
         if not path:
             refused[why or "empty path"] += 1
             continue
@@ -212,6 +238,25 @@ def run(db, feed) -> int:
     return 0
 
 
+def run_s3(a) -> int:
+    import warehouse_source as ws
+    dates = ws.dates_of(a)
+    trades, m1 = ws.load_trades(dates)
+    print("  " + m1.banner())
+    if m1.error:
+        return 1
+    rows = [t for t in trades if (t.get("status") or "").lower() == "closed"
+            and not t.get("relaxed_entry")]
+    # ⚠️ ONE LIST CALL, NOT ONE PER TRADE. The quote batches for the window
+    # are loaded once and indexed per symbol; per-trade fetches against S3
+    # would be the expensive path the handoff warns this tool already is.
+    qrows, m2 = ws.load_series("quote_series", dates)
+    print("  " + m2.banner())
+    if m2.error:
+        return 1
+    return run(rows, _s3_fetch(qrows))
+
+
 def selftest() -> int:
     con = sqlite3.connect(":memory:")
     con.execute("CREATE TABLE quote_series (streamer_symbol TEXT, ts_epoch REAL,"
@@ -223,7 +268,7 @@ def selftest() -> int:
         con.execute("INSERT INTO quote_series VALUES (?,?,?,?)",
                     ("X 260823C100", 1000 + t, mid - 0.02, mid + 0.02))
     legs = [("X 260823C100", +1)]
-    path, why = path_for(con, legs, 1000, 1600)
+    path, why = path_for(_sqlite_fetch(con), legs, 1000, 1600)
     ok = bool(path) and not why and len(path) == 41
     r_hold = replay(path, path[0][1], 1.0, ("stop", 0.25))
     ok &= abs(r_hold - 0.20) < 0.03           # rode up, gave back to +0.20
@@ -231,8 +276,14 @@ def selftest() -> int:
     ok &= 0.80 < r_trail < 0.92               # trail keeps ~+0.85 of the +1.00 peak
     r_tp = replay(path, path[0][1], 1.0, ("tp", 0.25, 0.50))
     ok &= abs(r_tp - 0.50) < 1e-9
+    # v1.1 — the S3 provider must build the IDENTICAL path from the same data
+    qrows = [{"streamer_symbol": "X 260823C100", "ts_epoch": t, "bid_price": b,
+              "ask_price": a2} for t, b, a2 in con.execute(
+                  "SELECT ts_epoch, bid_price, ask_price FROM quote_series")]
+    path2, _w = path_for(_s3_fetch(qrows), legs, 1000, 1600)
+    ok &= path2 == path
     # deliberate failures: coverage refusal + ambiguity refusal
-    sparse, _ = path_for(con, legs, 0, 20000)
+    sparse, _ = path_for(_sqlite_fetch(con), legs, 0, 20000)
     cov = len(sparse or []) / ((20000 - 0) / POLL_S)
     ok &= cov < MIN_COVERAGE
     lg, why2 = legs_of({"is_short_position": 0})
@@ -244,17 +295,30 @@ def selftest() -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=DEFAULT_DB)
-    ap.add_argument("--feed", default=DEFAULT_FEED)
+    ap.add_argument("--db", default=None, help="LOCAL escape hatch")
+    ap.add_argument("--feed", default=None, help="LOCAL escape hatch")
+    ap.add_argument("--date")
+    ap.add_argument("--from", dest="frm")
+    ap.add_argument("--to", dest="to")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
         return selftest()
-    for p, name in ((a.db, "trades db"), (a.feed, "feed store")):
-        if not os.path.exists(p):
-            print(f"exit_replay: no {name} at {p}")
-            return 0
-    return run(a.db, a.feed)
+    if a.db or a.feed:
+        db, feed = a.db or DEFAULT_DB, a.feed or DEFAULT_FEED
+        for pth, name in ((db, "trades db"), (feed, "feed store")):
+            if not os.path.exists(pth):
+                print(f"  SOURCE: local {pth} — 🔴 {name} DOES NOT EXIST")
+                return 1
+        print(f"  SOURCE: local sqlite {db} + {feed}")
+        tcon = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        tcon.row_factory = sqlite3.Row
+        rows = [dict(r) for r in tcon.execute(
+            "SELECT * FROM trades WHERE status='closed'"
+            " AND COALESCE(relaxed_entry,0)=0")]
+        fcon = sqlite3.connect(f"file:{feed}?mode=ro", uri=True)
+        return run(rows, _sqlite_fetch(fcon))
+    return run_s3(a)
 
 
 if __name__ == "__main__":

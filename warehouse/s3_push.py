@@ -1,5 +1,15 @@
 """
-warehouse/s3_push.py  v4.2
+warehouse/s3_push.py  v4.3
+v4.3  2026-08-23  R-PROJECT PART 2: THE DERIVED LIFECYCLE TABLES WAREHOUSE.
+      retention_purge marks them NEVER_PURGE because "a recomputation cannot
+      rebuild a biography" — but nothing pushed them either, so the only copy
+      of every biography lived on a box that gets rebuilt, and control (where
+      the operator ruled all reporting runs) could not read fire_snapshot or
+      plan_ledger at all. push_derived: uniform CDC by sqlite rowid — every
+      row hashed, CHANGED rows batched into one object per table per run
+      under raw/derived_<table>/, own ledger file (derived_ledger.json) so
+      its {rid: sha} shape can never share a dict with another meaning (the
+      r82 class). Reader dedupes latest-per-rid by pushed_at.
 v4.2  2026-08-23  R-PROJECT: THE SERIES TABLES ARE NOW PUSHED. retention_purge
       v1.0 calls its 3 days on greeks/quotes/prints/etc "a RE-PUSH window" —
       but no push stage existed for any of the seven series tables, so the
@@ -619,8 +629,10 @@ FLUSH_EVERY   = int(os.environ.get("OT_S3_FLUSH_EVERY", "200"))
 _OPEN = {}
 _SINCE_FLUSH = [0]
 
-MISC_LEDGER   = os.path.join(STATE_DIR, "misc_ledger.json")
-CANDLE_LEDGER = os.path.join(STATE_DIR, "candle_ledger.json")
+MISC_LEDGER    = os.path.join(STATE_DIR, "misc_ledger.json")
+CANDLE_LEDGER  = os.path.join(STATE_DIR, "candle_ledger.json")
+DERIVED_LEDGER = os.path.join(STATE_DIR, "derived_ledger.json")
+DERIVED_DB     = os.path.join(_OT, "data", "derived_store.db")
 
 
 def _eod_day(eod_dir):
@@ -847,6 +859,62 @@ def push_candles(s3, bucket, db_path, ledger, me, counters=None):
 
 SERIES_TABLES = ("greeks_series", "quote_series", "prints", "last_trade",
                  "session_summary", "theo_series", "underlying_series")
+
+# v4.3 — the lifecycle biographies. Mutating (plans transition, characters
+# close, snapshots replace), so CDC by rowid rather than a high-water mark.
+DERIVED_TABLES = ("fire_snapshot", "strategy_note", "plan_ledger",
+                  "gate_disposition", "character_ledger", "level_ledger",
+                  "exit_counterfactual")
+
+
+def push_derived(s3, bucket, db_path, ledger, me, counters=None):
+    """derived_store.db lifecycle tables — CDC by rowid, batched per table.
+
+    Every row is `SELECT rowid AS _rid, *`; its content hash is compared to
+    the ledger's `{table: {rid: sha}}` map and CHANGED rows ship as ONE
+    object per table per run. A plan that transitions re-ships its row with
+    a newer pushed_at; the reader keeps latest-per-rid. ⚠️ THE LEDGER IS ITS
+    OWN FILE (derived_ledger.json): its nested shape must never share a dict
+    with the offset or high-water ledgers — same helper, different meaning,
+    is exactly the r82 failure class.
+    """
+    pushed = failed = 0
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True, timeout=5)
+        con.row_factory = sqlite3.Row
+    except Exception:
+        return 0, 0
+    day = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    for table in DERIVED_TABLES:
+        try:
+            rows = [dict(r) for r in con.execute(
+                "SELECT rowid AS _rid, * FROM %s" % table)]
+        except Exception:
+            continue                     # table absent on this box — fine
+        seen = ledger.setdefault(table, {})
+        changed = []
+        for rec in rows:
+            sha = _sha256(_canon(rec))
+            rid = str(rec["_rid"])
+            if seen.get(rid) != sha:
+                changed.append((rid, sha, rec))
+        if not changed:
+            continue
+        batch = [rec for _r, _s, rec in changed]
+        sha_b = _sha256(_canon(batch))
+        body = _wrap("derived_%s" % table, batch, me or "UNKNOWN", day,
+                     {"n_rows": len(batch)})
+        key = "%s/derived_%s/dt=%s/sym=%s/%d-%s.json" % (
+            PREFIX, table, day, me or "UNKNOWN",
+            int(time.time() * 1000), sha_b[:16])
+        if put_and_verify(s3, bucket, key, body, counters):
+            for rid, sha, _rec in changed:
+                seen[rid] = sha
+            pushed += 1
+        else:
+            failed += 1
+    con.close()
+    return pushed, failed
 SERIES_BATCH_ROWS = int(os.environ.get("OT_S3_SERIES_BATCH", "50000"))
 
 
@@ -1006,6 +1074,7 @@ def main(argv=None) -> int:
         t_ledger = load_ledger(TRADES_LEDGER)
         misc = load_ledger(MISC_LEDGER)
         c_ledger = load_ledger(CANDLE_LEDGER)
+        d_ledger = load_ledger(DERIVED_LEDGER)
         me = own_symbol()
         total_pushed = 0
         total_failed = 0
@@ -1043,6 +1112,9 @@ def main(argv=None) -> int:
             # bulk streams so a timeout cannot starve the only copy of the
             # greeks/quote tape. Batched: one object per table per run.
             ("series", lambda: push_series(s3, BUCKET, FEED_DB, c_ledger, me, counters)),
+            # v4.3 — the biographies. Small tables, but they are the ONLY copy.
+            ("derived", lambda: push_derived(s3, BUCKET, DERIVED_DB, d_ledger,
+                                             me, counters)),
             ("liquidity_ledger", lambda: push_whole_files(
                 s3, BUCKET, discover(LIQ_ROOT, ".json"), "liquidity_ledger",
                 misc, counters)),

@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-tests/check_ledger_paths.py  v4.0
+tests/check_ledger_paths.py  v4.1
 Two ledgers, two files. Neither may be written to the other's path.
+
+v4.1  2026-08-24  L5 generalises the rule. L1/L2 pinned the ONE call site that
+existed when the bug was found; there are now SIX ledger constants
+(chain/trades/counters/misc/candle/derived) and a NEW explicit save with a
+mismatched one would have passed. L5 checks every explicit save against the
+constant its variable was loaded from.
 
 v4.0  2026-08-23  Written after `--reconcile` wrote the PREFIX COUNTERS over
 `chain_ledger.json` — the FILE-OFFSET ledger — instead of
@@ -77,6 +83,23 @@ def main() -> int:
     check("L4 the two ledgers are different filenames",
           bool(m1 and m2 and m1.group(1) != m2.group(1)),
           f"{m1.group(1) if m1 else '?'} vs {m2.group(1) if m2 else '?'}")
+
+    # L5 — GENERIC: every EXPLICIT save_ledger(var, CONST) must save to the
+    # constant that variable was LOADED from.
+    # ⚠️ L1/L2 pin the ONE call that existed when the r82 bug was found. There
+    # are now SIX ledger constants; a NEW explicit save with a mismatched one
+    # would pass both. `flush_all` is safe by construction — it iterates
+    # path->data pairs established at load time — so only explicit calls can
+    # reproduce the bug, and this rule covers all of them, present and future.
+    loads = dict(re.findall(r"(\w+)\s*=\s*load_ledger\((\w+)\)", src))
+    saves = re.findall(r"save_ledger\(\s*(\w+)\s*,\s*([A-Z_]+)\s*\)", src)
+    mismatched = [(v, c, loads.get(v))
+                  for v, c in saves
+                  if v in loads and loads[v] != c]
+    check("L5 every explicit save pairs with the constant it loaded from",
+          not mismatched,
+          "; ".join(f"{v} loaded from {ld} but saved to {c}"
+                    for v, c, ld in mismatched))
 
     print("=" * 62)
     if PROBLEMS:

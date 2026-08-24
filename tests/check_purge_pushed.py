@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 """
-tests/check_purge_pushed.py  v1.0
-NOTHING THE PURGE CAN DELETE MAY LACK A PUSH STAGE. Executing invariant.
+tests/check_purge_pushed.py  v1.1
+NOTHING UNRECOVERABLE MAY LACK A PUSH STAGE. Executing invariant.
+
+v1.1  2026-08-23  C6-C8: the LIFECYCLE tables join the invariant. They are
+NEVER_PURGE precisely because a recomputation cannot rebuild a biography —
+which is the strongest possible argument that the box must not hold the only
+copy. Born red at r86 (no push_derived existed); green from s3_push v4.3.
+C8 closes the loop end-to-end: planted store → push_derived → fake S3 →
+tests/warehouse_source.load_derived must return the LATEST state of a row
+that mutated between pushes, proving CDC and reader dedupe agree.
 
 v1.0  2026-08-23  Born RED at r84: retention_purge held greeks_series,
 quote_series, prints, last_trade, session_summary, theo_series and
@@ -102,6 +110,64 @@ def main() -> int:
     p2, f2 = sp.push_series(s3, "b", tmp, ledger, "X", counters={})
     check("C4 high-water marks are namespaced `series|<t>` and idempotent",
           ok_hwm and p2 == 0 and f2 == 0, f"ledger={ledger} rerun=({p2},{f2})")
+
+    # 6 — lifecycle tables: NEVER_PURGE means the box holds the only copy
+    # unless a derived push exists. Declared set must cover them.
+    lifecycle = sorted(set(rp.NEVER_PURGE) - {"trades", "circuit_breaker_events"})
+    declared_d = set(getattr(sp, "DERIVED_TABLES", ()))
+    miss_l = [t for t in lifecycle if t not in declared_d]
+    check("C6 every lifecycle biography table has a derived push stage",
+          not miss_l, f"unwarehoused biographies: {miss_l}")
+
+    # 7+8 — EXECUTE push_derived, mutate a row, push again, read back via the
+    # R suite's own S3 source: latest state must win.
+    tmp2 = os.path.join("/tmp", "check_purge_pushed_derived.db")
+    if os.path.exists(tmp2):
+        os.remove(tmp2)
+    con = sqlite3.connect(tmp2)
+    for t in declared_d:
+        con.execute(f"CREATE TABLE {t} (k TEXT, state TEXT, ts_epoch REAL)")
+        con.execute(f"INSERT INTO {t} VALUES ('a','OPEN',1.0)")
+    con.commit()
+    dled: dict = {}
+    p1, f1 = sp.push_derived(s3, "b", tmp2, dled, "X", counters={})
+    check("C7 push_derived lands one object per lifecycle table (executed)",
+          p1 == len(declared_d) and f1 == 0, f"pushed={p1} failed={f1}")
+    con.execute("UPDATE plan_ledger SET state='COMPLETE' WHERE k='a'")
+    con.commit()
+    p2b, _ = sp.push_derived(s3, "b", tmp2, dled, "X", counters={})
+    con.close()
+    check("C7b CDC re-ships only the mutated table", p2b == 1, f"pushed={p2b}")
+    sys.path.insert(0, os.path.join(ROOT, "tests"))
+    import warehouse_source as ws
+    import json as _json
+
+    class _WS3:
+        def __init__(self, objs):
+            self.objs = objs
+
+        def get_paginator(self, _):
+            objs = self.objs
+
+            class P:
+                def paginate(self, Bucket, Prefix):
+                    yield {"Contents": [{"Key": k} for k in objs
+                                        if ("/" + Prefix.split("/", 1)[1]) in ("/" + k)]}
+            return P()
+
+        def get_object(self, Bucket, Key):
+            import io
+            return {"Body": io.BytesIO(self.objs[Key])}
+
+    day = None
+    for k in s3.objs:
+        if "/derived_plan_ledger/" in k:
+            day = k.split("dt=")[1].split("/")[0]
+    rows, meta = ws.load_derived("plan_ledger", [day], s3=_WS3(s3.objs))
+    got = {r["k"]: r["state"] for r in rows}
+    check("C8 warehouse_source reads back the LATEST CDC state (round trip)",
+          got.get("a") == "COMPLETE" and not meta.error, f"got={got}")
+    os.remove(tmp2)
 
     # 5 — deliberate-failure control: a purgeable table the store lacks must
     # surface as uncovered when we widen the policy in-memory.

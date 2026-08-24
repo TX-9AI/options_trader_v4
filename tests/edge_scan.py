@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/edge_scan.py  v1.0
+tests/edge_scan.py  v1.1
+v1.1  2026-08-23  S3 default source: trades from raw/trades, fire snapshots
+and plans from raw/derived_* (s3_push v4.3, latest-per-rid). --db/--derived
+remain the explicit local escape hatch. The bar is unchanged and will not be
+softened to produce output; NOT YET is the expected answer for weeks.
+v1.0  2026-08-23
 WHERE THE R MIGHT LIVE — every derived feature at fire time, tested against
 dollar outcomes with a PRE-REGISTERED bar; plus the unfired plans, scored.
 
@@ -259,19 +264,78 @@ def selftest() -> int:
     return 0 if ok else 1
 
 
+def load_joined_s3(a):
+    import warehouse_source as ws
+    dates = ws.dates_of(a)
+    trades, m1 = ws.load_trades(dates)
+    snaps_rows, m2 = ws.load_derived("fire_snapshot", dates)
+    plans_rows, m3 = ws.load_derived("plan_ledger", dates)
+    for m in (m1, m2, m3):
+        print("  " + m.banner())
+    if m1.error:
+        return None, None, None, None
+    snaps = {}
+    for r in snaps_rows:
+        try:
+            snaps[r.get("trade_id")] = json.loads(r.get("payload") or "{}")
+        except Exception:                                       # noqa: BLE001
+            pass
+    rows = []
+    joined = 0
+    closed = [t for t in trades if (t.get("status") or "").lower() == "closed"
+              and not t.get("relaxed_entry")]
+    for t in closed:
+        pnl = _f(t.get("pnl_usd"))
+        if pnl is None:
+            continue
+        row = {"_pnl": pnl, "_session": str(t.get("entry_time") or "")[:10],
+               "_side": (t.get("option_side") or "?").lower(),
+               "adx_at_entry": t.get("adx_at_entry"), "gap_pct": t.get("gap_pct")}
+        snap = snaps.get(t.get("trade_id"))
+        if snap:
+            joined += 1
+            for k, v in snap.items():
+                if _f(v) is not None:
+                    row[k] = v
+        rows.append(row)
+    plans = {"total": 0, "reached": 0, "unreached": 0, "unscoreable": 0}
+    for r in plans_rows:
+        if r.get("state") not in ("EXPIRED", "CANCELLED"):
+            continue
+        plans["total"] += 1
+        trig, mx, mn = _f(r.get("trigger_price")), _f(r.get("max_price_seen")), _f(r.get("min_price_seen"))
+        if trig is None or (mx is None and mn is None):
+            plans["unscoreable"] += 1
+            continue
+        d = (r.get("direction") or "").lower()
+        hit = (mx is not None and mx >= trig) if d in ("call", "up", "long")             else (mn is not None and mn <= trig) if d in ("put", "down", "short")             else ((mx is not None and mx >= trig) or (mn is not None and mn <= trig))
+        plans["reached" if hit else "unreached"] += 1
+    return rows, plans, len(closed), joined
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=DEFAULT_DB)
-    ap.add_argument("--derived", default=DEFAULT_DERIVED)
+    ap.add_argument("--db", default=None, help="LOCAL escape hatch")
+    ap.add_argument("--derived", default=None, help="LOCAL escape hatch")
+    ap.add_argument("--date")
+    ap.add_argument("--from", dest="frm")
+    ap.add_argument("--to", dest="to")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
         return selftest()
-    if not os.path.exists(a.db):
-        print(f"edge_scan: no trades db at {a.db}")
-        return 0
-    rows, n_trades, n_joined = load_joined(a.db, a.derived)
-    return render(scan_features(rows), score_plans(a.derived), n_trades, n_joined)
+    if a.db:
+        derived = a.derived or DEFAULT_DERIVED
+        if not os.path.exists(a.db):
+            print(f"  SOURCE: local {a.db} — 🔴 PATH DOES NOT EXIST")
+            return 1
+        print(f"  SOURCE: local sqlite {a.db} + {derived}")
+        rows, n_trades, n_joined = load_joined(a.db, derived)
+        return render(scan_features(rows), score_plans(derived), n_trades, n_joined)
+    rows, plans, n_trades, n_joined = load_joined_s3(a)
+    if rows is None:
+        return 1
+    return render(scan_features(rows), plans, n_trades, n_joined)
 
 
 if __name__ == "__main__":

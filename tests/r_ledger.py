@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/r_ledger.py  v1.0
+tests/r_ledger.py  v1.1
+v1.1  2026-08-23  S3 IS THE DEFAULT SOURCE. Operator's baseline requirement:
+reports run on control against the bucket; nothing runs on a trading box and
+nothing is pulled to control. --db survives as a local-debug escape hatch
+ONLY when passed explicitly. The SOURCE line prints on every run so an empty
+day and an unreachable warehouse can never look alike.
+v1.0  2026-08-23
 THE R BASELINE. avg win / avg loss, expectancy, capture and giveback —
 per strategy, per option side, per exit reason. Dollars (WA §31).
 
@@ -197,21 +203,45 @@ def selftest() -> int:
     return 0 if ok else 1
 
 
+def load_s3(a):
+    import warehouse_source as ws
+    dates = ws.dates_of(a)
+    rows, meta = ws.load_trades(dates)
+    print("  " + meta.banner())
+    if meta.error:
+        return None
+    out = [r for r in rows if (r.get("status") or "").lower() == "closed"]
+    if not a.include_relaxed:
+        out = [r for r in out if not r.get("relaxed_entry")]
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=DEFAULT_DB)
+    ap.add_argument("--db", default=None, help="LOCAL sqlite escape hatch; "
+                    "default source is the S3 warehouse")
+    ap.add_argument("--date")
+    ap.add_argument("--from", dest="frm")
+    ap.add_argument("--to", dest="to")
     ap.add_argument("--include-relaxed", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
         return selftest()
-    if not os.path.exists(a.db):
-        print(f"r_ledger: no trades db at {a.db} — nothing to measure (absence "
-              f"reported as absence)")
-        return 0
-    rows = load(a.db, a.include_relaxed)
+    if a.db:
+        if not os.path.exists(a.db):
+            print(f"  SOURCE: local {a.db} — 🔴 PATH DOES NOT EXIST (this is a "
+                  f"tool fault, not an empty day)")
+            return 1
+        print(f"  SOURCE: local sqlite {a.db}")
+        rows = load(a.db, a.include_relaxed)
+    else:
+        rows = load_s3(a)
+        if rows is None:
+            return 1
     if not rows:
-        print("r_ledger: zero closed unrelaxed rows — the baseline does not exist yet")
+        print("r_ledger: zero closed unrelaxed rows in this window — the "
+              "baseline does not exist yet")
         return 0
     return render(rows)
 
