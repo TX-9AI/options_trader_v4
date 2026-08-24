@@ -391,6 +391,92 @@ the 15:40 flatten ladder.
 
 ---
 
+## 6. EXECUTION — ONE PRICING AUTHORITY FOR EVERY TRANSACTION
+
+**Operator's spec, 2026-08-24, read back and confirmed. Applies to every order
+this system places — entries and exits, debits and credits, every strategy.**
+
+🔴 **THE LADDER WAS BUILT ON 2026-08-20 AND HAS NEVER BEEN CALLED.**
+`execution/entry_ladder.py` is a complete 221-line implementation — 25% start,
+venue-increment stepping, ratchet, reprice, mark floor — with **zero importers**.
+It appeared in `gen_file_map`'s orphan report and was dismissed as noise. The
+live path posts a single `limit_at_mark` and walks away
+(`entry_engine.py:269`), so **every rung of price improvement since the split
+has been given away.**
+
+⚠️ **AND THIS IS THE LARGEST SINGLE ITEM ON THE BOARD.** FRC.1: gross edge
+**+$2.70/trade** against **$126/trade** of round-trip friction. Capturing half
+the half-spread is worth on the order of **$31/trade** — an order of magnitude
+more than anything on the trade-selection list. `entry_ladder.py`'s own header
+says so, and nothing read it.
+
+### The two authorities
+
+    PAPER   limit_ladder.paper_fill_price / paper_fill_credit   (mark-based)
+    LIVE    entry_ladder.LadderState                            (the ladder)
+
+Nothing else prices an order. A strategy proposes a structure; it does not
+price it.
+
+### The walk
+
+· **Start 25% in from the BEST price** — the ask when selling, the bid when
+  buying. Not 50%: *"always start at 25% of best price to not waste a lot of
+  time on hopeless attempts."*
+· **Step ONE VENUE INCREMENT toward mark.** Granularity falls out of the
+  increment, not a fraction list — a nickel grid on a $1.00 spread gives six
+  rungs, a dime grid three.
+· **ONE RUNG PER TICK.** A refusal is *"didn't completely fill at that price"* —
+  a partial counts as a refusal for the remainder.
+· **RATCHET** — a refused price never returns, even if the market moves back
+  through it. *"If it's not accepting 80 at the first attempt, it won't accept
+  80 at the next attempt."*
+· **REPRICE** each attempt from the CURRENT mark, never the entry-time one.
+· **MARK FLOOR — NEVER POST WORSE THAN MARK.** *"If price moved in our favour,
+  don't offer to give it back."* On a market moving our way the ladder collapses
+  to mark and fills, which is correct: the rungs only ever existed to try for
+  BETTER than mark.
+
+### Per-transaction policy
+
+| transaction | policy |
+|---|---|
+| every entry | full walk |
+| condor roll | full walk |
+| inverted butterfly | full walk |
+| structural / profit-side close | full walk |
+| **15% floor stop** | **escalate straight to MARK**, reprice at mark each tick |
+| **debit hard close (15:40)** | the existing flatten ladder |
+| **credit hard close (15:45)** | nickel close, else **ASSIGNMENT** |
+
+⚠️ **THE 15% FLOOR DOES NOT WALK.** It is thesis-invalidated; spending six ticks
+hunting a better fill while price runs is turning a stop into a negotiation. It
+goes to mark and re-prices there until filled.
+
+⚠️ **NOTHING EVER CROSSES THE SPREAD.** Operator: *"I'll take assignment over a
+shitty market order fill."* This REVERSES `hard_close_order_mode`, which returns
+`'market'` from 15:45 — *"the position MUST close; cross and be done."* Two call
+sites act on it (`exit_engine.py:2029`, `:2364`).
+
+⚠️ **THE TRADEOFF IS DELIBERATE, NOT A SIDE EFFECT.** Accepting assignment means
+overnight exposure and margin on the underlying. On a defined-risk vertical that
+is usually better than crossing a garbage 0DTE spread. It is a policy choice
+made with the cost known.
+
+⚠️ **NICKEL IS A DISPOSAL RULE, NOT A TAKE-PROFIT.** There is no TP on a credit
+vertical — it is an all-or-none theta trade. `CONDOR_NICKEL_CLOSE` survives only
+as the 15:45 preference; it is unreachable intraday because 15:45 arrives first.
+
+### Ladder state
+
+`LadderState` carries the ratchet, so it must persist ACROSS ticks — one rung
+per tick means the walk IS multi-tick. Keyed per open order intent; cleared on
+fill or abandon. **Lost on restart**, which costs at most one re-offer of an
+already-refused price. Recorded here rather than defended: it does not ride a
+column, and WORKING_AGREEMENT 22 says state that must survive a restart does.
+
+---
+
 ## Not specced, deliberately
 
 **`continuation_strategy`** — inert. The runaway handoff already *is* the

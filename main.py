@@ -2535,7 +2535,27 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                                 ), ctx)
         if sc_sig:
             sc_sig.condor_trigger_source = "sweep_reversal"
-            signal = sc_sig
+            # ── 🔴 r97 — VALIDATE BEFORE CLAIMING THE SLOT ───────────────────
+            # ⚠️ AN INVALID SIGNAL USED TO CONSUME THE DISPATCH ANYWAY. Setting
+            # `signal` here gates the butterfly and ALL FOUR credit-vertical
+            # triggers below (`if signal is None`), while validation lives ~240
+            # lines further down. So a signal that could never trade still shut
+            # out every strategy behind it: 231 ticks on SPX, 90 on GOOGL,
+            # 2026-08-24.
+            # This is AFD.1 recurring, and this file already wrote the lesson
+            # down: "a strategy-level veto still consumes the dispatch slot on
+            # its way to returning None" and "placing it after the signal was
+            # chosen was right for JOURNALLING and wrong for ARBITRATION."
+            # ⚠️ THE POST-SELECTION CHECK STAYS. It is the one that JOURNALS a
+            # fully-formed refusal, and it still catches anything reaching it by
+            # another path. This is defence in depth, not a replacement.
+            if sc_sig.is_valid:
+                signal = sc_sig
+            else:
+                logger.warning(
+                    "SweepCreditSpread produced an INVALID signal - NOT "
+                    "claiming the dispatch slot, so the butterfly and the "
+                    "credit verticals still get this tick")
 
     # ── Priority 4: GEX PIN BUTTERFLY ───────────────────────────────────────
     # ⚠️ PARKED - `ENABLED` is False and generate_signal returns None on the

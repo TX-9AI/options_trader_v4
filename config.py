@@ -410,7 +410,25 @@ TREND_CREDIT_ACTIVE         = os.environ.get("OT_TCS_ACTIVE", "1") == "1"
 #      total profit potential is ONE CENT — the trade closes on the tick it
 #      opens, then reopens. "No per-session limit" was the operator's call and
 #      is respected; a LOOP is a defect, not a limit question.
-TCS_START_ET                = (11, 0)     # afternoon only, matches AFD.1
+# 🔴 r98 (2026-08-24) — 11:00 COLLIDED WITH THE RUNAWAY, WHICH FIRES ON THE
+# SAME TRIGGER. The handoff credit spread and RunawayContinuation are two
+# expressions of ONE event: an ORB that ran without retesting. AFD.1 blocks long
+# debits from DEBIT_DIRECTIONAL_CUTOFF_ET = 11:30, so between 11:00 and 11:30
+# BOTH were armed on the same runaway — and dispatch order decides, not design:
+# RunawayContinuation gets first refusal (it must, because firing DISARMS the
+# retest), sets `signal`, and TC.6 sits behind `if signal is None` and never
+# runs. The handoff was therefore SHADOWED for the entire half hour it was
+# nominally open, and only reachable after 11:30 by accident of the debit
+# cutoff rather than by intent.
+# ⚠️ 11:31, NOT 11:30. The cutoff test is `>= (11, 30)`, so the debit is already
+# blocked AT 11:30; starting the credit at 11:30 would hand both strategies the
+# same minute and reproduce the collision in miniature. One minute of daylight
+# makes the handover unambiguous in the log and in the record.
+# Operator, 2026-08-24: "Handoff (credit) needs to start at 1131 - it's
+# colliding with runaway (same trigger)."
+# ⚠️ THE WINDOW IS NOW 11:31 -> TCS_ENTRY_END_ET (14:00). The debit owns the
+# runaway until 11:30; the credit owns it after.
+TCS_START_ET                = (11, 31)    # afternoon only; 11:31 clears AFD.1
 # Credit must clear BOTH floors. Width-relative keeps risk/reward sane;
 # nickel-relative guarantees the trade has room to exist at all.
 # 0.10 is a STATED PRIOR inside the measured band: credit_edge ran 8-19% of
@@ -545,6 +563,20 @@ MAX_LOSS_PCT        = float(os.environ.get("OT_MAX_LOSS_PCT", "0.25"))
 # The thesis is that the swept pool HOLDS as a boundary; a 15% loss on the
 # spread means it did not, and there is nothing further to wait for.
 SWEEP_CS_MAX_LOSS_PCT = float(os.environ.get("OT_SWEEP_CS_MAX_LOSS_PCT", "0.15"))
+
+# ─── r97 (2026-08-24) — THE SWEEP'S PROTECTIVE WING ──────────────────────────
+# ⚠️ AN ENCODING NOBODY CHOSE, AND IT IS FLAGGED RATHER THAN BURIED (SPEC.1).
+# `docs/TRADES.md` specifies the sweep's SHORT strike precisely — the nearest
+# strike actually pierced — and says NOTHING about the long leg. The strategy
+# never built one, so no width was ever needed and none was ever argued for.
+# 5 is taken from the rest of the fleet, where every credit vertical uses it:
+# TCS_WING_WIDTH_SPX/QQQ = 5, CONDOR_WING_WIDTH_SPX/QQQ = 5. It is a CONVENTION
+# I inherited, not a measurement — no study sized the sweep's wing, and the
+# operator has not ruled on it.
+# ⚠️ IT SETS THE RISK, SO IT IS WORTH ARGUING WITH. Width minus credit is the
+# max loss per contract; the 15% stop fires long before that, but the wing is
+# what makes the risk DEFINED and what the sizer reads.
+SWEEP_CS_WING_WIDTH = float(os.environ.get("OT_SWEEP_CS_WING", "5"))
 
 # ⚠️ NO PROFIT TARGET, DELIBERATELY, AND THIS IS MEASURED. v3's condor
 # backtest: on 18 standalone legs a TP@25% turned -$242.77 into -$8.43, and on

@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-153 Python modules across 13 local packages.
+154 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -288,7 +288,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/entry_ladder.py`
 - **calls:** `execution/tick_size.py`, `utils/math_utils.py`
-- **called by:** `tests/stress_entry_path.py`
+- **called by:** `execution/ladder_registry.py`, `tests/stress_entry_path.py`
 
 ### `execution/exit_engine.py`
 - **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/limit_ladder.py`, `notifications/alert_manager.py`, `strategy/structure.py`, `utils/math_utils.py`, `utils/time_utils.py`
@@ -296,6 +296,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/fill_model.py`
 - **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `execution/ladder_registry.py`
+- **calls:** `execution/entry_ladder.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `execution/limit_ladder.py`
@@ -392,7 +396,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/credit_vertical.py`
 - **calls:** (none)
-- **called by:** `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/trend_credit_spread.py`
+- **called by:** `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`
 
 ### `strategy/daily_fork_credit_spread.py`
 - **calls:** `analysis/market_state.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`
@@ -423,7 +427,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `execution/exit_engine.py`, `execution/position_manager.py`
 
 ### `strategy/sweep_credit_spread.py`
-- **calls:** `analysis/gate_report.py`, `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/relaxed.py`, `utils/math_utils.py`
+- **calls:** `analysis/gate_report.py`, `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`, `strategy/relaxed.py`, `utils/math_utils.py`
 - **called by:** `main.py`, `tests/check_atr_units.py`, `tests/check_dispatch.py`, `tests/stress_entry_path.py`
 
 ### `strategy/trend_credit_spread.py`

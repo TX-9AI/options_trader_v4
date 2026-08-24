@@ -114,6 +114,48 @@ def _snap_toward_mark(px: float, mark: float, inc: float) -> float:
     return round(mark / inc) * inc
 
 
+def _snap_in_our_favour(px: float, inc: float, sell: bool) -> float:
+    """Snap `px` to the venue grid IN OUR FAVOUR — up selling, down buying."""
+    if inc <= 0:
+        return round(px, 2)
+    if sell:
+        return math.ceil(px / inc - 1e-9) * inc
+    return math.floor(px / inc + 1e-9) * inc
+
+
+def _snap_mark_in_our_favour(mark: float, inc: float, sell: bool) -> float:
+    """The TERMINAL rung: mark, snapped to the grid IN OUR FAVOUR.
+
+    🔴 r98 — THE MARK RUNG COULD LAND WORSE THAN MARK, WHICH BREAKS THE ONE
+    RULE THE OPERATOR STATED MOST FIRMLY. `_snap_toward_mark` fell through to
+    NEAREST rounding when `px == mark`, so a mark on a half-cent snapped the
+    wrong way: NFLX bid 0.45 / ask 0.50 gave a BUY table of [0.47, 0.48] with
+    mark 0.475 — the terminal rung paying a cent ABOVE mark.
+
+    ⚠️ AND THE CLAMP COULD NOT SAVE IT. Rule 3 in `next_price` clamps a buy to
+    `mark` — 0.475 — which is UNPOSTABLE on a penny grid. The venue rejects it
+    or silently adjusts it, and `tick_size.py` says exactly what that costs:
+    "a silently adjusted limit is a fill at a price nobody chose with nothing
+    in the logs to explain it."
+
+    ⚠️ SO THE TERMINAL RUNG ROUNDS IN OUR FAVOUR. Operator, 2026-08-24: "always
+    round in our favour." Buying takes the grid price at or BELOW mark; selling
+    takes the grid price at or ABOVE mark. Worst case we post exactly mark when
+    mark is already on the grid; otherwise we keep the fraction of a cent
+    instead of giving it away. On a 5c spread half a cent is 10% of the
+    half-spread, on the rung most likely to fill.
+
+    ⚠️ THIS IS THE TERMINAL RUNG ONLY. The intermediate rungs still snap TOWARD
+    mark, deliberately — see the header: rounding an OPENING rung away from
+    mark "recreates the hopeless attempt the 25% start exists to avoid."
+    """
+    if inc <= 0:
+        return round(mark, 2)
+    if sell:
+        return math.ceil(mark / inc - 1e-9) * inc     # receive at least mark
+    return math.floor(mark / inc + 1e-9) * inc        # pay at most mark
+
+
 def rungs(bid: float, ask: float, side: str, symbol: str = "") -> list:
     """Every price this ladder will post, in order, ending at mark.
 
@@ -125,7 +167,20 @@ def rungs(bid: float, ask: float, side: str, symbol: str = "") -> list:
     # `_safe_strategy` would have logged as "no signal", hiding it entirely.
     from utils.math_utils import safe_float
     b, a = safe_float(bid), safe_float(ask)
-    if b is None or a is None or b <= 0 or a <= 0 or a < b:
+    # 🔴 r98 — A ZERO BID IS A USABLE QUOTE AND THE OLD GUARD KILLED THE LADDER
+    # IN THE EXACT CASE ITS OWN HEADER SPECIFIES. `b <= 0` rejected bid 0.00 /
+    # ask 1.00 — which is the operator's worked example three inches above this
+    # line — so `rungs()` returned [] and the caller fell back to posting at
+    # mark. Inert precisely on the widest spreads, where the six rungs are worth
+    # the most, and invisible because nothing has ever called this module.
+    # ⚠️ THE ZERO IS THE MARKET'S BID, NOT OUR OFFER. Operator, 2026-08-24:
+    # "We don't ever bid 0, that's not the intent. We bid 25% of the DISTANCE to
+    # Ask." Selling into a 0.00/1.00 book starts at 0.75 and walks to mark 0.50;
+    # buying starts at 0.25 and walks up. Nothing about that needs a bid.
+    # A zero bid is ROUTINE on cheap 0DTE, so this was not an edge case.
+    # What genuinely IS unusable: a missing quote, a non-positive ASK (no offer
+    # to work against), or a CROSSED book.
+    if b is None or a is None or a <= 0 or b < 0 or a < b:
         return []
 
     mark = (a + b) / 2.0
@@ -136,9 +191,24 @@ def rungs(bid: float, ask: float, side: str, symbol: str = "") -> list:
     inc = _increment(symbol, mark, b, a)
     sell = str(side).lower().startswith("s")
 
-    # 25% in from the BEST price - the ask when selling, the bid when buying
+    # 25% in from the BEST price - the ask when selling, the bid when buying.
+    # 🔴 r98 — THE 25% IS A TARGET, NOT A GRID POSITION, AND THE SNAP GOES IN
+    # OUR FAVOUR. Operator, 2026-08-24: "If we're SELLING offer it at 80% of
+    # ASK, then 70, 60, stop at 50 (mark)."
+    # On a DIME grid, bid 0.00 / ask 1.00: the 25% target is 0.75, which is not
+    # postable. Snapping TOWARD MARK gave 0.70 and opened by conceding 30% of
+    # the spread before the book had refused anything. Snapping IN OUR FAVOUR
+    # gives 0.80 and the walk becomes 0.80 -> 0.70 -> 0.60 -> 0.50: one extra
+    # rung, and every rung a better price.
+    # ⚠️ IT COSTS NOTHING WHEN THE TARGET IS POSTABLE. On a NICKEL grid the 25%
+    # target IS on the grid, so the opener stays 0.75 and the operator's
+    # original six-rung example is unchanged: .75 .70 .65 .60 .55 .50.
+    # ⚠️ AND IT DOES NOT REVIVE THE HOPELESS ATTEMPT THE HEADER WARNS ABOUT.
+    # That warning is about opening SO FAR from mark that the book was never
+    # going to take it; one increment better than a 25% standoff is not that,
+    # and the ratchet still walks it in on the very next tick.
     start = (a - spread * START_FRACTION) if sell else (b + spread * START_FRACTION)
-    start = _snap_toward_mark(start, mark, inc)
+    start = _snap_in_our_favour(start, inc, sell)
 
     out, px = [], start
     for _ in range(MAX_RUNGS):
@@ -150,7 +220,8 @@ def rungs(bid: float, ask: float, side: str, symbol: str = "") -> list:
             out.append(r)
         px = px - inc if sell else px + inc
 
-    m = round(_snap_toward_mark(mark, mark, inc), 4)
+    # r98 — the terminal rung is mark snapped IN OUR FAVOUR, never nearest.
+    m = round(_snap_mark_in_our_favour(mark, inc, sell), 4)
     if m not in out:
         out.append(m)
     return out

@@ -97,6 +97,7 @@ from typing import Optional
 
 import config
 from strategy import relaxed
+from strategy import credit_vertical as cv     # r97 — shared spread math
 from strategy.base_strategy import OptionsSignal as Signal
 from utils.math_utils import safe_float
 
@@ -153,7 +154,15 @@ MIN_REJECTION_PCT = getattr(config, "SWEEP_CS_MIN_REJECTION_PCT", 0.0002)
 # less session remaining means less time for the boundary to be tested. Treating
 # them as independent confirmation would be double-counting one effect.
 EARLIEST_ET = getattr(config, "SWEEP_CS_EARLIEST_ET", "13:00")
-LATEST_ET = getattr(config, "SWEEP_CS_LATEST_ET", "15:00")
+# 🔴 r98 (2026-08-24) — 15:00 WAS TOO LATE AND RELAXED MADE IT 15:30.
+# Operator: "Close the window on sweep to 1400 also. That entry is way too
+# late." A credit vertical opened at 15:00 has 45 minutes to the 15:45 hard
+# close: it cannot collect the theta it exists to collect, and it is judged on
+# a boundary test the session has no time to deliver. `relaxed.window` widened
+# the late side to 15:30, which is worse still — 15:30 collides with the 15:40
+# flatten ladder, so a relaxed sweep could open a position that is closed ten
+# minutes later by the clock rather than by its thesis.
+LATEST_ET = getattr(config, "SWEEP_CS_LATEST_ET", "14:00")
 
 # ── AND A CEILING ON THE PIERCE DEPTH ──────────────────────────────────────
 #   BY REJECTION DEPTH            n     survived   p50 adverse
@@ -193,6 +202,7 @@ ATR_MAX_PCT = getattr(config, "SWEEP_CS_ATR_MAX_PCT", 0.20)
 # turned -$242.77 into -$8.43. A credit vertical is EARNING from decay; closing
 # it early buys back the theta it was opened to collect.
 MAX_LOSS_PCT = getattr(config, "SWEEP_CS_MAX_LOSS_PCT", 0.15)
+WING_WIDTH = getattr(config, "SWEEP_CS_WING_WIDTH", 5.0)
 
 # ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
 # ⚠️ CHECKED BY `tests/check_gates.py`, WHICH READS THE CODE. The prose block in
@@ -371,7 +381,15 @@ class SweepCreditSpreadStrategy:
         # measured to favour the afternoon and a shallow pierce. It does NOT
         # widen the ATR ceiling below: that is a FEASIBILITY veto and a boundary
         # does not hold in tape that moved 0.5% on 92% of 90-bar windows.
-        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET)
+        # ⚠️ r98 — RELAXED MAY WIDEN THE EARLY SIDE, NEVER THE LATE ONE.
+        # Passing LATEST_ET as `relaxed_latest` makes the 14:00 close a HARD
+        # ceiling: `max(latest, relaxed_latest)` can no longer push it out. The
+        # early side stays relaxable because opening earlier only produces a
+        # worse-selected example of the same trade, which is what a debug
+        # session wants; opening LATER produces a trade the session has no time
+        # to judge, which is a different and unmeasurable thing.
+        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET,
+                                       relaxed_latest=LATEST_ET)
         if now_et and not (_early <= now_et <= _late):
             return None
         # ⚠️ SHORT-VOL CONDITION, inverted from the runaway trade. A credit
@@ -413,10 +431,76 @@ class SweepCreditSpreadStrategy:
         sig.atr_pct_at_entry = atr_pct
         sig.max_loss_pct = MAX_LOSS_PCT      # 15%, tighter than the fleet 0.25
 
+        # ── 🔴 r97 — RESOLVE THE ANCHOR INTO A REAL SPREAD ───────────────────
+        # ⚠️ UNTIL NOW THIS STRATEGY COULD NOT PRODUCE A TRADEABLE SIGNAL AT
+        # ALL. It set `short_anchor` and returned. `grep short_anchor` across
+        # the tree found ONE writer and ZERO readers: nothing ever converted it
+        # into a strike, a premium or a contract. So `is_valid` fell to the
+        # default arm, needed `strike > 0 and entry_premium > 0`, and got 0.0
+        # for both — every fire died one step later at main.py's
+        # `Invalid signal from SweepCreditSpread`. Measured 2026-08-24: SPX 231
+        # times, GOOGL 90, CRM 1.
+        # ⚠️ AND IT CLAIMED THE DISPATCH SLOT ON THE WAY DOWN, because
+        # `signal = sc_sig` runs ~240 lines before validation and everything
+        # after it is gated on `if signal is None`. So each of those 231 SPX
+        # ticks also cost the butterfly and all four credit-vertical triggers.
+        # The slot half is fixed in main.py; this half builds the trade.
+        #
+        # Built with `credit_vertical`'s shared helpers — the module that exists
+        # precisely so credit-spread math is owned by neither strategy — and in
+        # `trend_credit_spread`'s idiom: short at the anchor, protective wing at
+        # a fixed width, credit from short.bid - long.ask (never marks, which
+        # would book a credit no fill can achieve).
+        _contracts = None
+        try:
+            _contracts = chain.puts if side == "put" else chain.calls
+        except Exception:                                      # noqa: BLE001
+            _contracts = None
+        if not _contracts:
+            logger.info("[sweep_cs] no %s contracts on the chain - SKIP", side)
+            return None
+
+        _short = cv.find_contract_at_strike(_contracts, sig.short_anchor)
+        if _short is None or not (getattr(_short, "mark", 0) or 0) > 0:
+            logger.info("[sweep_cs] no priced %s contract at the pierced strike "
+                        "%.2f - SKIP (the anchor is the trade; a different "
+                        "strike is a different trade)", side, sig.short_anchor)
+            return None
+
+        _long_strike = (_short.strike - WING_WIDTH if side == "put"
+                        else _short.strike + WING_WIDTH)
+        _long = cv.find_contract_at_strike(_contracts, _long_strike)
+        if _long is None or _long.strike == _short.strike:
+            logger.info("[sweep_cs] no protective wing at %.2f - SKIP "
+                        "(undefined risk is never sold)", _long_strike)
+            return None
+
+        # bid/ask, never mark: the credit has to be one the market would pay.
+        _credit = max(0.0, (getattr(_short, "bid", 0.0) or 0.0)
+                      - (getattr(_long, "ask", 0.0) or 0.0))
+        if _credit <= 0:
+            logger.info("[sweep_cs] %s %.2f/%.2f pays no credit (bid %.2f vs "
+                        "wing ask %.2f) - SKIP", side, _short.strike,
+                        _long.strike, getattr(_short, "bid", 0.0) or 0.0,
+                        getattr(_long, "ask", 0.0) or 0.0)
+            return None
+
+        sig.is_credit_vertical = True
+        sig.net_credit = _credit
+        if side == "call":
+            sig.short_call_contract, sig.long_call_contract = _short, _long
+        else:
+            sig.short_put_contract, sig.long_put_contract = _short, _long
+        # The default `is_valid` arm and the sizer both read these.
+        sig.strike = _short.strike
+        sig.expiry = getattr(_short, "expiry", "")
+        sig.entry_premium = _credit
+        sig.contract = _short
+
         relaxed.tag(sig)
-        logger.info("[sweep_cs] FIRE  %s swept -> %s  short %.2f (pool %.2f, "
-                    "pierced to %.2f)  %s credit spread  age %d bars  "
-                    "rejection %.3f%%",
-                    name, boundary, sig.short_anchor, pool, _swept_px,
-                    side.upper(), age, rej * 100.0)
+        logger.info("[sweep_cs] FIRE  %s swept -> %s  short %.2f / long %.2f  "
+                    "credit %.2f  (pool %.2f, pierced to %.2f)  %s credit "
+                    "spread  age %d bars  rejection %.3f%%",
+                    name, boundary, _short.strike, _long.strike, _credit,
+                    pool, _swept_px, side.upper(), age, rej * 100.0)
         return sig
