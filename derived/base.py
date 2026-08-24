@@ -106,6 +106,63 @@ class DerivedEngine:
                 "last_error": self._last_error}
 
 
+# 🔴 THE ENGINES KNEW AND NOBODY COULD ASK — 2026-08-24. `status()` has tracked
+# runs / failures / last_rows / last_error since r62 and NOTHING EVER PERSISTED
+# OR DISPLAYED IT. On 2026-08-24 `indicator_series` and `surface_series` sat at
+# ZERO ROWS on all fifteen boxes while `fork_series` and `level_ledger` filled
+# normally — no exception logged, no write failure logged, the engines built
+# fine, and the same code writing 1 row on a workstation wrote 0 on a box.
+# Diagnosis degenerated into an hour of inference across a dozen greps because
+# THE ONE PROCESS THAT KNEW THE ANSWER HAD NO WAY TO SAY IT.
+# 🔑 A COUNTER THAT NEVER LEAVES THE PROCESS IS NOT OBSERVABILITY. This writes
+# each engine's own account of itself to a table any reader can query — the
+# health board, devtools, a person with sqlite3 — so "wrote 0 rows and did not
+# fail" becomes a FACT ON DISK instead of something to be deduced.
+# ⚠️ IT RECORDS THE ZERO. An engine that returns 0 without raising is the exact
+# case that was invisible; a status row that only appeared on failure would
+# have been just as silent here.
+STATUS_TABLE = "derived_engine_status"
+
+
+def _persist_status(engines, store) -> None:
+    """Write every engine's self-report. NEVER raises — see the class docstring."""
+    if store is None:
+        return
+    try:
+        conn = store.conn
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {STATUS_TABLE} (
+                name        TEXT PRIMARY KEY,
+                table_name  TEXT,
+                runs        INTEGER,
+                failures    INTEGER,
+                last_rows   INTEGER,
+                last_run_ts REAL,
+                last_error  TEXT,
+                updated_ts  REAL
+            );""")
+        now = time.time()
+        for e in engines:
+            try:
+                st = e.status()
+            except Exception:                                   # noqa: BLE001
+                continue
+            conn.execute(
+                f"INSERT INTO {STATUS_TABLE} (name, table_name, runs, failures,"
+                f" last_rows, last_run_ts, last_error, updated_ts)"
+                f" VALUES (?,?,?,?,?,?,?,?)"
+                f" ON CONFLICT(name) DO UPDATE SET table_name=excluded.table_name,"
+                f" runs=excluded.runs, failures=excluded.failures,"
+                f" last_rows=excluded.last_rows, last_run_ts=excluded.last_run_ts,"
+                f" last_error=excluded.last_error, updated_ts=excluded.updated_ts",
+                (st.get("name"), st.get("table"), st.get("runs"),
+                 st.get("failures"), st.get("last_rows"),
+                 getattr(e, "_last_run", None), st.get("last_error"), now))
+        conn.commit()
+    except Exception as exc:                                    # noqa: BLE001
+        logger.debug("engine status not persisted: %s", exc)
+
+
 def run_all(engines, ctx: dict) -> dict:
     """Drive every engine once. Returns {name: rows}. NEVER raises.
 
@@ -121,4 +178,10 @@ def run_all(engines, ctx: dict) -> dict:
             logger.warning("[derived] engine %r broke its own wrapper: %s",
                            getattr(e, "name", e), exc)
             out[getattr(e, "name", "?")] = 0
+    # ⚠️ AFTER THE LOOP, ALWAYS — including when every engine returned 0. The
+    # store comes off the engines themselves so this needs no new plumbing and
+    # cannot disagree with what they actually wrote to.
+    _persist_status(engines, next((getattr(e, "_store", None) for e in engines
+                                   if getattr(e, "_store", None) is not None),
+                                  None))
     return out

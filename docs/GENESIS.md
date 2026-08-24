@@ -151,3 +151,4 @@ interleaved. Nothing after this table.
 | **r88** | R suite reads S3; push_derived warehouses the seven biography tables; L5 ledger rule. |
 | **r90** | CONDOR REMODEL + stop spec. Standalone vertical: 15% floor only. Formed condor: NO premium stop - roll, invert, close. RATCHET DELETED from the credit path (operator: ratchet stops are for debits); it was the double-stop mechanism and no directive ever requested it. ORB debit trail untouched. |
 | **r91** | Observation and trading were ONE gate. run_analysis ends in the derived layer and sat behind the pre-RTH continue, so every deriver inherited a trading gate. Now observe always, trade in RTH. |
+| **r92** | Engines persist their own status. runs/failures/last_rows/last_error to derived_engine_status every pass, shown on the health board. An engine that returns 0 without raising was invisible; now it is a fact on disk. |

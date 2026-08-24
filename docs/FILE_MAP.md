@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-148 Python modules across 13 local packages.
+149 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -46,7 +46,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `config.py` | 48 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
 | `utils/time_utils.py` | 18 | alert_manager.py, broker_reconcile.py, check_condor_spec.py, check_exit_executes.py |
 | `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
-| `derived/base.py` | 11 | __init__.py, character_engine.py, check_derived_layer.py, counterfactual.py |
+| `derived/base.py` | 12 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
 | `strategy/base_strategy.py` | 10 | daily_fork_credit_spread.py, entry_engine.py, gex_pin_butterfly.py, iron_condor_strategy.py |
 | `database/trade_logger.py` | 9 | check_condor_pairing.py, check_condor_stop_suppression.py, condor_roll.py, counterfactual.py |
 | `strategy/__init__.py` | 9 | check_audit_20260823.py, check_condor_spec.py, daily_fork_credit_spread.py, gex_pin_butterfly.py |
@@ -184,7 +184,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/derived_store.py`
 - **calls:** (none)
-- **called by:** `analysis/gate_report.py`, `derived/registry.py`, `tests/check_derived_layer.py`
+- **called by:** `analysis/gate_report.py`, `derived/registry.py`, `tests/check_derived_layer.py`, `tests/check_engine_status.py`
 
 ### `data/gex_data.py`
 - **calls:** `data/options_chain.py`
@@ -228,7 +228,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `derived/base.py`
 - **calls:** (none)
-- **called by:** `derived/__init__.py`, `derived/character_engine.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/snapshot.py`, `derived/surface.py`, `main.py`, `tests/check_derived_layer.py`
+- **called by:** `derived/__init__.py`, `derived/character_engine.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/snapshot.py`, `derived/surface.py`, `main.py`, `tests/check_derived_layer.py`, `tests/check_engine_status.py`
 
 ### `derived/character_engine.py`
 - **calls:** `analysis/character.py`, `derived/base.py`
@@ -468,6 +468,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_dispatch.py`
 - **calls:** `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_engine_status.py`
+- **calls:** `data/derived_store.py`, `derived/base.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_exit_executes.py`

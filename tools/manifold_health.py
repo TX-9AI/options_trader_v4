@@ -133,6 +133,21 @@ def collect(feed_db: str, derived_db: str, in_rth: bool) -> dict:
 
     if os.path.exists(derived_db):
         dc = sqlite3.connect(f"file:{derived_db}?mode=ro", uri=True)
+        # Engine self-reports, if the layer has run at all.
+        try:
+            rows = conn.execute(
+                "SELECT name, runs, failures, last_rows, last_error"
+                " FROM derived_engine_status ORDER BY name").fetchall()
+            rep["engines"] = [{"name": r[0], "runs": r[1], "failures": r[2],
+                               "last_rows": r[3], "last_error": r[4]}
+                              for r in rows]
+        except Exception:                                       # noqa: BLE001
+            # ⚠️ NOT AN ERROR ON AN OLD BOX — the table only exists once a box
+            # runs the build that writes it. None means "cannot say"; [] would
+            # claim the layer ran and reported nothing, which is a real and
+            # different finding.
+            rep["engines"] = None
+
         for tbl, tscol, budget, label in DERIVED:
             r = _q1(dc, f"SELECT COUNT(*), MAX({tscol}) FROM {tbl}")
             rows = (r[0] if r else 0) or 0
@@ -219,6 +234,23 @@ def main() -> int:
         for d in rep["derived"]:
             age = "—" if d["age_s"] is None else f"{d['age_s']}s"
             print(f"   {d['bulb']}  {d['label']:<22} rows={d['rows']:<8} age={age}")
+    # 🔴 THE ENGINE'S OWN ACCOUNT, NEXT TO THE ROW COUNT. On 2026-08-24 two
+    # engines showed rows=0 with no error anywhere, and the row count alone
+    # could not distinguish "never ran", "ran and wrote nothing", and "ran and
+    # failed". Those are three different faults with three different fixes.
+    # ⚠️ ABSENT IS SAID OUT LOUD. An engine missing from the table has never
+    # completed a single pass since the last restart, which is itself a finding
+    # — and printing nothing for it would hide exactly that.
+    st = rep.get("engines")
+    if st:
+        print("\n  ENGINES  (each engine's own account of itself)")
+        for e in st:
+            err = e.get("last_error") or ""
+            print(f"   {e['name']:<14} runs={e['runs']:<6} fail={e['failures']:<4}"
+                  f" last_rows={e['last_rows']:<5}"
+                  + (f"  ERR {err[:40]}" if err else ""))
+    elif st is not None:
+        print("\n  ENGINES  no engine has completed a pass since restart")
 
     print("=" * 62)
     print(f"  ROLLUP: {r}   (* = trading depends on it)")
