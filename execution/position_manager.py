@@ -1,5 +1,9 @@
 """
-execution/position_manager.py  v4.2
+execution/position_manager.py  v4.3
+v4.3  2026-08-24  r99 — flatten_all HOLDS credit verticals until
+      VERTICAL_HOLD_TO_ET (15:45). It ran from 15:40 over every record and
+      closed them with the debits; the 15:45 hold existed only in
+      _evaluate_condor_leg, which the flatten window never reached.
 v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -114,6 +118,20 @@ from risk.risk_manager import get_risk_manager
 from notifications.alert_manager import get_alert_manager
 from config import PAPER_TRADING, CONTRACT_MULTIPLIER
 
+
+def _vertical_close_due() -> bool:
+    """r99 — True once credit verticals are due to close. Reads config at call
+    time so a test can pin the clock; fails toward FLATTEN on any error."""
+    try:
+        from config import VERTICAL_HOLD_TO_ET, VERTICAL_HOLD_TO_CLOSE
+        from utils.time_utils import now_et
+        if not VERTICAL_HOLD_TO_CLOSE:
+            return True
+        _n = now_et()
+        return (_n.hour, _n.minute) >= tuple(VERTICAL_HOLD_TO_ET)
+    except Exception:                                          # noqa: BLE001
+        return True
+
 logger = logging.getLogger(__name__)
 _WARNED_LEG_COUNT: set = set()   # SWALLOW T1: warn once on an unreadable count
 
@@ -197,8 +215,20 @@ class PositionManager:
             self._open_records = self._trade_logger.get_open_trades()
 
         failed: List[str] = []
+        held: List[str] = []
         for record in list(self._open_records):
             trade_id = record.get("trade_id", "")
+            # 🔴 r99 — CREDIT VERTICALS HOLD TO VERTICAL_HOLD_TO_ET (15:45).
+            # This loop ran from 15:40 (FLATTEN_WINDOW_OPEN) over EVERY record,
+            # so the operator's 2026-08-13 ruling — "5 more minutes of
+            # exponentially rising profit curve" — was documented in config
+            # and enforced nowhere on this path. A held vertical is still
+            # MANAGED in that window (main.py runs a manage pass); it is not
+            # flattened. Fail direction: a bad clock read -> flatten (the
+            # pre-r99 behaviour), never an overnight orphan.
+            if _is_credit_vertical(record) and not _vertical_close_due():
+                held.append(trade_id)
+                continue
             premium = self._fetch_current_premium(record, chain=chain)
             if premium is None:
                 premium = float(record.get("entry_premium", 0.0) or 0.0)
@@ -213,6 +243,10 @@ class PositionManager:
             else:
                 failed.append(trade_id)
                 logger.error(f"Flatten FAILED for {trade_id[:8]} — will retry")
+        if held:
+            logger.info("Flatten: %d credit vertical(s) HELD to 15:45 per "
+                        "VERTICAL_HOLD_TO_ET (%s)", len(held),
+                        ",".join(t[:8] for t in held))
         return failed
 
     def add_condor_leg(self, record: TradeRecord):

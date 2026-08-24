@@ -26,7 +26,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `fork_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `indicator_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
-| `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `tests/check_audit_20260823.py`, `tests/edge_scan.py` |
+| `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `tests/check_audit_20260823.py`, `tests/check_missed_inert.py`, `tests/edge_scan.py` |
 | `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | — |
 | `surface_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 
@@ -34,7 +34,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 | table | created by | written by | read by |
 |---|---|---|---|
-| `candles` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert), `tests/check_audit_20260823.py` (insert), `tests/check_purge_pushed.py` (insert), `tools/segregate_nonrth_bars.py` (delete/update), `warehouse/retention_purge.py` (delete) | `data/candle_logger.py`, `data/market_data.py`, `tools/manifold_health.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
+| `candles` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert), `tests/check_audit_20260823.py` (insert), `tests/check_manifold_windows.py` (insert/update), `tests/check_purge_pushed.py` (insert), `tools/segregate_nonrth_bars.py` (delete/update), `warehouse/retention_purge.py` (delete) | `data/candle_logger.py`, `data/market_data.py`, `tools/manifold_health.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `chain_marks` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert) | `data/options_chain.py`, `tools/manifold_status.py` |
 | `chain_subs` | `data/candle_feed.py`, `data/options_chain.py` | `data/options_chain.py` (insert) | — |
 | `chain_subs_aux` | `analysis/tenor_publish.py` | `analysis/tenor_publish.py` (delete/insert) | — |
@@ -43,7 +43,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `last_trade` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |
 | `prints` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `analysis/order_flow.py` |
 | `quote_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/exit_replay.py` (insert) | `analysis/order_flow.py` |
-| `session_summary` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |
+| `session_summary` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_manifold_windows.py` (update) | — |
 | `theo_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |
 | `underlying_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |
 

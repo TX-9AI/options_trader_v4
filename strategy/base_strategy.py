@@ -1,5 +1,10 @@
 """
-strategy/base_strategy.py  v4.2
+strategy/base_strategy.py  v4.3
+v4.3  2026-08-24  r99 — is_valid's credit-vertical arm accepts a ONE-SIDED
+      vertical (the only shape any writer produces since r90) and FAILS CLOSED
+      on a naked short, a wing without a short, or a wing inside the short.
+      Was demanding all four contracts, so every sweep and fork signal died as
+      `Invalid signal`. Pinned by tests/check_sweep_spread.py.
 v4.2  2026-08-24  CONDOR REMODEL: add condor_trigger_source to OptionsSignal
       so every credit spread records which trigger fired it (1h_fork, 1d_fork,
       sweep_reversal, trend_orb) enabling per-source grading. Paired with the
@@ -147,19 +152,46 @@ class OptionsSignal:
                 self.upper_contract is not None
             )
         if self.is_credit_vertical:
-            return (
-                self.net_credit > 0 and
-                self.short_put_contract is not None and
-                self.long_put_contract is not None and
-                self.short_call_contract is not None and
-                self.long_call_contract is not None
-            )
+            # r99 — A VERTICAL IS VALID WHEN THE SIDE IT HAS IS COMPLETE. The
+            # old arm demanded all four contracts, written when this dataclass
+            # described a whole condor. r90 made every vertical autonomous —
+            # "leg 2 is permitted, not implied" — and changed the WRITERS
+            # (sweep, forks, TC.6 all set ONE side) without grepping this
+            # reader. Every sweep died as `Invalid signal` (SPX 231x, GOOGL
+            # 90x on 2026-08-24). Per side, never "any two contracts present".
+            # ⚠️ FAILS CLOSED ON A NAKED SHORT: a short with no wing, or a wing
+            # inside the short (a debit spread wearing a credit flag), is
+            # undefined risk and never validates.
+            return self._credit_side_ok("call") or self._credit_side_ok("put")
         return (
             self.option_side in ("call", "put") and
             self.strike > 0 and
             self.entry_premium > 0 and
             self.underlying_entry > 0
         )
+
+    def _credit_side_ok(self, side: str) -> bool:
+        """r99 — one side of a credit vertical is complete: a short, a
+        protective wing beyond it, and a positive credit. Any side that is
+        PRESENT but incomplete poisons the whole signal (a naked short on the
+        put side is not rescued by a clean call side)."""
+        if not (self.net_credit > 0):
+            return False
+        sc, lc = self.short_call_contract, self.long_call_contract
+        sp, lp = self.short_put_contract, self.long_put_contract
+        # A wing with no short, or a short with no wing, on EITHER side: fail.
+        if (sc is None) != (lc is None) or (sp is None) != (lp is None):
+            return False
+        if sc is None and sp is None:
+            return False
+        try:
+            if sc is not None and not (float(lc.strike) > float(sc.strike)):
+                return False                       # call wing must sit ABOVE
+            if sp is not None and not (float(lp.strike) < float(sp.strike)):
+                return False                       # put wing must sit BELOW
+        except (TypeError, ValueError, AttributeError):
+            return False
+        return (sc is not None) if side == "call" else (sp is not None)
 
     @property
     def is_iron_condor(self) -> bool:

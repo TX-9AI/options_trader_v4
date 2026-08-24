@@ -1,5 +1,9 @@
 """
-strategy/structure.py  v4.0
+strategy/structure.py  v4.1
+v4.1  2026-08-24  r99 — the sweep credit spread classifies as CONDOR_LEG (lone
+      vertical: 15% floor, 15:45) instead of TREND_PARTICIPATION (TC.6: breach
+      or hold, no premium stop). Its spec names exactly two exits and the TC.6
+      arm gave it neither the stop nor the sibling-aware management.
 Derives trade structure from PERSISTED fields, never a flag.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -98,7 +102,13 @@ def of(record: Optional[Mapping[str, Any]]) -> Structure:
     # was written onto the record as a flag with NO COLUMN and crash-looped
     # NFLX every 15 seconds; §22 PREFER DERIVING exists because of it.
     if "sweepcredit" in strat.replace("_", "") or setup.startswith("sweep_credit"):
-        return Structure.TREND_PARTICIPATION
+        # r99 — CONDOR_LEG, not TREND_PARTICIPATION. TREND_PARTICIPATION is the
+        # TC.6 arm: breach-or-hold, NO premium stop. The sweep's spec is
+        # "exactly two exits: 15% stop and the 15:45 hard close" — which is
+        # the lone-vertical arm every standalone credit spread gets under the
+        # union. Mapping it to TC.6 kept it out of the 15:40 flatten (the
+        # original intent) and silently removed its stop (the cost).
+        return Structure.CONDOR_LEG
 
     if "ironcondor" in strat.replace("_", ""):
         return Structure.CONDOR_LEG

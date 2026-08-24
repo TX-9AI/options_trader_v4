@@ -1,5 +1,8 @@
 """
-execution/entry_ladder.py  v4.0
+execution/entry_ladder.py  v4.1
+v4.1  2026-08-24  r99 — next_price's rule-3 clamp returned the RAW mark; it now
+      returns mark snapped to the grid in our favour, like the terminal rung.
+
 The entry ladder: start 25% in from the best price, step ONE VENUE INCREMENT
 toward mark, never worse than mark, and never re-offer a refused price.
 
@@ -269,10 +272,16 @@ class LadderState:
                 why += " (ratcheted above a refusal)"
 
         # ── rule 3: never worse than mark. If mark is better, TAKE MARK. ────
+        # r99 — TAKE MARK SNAPPED IN OUR FAVOUR. r98 fixed the terminal rung in
+        # `rungs()` but this clamp still returned the RAW mark (0.475 on a
+        # penny grid): unpostable, and exactly the price the r98 comment above
+        # says "the clamp could not save".
         if sell and px < mark:
-            px, why = mark, "mark (better than the rung)"
+            px = _snap_mark_in_our_favour(mark, _increment(self.symbol, mark, bid, ask), True)
+            why = "mark (better than the rung)"
         elif (not sell) and px > mark:
-            px, why = mark, "mark (better than the rung)"
+            px = _snap_mark_in_our_favour(mark, _increment(self.symbol, mark, bid, ask), False)
+            why = "mark (better than the rung)"
 
         return round(px, 4), why
 

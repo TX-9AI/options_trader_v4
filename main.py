@@ -1,5 +1,17 @@
 """
-main.py  v4.7
+main.py  v4.8
+v4.8  2026-08-24  r99 — THREE DEFECTS THAT COST TRADES OR WOULD HAVE. (1) P0:
+      `manage_open_position(ms=None)` — r65 renamed the retired label kwarg
+      to `ms=` while deleting the parameter, so every tick with an open position
+      raised TypeError into the loop catch-all and the loop sys.exit'd after 30
+      of them. No position had been managed since 08-22; unseen because no fill
+      happened. (2) The sweep credit spread claimed `signal` and went down the
+      DEBIT dispatch (scorer, debit sizer, `_place_single_leg` buying its own
+      short strike). It now routes pairing gate -> `_execute_condor_leg` like
+      TC.6, carrying its own strategy name and its own 15% stop. (3) Credit
+      verticals were flattened at 15:40 with the debits — VERTICAL_HOLD_TO_ET
+      lived only in an evaluator this window never reached. flatten_all holds
+      them to 15:45; a manage pass keeps the 15% floor live in between.
 v4.7  2026-08-24  CONDOR REMODEL (v4.3): four independent credit-spread
       triggers (1h_fork, 1d_fork, sweep_reversal, trend_orb). Each vertical is
       standalone; second leg is allowed, never expected. Pairing gate enforces
@@ -1730,10 +1742,20 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
     # One function serves two trades; the identity must come from the SIGNAL,
     # never from the function it happens to route through.
     _is_tcs = bool(getattr(signal, "is_trend_credit", False))
+    # r99 — the sweep now routes here too. Its identity rides its own
+    # strategy_name (structure.of routes "SweepCreditSpread" to the
+    # lone-vertical management its spec names: 15% floor or 15:45) and its
+    # stop is its OWN max_loss_pct (SWEEP_CS_MAX_LOSS_PCT 0.15), not the
+    # condor's 25%. Stamping "IronCondorStrategy" here is the 2026-08-14
+    # identity bug — 108 trades attributed to a strategy that never fired them.
+    _is_sweep = (getattr(signal, "strategy_name", "") == "SweepCreditSpread")
+    _stop_pct = (float(getattr(signal, "max_loss_pct", 0.0) or 0.0)
+                 if _is_sweep else 0.0) or CONDOR_STOP_LOSS_PCT
     record = make_record(
         trade_id         = str(uuid.uuid4()),
         symbol           = INSTRUMENT,
         strategy         = ("TrendCreditSpread" if _is_tcs
+                            else "SweepCreditSpread" if _is_sweep
                             else "IronCondorStrategy"),
         setup_type       = signal.setup_type,
         setup_grade      = "B",
@@ -1756,7 +1778,7 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         # the 15:45 close. Writing a stop here is what made a $0.06 credit
         # closeable on one cent of widening.
         stop_premium     = (0.0 if _is_tcs
-                            else fill_credit * (1 + CONDOR_STOP_LOSS_PCT)),
+                            else fill_credit * (1 + _stop_pct)),
         target_premium   = CONDOR_NICKEL_CLOSE,
         underlying_entry = getattr(signal, "underlying_entry", 0.0),
         # ⚠️ TC.6 CARRIES ITS OWN IDENTITY THROUGH THIS PATH (2026-08-14).
@@ -1821,7 +1843,7 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         # is_condor_leg is what _condor_sibling_open and condor_roll key on,
         # and condor_leg_num=2 on every TC.6 row was data pollution.
         is_condor_leg    = 1,   # v4.3: all credit verticals are condor-eligible
-        condor_leg_num   = 0 if _is_tcs else (1 if is_leg1 else 2),
+        condor_leg_num   = 0 if (_is_tcs or _is_sweep) else (1 if is_leg1 else 2),
         condor_trigger_source = getattr(signal, 'condor_trigger_source', ''),
         is_broken_wing   = 0,
         short_symbol     = getattr(short_contract, "symbol", ""),
@@ -1852,7 +1874,7 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
     # caught the last identity bug.
     _exit_desc = (f"exit=breach@{getattr(signal, 'underlying_stop', 0.0):.2f} or 15:45"
                   if _is_tcs else
-                  f"stop=${fill_credit * (1 + CONDOR_STOP_LOSS_PCT):.2f} | "
+                  f"stop=${fill_credit * (1 + _stop_pct):.2f} ({_stop_pct:.0%}) | "
                   f"nickel=${CONDOR_NICKEL_CLOSE:.2f}")
     get_alert_manager()._send(
         f"\U0001F985 [{mode}] {INSTRUMENT} | {signal.setup_type} | "
@@ -2549,13 +2571,29 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
             # ⚠️ THE POST-SELECTION CHECK STAYS. It is the one that JOURNALS a
             # fully-formed refusal, and it still catches anything reaching it by
             # another path. This is defence in depth, not a replacement.
-            if sc_sig.is_valid:
-                signal = sc_sig
-            else:
+            # ── 🔴 r99 — THE SWEEP IS A CREDIT VERTICAL AND TAKES THE CREDIT
+            # PATH. Setting `signal = sc_sig` sent it down the GENERIC dispatch:
+            # the debit scorer, `compute_size(premium=credit)` and
+            # `entry_eng.enter()`, whose only arms are single-leg and butterfly
+            # — `_place_single_leg` would have BUY_TO_OPENed `signal.contract`,
+            # the SHORT strike, as a long. r97 built the spread and this line
+            # would have bought its short leg. Same route as TC.6 below:
+            # pairing gate -> `_execute_condor_leg`, which sizes it as a credit
+            # vertical, stamps is_condor_leg for the pairing gate, and books
+            # the broker's net credit.
+            if not sc_sig.is_valid:
                 logger.warning(
                     "SweepCreditSpread produced an INVALID signal - NOT "
                     "claiming the dispatch slot, so the butterfly and the "
                     "credit verticals still get this tick")
+            elif _can_open_credit_spread(sc_sig.option_side, sc_sig,
+                                         ctx["price"]):
+                _execute_condor_leg(sc_sig, state, ctx)
+                return
+            else:
+                logger.info("SweepCreditSpread %s side blocked by the pairing "
+                            "gate - tick passes to the next strategy",
+                            sc_sig.option_side)
 
     # ── Priority 4: GEX PIN BUTTERFLY ───────────────────────────────────────
     # ⚠️ PARKED - `ENABLED` is False and generate_signal returns None on the
@@ -2964,6 +3002,16 @@ def handle_session_reset(state: BotState):
             state.orb_range_established_today = _fetch_orb_range()
 
 
+def _vertical_close_due() -> bool:
+    """r99 — True once credit verticals are due to close (VERTICAL_HOLD_TO_ET,
+    15:45). Before it, from 15:40, debits flatten and verticals are managed."""
+    from config import VERTICAL_HOLD_TO_ET, VERTICAL_HOLD_TO_CLOSE
+    if not VERTICAL_HOLD_TO_CLOSE:
+        return True
+    _n = now_et()
+    return (_n.hour, _n.minute) >= tuple(VERTICAL_HOLD_TO_ET)
+
+
 def handle_hard_close(state: BotState):
     """Force-close every open position at 15:45 ET — durably.
 
@@ -3134,6 +3182,27 @@ def main_loop(state: BotState):
             # ── Hard close check ──────────────────────────────────────────
             if is_hard_close_time():
                 handle_hard_close(state)
+                # 🔴 r99 — CREDIT VERTICALS HOLD TO 15:45 (config
+                # VERTICAL_HOLD_TO_ET, operator ruling 2026-08-13) BUT NOTHING
+                # ENFORCED IT ON THIS PATH. flatten_all closed every record
+                # from 15:40 and this `continue` skipped the manage branch, so
+                # the exemption in _evaluate_condor_leg never ran. flatten_all
+                # now holds the verticals until 15:45; this block keeps them
+                # MANAGED in between — the lone 15% floor still applies to a
+                # vertical at 15:41.
+                if pos_mgr.has_open_position() and not _vertical_close_due():
+                    try:
+                        _hc_ctx = run_analysis(state)
+                        pos_mgr.manage_open_position(
+                            chain=_hc_ctx.get("chain"),
+                            df_1m=_hc_ctx.get("df_1m"),
+                            df_5m=_hc_ctx.get("df_5m"),
+                            vol_state=_hc_ctx.get("vol"),
+                            trend=_hc_ctx.get("trend"),
+                        )
+                    except Exception as _hc_err:                # noqa: BLE001
+                        logger.warning("15:40-15:45 vertical manage pass "
+                                       "failed: %s", _hc_err)
                 time.sleep(POLL_INTERVAL_SECONDS)
                 continue
 
@@ -3237,8 +3306,13 @@ def main_loop(state: BotState):
                 pos_mgr.manage_open_position(
                     chain=ctx.get("chain"),
                     df_1m=ctx.get("df_1m"),
-                    ms=None,   # PHASE B (r58): label retired; the exit
-                                   # engine's label arms are deleted with it
+                    # 🔴 r99 — `ms=None` REMOVED. r65 renamed the retired
+                    # label kwarg here to `ms=` while DELETING the parameter
+                    # from position_manager, so every tick with an open position
+                    # raised TypeError into the loop catch-all; after 30 errors
+                    # (~7.5 min) the loop sys.exit(1)'d. No position had been
+                    # managed since 2026-08-22. Pinned by tests/check_manage_call.py
+                    # against the real signature, not a string.
                     df_5m=ctx.get("df_5m"),   # v3.8: 5m FVG trail anchor
                     vol_state=ctx.get("vol"),
                     trend=ctx.get("trend"),   # continuation exhaustion exit

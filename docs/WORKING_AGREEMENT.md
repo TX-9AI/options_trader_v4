@@ -165,10 +165,13 @@ subfolder, not a guess.)
 ## 15. DELIVERY IS A TARBALL PLUS ONE LINE. Nothing lands by hand.
 Added 2026-08-01. Every presented file, patch or hotfix ships as **one archive**
 built with **`tar czf` (.tar.gz)** — Termius prefers compressed. It arrives in
-`/home/ubuntu` renamed `.tar` (the `.gz` is stripped in transit; verified by
-screenshot 2026-08-01, a 22 KB gzip payload named `...r2.tar`). That is harmless
-provided the extract is **`tar xf`**, which sniffs the compression — **never
-`tar xzf`**, because the arriving name lies. The 2026-07-25 breakage was the
+`/home/ubuntu` **sometimes** renamed `.tar` (the `.gz` was stripped on 2026-08-01
+— a 22 KB gzip payload named `...r2.tar` — and was NOT stripped on 2026-08-24,
+when two files landed as `.tar.gz` intact). **Amended 2026-08-24: the strip is
+not an invariant. Glob the extension — `tar xf "$HOME"/<name>.tar*` — so the
+line is right either way.** That is harmless provided the extract is
+**`tar xf`**, which sniffs the compression — **never `tar xzf`**, because the
+arriving name may lie. The 2026-07-25 breakage was the
 extract FLAG, not the compression.
 - Underscores survive the Termius upload; do NOT build glob-resolution for
   spaces (that was a different transfer path, and predicting it here was wrong).

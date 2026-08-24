@@ -1,5 +1,8 @@
 """
-execution/ladder_registry.py  v1.0
+execution/ladder_registry.py  v1.1
+v1.1  2026-08-24  r99 — price_for accepts a zero bid (was rejecting the
+      header's own example) and the stop escalation returns mark snapped to
+      the venue grid in our favour, never a raw half-cent. Still uncalled.
 
 THE OWNER OF `LadderState` BETWEEN TICKS. One rung per tick means the walk IS
 multi-tick, so somebody has to hold the ratchet — and nobody did.
@@ -145,11 +148,19 @@ def price_for(key: str, side: str, bid: float, ask: float,
         b, a = float(bid), float(ask)
     except (TypeError, ValueError):
         return None
-    if b <= 0 or a <= 0 or a < b:
+    # r99 — `b <= 0` re-introduced the zero-bid guard r98 removed from
+    # `rungs()`: bid 0.00 / ask 1.00 is the operator's own worked example and a
+    # routine 0DTE quote. Unusable is a missing quote, a non-positive ASK, or a
+    # crossed book — the same test `rungs()` applies.
+    if b < 0 or a <= 0 or a < b:
         return None
 
     if stop_escalation:
-        return round((a + b) / 2.0, 4), "mark (stop escalation — no walk)"
+        from execution.entry_ladder import _increment, _snap_mark_in_our_favour
+        mark = (a + b) / 2.0
+        sell = str(side).lower().startswith("s")
+        px = _snap_mark_in_our_favour(mark, _increment(symbol, mark, b, a), sell)
+        return round(px, 4), "mark (stop escalation — no walk)"
 
     return get(key, side, symbol).next_price(b, a)
 

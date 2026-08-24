@@ -97,6 +97,13 @@ of 90-bar windows**; a boundary does not hold in that.
 **Exit — exactly two.** 15% stop, and the 15:45 hard close. **No trail, no
 profit target**, exempt from the 15:40 flatten ladder as a credit vertical.
 
+⚠️ **r99: this trade could not fire and, had it fired, would not have been
+managed as written.** `is_valid` demanded four contracts (every sweep died
+`Invalid signal`); a valid one would have gone down the DEBIT dispatch and
+bought its own short strike; and `structure.of` filed it under TC.6, which has
+no premium stop. Fixed: per-side validation, pairing gate ->
+`_execute_condor_leg`, CONDOR_LEG (lone-vertical) management.
+
 ---
 
 ## 3. GEX Pin Butterfly — `gex_pin_butterfly.py` ⏸ PARKED
@@ -403,6 +410,11 @@ It appeared in `gen_file_map`'s orphan report and was dismissed as noise. The
 live path posts a single `limit_at_mark` and walks away
 (`entry_engine.py:269`), so **every rung of price improvement since the split
 has been given away.**
+
+**Status r99 (2026-08-24): STILL UNWIRED.** Two more residual defects fixed
+first — `next_price`'s rule-3 clamp returned the raw mark (0.475 on a penny
+grid), and `ladder_registry.price_for` rejected a zero bid, the header's own
+example. Wiring lands as r100 across the five sites below.
 
 ⚠️ **AND THIS IS THE LARGEST SINGLE ITEM ON THE BOARD.** FRC.1: gross edge
 **+$2.70/trade** against **$126/trade** of round-trip friction. Capturing half
