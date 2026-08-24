@@ -58,6 +58,16 @@ data/feed_store.db
 data/liquidity_ledger/
 data/shadow/
 data/signal_journal/
+# ── OPERATOR FLAGS (r108) — runtime state in a TRACKED source directory ─────
+# data/ holds real modules (candle_feed.py), so these are ignored by NAME and
+# not by directory. Both are set ONLY by devtools (67 and 68) and read live by
+# the running services; neither is ever committed.
+# ⚠️ FEED_MAINTENANCE has worked untracked since 2026-08-15 by luck rather than
+# intent — nothing on a box runs `git add`. Written down now so a future
+# `git add -A` on a control-side checkout cannot capture an operator flag and
+# ship someone else's maintenance window to the fleet.
+data/FEED_MAINTENANCE
+data/REHEARSAL_OFF
 env/
 ohlc/
 orb_range.json

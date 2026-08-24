@@ -1,5 +1,10 @@
 """
-main.py  v4.13
+main.py  v4.14
+v4.14 2026-08-24  r108: the pre-open rehearsal has a GO-RED TOGGLE (devtools
+      item 68, mirroring the feed-maintenance window at 67). data/REHEARSAL_OFF
+      on the box, read LIVE every pass, survives a bake. Inverted sense — the
+      file's PRESENCE disables — so a fresh or forgotten box rehearses, and the
+      menu line goes RED while it is OFF.
 v4.13 2026-08-24  r106: the TENT is called after the roll (rung below it, only
       on an already-rolled + breached structure). CONDOR_TP_PCT retired, the
       stop written on every credit row is now the 15% floor the engine actually
@@ -3215,6 +3220,37 @@ def _check_blindness(state: BotState):
             state.blind_latch.last_outage_cause)
 
 
+_REHEARSAL_FLAG = os.path.join(os.path.dirname(LOG_FILE), "data", "REHEARSAL_OFF")
+
+
+def _rehearsal_disabled() -> bool:
+    """r108 — True when the operator has turned the pre-open rehearsal OFF.
+
+    Read on EVERY pass, never cached: the flag is a live control (devtools item
+    68 fans it out to the fleet with no restart), and a cached read would make
+    the menu lie about what the boxes are doing — the failure `_MAINT_MARK`'s
+    own comment calls out ("the marker is a HINT, not the truth").
+    ⚠️ FAILS TOWARD RUNNING. An unreadable path leaves the rehearsal ON: the
+    cost of rehearsing when you meant not to is some log noise; the cost of
+    NOT rehearsing when you meant to is finding a broken build at 09:30:01.
+    """
+    try:
+        return os.path.exists(_REHEARSAL_FLAG)
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def _rehearsal_note(state) -> None:
+    """Say it once per process, then stay quiet. A disabled safety net is worth
+    one line at INFO; it is not worth a line a minute for two hours."""
+    if getattr(state, "_rehearsal_noted", False):
+        return
+    state._rehearsal_noted = True
+    logger.info("[rehearsal] DISABLED by %s — the trading path will not be "
+                "executed until 09:30. Re-enable with devtools 'Pre-open "
+                "rehearsal'.", _REHEARSAL_FLAG)
+
+
 _DISPATCH_PAGED: set = set()
 
 
@@ -3312,6 +3348,19 @@ def main_loop(state: BotState):
                 # ⚠️ AND IT FAILS LOUD, unlike the observation pass above. A
                 # failure HERE is the failure that costs the session, so it
                 # pages on the FIRST occurrence — see `_page_dispatch_failure`.
+                # ── r108 — THE GO-RED TOGGLE (devtools item 68) ─────────────
+                # The flag lives on the BOX and is read LIVE, like
+                # FEED_MAINTENANCE: no restart, and it survives a bake. Its
+                # PRESENCE turns the rehearsal OFF — inverted on purpose, so a
+                # fresh, rebuilt or forgotten box rehearses. A flag you must
+                # create to ENABLE a safety-adjacent behaviour is one that ends
+                # up unset exactly when nobody was paying attention, which is
+                # the morning this exists for.
+                if _rehearsal_disabled():
+                    _rehearsal_note(state)
+                    secs = seconds_until_rth_open()
+                    time.sleep(60 if secs > 120 else max(secs - 5, 5))
+                    continue
                 # r102 — SILENCE IS NOT A VALID OUTCOME HERE. Each branch says
                 # how far the pass got, at INFO, so "the rehearsal ran" and
                 # "the rehearsal proved something" stop looking alike.
