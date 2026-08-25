@@ -52,26 +52,44 @@ from tastytrade import DXLinkStreamer
 from tastytrade.dxfeed import Greeks, Quote, Trade, Underlying, TheoPrice
 
 from data.tasty_client import get_session
-from data.options_chain import get_chain_fetcher
 from config import INSTRUMENT
+
+# ⚠️ $OT_FEED_DB OVERRIDES, exactly as candle_feed resolves it. A probe that
+# hardcodes the default reads a DIFFERENT store than the feed writes on any box
+# where that variable is set, and would report an empty option arm as fact.
+FEED_DB = (os.environ.get("OT_FEED_DB", "").strip()
+           or os.path.expanduser("~/options-trader/data/feed_store.db"))
 
 SECONDS = float(sys.argv[1]) if len(sys.argv) > 1 else 45.0
 
 
 async def main() -> None:
-    session = get_session()
-    # The SAME option symbols the feed already subscribes Greeks/Quote to — the
-    # ones that demonstrably tick. A handful is plenty; this is a yes/no.
+    # 🔴 READ THE SYMBOLS FROM THE FEED STORE, DO NOT FETCH THE CHAIN.
+    # `fetch_chain()` is SYNCHRONOUS and spins up its OWN asyncio loop
+    # internally, then closes it — and the shared `get_session()` singleton
+    # binds its httpx client to whichever loop first used it. Calling it from
+    # inside our loop left the session attached to a CLOSED loop, and
+    # DXLinkStreamer then died on "/api-quote-tokens" with `Event loop is
+    # closed`. The giveaway was printed before the banner: "OI: fetch failed
+    # ... is bound to a different event loop".
+    # `chain_marks` already holds exactly the streamer symbols candle_feed
+    # subscribes Greeks/Quote to — the ones that demonstrably tick. No network,
+    # no second loop, and it is the same list by construction.
     opts: list = []
     try:
-        chain = get_chain_fetcher().fetch_chain()
-        for c in (list(getattr(chain, "calls", []))[:6]
-                  + list(getattr(chain, "puts", []))[:6]):
-            s = getattr(c, "streamer_symbol", "") or ""
-            if s:
-                opts.append(s)
+        import sqlite3
+        conn = sqlite3.connect(f"file:{FEED_DB}?mode=ro", uri=True, timeout=5)
+        opts = [r[0] for r in conn.execute(
+            "SELECT streamer_symbol FROM chain_marks "
+            "WHERE streamer_symbol IS NOT NULL AND streamer_symbol != '' "
+            "LIMIT 12").fetchall()]
+        conn.close()
     except Exception as exc:                                   # noqa: BLE001
-        print(f"chain fetch failed ({exc}) — option-symbol arm will be skipped")
+        print(f"could not read chain_marks ({exc}) — option arm skipped")
+
+    # The session is created INSIDE the running loop and nothing sync-with-its-
+    # own-loop runs before it.
+    session = get_session()
 
     print(f"instrument   : {INSTRUMENT}")
     print(f"ticker arm   : {INSTRUMENT}")
