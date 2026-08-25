@@ -88,6 +88,19 @@ NAMED_IN_PATH_ORB_WIDTHS    = 1.5
 BEYOND_TP_ADJUSTMENT_WIDTHS = 0.5
 
 
+def _confirmed_epoch(orb) -> float:
+    """`confirmed_at` as an epoch, or 0.0. Never raises: this feeds an
+    observation, and an observation must not break an entry."""
+    raw = str(getattr(orb, "confirmed_at", "") or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        from datetime import datetime as _dt
+        return _dt.fromisoformat(raw).timestamp()
+    except Exception:                                          # noqa: BLE001
+        return 0.0
+
+
 class ORBStrategy(BaseOptionsStrategy):
     """
     Opening Range Breakout strategy.
@@ -150,6 +163,14 @@ class ORBStrategy(BaseOptionsStrategy):
             # ── ORB range boundaries for strategy-aware exit ──────────────────
             orb_range_high    = orb.orb_high,
             orb_range_low     = orb.orb_low,
+            # r120 — carried from the engine's own counter, not recomputed.
+            # r120 — the tape window opens at the CONFIRMED BREAK, so the
+            # measurement spans the fight over the level rather than the fire
+            # instant. `confirmed_at` is an ET string; parsed to epoch here
+            # because the consumer needs a number and this is where the
+            # timezone context lives.
+            orb_break_ts      = _confirmed_epoch(orb),
+            atr_at_signal     = float(getattr(vol_state, "atr", 0.0) or 0.0),
             # - which is exactly why it kept working while every gated strategy
             # degraded, and why it is the one v3 strategy with a positive
             # record (orb_trail_stop 96% / 85 trades / +$30,696, worst -$16).

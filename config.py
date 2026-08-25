@@ -559,6 +559,41 @@ DAILY_LOSS_LIMIT_USD = float(os.environ.get("OT_DAILY_LOSS_LIMIT", str(RISK_PER_
 # OT_DAILY_LOSS_LIMIT with that in mind.
 MAX_LOSS_PCT        = float(os.environ.get("OT_MAX_LOSS_PCT", "0.25"))
 
+# ── 🔴 r121 — SIZE ON RISK-TO-STOP, NOT ON PREMIUM ───────────────────────────
+# Operator, 2026-08-25, reading CVX's card: "it's not 'risking' the correct
+# amount. I don't account for max loss on every trade!!!"
+# He is right, and the note above admits it in passing: "Sizing is FULL-PREMIUM
+# based (risk unit = position size)". So RISK_PER_TRADE_USD has never been a
+# risk budget — it is a POSITION-SIZE budget wearing a risk name, and the two
+# diverge by exactly the stop.
+# ⚠️ MEASURED ON TODAY'S OWN FIRES. Every ORB trade this morning was sized to
+# deploy ~$1050 of premium while the -25% floor caps the actual loss near $260:
+#   NVDA  $1206 deployed -> stop $4.52 ->  $302 at risk
+#   TSLA  $1280 deployed -> stop $2.40 ->  $320 at risk
+#   PLTR  $1400 deployed -> stop $3.50 ->  $350 at risk  (it lost $310)
+# A $1050 budget was buying ~$300 of exposure. The CREDIT path never had this
+# problem — compute_condor_leg_size divides by (width - credit), which is the
+# true max loss because a credit spread genuinely CAN go to full width.
+# ⚠️ WHY IT IS OPT-IN, DEFAULT OFF. The stop is SOFT — a premium threshold or a
+# 1-min close, evaluated on a 15s tick, not a resting order with the venue. A
+# gap or a halt can print through it, and on that path the full premium really
+# is gone. Sizing to the stop assumes the stop holds. Turning this on roughly
+# 4x's every debit position, which is correct by intent and still a large
+# change to make silently: it also interacts with DAILY_LOSS_LIMIT_USD, since
+# the same floored trade now costs the full budget rather than a quarter of it.
+# Set OT_SIZE_ON_RISK=1 deliberately, with the loss limit re-read first.
+SIZE_ON_RISK_TO_STOP = os.environ.get("OT_SIZE_ON_RISK", "0") == "1"
+
+# ⚠️ AND A CEILING ON WHAT MAY BE DEPLOYED TO REACH THAT RISK. Risk-based
+# sizing has no natural bound: the tighter the stop, the larger the position it
+# justifies, and a stop 10% away mathematically licenses a 10x position. NVDA's
+# own 2026-08-25 fire, sized on risk, wanted 10 contracts — $6,030 of premium
+# to put $1,510 at risk, and the stop is SOFT, so a gap through it costs the
+# $6,030 rather than the $1,510. That is 6x the intended risk on one trade.
+# This caps deployment at a multiple of the risk budget: size on risk, but
+# never own more than the operator would accept losing outright.
+DEPLOY_CAP_MULT = float(os.environ.get("OT_DEPLOY_CAP_MULT", "2.0"))
+
 # ── SWEEP CREDIT SPREAD (v4.0) ─────────────────────────────────────────────
 # Operator's spec, 2026-08-20: *"The only 2 ways I want out of this trade is a
 # 15% loss (thesis invalidated) or a session hard close."*

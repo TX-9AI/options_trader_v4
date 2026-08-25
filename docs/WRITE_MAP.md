@@ -41,7 +41,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `feed_meta` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `data/market_data.py`, `tools/manifold_status.py` |
 | `greeks_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `analysis/second_order.py` |
 | `last_trade` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |
-| `prints` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `analysis/order_flow.py` |
+| `prints` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_orb_geometry.py` (delete/insert) | `analysis/order_flow.py`, `analysis/tape_at_level.py` |
 | `quote_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/exit_replay.py` (insert) | `analysis/order_flow.py` |
 | `session_summary` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_manifold_windows.py` (update) | — |
 | `theo_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |

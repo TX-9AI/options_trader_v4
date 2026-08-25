@@ -87,7 +87,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 from config import (
-    RISK_PER_TRADE_USD, GRADE_SIZE_MULTIPLIER,
+    RISK_PER_TRADE_USD, GRADE_SIZE_MULTIPLIER, SIZE_ON_RISK_TO_STOP,
+    DEPLOY_CAP_MULT,
     CONTRACT_MULTIPLIER, PAPER_TRADING, INSTRUMENT, DAILY_LOSS_LIMIT_USD
 )
 from utils.time_utils import fmt_et_short
@@ -102,11 +103,16 @@ SERVICE_NAME = "optionsbot"
 class SizingResult:
     contracts:          int   = 0
     cost_per_contract:  float = 0.0
+    # r121 — what one contract can actually LOSE (premium - stop). Equals
+    # cost_per_contract when SIZE_ON_RISK_TO_STOP is off, so a reader can
+    # always compare the two and see which rule produced the size.
+    risk_per_contract:  float = 0.0
     total_cost:         float = 0.0
     max_loss:           float = 0.0
     grade:              str   = "B"
     grade_multiplier:   float = 1.0
     allowed:            bool  = True
+    deploy_capped:      bool  = False    # r121 — risk wanted more than ownership allows
     reject_reason:      str   = ""
 
 
@@ -176,7 +182,8 @@ class RiskManager:
                      grade: str = "B",
                      is_butterfly: bool = False,
                      net_debit: float = 0.0,
-                     butterfly_half_size: bool = False) -> SizingResult:
+                     butterfly_half_size: bool = False,
+                     stop_premium: float = 0.0) -> SizingResult:
         """
         Calculate whole contract count.
 
@@ -190,20 +197,50 @@ class RiskManager:
         result = SizingResult(grade=grade)
 
         cost_per_share = net_debit if is_butterfly else premium
+        # ── r121 — THE DENOMINATOR IS THE RISK, WHEN ENABLED ──────────────
+        # Premium is what the position COSTS; (premium - stop) is what it can
+        # LOSE. Dividing the budget by cost sizes the position; dividing by
+        # risk sizes the RISK, which is what RISK_PER_TRADE_USD claims to be.
+        # Off by default — see config's SIZE_ON_RISK_TO_STOP for why the soft
+        # stop makes this a deliberate choice rather than a correction.
+        risk_per_share = cost_per_share
+        if SIZE_ON_RISK_TO_STOP and stop_premium and stop_premium > 0:
+            _r = abs(cost_per_share - float(stop_premium))
+            # A stop at or beyond the premium leaves the full premium at risk —
+            # fall back rather than divide by something tiny and size wildly.
+            if 0 < _r < cost_per_share:
+                risk_per_share = _r
         if cost_per_share <= 0:
             result.allowed       = False
             result.reject_reason = "zero_premium"
             return result
 
         cost_per_contract = cost_per_share * CONTRACT_MULTIPLIER
+        risk_per_contract = risk_per_share * CONTRACT_MULTIPLIER
         grade_mult        = GRADE_SIZE_MULTIPLIER.get(grade, 1.0)
 
         if is_butterfly and butterfly_half_size:
             grade_mult = grade_mult * 0.5
 
         count = contracts_from_risk(
-            self._risk_per_trade, cost_per_contract, grade_mult
+            self._risk_per_trade, risk_per_contract, grade_mult
         )
+        # ── r121 — THE DEPLOYMENT CEILING ────────────────────────────────
+        # Applied AFTER the risk sizing so the intent is visible in the log:
+        # this is what risk WANTED, and this is what ownership ALLOWS. Binding
+        # is not an error and is not suppressed — a size that was cut is a
+        # thing the operator should see, since it means the stop is tight
+        # enough that risk-sizing has run past what he is willing to own.
+        if SIZE_ON_RISK_TO_STOP and count > 0 and cost_per_contract > 0:
+            _cap = int((self._risk_per_trade * DEPLOY_CAP_MULT) // cost_per_contract)
+            if _cap < count:
+                logger.info(
+                    "Deploy cap binds: risk wanted %d contract(s) ($%.0f "
+                    "deployed); cap %gx risk budget allows %d ($%.0f)",
+                    count, count * cost_per_contract, DEPLOY_CAP_MULT,
+                    _cap, _cap * cost_per_contract)
+                result.deploy_capped = True
+                count = _cap
 
         if count < 1:
             result.allowed       = False
@@ -218,7 +255,11 @@ class RiskManager:
         result.contracts         = count
         result.cost_per_contract = cost_per_contract
         result.total_cost        = total_cost
+        # max_loss stays the FULL premium: that is what a gap through a soft
+        # stop actually costs, and the field is read by risk gates that must
+        # assume the worst rather than the intent.
         result.max_loss          = total_cost
+        result.risk_per_contract = risk_per_contract
         result.grade_multiplier  = grade_mult
         result.allowed           = True
 

@@ -279,6 +279,13 @@ class TradeLogger:
         --     available, per setup, rather than against a house average.
         stop_width_pct    REAL,
         planned_r         REAL,
+        -- r120: which attempt on this ORB range fired. 0 = not an ORB trade.
+        -- r120: what the TAPE did at the break level while it was contested.
+        -- NULL when unmeasurable — zero volume at a level is a real reading,
+        -- an unreadable store is not, and they must stay distinguishable.
+        tape_vol_at_level      REAL,
+        tape_buy_frac_at_level REAL,
+        tape_prints_at_level   INTEGER,
         short_strike      REAL DEFAULT 0.0,
         long_strike       REAL DEFAULT 0.0,
         credit_received   REAL DEFAULT 0.0,
@@ -459,6 +466,9 @@ class TradeLogger:
             # r119 — ORB setup geometry. NULL, never 0.0: see the schema note.
             ("stop_width_pct",    "REAL"),
             ("planned_r",         "REAL"),
+            ("tape_vol_at_level",      "REAL"),
+            ("tape_buy_frac_at_level", "REAL"),
+            ("tape_prints_at_level",   "INTEGER"),
         ]
         for col, definition in _MIGRATION_ADDS:
             try:

@@ -67,6 +67,12 @@ class OptionsSignal:
     underlying_tp50:    float = 0.0
 
     # ── ORB range boundaries (ORB trades only) ──────────────────────────────
+    # r120 — the window and the scale the tape measurement needs. WITHOUT these
+    # the measurement silently falls back to "last 15 minutes, price-relative
+    # band", which measures a DIFFERENT THING than the contested level and
+    # would look like a valid reading. A wrong number is worse than none.
+    orb_break_ts: float = 0.0      # epoch of the confirming break
+    atr_at_signal: float = 0.0
     orb_range_high: float = 0.0
     orb_range_low:  float = 0.0
 

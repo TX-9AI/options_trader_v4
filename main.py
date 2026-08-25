@@ -3033,6 +3033,10 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
 
     sizing = risk_mgr.compute_size(
         premium           = signal.entry_premium,
+        # r121 — the sizer needs the STOP to size on risk. Passed from the
+        # signal the strategy already computed; when it is absent or the flag
+        # is off, the sizer falls back to premium and nothing changes.
+        stop_premium      = float(getattr(signal, "stop_premium", 0.0) or 0.0),
         grade             = score.grade,
         is_butterfly      = signal.is_butterfly,
         net_debit         = signal.net_debit if signal.is_butterfly else 0.0,

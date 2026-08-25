@@ -290,11 +290,31 @@ class EntryEngine:
                 record["stop_width_pct"] = round(_risk / _width, 4)
             if _risk > 0 and _u_tgt and _u_entry:
                 record["planned_r"] = round(abs(_u_tgt - _u_entry) / _risk, 3)
-            logger.info("[orb-geom] stop_width=%s of range  planned_r=%s",
+            # ── r120 — THE TAPE AT THE LEVEL, while it was contested ───────
+            # Wrapped whole: this is an observation, and an observation must
+            # never be the reason a confirmed fill fails to record.
+            try:
+                from analysis.tape_at_level import measure as _tape
+                _lvl = (float(signal.orb_range_high or 0.0)
+                        if (signal.direction or "").upper() in ("LONG", "BULLISH")
+                        else float(signal.orb_range_low or 0.0))
+                _since = float(getattr(signal, "orb_break_ts", 0.0) or 0.0)
+                record.update(_tape(
+                    symbol=str(record.get("symbol") or ""),
+                    level=_lvl,
+                    since_epoch=_since or (time.time() - 900),
+                    until_epoch=time.time(),
+                    atr=float(getattr(signal, "atr_at_signal", 0.0) or 0.0) or None))
+            except Exception as exc:                            # noqa: BLE001
+                logger.debug("tape-at-level skipped: %s", exc)
+            logger.info("[orb-geom] stop_width=%s of range  planned_r=%s "
+                        "tape_vol=%s buy_frac=%s",
                         f"{record.get('stop_width_pct'):.1%}"
                         if record.get("stop_width_pct") is not None else "n/a",
                         f"{record.get('planned_r'):.2f}"
-                        if record.get("planned_r") is not None else "n/a")
+                        if record.get("planned_r") is not None else "n/a",
+                        record.get("tape_vol_at_level", "n/a"),
+                        record.get("tape_buy_frac_at_level", "n/a"))
 
         self._trade_logger.log_entry(record)
 

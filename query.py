@@ -225,7 +225,36 @@ def show_open_position(conn):
     print()
 
     print(f"  Entry Premium: ${entry_prem:.2f}/share  (${entry_prem * 100:.2f}/contract)")
-    print(f"  Total Cost:    ${total_cost:.2f}")
+    # ── 🔴 r121 — THREE NUMBERS, NOT ONE ──────────────────────────────────
+    # Operator, 2026-08-25, on CVX's card: "How is 2 contracts at $96 costing
+    # me $800???" — and then the correction that named the confusion exactly:
+    # "I do still want the cost shown, but part of that cost is ownership of
+    # contracts. Dollars out, contracts that have value in."
+    # "Total Cost" was collapsing three different facts into one line, and for
+    # a CREDIT spread it was not a cost at all: CVX's $808 is width-minus-credit
+    # margin against $192 RECEIVED, so the label was wrong by sign as well as
+    # by meaning.
+    #   Deployed  — dollars out, held as contracts that still have value
+    #   At risk   — deployed minus what the stop hands back; the real exposure
+    #   Max loss  — the whole deployment, which is what a gap through a SOFT
+    #               stop actually costs
+    _is_credit = bool(row["is_condor_leg"] or 0) or (row["credit_received"] or 0) > 0
+    if _is_credit:
+        _credit = (row["credit_received"] or 0) * contracts * 100
+        print(f"  Credit rec'd:  ${_credit:.2f}  (received, not paid)")
+        print(f"  Capital @risk: ${total_cost:.2f}  "
+              f"(width − credit; margin held, not spent)")
+    else:
+        _stop_p = row["stop_premium"] or 0.0
+        _risk   = ((entry_prem - _stop_p) * contracts * 100) if _stop_p else total_cost
+        print(f"  Deployed:      ${total_cost:.2f}  "
+              f"({contracts} contract(s) owned, still worth something)")
+        print(f"  Capital @risk: ${_risk:.2f}  "
+              f"(to the ${_stop_p:.2f} stop)" if _stop_p else
+              f"  Capital @risk: ${_risk:.2f}")
+        if _stop_p and _risk < total_cost:
+            print(f"  Max loss:      ${total_cost:.2f}  "
+                  f"(gap through the stop — it is soft, not resting)")
     if current_prem:
         print(f"  Current Mark:  ${current_prem:.2f}/share  (${current_prem * 100:.2f}/contract)")
     if live_pnl_usd is not None:
