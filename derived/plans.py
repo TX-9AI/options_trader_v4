@@ -83,7 +83,12 @@ logger = logging.getLogger(__name__)
 
 # ⟨PRIOR⟩ every threshold here. Stated, not fitted — they exist so a plan can
 # render a verdict at all, and the fit replaces them. See docs/PLAN_SPEC.md.
-PLAN_R_FLOOR      = 1.00    # operator's stated minimum reward:risk
+# 🔴 r128 — THE R HURDLE MOVED TO strategy/criteria.py. It is the ONE thing
+# the relaxed flag changes, and it now lives in one file with every other
+# mode-dependent criterion rather than being re-decided per plan.
+# ⚠️ `r_hurdle()` returns None when MUTED — never 0.0. A floor of zero would
+# still reject a negative-R plan and would look like a decision nobody made.
+from strategy.criteria import r_verdict, r_hurdle, mode as criteria_mode
 PIN_CONC_MIN      = 3.00    # pin must hold 3x its neighbours' gamma
 PIN_SHARE_MIN     = 0.15    # ...and 15% of all near-money gamma
 PIN_REACH_MAX     = 1.00    # pin within one remaining expected move
@@ -227,9 +232,10 @@ class PlanEngine(DerivedEngine):
         elif reach < PIN_REACH_MIN:
             ok = False
             why.append(f"already at the pin ({reach:.2f} EM)")
-        if r is not None and r < PLAN_R_FLOOR:
+        _rv, _rr = r_verdict(r)
+        if _rv == "FAIL":
             ok = False
-            why.append(f"R {r:.2f} below {PLAN_R_FLOOR:.2f}")
+            why.append(_rr)
         # ⚠️ EACH CHECK CARRIES ITS OWN (value, verdict). That is what makes an
         # elimination a QUERYABLE ROW rather than a sentence — "which check
         # failed, at what reading" becomes one GROUP BY instead of a log grep.
@@ -241,8 +247,7 @@ class PlanEngine(DerivedEngine):
                            if share is not None else None),
             "reach_em":   ((reach, "PASS" if PIN_REACH_MIN <= reach <= PIN_REACH_MAX
                             else "FAIL") if reach is not None else None),
-            "r":          ((r, "PASS" if r >= PLAN_R_FLOOR else "FAIL")
-                           if r is not None else None),
+            "r":          ((r, r_verdict(r)[0]) if r is not None else None),
             # RECORDED ONLY — these gate nothing. Carried so the fit can decide
             # whether charm deserves authority; concentration replaced it as
             # the strength gate on measured grounds (see the docstring).
@@ -294,15 +299,14 @@ class PlanEngine(DerivedEngine):
             return None
         risk = round(5.0 - credit, 2)
         r = round(credit / risk, 2) if risk > 0 else None
-        ok = r is not None and r >= PLAN_R_FLOOR
+        _rv, _rr = r_verdict(r)
+        ok = _rv in ("PASS", "MUTED")
         why = ("" if ok else
-               f"R {r if r is not None else 0:.2f} below {PLAN_R_FLOOR:.2f} — "
-               f"TARGET {sk:.2f} (short strike expiring worthless) pays "
-               f"${credit:.2f}; STOP {orb_hi:.2f} (a close back through the ORB "
-               f"high) risks ${risk:.2f}")
+               f"{_rr} — TARGET {sk:.2f} (short strike expiring worthless) "
+               f"pays ${credit:.2f}; STOP {orb_hi:.2f} (a close back through "
+               f"the ORB high) risks ${risk:.2f}")
         checks = {
-            "r":       ((r, "PASS" if (r or 0) >= PLAN_R_FLOOR else "FAIL")
-                        if r is not None else None),
+            "r":       ((r, r_verdict(r)[0]) if r is not None else None),
             "credit":  (credit, "n/a"),
             "risk":    (risk, "n/a"),
             "strike_inside_range": (float(sk), "PASS"),
@@ -442,9 +446,10 @@ class PlanEngine(DerivedEngine):
         if age > 8:
             ok = False
             why.append(f"reclaim is {age} bars old (max 8)")
-        if r is not None and r < PLAN_R_FLOOR:
+        _rv, _rr = r_verdict(r)
+        if _rv == "FAIL":
             ok = False
-            why.append(f"R {r:.2f} below {PLAN_R_FLOOR:.2f} — TARGET {sk:.2f} "
+            why.append(f"{_rr} — TARGET {sk:.2f} "
                        f"(short strike expiring worthless) pays ${credit:.2f}; "
                        f"STOP {extreme:.2f} (a close beyond the sweep extreme) "
                        f"risks ${risk:.2f}")
@@ -454,8 +459,7 @@ class PlanEngine(DerivedEngine):
             "acceptance":      (1.0 if invalid else 0.0,
                                 "FAIL" if invalid else "PASS"),
             "reclaim_age":     (float(age), "PASS" if age <= 8 else "FAIL"),
-            "r":               ((r, "PASS" if r >= PLAN_R_FLOOR else "FAIL")
-                                if r is not None else None),
+            "r":               ((r, r_verdict(r)[0]) if r is not None else None),
             "event_spent":     (1.0 if spent else 0.0,
                                 "FAIL" if spent else "PASS"),
             # RECORDED ONLY — gates nothing until the fit says what depth means
