@@ -862,7 +862,13 @@ SERIES_TABLES = ("greeks_series", "quote_series", "prints", "last_trade",
 
 # v4.3 — the lifecycle biographies. Mutating (plans transition, characters
 # close, snapshots replace), so CDC by rowid rather than a high-water mark.
+# 🔴 r126b — `plan_tick` and `plan_check` added. They are the only record of
+# what each plan SAW and what it would have COST; bot.log is bounded by
+# rotation and the fit needs weeks. `plan_check` is the higher-volume of the
+# two (one row per variable per plan per cycle) — it goes here, never before
+# `shadow` in the ordering, per the standing push-order rule.
 DERIVED_TABLES = ("fire_snapshot", "strategy_note", "plan_ledger",
+                  "plan_tick", "plan_check",
                   "gate_disposition", "character_ledger", "level_ledger",
                   "exit_counterfactual")
 

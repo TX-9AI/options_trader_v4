@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""
+tests/check_plans.py  v1.0  (2026-08-25)
+
+The plan engine declares, prices, and CANNOT AFFECT TRADING.
+
+⚠️ THE LAST ASSERTION IS THE IMPORTANT ONE. r126 ships an engine that renders
+verdicts — TAKE and DECLINE — on live setups. That is precisely the shape of
+thing that gets wired into dispatch by a future edit "since it already knows".
+This test fails if main.py ever reads it.
+"""
+import ast
+import os
+import sys
+
+FAIL = []
+
+
+def check(label, cond, detail=""):
+    print(f"  {'PASS' if cond else 'FAIL'}  {label}" + (f"  — {detail}" if detail else ""))
+    if not cond:
+        FAIL.append(label)
+
+
+class _C:
+    def __init__(self, strike, bid, ask, gamma=0.0, oi=0.0):
+        self.strike, self.bid, self.ask = strike, bid, ask
+        self.gamma, self.oi = gamma, oi
+
+
+class _Chain:
+    def __init__(self, calls, puts):
+        self.calls, self.puts = calls, puts
+
+
+def main():
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from derived.plans import PlanEngine
+
+    e = PlanEngine(store=None, symbol="TSLA", ledger=None)
+
+    # A chain with a deliberate gamma flip at 360, TSLA 2026-08-25 shape.
+    calls = [_C(k, max(0.05, 8 - (k-350)*0.6), max(0.10, 8.4 - (k-350)*0.6),
+                gamma=0.02 if k != 360 else 0.044,
+                oi=800 if k != 360 else 7326) for k in range(345, 376, 5)]
+    puts = [_C(k, max(0.05, 1.9 - (350-k)*0.22), max(0.10, 2.0 - (350-k)*0.22),
+               gamma=0.02, oi=1500) for k in range(340, 361, 5)]
+    ctx = {"price": 354.41, "chain": _Chain(calls, puts),
+           "orb_high": 351.88, "orb_low": 349.20,
+           "session_fraction_remaining": 0.60}
+
+    per = e._gamma_by_strike(ctx["chain"], ctx["price"])
+    check("P1 gamma surface is built from gamma x OI", bool(per), f"{len(per)} strikes")
+
+    pin = e._pin(per)
+    check("P2 the gamma flip is located", pin is not None, f"pin={pin}")
+
+    conc, share = e._concentration(per, pin) if pin else (None, None)
+    check("P3 concentration exceeds the neighbours", conc is not None and conc > 1.0,
+          f"{conc:.2f}x" if conc else "none")
+
+    b = e._butterfly(ctx)
+    check("P4 the butterfly plan is PRICED, not just triggered",
+          b is not None and (b.get("debit") is not None or b.get("verdict") == "NO PLAN"),
+          f"debit={b.get('debit')} R={b.get('r')}" if b else "none")
+
+    p = e._participation(ctx)
+    check("P5 participation prices a real strike inside the range",
+          p is not None and p.get("verdict") in ("TAKE", "DECLINE", "NO PLAN"),
+          f"{p.get('verdict')} R={p.get('r')}" if p else "none")
+
+    # ⚠️ A DECLINE MUST NAME ITS LEVELS. Operator's requirement: not "no
+    # trade" but "R 0.29, target 350.00, stop 351.88, cannot clear 1:1".
+    if p and p.get("verdict") == "DECLINE":
+        w = p.get("why", "")
+        check("P6 a decline names TARGET and STOP with numbers",
+              "TARGET" in w and "STOP" in w, w[:70])
+
+    # ── P7: THE TABLES — spine + long-format checks ─────────────────────
+    import sqlite3, time as _t
+
+    class _S:
+        def __init__(self):
+            self.conn = sqlite3.connect(":memory:")
+        def commit(self):
+            self.conn.commit()
+
+    st = _S()
+    e2 = PlanEngine(store=st, symbol="TSLA", ledger=None)
+    e2._last_run = 0
+    e2.derive(ctx)
+    n_tick = st.conn.execute("select count(*) from plan_tick").fetchone()[0]
+    n_chk = st.conn.execute("select count(*) from plan_check").fetchone()[0]
+    check("P7 plan_tick records every plan, TAKE and DECLINE alike",
+          n_tick >= 2, f"{n_tick} rows")
+    check("P8 plan_check is LONG — one row per variable per plan",
+          n_chk >= 6, f"{n_chk} rows")
+
+    # ⚠️ NO PLAN MAY WRITE A CHECK IT DOES NOT OWN. The CHECKS map is the
+    # contract that lets a reader tell "not applicable" from "not run"; if a
+    # plan writes outside it, that distinction is gone and the table starts
+    # lying about coverage.
+    stray = []
+    for sg, nm in st.conn.execute(
+            "select distinct strategy, check_name from plan_check"):
+        if nm not in PlanEngine.CHECKS.get(sg, ()):
+            stray.append((sg, nm))
+    check("P9 no plan writes a check outside its declared CHECKS map",
+          not stray, str(stray))
+
+    # ⚠️ ABSENT IS NOT ZERO. A check that could not be computed must land as
+    # NULL/'n/a', never 0.0/PASS — the VW.1 failure, which second_order.py
+    # already refuses for the same reason.
+    bad = st.conn.execute(
+        "select count(*) from plan_check where value is null "
+        "and verdict in ('PASS','FAIL')").fetchone()[0]
+    check("P10 an unmeasurable check is NULL/'n/a', never 0.0/PASS",
+          bad == 0, f"{bad} violations")
+
+    # ── P11: THE ONE THAT MATTERS ───────────────────────────────────────
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "main.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+    # strip docstrings — a canary that fires on documentation trains you to
+    # loosen it (the 2026-08-07 lesson, and it recurred twice on 08-25).
+    hits = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "PlanEngine":
+            hits.append(node.lineno)
+        if isinstance(node, ast.Attribute) and node.attr in (
+                "_butterfly", "_participation", "_concentration"):
+            hits.append(node.lineno)
+    check("P11 main.py does NOT read the plan engine — OBSERVE-ONLY",
+          not hits, f"lines {hits}" if hits else "no references")
+
+    print()
+    if FAIL:
+        print(f"FAILED {len(FAIL)}: {', '.join(FAIL)}")
+        return 1
+    print("check_plans: all checks pass")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,285 @@
+# PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
+
+**v1.0 · 2026-08-25 · FIRST PASS, EXPLICITLY UNFITTED.**
+Operator: *"every strategy SPEC now needs a plan — use your best judgement on the
+1st pass. We will fit later. Allow for relaxed and tight entry conditions."*
+
+Every number in this document that is not read from an existing constant is a
+**STATED PRIOR**, not a measurement. They are marked `⟨PRIOR⟩`. Nothing here is
+validated against a tape.
+
+---
+
+## 0. WHY — the failure this exists to end
+
+**2026-08-25, TSLA.** Price ran 351.4 → 356.86 between roughly 11:35 and 13:00
+ET. Verified from `strategy_note`: `TrendCreditSpread` evaluated 182 times in
+that window and produced one signal; `TrendCS2nd` signalled on 207 of 218 looks
+and traded nothing. Verified from `main.py`: **only `ORBStrategy` ever calls
+`open_plan`.** The PLANS panel on that box therefore showed six ORB rows, all
+`EXPIRED / left_confirmed_state`, the newest at 10:38 — and nothing whatsoever
+about the largest directional move of the session.
+
+Operator: *"Right now it's looking like nothing was watching it & that's where
+my aggravation lies."*
+
+The old engine's flaw, in his words: *"it was watching EVERYTHING, the flaw was
+that it was circular logic, making it regressive and late."* A score computed
+per tick from data that already contains the move can only ever report the move
+after it happens.
+
+---
+
+## 1. THE GOVERNING RULE
+
+> **Evidence decides whether a plan is WRITTEN.
+> Price decides whether it FIRES.**
+
+The instant a score, label, or conviction is consulted at fire time, the loop is
+back. A plan's trigger is a **number fixed at declaration** and compared against
+the tape. Nothing more.
+
+**The anchor test — apply to every plan input:**
+*Would this number be the same if I asked ten minutes from now, absent a
+structural event?*
+
+| Admissible anchors (fixed) | Inadmissible (re-derived) |
+|---|---|
+| ORB high / low | a rolling N-bar high |
+| named levels (`levels` store) | "current support" |
+| pitchfork rails at a stamped index | a rail re-projected each tick |
+| session high / low | a moving average |
+| GEX pin | ADX / conviction / any score |
+| prior-day high / low / close | anything with `_now` in its name |
+
+Scores may appear ONLY in `justification` — the frozen evidence vector — and in
+the decision to declare. Never in the trigger.
+
+---
+
+## 2. THE PLAN RECORD
+
+`derived/plan_ledger.py` already carries `trigger_price`, the four strike
+fields, `underlying_at_decision`, `expected_move`, and `justification`
+(the frozen vector: price, adx, atm_iv, expected_move_iv, VRP, realised vol,
+charm, vanna, gex, session fraction, levels, fork rails).
+
+**FIELDS TO ADD:**
+
+| field | why |
+|---|---|
+| `invalidation_price` | the plan's own death line. Today the exit re-derives it. |
+| `expires_ts` | a plan with no expiry is a standing order nobody placed. |
+| `mode` | `tight` \| `relaxed` — see §5. Keeps the populations separable forever. |
+| `distance_to_trigger` | updated on transition only, never per tick. Makes "how close did we get" answerable. |
+| `arm_reason` | one line: what structure justified declaring. |
+
+**STATES:** `DECLARED → ARMED → TRIGGERED → FILLED` with terminal
+`EXPIRED` / `INVALIDATED` / `SUPERSEDED` / `WIPED_BY_RESTART`.
+
+`DECLARED` = structure exists, evidence gathered, trigger set.
+`ARMED` = still valid, still inside its window, trigger not yet crossed.
+The split matters because a plan can be declared and then fall out of its
+window without ever being wrong.
+
+---
+
+## 3. THE INVERSION — what each strategy asks per tick
+
+Not *"is this a breakout?"* but ***"what price, from here, would constitute
+one — and what would I sell or buy when it comes?"***
+
+Each strategy gains one method:
+
+```
+declare_plan(ctx) -> Plan | None
+```
+
+It runs on ticks where **no plan of its type stands**. It answers the forward
+question, prices the contract, stamps the evidence, and returns. Once a plan
+stands, the tick loop does one thing: compare price to `trigger_price`.
+
+---
+
+## 4. THE PLANS, ONE PER STRATEGY
+
+Each carries: **trigger** (fixed price), **invalidation** (fixed price),
+**instrument** (pre-selected contract), **window**, **declare-when**.
+
+### 4.1 ORB — `ORBStrategy` — 🔴 **LEAVE IT ALONE**
+Operator, 2026-08-25: *"leave orb alone. That one can't get encumbered with
+extra hurdles & it already pretty much plans."*
+**NO CHANGES. ORB IS THE MODEL, NOT A CANDIDATE.** It already declares a range
+at 09:35, fixes a trigger, names an invalidation, and fires on a price
+comparison — which is exactly why it has never been late, and why every other
+plan in this document is written in its shape. It opens plans today
+(`main.py` 1291/1353) and those calls stand unchanged.
+⚠️ The temptation to "formalise" it into the new interface is the hurdle he is
+refusing. A working thing does not get rewritten to match a document.
+Strike selection is a **later, separate** fine-tune and is out of scope here.
+
+### 4.2 RUNAWAY CONTINUATION — `RunawayContinuation` (DEBIT)
+- **declare when** ORB has broken and gone `runaway` (no retest)
+- **trigger** ⟨PRIOR⟩ close beyond `orb_break_price + 0.25 × ATR` — the
+  continuation confirming, not the break itself
+- **invalidation** close back below the ORB boundary
+- **instrument** the staged call/put at `CONT_TARGET_DELTA`
+- **window** break → `DEBIT_DIRECTIONAL_CUTOFF_ET` (11:30)
+
+### 4.3 TREND PARTICIPATION — `TrendCreditSpread` (CREDIT)
+**This is the one that failed on 2026-08-25 and the changes are the point.**
+- **declare when** 11:31, ORB range known, trend vote directional
+- **trigger** close beyond the ORB boundary (`orb_high` for a PCS)
+- **invalidation** close back through that boundary
+- **instrument** — 🔴 **CHANGED. THE STRIKE MUST BE ABLE TO FOLLOW THE MOVE.**
+  Today `_inside[-1]` pins the short strike inside the opening range for the
+  whole session, so as price advances the strike goes deeper OTM, the credit
+  collapses, and the trade refuses *the harder it rips.* Verified in source at
+  `strategy/trend_credit_spread.py` lines 341-352 and confirmed by the two
+  fires being the only two moments price sat near the boundary.
+  **NEW RULE: the floor is re-anchored per plan, not per session.**
+  A plan declares its short strike as the first strike at or below
+  `max(orb_high, session_low_since_break)` ⟨PRIOR⟩ — so a second plan declared
+  at 12:30 sits under the 12:30 structure, while the FIRST plan keeps the strike
+  it was born with. Plans do not move; new plans get new strikes.
+- **window** `TCS_START_ET` (11:31) → `TCS_ENTRY_END_ET` (14:00)
+- **re-declaration** ⟨PRIOR⟩ a new plan may be declared when price has advanced
+  ≥ 0.5 × ATR beyond the last plan's trigger. This is what "participate in a
+  move that keeps going" requires, and it is bounded so it cannot become the
+  CVX loop.
+
+### 4.4 SWEEP CREDIT SPREAD — `SweepCreditSpread`
+🔴 Carries the 2026-08-25 CVX finding, still open and NOT yet built.
+- **declare when** a named level is pierced AND a bar **closes** back on the
+  rejected side. Operator: *"a wick can be a pierce. But it takes a close to log
+  a rejection."* The plan's identity is `(pool, reclaim_bar_ts)`.
+- **trigger** the close itself — so the plan is declared and triggered by one
+  event, and **that event is consumed.** One plan per reclaim bar. Re-firing
+  requires a NEW closing bar. This is the operator's *"you tried once, you lost,
+  it should be gone"* falling out of the definition rather than bolted on.
+- **invalidation** close beyond the pierce extreme (acceptance)
+- **instrument** short strike beyond the pool, existing selector
+- ⟨PRIOR⟩ **pierce depth becomes a plan attribute**, not a pass/fail ceiling.
+  Operator: *"the depth of the pierce is what's going to discriminate on what
+  constitutes a pierce."* Recorded now, fitted later; a deep pierce may warrant
+  a wider stop or no plan at all.
+
+### 4.5 IRON CONDOR — `IronCondorStrategy`
+- **declare when** RANGING, both boundaries identified
+- **trigger** per side, price travels `CONDOR_TRIGGER_APPROACH` of the way from
+  `bb_middle` toward that short strike
+- **invalidation** close beyond the short strike
+- **one plan, two triggers.** This is what makes the second leg legible: the
+  plan stands with `leg2_pending`, so the PLANS panel shows a half-built condor
+  waiting rather than 406 silent refusals (verified on CRM today).
+
+### 4.6 GEX PIN BUTTERFLY — `GEXPinButterfly`
+- **declare when** a firm pin exists and price is away from it
+- **trigger** ⟨PRIOR⟩ price crosses within `0.5 × EM` of the pin, moving toward it
+- **invalidation** close beyond `1.5 × EM` from the pin
+- **window** `BUTTERFLY_ENTRY_START_ET` (12:00) → 14:00
+
+### 4.7 DAILY FORK — `DailyForkCreditSpread`
+- **declare when** a 1d fork is BUILT with containment
+- **trigger** price touches the projected tine (rail at the plan's stamped index —
+  **the rail is frozen at declaration**, never re-projected)
+- **invalidation** close beyond the tine by ⟨PRIOR⟩ `0.25 × ATR`
+
+### 4.8 CONDOR ROLL — `condor_roll`
+Management, not entry: a roll is a plan whose trigger is the tested short strike
+and whose instrument is the replacement leg. Declared when a leg is tested,
+not when it is breached.
+
+---
+
+## 5. TIGHT AND RELAXED
+
+`strategy/relaxed.py` already exists and is already loud
+(`relaxed_entry=1`, populations separable forever). Plans inherit it with one
+addition: **`mode` is stamped on the plan at DECLARATION and never changes.**
+
+- **TIGHT** — the specified trigger, unwidened.
+- **RELAXED** — `relaxed.widen()` may loosen the **declare-when** conditions and
+  the instrument constraints (credit floors, POP, distance).
+  🔴 **RELAXED MAY NEVER MOVE A TRIGGER OR AN INVALIDATION.** Those are
+  structural prices. Widening the evidence bar produces more plans; widening the
+  trigger produces a different trade wearing the same name — which is how the
+  relaxed population would silently contaminate the tight fit.
+
+A plan declared relaxed that fires is a relaxed trade, permanently.
+
+---
+
+## 6. THE TICK — AN ELIMINATION CASCADE, NOT A PRIORITY QUEUE
+
+Operator, 2026-08-25, and this is the architecture:
+
+> *"The primal question at every tick is 'are one of my available plans
+> executable from HERE' not 'would any strategy FIRE here' — that is a TRIGGER
+> not a PLAN. Every tick should be able to assign a binary to each available
+> plan until it gets invalidated somewhere in the chain until only one strategy
+> remains. Often that remaining strategy might be a GEX pin butterfly, other
+> times it might be leg 2 of a condor, followed by GEX pin butterfly."*
+
+**THIS REPLACES `if signal is None`.** Today dispatch is a priority chain: the
+first strategy to produce a signal wins the slot and everything behind it is
+never evaluated. That is why CRM's second condor leg re-signalled on 406
+consecutive ticks with nothing in any log, and why the shape of a tick is
+invisible after the fact.
+
+**THE NEW TICK:**
+
+1. Every standing plan is asked ONE question: **executable from here?** — a
+   binary, answered by comparing the tape to prices fixed at declaration.
+   Not a score. Not a ranking. Yes or no.
+2. Plans that answer NO are **eliminated with a reason**, and the reason is
+   recorded. A plan is not silently skipped; it drops out of the chain
+   somewhere, and where it dropped is the finding.
+3. **What survives is what trades.** The residual is not a fallback — it is the
+   correct read of a tape on which everything else has been ruled out.
+
+⚠️ **THE RESIDUAL IS MEANINGFUL, AND THIS IS THE PART THAT IS NOT OBVIOUS.**
+When the directional plans have all been eliminated, a GEX pin butterfly is not
+a consolation prize; it is the trade the tape is describing. The operator's own
+sequence — *"leg 2 of a condor, followed by GEX pin butterfly"* — is an
+ordering that FALLS OUT of what remains executable, not a hard-coded priority.
+Elimination is what produces it.
+
+⚠️ **AND THE ELIMINATION RECORD IS THE INSTRUMENT.** A tick that produces no
+trade currently produces one line: `STRATEGY: NO TRADE`. Under the cascade it
+produces a full account — six plans stood, five were eliminated, here is where
+each one dropped, and the survivor was declined for this reason. That is the
+visibility that was missing on TSLA today.
+
+**INVARIANT:** every elimination test is a comparison against a fixed price or
+a stamped structural fact. The moment a test re-derives a score, the cascade
+becomes the old confluence engine with new vocabulary.
+
+---
+
+## 6b. STALENESS AND CONCURRENCY — still open, operator's call
+
+Not settled by this pass, flagged rather than guessed:
+
+1. **Staleness.** A plan declared at 11:00 on 10:55 evidence may be stale by
+   11:40. Options: clock expiry ⟨PRIOR: 45 min⟩, structural expiry (the anchor
+   itself moves), or invalidation-only. **Re-scoring is not an option — it
+   reintroduces the loop.**
+2. **Concurrency.** How many plans may stand at once, and if two survive the
+   cascade on the same tick, what breaks the tie? Note the cascade makes this
+   rarer than the old chain did — most ticks eliminate down to one or zero —
+   but "two survivors" needs an answer before it happens live.
+
+---
+
+## 7. WHAT THIS BUYS
+
+The PLANS panel becomes the primary instrument: every standing intent, its
+trigger, its distance from firing, and the evidence that justified it —
+**including every plan that never fired.** Today that population is invisible;
+`strategy_note` records 182 evaluations and cannot say what any of them wanted.
+
+⚠️ **AND IT IS A MAJOR BUILD.** Operator acknowledged it up front: *"It will be
+a major build and it will likely set us back."* Eight strategies, a schema
+change, a dispatch rewrite, and the tick loop inverted from evaluate-and-fire to
+declare-then-compare.

@@ -44,6 +44,7 @@ def build_engines(symbol: str) -> List:
         from derived.notes import NotesEngine
         from derived.plan_ledger import PlanLedger
         from derived.character_engine import CharacterEngine
+        from derived.plans import PlanEngine
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("derived registry: engine import failed: %s", exc)
         return []
@@ -67,6 +68,14 @@ def build_engines(symbol: str) -> List:
         # ⚠️ CHARACTER IS A STATE WITH DURATION — it records
         # TRANSITIONS, not per-tick samples, and gates nothing.
         CharacterEngine(store, symbol),
+        # 🔴 r126 — FORWARD PLANS. Declares and PRICES what each setup would
+        # trade from here, logs one INFO line per plan per cycle, and records
+        # TAKE plans in plan_ledger. ⚠️ OBSERVE-ONLY: nothing in main.py reads
+        # it, so entry and exit behave exactly as they did before. Operator
+        # asked for visibility first — "better communication from the bots
+        # tomorrow about what they're seeing" — and the plan architecture
+        # proper (docs/PLAN_SPEC.md) is a far larger build.
+        PlanEngine(store, symbol, ledger=PlanLedger(store, symbol)),
     ]
 
 

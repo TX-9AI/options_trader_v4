@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-165 Python modules across 13 local packages.
+175 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -47,7 +47,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `utils/time_utils.py` | 30 | alert_manager.py, broker_reconcile.py, check_condor_spec.py, check_entry_gate.py |
 | `strategy/base_strategy.py` | 14 | check_entry_gate.py, check_orb_geometry.py, check_signal_kwargs.py, check_sweep_spread.py |
 | `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
-| `derived/base.py` | 12 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
+| `derived/base.py` | 13 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
 | `database/trade_logger.py` | 10 | check_condor_pairing.py, check_condor_stop_suppression.py, check_orb_resume.py, condor_roll.py |
 | `data/options_chain.py` | 9 | base_strategy.py, check_entry_gate.py, check_sweep_spread.py, daily_fork_credit_spread.py |
 | `data/tasty_client.py` | 9 | candle_feed.py, condor_roll.py, entry_engine.py, exit_engine.py |
@@ -232,7 +232,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `derived/base.py`
 - **calls:** (none)
-- **called by:** `derived/__init__.py`, `derived/character_engine.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/snapshot.py`, `derived/surface.py`, `main.py`, `tests/check_derived_layer.py`, `tests/check_engine_status.py`
+- **called by:** `derived/__init__.py`, `derived/character_engine.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/plans.py`, `derived/snapshot.py`, `derived/surface.py`, `main.py`, `tests/check_derived_layer.py`, `tests/check_engine_status.py`
 
 ### `derived/character_engine.py`
 - **calls:** `analysis/character.py`, `derived/base.py`
@@ -262,8 +262,12 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** `derived/registry.py`, `tests/check_audit_20260823.py`, `tests/check_missed_inert.py`
 
+### `derived/plans.py`
+- **calls:** `derived/base.py`
+- **called by:** `derived/registry.py`, `tests/check_plans.py`
+
 ### `derived/registry.py`
-- **calls:** `data/derived_store.py`, `derived/character_engine.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/plan_ledger.py`, `derived/snapshot.py`, `derived/surface.py`
+- **calls:** `data/derived_store.py`, `derived/character_engine.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/plan_ledger.py`, `derived/plans.py`, `derived/snapshot.py`, `derived/surface.py`
 - **called by:** `main.py`, `status.py`, `strategy/iron_condor_strategy.py`, `tests/check_derived_layer.py`
 
 ### `derived/snapshot.py`
@@ -442,6 +446,22 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `config.py`, `execution/exit_engine.py`
 - **called by:** (entry point)
 
+### `tests/butterfly_plan.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/cascade_harness.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/cascade_real.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/cascade_warehouse.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/chain_feasibility.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
@@ -550,6 +570,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `analysis/orb_engine.py`, `database/trade_logger.py`, `utils/time_utils.py`
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/check_plans.py`
+- **calls:** `derived/plans.py`
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/check_purge_pushed.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/s3_push.py`
 - **called by:** (nothing - orphan or leaf)
@@ -606,6 +630,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/gex_from_chains.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/magnitude_estimator.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
@@ -619,6 +647,14 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/pin_strength.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/priced_plan.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/r_gate.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
@@ -651,6 +687,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/test_candle_routing.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/tick_board.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 

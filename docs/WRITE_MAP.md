@@ -7,7 +7,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 ⚠️ **A table with no writer is an orphan. A table nobody reads is dead weight.** Both are visible here and in neither the schema nor the call graph alone.
 
-**25 tables.**
+**27 tables.**
 
 ## (unattributed)
 
@@ -26,8 +26,10 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `fork_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `indicator_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
+| `plan_check` | `derived/plans.py` | `derived/plans.py` (insert) | `tests/check_plans.py` |
 | `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `tests/check_audit_20260823.py`, `tests/check_missed_inert.py`, `tests/edge_scan.py` |
-| `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | — |
+| `plan_tick` | `derived/plans.py` | `derived/plans.py` (insert) | `tests/check_plans.py` |
+| `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | `derived/plans.py` |
 | `surface_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 
 ## feed_store.db
@@ -57,6 +59,6 @@ Regenerated in the land gate; a stale map fails `--check`.
 ## Flags
 
 - **No writer** (0): none
-- **No external reader** (16): `chain_subs_aux`, `character_axis_sample`, `character_ledger`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `fork_series`, `gate_disposition`, `indicator_series`, `last_trade`, `level_ledger`, `session_summary`, `strategy_note`, `surface_series`, `theo_series`, `underlying_series`
+- **No external reader** (15): `chain_subs_aux`, `character_axis_sample`, `character_ledger`, `circuit_breaker_events`, `exit_counterfactual`, `fire_snapshot`, `fork_series`, `gate_disposition`, `indicator_series`, `last_trade`, `level_ledger`, `session_summary`, `surface_series`, `theo_series`, `underlying_series`
 
 ⚠️ *No external reader* is not automatically a defect — a table written today for a study run in a month is exactly the point of the derived layer. It IS a defect when nobody ever intends to read it, and this list is where that question gets asked.
