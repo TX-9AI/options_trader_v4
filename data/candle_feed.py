@@ -1,5 +1,11 @@
 """
-data/candle_feed.py  v4.9
+data/candle_feed.py  v4.10
+v4.10 2026-08-25  r118 REVERT of r116's TheoPrice subscription. SPX lost its
+      whole per-contract subscription this morning at 13:27 UTC — greeks,
+      quotes, marks and theo frozen together while ticker events kept flowing —
+      and could not build a chain, so it evaluated nothing through the ORB
+      window. QQQ, identical code, narrower chain, was fine. The writer and the
+      table stay; only the subscribe is withdrawn.
 v4.9  2026-08-24  r116: TheoPrice moves to the PER-CONTRACT subscription beside
       Greeks/Quote. It was asked of the plain ticker, which has no publisher for
       it, so theo_series has been empty since the stream was added on 08-22 —
@@ -1348,10 +1354,9 @@ class CandleFeed:
                             self._chain_expiry or "(none)", expiry)
                 await streamer.unsubscribe_all(Greeks)
                 await streamer.unsubscribe_all(Quote)
-                try:
-                    await streamer.unsubscribe_all(TheoPrice)   # r116
-                except Exception:                               # noqa: BLE001
-                    pass
+                # r118 — nothing to unsubscribe; TheoPrice is no longer
+                # subscribed. Left as a comment so the next reader does not
+                # re-add an unsubscribe for a stream that has no subscription.
             self._chain_subscribed.clear()
             self._quotes_buf.clear()
             self._greeks_buf.clear()
@@ -1375,11 +1380,26 @@ class CandleFeed:
                 # option symbols, 0 on the ticker, with Greeks/Quote as
                 # controls. Wrapped alone so an entitlement gap costs THIS
                 # stream and not the chain marks everything trades on.
-                try:
-                    await streamer.subscribe(TheoPrice, chunk)
-                except Exception as exc:                        # noqa: BLE001
-                    logger.warning("TheoPrice subscribe failed for %d symbols: "
-                                   "%s — continuing without it", len(chunk), exc)
+                # 🔴 r118 — REVERTED, 2026-08-25 09:40 ET, MID-SESSION.
+                # r116 added TheoPrice here and it landed on the fleet last
+                # night. This morning SPX lost its ENTIRE per-contract
+                # subscription at 13:27 UTC — greeks, quotes, chain marks and
+                # theo all stopped at the SAME instant (age 688-698s) while
+                # ticker-level events kept arriving, so options_chain returned
+                # None every tick and SPX could not evaluate a single strategy
+                # during the ORB window. QQQ on identical code stayed healthy.
+                # ⚠️ THE ASYMMETRY IS WIDTH: SPX is 500 contracts (7 chunks),
+                # QQQ 372 (5). Adding a THIRD event type to each chunk is the
+                # only change, and SPX is where it first crossed whatever the
+                # limit is. The per-chunk try/except did NOT save it — the
+                # subscribe succeeded (theo had 5026 rows) and the connection
+                # degraded later, which is a failure mode a wrapper cannot see.
+                # ⚠️ THE COST OF KEEPING IT IS A TRADING DAY; the cost of
+                # dropping it is a stream NOTHING READS YET. Not a close call.
+                # theo_series and _on_theo stay — the writer is correct and the
+                # probe proved the symbol space. Re-enable only behind a
+                # per-symbol opt-in, tested on ONE narrow box, never fleet-wide
+                # on a session morning.
             self._chain_subscribed.update(new)
             logger.info("chain marks: subscribed %d new symbols (%d total, expiry %s)",
                         len(new), len(self._chain_subscribed), expiry)

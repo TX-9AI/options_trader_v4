@@ -259,6 +259,42 @@ class EntryEngine:
         if signal.is_orb:
             record["orb_range_high"] = signal.orb_range_high
             record["orb_range_low"]  = signal.orb_range_low
+            # ── r119 — THE SETUP'S GEOMETRY, MEASURED AT FIRE ──────────────
+            # Operator, 2026-08-25, watching TSLA and PLTR stop out structurally
+            # within five minutes: "the closer to the range boundary the
+            # impulsive candle (stop location) sits, the lower the risk & higher
+            # the R-value." Both ratios are knowable HERE and nowhere later —
+            # the ORB range is the one this fire confirmed against, and by the
+            # time a postmortem runs the engine has moved on.
+            # ⚠️ RECORDED, NOT GRADED. Operator: "observe first." Nothing reads
+            # these. They exist so the bands can be FITTED in a few weeks, and
+            # so the real question is answerable: do deep-break setups FAIL more
+            # often, or merely COST more when they fail? A gate answers the
+            # first; a size answers the second, and guessing picks wrong.
+            # ⚠️ WHY GRADING WOULD NOT HAVE WORKED ANYWAY: the operator's point
+            # that ORB survivors are "all structurally A unless we start grading
+            # how deep the impulsive candle sits inside the range" is visible in
+            # the data — PLTR 51 A-grades, TSLA 30, AVGO 29. The letter carries
+            # no information for this strategy today, so this ratio is not AN
+            # input to the grade, it is the ONLY discriminator ORB has left.
+            _u_entry = float(record.get("underlying_entry") or 0.0)
+            _u_stop  = float(record.get("underlying_stop")   or 0.0)
+            _u_tgt   = float(record.get("underlying_target") or 0.0)
+            _width   = abs(float(signal.orb_range_high or 0.0)
+                           - float(signal.orb_range_low or 0.0))
+            _risk    = abs(_u_entry - _u_stop)
+            # Left NULL when a leg is missing — see the schema note. A ratio of
+            # zero is impossible; a MISSING one is ordinary, and the two must
+            # stay distinguishable.
+            if _width > 0 and _risk > 0:
+                record["stop_width_pct"] = round(_risk / _width, 4)
+            if _risk > 0 and _u_tgt and _u_entry:
+                record["planned_r"] = round(abs(_u_tgt - _u_entry) / _risk, 3)
+            logger.info("[orb-geom] stop_width=%s of range  planned_r=%s",
+                        f"{record.get('stop_width_pct'):.1%}"
+                        if record.get("stop_width_pct") is not None else "n/a",
+                        f"{record.get('planned_r'):.2f}"
+                        if record.get("planned_r") is not None else "n/a")
 
         self._trade_logger.log_entry(record)
 

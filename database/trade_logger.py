@@ -254,6 +254,31 @@ class TradeLogger:
         underlying_target REAL,
         orb_range_high    REAL DEFAULT 0.0,
         orb_range_low     REAL DEFAULT 0.0,
+        -- ── r119 (2026-08-25): THE ORB SETUP'S GEOMETRY, RECORDED. ─────────
+        -- Operator: "the closer to the range boundary the impulsive candle
+        -- (stop location) sits, the lower the risk & higher the R-value."
+        -- ⚠️ RECORDED, NOT GRADED. Operator: "observe first." Nothing reads
+        -- these; no gate, no size, no score. They exist so that in a few weeks
+        -- the bands can be FITTED rather than guessed, and so the question
+        -- "do deep-break setups FAIL more, or merely COST more?" can be
+        -- answered — those have different answers (a gate vs a size).
+        -- ⚠️ NULL, NOT 0.0, and for the reason gap_pct is NULL above: a ratio
+        -- of exactly zero is impossible here, but a MISSING one is common
+        -- (non-ORB trades, or an ORB fire whose range never established), and
+        -- a numeric default makes "not applicable" indistinguishable from
+        -- "measured". That confusion is what hollowed out flat_angle_deg.
+        --
+        -- stop_width_pct  = |entry - stop| / ORB width
+        --     How deep inside the range the invalidation sits. The operator's
+        --     depth measure: small = stop hugs the boundary = cheap to be
+        --     wrong; large = the impulsive candle ran far and the stop is
+        --     structurally distant.
+        -- planned_r       = |target - entry| / |entry - stop|
+        --     The R the setup OFFERED at fire time. This is the report card's
+        --     numerator: realised R can then be compared against what was
+        --     available, per setup, rather than against a house average.
+        stop_width_pct    REAL,
+        planned_r         REAL,
         short_strike      REAL DEFAULT 0.0,
         long_strike       REAL DEFAULT 0.0,
         credit_received   REAL DEFAULT 0.0,
@@ -431,6 +456,9 @@ class TradeLogger:
             # mutation of stop_premium (see update_trail_stop's v3.1 lesson).
             ("stop_suppressed_ts", "TEXT DEFAULT ''"),
             ("stop_suppressed_by", "TEXT DEFAULT ''"),
+            # r119 — ORB setup geometry. NULL, never 0.0: see the schema note.
+            ("stop_width_pct",    "REAL"),
+            ("planned_r",         "REAL"),
         ]
         for col, definition in _MIGRATION_ADDS:
             try:

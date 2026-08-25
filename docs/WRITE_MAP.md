@@ -52,7 +52,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | table | created by | written by | read by |
 |---|---|---|---|
 | `circuit_breaker_events` | `database/trade_logger.py` | `database/trade_logger.py` (insert) | — |
-| `trades` | `database/trade_logger.py`, `tests/check_condor_stop_suppression.py` | `database/trade_logger.py` (insert/update), `tests/check_condor_pairing.py` (insert) | `derived/counterfactual.py`, `notifications/alert_manager.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py` |
+| `trades` | `database/trade_logger.py`, `tests/check_condor_stop_suppression.py` | `database/trade_logger.py` (insert/update), `tests/check_condor_pairing.py` (insert), `tests/check_orb_geometry.py` (insert) | `derived/counterfactual.py`, `notifications/alert_manager.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py` |
 
 ## Flags
 
