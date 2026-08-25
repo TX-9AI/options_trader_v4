@@ -321,6 +321,165 @@ class PlanEngine(DerivedEngine):
             "credit": credit, "risk": risk, "r": r,
         }
 
+    def _sweep(self, ctx: dict) -> Optional[dict]:
+        """The credit spread sold beyond a swept-and-RECLAIMED named level.
+
+        🔴 THIS PLAN EXISTS BECAUSE OF CVX, 2026-08-25. The strategy sold the
+        SAME 200/195 put spread at least a dozen times — entry, stop, re-entry
+        inside the same MINUTE at 13:30, 13:31, 13:32 — for about -$400 on one
+        symbol. Every foundational gate passed on every tick because they are
+        properties of the SWEEP EVENT, and the event does not change.
+
+        ⚠️ THE ROOT CAUSE IS A CATEGORY ERROR, and the operator named it:
+        *"a wick can be a pierce. But it takes a CLOSE to log a rejection."*
+        The strategy reads `sweep.reclaimed`, a LATCHED FLAG on a persisted
+        object that stays true for as long as the sweep lives. His thesis is a
+        BAR EVENT, true exactly once. Three reclaim candles cannot exist in
+        three consecutive minutes for one level — so those were one reclaim,
+        counted every tick for hours. The same failure was recorded on
+        2026-08-11 about the predecessor: "`liq_map.recent_sweep` PERSISTS once
+        set". It is also why AGE has always been the only binding damper:
+        nothing else ever goes false.
+
+        ⇒ **THE PLAN'S IDENTITY IS (pool_price, reclaim_bar).** One plan per
+        reclaim bar. Once that plan produces a position the event is SPENT, and
+        re-firing requires a NEW closing bar on the rejected side. The
+        one-attempt rule falls out of the definition rather than being bolted
+        on as a cooldown — operator: *"It doesn't need a cooldown it needs that
+        level taken out. You tried once you lost it should be gone now."*
+
+        ⚠️ AND HE RAISED THE COUNTER-ARGUMENT HIMSELF, WHICH IS NOT SETTLED:
+        *"if it went right back to it minutes or hours later… that only
+        strengthens the level then because it defended many times."* Genuinely
+        open. `level_hold_rate` is what will answer it: a level that is truly
+        defended shows holds/touches near 1.0 (TSLA's London LOW ran 70/71 =
+        98.6%), while one that is merely being tested repeatedly decays
+        (London HIGH ran 188 holds / 135 breaches = 58%). Recording both is how
+        the fit decides rather than either of us.
+        """
+        liq = ctx.get("liq_map")
+        spot = float(ctx.get("price") or 0)
+        chain = ctx.get("chain")
+        if liq is None or chain is None or spot <= 0:
+            return None
+        sweep = getattr(liq, "recent_sweep", None)
+        if sweep is None:
+            return {"strategy": "SweepCreditSpread", "verdict": "NO PLAN",
+                    "checks": {}, "why": "no sweep on the map"}
+        name = getattr(sweep, "swept_named_level", "") or ""
+        if not name:
+            return {"strategy": "SweepCreditSpread", "verdict": "NO PLAN",
+                    "checks": {}, "why": "sweep is not on a NAMED level"}
+
+        pool = float(getattr(sweep, "pool_price", 0) or 0)
+        extreme = float(getattr(sweep, "sweep_price", 0) or 0)
+        kind = str(getattr(sweep, "kind", ""))
+        is_low = "low" in kind
+        age = int(getattr(liq, "sweep_age_bars", 999) or 999)
+        invalid = bool(getattr(liq, "sweep_invalidated", False))
+        # ⚠️ DEPTH AS A FRACTION OF THE LEVEL, not dollars — comparable across
+        # symbols, which a dollar figure is not.
+        depth = (abs(extreme - pool) / pool * 100.0) if pool else None
+
+        # ── the hold rate, from the level book the bot itself writes ──────
+        hold = holds = touches = None
+        try:
+            from analysis.liquidity_ledger import get_ledger
+            led = get_ledger(self.symbol)
+            for lv in (getattr(led, "levels", []) or []):
+                if abs(float(lv.price) - pool) < 0.01:
+                    touches = int(getattr(lv, "touches", 0) or 0)
+                    holds = int(getattr(lv, "holds", 0) or 0)
+                    hold = (holds / touches) if touches else None
+                    break
+        except Exception as exc:                                # noqa: BLE001
+            logger.debug("[plans] level book unreachable: %s", exc)
+
+        # ── the structure: sell beyond the pool ──────────────────────────
+        side = "P" if is_low else "C"
+        contracts = (getattr(chain, "puts", []) if is_low
+                     else getattr(chain, "calls", [])) or []
+        strikes = sorted({float(getattr(c, "strike", 0) or 0) for c in contracts})
+        if is_low:
+            cands = [k for k in strikes if k <= pool]
+            sk = cands[-1] if cands else None
+        else:
+            cands = [k for k in strikes if k >= pool]
+            sk = cands[0] if cands else None
+        if sk is None:
+            return {"strategy": "SweepCreditSpread", "verdict": "NO PLAN",
+                    "checks": {}, "why": f"no strike beyond the pool {pool:.2f}"}
+        by_k = {float(getattr(c, "strike", 0) or 0): c for c in contracts}
+        lk = sk - 5 if is_low else sk + 5
+        sp, lp = by_k.get(sk), by_k.get(lk)
+        credit = risk = r = None
+        if sp is not None and lp is not None:
+            try:
+                credit = round(float(sp.bid) - float(lp.ask), 2)
+                risk = round(5.0 - credit, 2)
+                r = round(credit / risk, 2) if risk > 0 else None
+            except Exception:                                   # noqa: BLE001
+                credit = risk = r = None
+
+        # ── EVENT IDENTITY. This is the whole fix. ───────────────────────
+        reclaim_bar = getattr(sweep, "reclaim_bar_ts", None) or age
+        key = f"SweepCreditSpread:{pool:.2f}:{reclaim_bar}"
+        spent = key in self._declared
+
+        why, ok = [], True
+        if spent:
+            ok = False
+            why.append(f"event SPENT — {name} @{pool:.2f} reclaim already "
+                       f"produced a plan; a new attempt needs a NEW closing bar")
+        if invalid:
+            ok = False
+            why.append(f"ACCEPTED through {pool:.2f} — that is a breakout, "
+                       f"not a sweep")
+        if hold is not None and hold < 0.75:
+            ok = False
+            why.append(f"{name} hold rate {hold*100:.0f}% on {touches} touches "
+                       f"— the level is being GIVEN UP, not defended")
+        if age > 8:
+            ok = False
+            why.append(f"reclaim is {age} bars old (max 8)")
+        if r is not None and r < PLAN_R_FLOOR:
+            ok = False
+            why.append(f"R {r:.2f} below {PLAN_R_FLOOR:.2f} — TARGET {sk:.2f} "
+                       f"(short strike expiring worthless) pays ${credit:.2f}; "
+                       f"STOP {extreme:.2f} (a close beyond the sweep extreme) "
+                       f"risks ${risk:.2f}")
+        checks = {
+            "level_hold_rate": ((hold, "PASS" if hold >= 0.75 else "FAIL")
+                                if hold is not None else None),
+            "acceptance":      (1.0 if invalid else 0.0,
+                                "FAIL" if invalid else "PASS"),
+            "reclaim_age":     (float(age), "PASS" if age <= 8 else "FAIL"),
+            "r":               ((r, "PASS" if r >= PLAN_R_FLOOR else "FAIL")
+                                if r is not None else None),
+            "event_spent":     (1.0 if spent else 0.0,
+                                "FAIL" if spent else "PASS"),
+            # RECORDED ONLY — gates nothing until the fit says what depth means
+            "pierce_depth":    ((depth, "n/a") if depth is not None else None),
+        }
+        return {
+            "strategy": "SweepCreditSpread",
+            "direction": "low_sweep" if is_low else "high_sweep",
+            "checks": checks,
+            "trigger_price": pool,
+            "invalidation": extreme,
+            "short_put_strike": sk if is_low else None,
+            "long_put_strike": lk if is_low else None,
+            "short_strike": None if is_low else sk,
+            "long_strike": None if is_low else lk,
+            "underlying_at_decision": spot,
+            "credit": credit, "risk": risk, "r": r,
+            "identity": key,
+            "verdict": "TAKE" if ok else "DECLINE",
+            "why": "; ".join(why) if why else
+                   (f"{name} @{pool:.2f} swept to {extreme:.2f} and reclaimed, "
+                    f"hold {(hold or 0)*100:.0f}%, {age} bars old, R {r:.2f}"),
+        }
+
     # ── the tables ──────────────────────────────────────────────────────
     # 🔴 r126b — TWO TABLES, AND THE SPLIT IS THE WHOLE DESIGN.
     #
@@ -361,6 +520,16 @@ class PlanEngine(DerivedEngine):
         "GEXPinButterfly":    ("net_gamma", "pin_conc", "pin_share",
                                "reach_em", "r", "charm_raw", "charm_corrected"),
         "TrendParticipation": ("r", "credit", "risk", "strike_inside_range"),
+        # 🔴 r127 — SWEEP. Six kill variables, and `level_hold_rate` is the
+        # only validator in the system so far that MOVES MEANINGFULLY WITHIN A
+        # SESSION: TSLA's London High read 93.3% at 11:31 and 58% by the close
+        # (measured from raw/liquidity_ledger, 75 snapshots). Everything else
+        # we have is near-constant intraday. `pierce_depth` is RECORDED ONLY —
+        # operator, 2026-08-25: "the depth of the pierce is what's going to
+        # discriminate on what constitutes a pierce" — fitted later, gating
+        # nothing now.
+        "SweepCreditSpread":  ("level_hold_rate", "acceptance", "reclaim_age",
+                               "r", "event_spent", "pierce_depth"),
     }
 
     def _ensure(self):
@@ -452,7 +621,7 @@ class PlanEngine(DerivedEngine):
     # ── the board ───────────────────────────────────────────────────────
     def derive(self, ctx: dict) -> int:
         plans = []
-        for fn in (self._butterfly, self._participation):
+        for fn in (self._butterfly, self._participation, self._sweep):
             try:
                 p = fn(ctx)
             except Exception as exc:                            # noqa: BLE001
@@ -495,7 +664,12 @@ class PlanEngine(DerivedEngine):
             for p in plans:
                 if p.get("verdict") != "TAKE":
                     continue
-                key = f"{p['strategy']}:{p.get('trigger_price')}"
+                # ⚠️ A PLAN THAT DECLARES ITS OWN IDENTITY OWNS IT. The sweep
+                # keys on (pool, reclaim bar) so a NEW reclaim is a NEW plan
+                # while the SAME reclaim can never re-declare — that is the
+                # CVX fix, and a generic strategy:trigger key would not
+                # express it (the pool price is identical across re-fires).
+                key = p.get("identity") or f"{p['strategy']}:{p.get('trigger_price')}"
                 if key in self._declared:
                     continue        # one plan per trigger — never a re-fire loop
                 pid = self._ledger.open_plan(

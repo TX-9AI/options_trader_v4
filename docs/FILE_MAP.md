@@ -96,7 +96,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/liquidity_ledger.py`
 - **calls:** (none)
-- **called by:** `main.py`
+- **called by:** `derived/plans.py`, `main.py`
 
 ### `analysis/liquidity_mapper.py`
 - **calls:** `config.py`, `utils/math_utils.py`
@@ -263,7 +263,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `derived/registry.py`, `tests/check_audit_20260823.py`, `tests/check_missed_inert.py`
 
 ### `derived/plans.py`
-- **calls:** `derived/base.py`
+- **calls:** `analysis/liquidity_ledger.py`, `derived/base.py`
 - **called by:** `derived/registry.py`, `tests/check_plans.py`
 
 ### `derived/registry.py`

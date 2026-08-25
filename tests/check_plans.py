@@ -76,6 +76,43 @@ def main():
         check("P6 a decline names TARGET and STOP with numbers",
               "TARGET" in w and "STOP" in w, w[:70])
 
+    # ── SWEEP: the CVX fix, as assertions ───────────────────────────────
+    class _Sw:
+        pool_price = 200.33; sweep_price = 200.29; kind = "low_sweep"
+        swept_named_level = "London Low (R1)"; reclaimed = True
+    class _Liq:
+        recent_sweep = _Sw(); sweep_age_bars = 6; sweep_invalidated = False
+
+    sputs = [_C(k, max(.05, 1.6-(200-k)*.18), max(.10, 1.7-(200-k)*.18))
+             for k in range(190, 206, 5)]
+    sctx = {"price": 201.2, "chain": _Chain([], sputs), "liq_map": _Liq(),
+            "orb_high": 0, "orb_low": 0, "session_fraction_remaining": 0.5}
+    sw = e._sweep(sctx)
+    check("S1 the sweep plan prices a strike beyond the pool",
+          sw and sw.get("credit") is not None, f"credit={sw.get('credit')}")
+
+    # ⚠️ THE R GATE ALONE REFUSES TODAY'S CVX TRADE. Twelve of these sold at
+    # R 0.19 needs an 84% win rate to break even; every one stopped out.
+    check("S2 CVX's actual shape DECLINES on R",
+          sw.get("verdict") == "DECLINE" and (sw.get("r") or 9) < 1.0,
+          f"R={sw.get('r')}")
+
+    # ⚠️ IDENTITY IS (pool, reclaim bar) — NOT (strategy, trigger). The pool
+    # price is IDENTICAL across re-fires, so a generic key cannot express the
+    # one-attempt rule. This is the CVX fix and it must not regress.
+    check("S3 the plan's identity keys on the RECLAIM BAR, not just the pool",
+          "200.33" in (sw.get("identity") or "") and
+          (sw.get("identity") or "").count(":") >= 2, sw.get("identity"))
+
+    # ⚠️ AN ABSENT LEVEL BOOK IS 'n/a', NEVER a passing 0.0.
+    check("S4 an unreachable level book reads absent, not zero",
+          sw["checks"].get("level_hold_rate") is None, "hold rate absent")
+
+    check("S5 pierce depth is RECORDED and gates nothing",
+          sw["checks"].get("pierce_depth") is not None and
+          sw["checks"]["pierce_depth"][1] == "n/a",
+          str(sw["checks"].get("pierce_depth")))
+
     # ── P7: THE TABLES — spine + long-format checks ─────────────────────
     import sqlite3, time as _t
 
