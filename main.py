@@ -2251,8 +2251,32 @@ def _can_open_credit_spread(side: str,
     the call falls through to True after the type check.
     """
     sides = _open_credit_sides()
-    if side in sides or len(sides) >= 2:
-        return False   # Rule 1 + Rule 3
+    # ── 🔴 r124 — SAY WHICH STATE WE ARE IN, AND SAY IT AT INFO ────────────
+    # These two refusals were SILENT, and on 2026-08-25 that cost five queries
+    # to explain one afternoon: CRM logged CondorLeg2nd signalling on 406
+    # CONSECUTIVE TICKS with nothing in any log, because a PUT was open and the
+    # second-leg signal was also a PUT. Rule 3 refused all 406 without a word.
+    # The condor's pairing refusal is the most consequential decision in this
+    # path — it is the difference between a lone vertical and a structure — and
+    # it was the only one that left no trace.
+    # ⚠️ PHRASED THE WAY THE OPERATOR ASKED FOR IT, 2026-08-25: state what is
+    # OPEN and what that BLOCKS, rather than naming a rule number. "PCS open —
+    # only a CCS can pair; another PCS is blocked" is readable at 2am from a
+    # phone; "Rule 3" requires opening this file.
+    # ⚠️ BOTH-SIDES FIRST. `side in sides` is true in the complete-structure
+    # case too, so testing it first reports "PCS open" on a finished condor —
+    # a true sentence that describes the wrong situation.
+    if len(sides) >= 2:
+        logger.info("Credit pairing BLOCKED: both sides already open "
+                    "(PCS + CCS) — the structure is complete, no third leg")
+        return False
+    if side in sides:
+        _open = "PCS" if "put" in sides else "CCS"
+        _want = "PCS" if side == "put" else "CCS"
+        logger.info("Credit pairing BLOCKED: %s open — only a %s can pair with "
+                    "it; another %s is refused (never two of a side)",
+                    _open, "CCS" if _open == "PCS" else "PCS", _want)
+        return False
 
     # First leg (nothing open yet) — type check is all we need.
     if not sides or new_signal is None or current_price <= 0:
