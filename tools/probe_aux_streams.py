@@ -108,9 +108,13 @@ async def main() -> None:
                 elif name == "Underlying":
                     und_syms.add(sym)
 
-        loop = asyncio.get_event_loop()
-        end = loop.time() + SECONDS
-        while loop.time() < end:
+        # ⚠️ A MONOTONIC CLOCK, NOT THE LOOP'S. The boxes run PYTHON 3.14,
+        # where asking asyncio for the running loop the deprecated way RAISES
+        # rather than warning — the probe died on line 111 before it listened
+        # to anything. time.monotonic() needs no loop at all.
+        import time as _t
+        end = _t.monotonic() + SECONDS
+        while _t.monotonic() < end:
             await asyncio.sleep(0.5)
             for ev, name in ((Trade, "Trade"), (Greeks, "Greeks"),
                              (Quote, "Quote"), (Underlying, "Underlying"),
