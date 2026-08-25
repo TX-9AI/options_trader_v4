@@ -1444,7 +1444,14 @@ NOTIFY_ON_CIRCUIT_BREAK     = True
 # ─── DATABASE & LOGGING ───────────────────────────────────────────────────────
 
 DB_PATH                     = os.path.expanduser("~/options-trader/trades.db")
-LOG_LEVEL                   = "INFO"
+# 🔴 r112 — ENV-OVERRIDABLE, AND THE FLAG BEATS BOTH. This was a bare literal,
+# so the only way to get DEBUG was to EDIT A TRACKED FILE on the box — and the
+# hotfix launcher runs `git checkout -- config.py` before every pull, which
+# reverts it. A setting that a bake silently undoes is a setting nobody can
+# rely on. `data/DEBUG_LOG` (devtools item 69) is read LIVE by main and wins
+# over this, so the level can be changed on a running fleet with no restart
+# and no edit to anything git tracks.
+LOG_LEVEL                   = os.environ.get("OT_LOG_LEVEL", "INFO").upper()
 LOG_FILE                    = os.path.expanduser("~/options-trader/bot.log")
 LOG_ROTATION_MB             = 50
 

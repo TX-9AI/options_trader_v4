@@ -1,5 +1,9 @@
 """
-main.py  v4.14
+main.py  v4.15
+v4.15 2026-08-24  r112: DEBUG is a LIVE FLAG (data/DEBUG_LOG, devtools item 69),
+      applied at import and on every tick — so it overrides however a box came
+      to be in DEBUG, and removing it genuinely restores LOG_LEVEL. No restart,
+      survives a bake, nothing git-tracked to edit.
 v4.14 2026-08-24  r108: the pre-open rehearsal has a GO-RED TOGGLE (devtools
       item 68, mirroring the feed-maintenance window at 67). data/REHEARSAL_OFF
       on the box, read LIVE every pass, survives a bake. Inverted sense — the
@@ -757,7 +761,50 @@ def _setup_logging():
     root.setLevel(level)
 
 
+# ── r112 — DEBUG IS A LIVE FLAG, NOT A RESTART ───────────────────────────────
+# `data/DEBUG_LOG` on the box, read every tick like the rehearsal flag: no
+# restart, survives a bake, and it OVERRIDES config.LOG_LEVEL rather than
+# competing with it. Its presence means DEBUG; its absence means whatever
+# LOG_LEVEL says.
+# ⚠️ DEBUG IS NOT FREE. The 2026-08-24 logs were ~300k lines a box, most of it
+# raw DXFeed payloads — a single Greeks frame is thousands of characters, and
+# it buries exactly the decision lines a postmortem needs. That is the cost the
+# toggle exists to let you pay deliberately and then stop paying.
+_DEBUG_FLAG = os.path.join(os.path.dirname(LOG_FILE), "data", "DEBUG_LOG")
+_debug_state = {"on": None}
+
+
+def _apply_log_level() -> None:
+    """Set the root level from the flag. Cheap (one stat), so it runs per tick;
+    announces only on a CHANGE, at the level being left, so the transition is
+    visible in whichever log you are reading."""
+    try:
+        want_debug = os.path.exists(_DEBUG_FLAG)
+    except Exception:                                          # noqa: BLE001
+        return
+    if want_debug == _debug_state["on"]:
+        return
+    first = _debug_state["on"] is None
+    _debug_state["on"] = want_debug
+    root = logging.getLogger()
+    # ⚠️ THE FIRST PASS ALWAYS APPLIES, AND THAT IS THE POINT. Whatever put this
+    # box in DEBUG — a systemd Environment=, an edited config, a library that
+    # called basicConfig — the level is SET here at import and again every tick,
+    # so removing the flag genuinely restores LOG_LEVEL rather than hoping
+    # nothing else got there first. The operator did not remember how the fleet
+    # was put in DEBUG; this does not require anyone to.
+    if want_debug:
+        root.setLevel(logging.DEBUG)
+        root.info("[log] DEBUG ENABLED by %s — verbose until the flag is "
+                  "removed (devtools item 69)", _DEBUG_FLAG)
+    else:
+        if not first:
+            root.info("[log] DEBUG disabled — back to %s", LOG_LEVEL)
+        root.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+
+
 _setup_logging()
+_apply_log_level()
 logger = logging.getLogger(__name__)
 
 from utils.time_utils import (
@@ -3289,6 +3336,7 @@ def main_loop(state: BotState):
         state.tick_count += 1
 
         try:
+            _apply_log_level()      # r112 — one stat; DEBUG flips with no restart
             # ── OUTSIDE RTH: OBSERVE, DO NOT TRADE ─────────────────────────
             # 🔴 v4.7, 2026-08-24 — TRADING AND OBSERVATION WERE THE SAME GATE.
             # Operator: "TRADING can only occur during RTH, the feed should be

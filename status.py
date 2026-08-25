@@ -1,5 +1,12 @@
 """
-status.py  v4.1
+status.py  v4.2
+v4.2  2026-08-24  r111: the PRE-OPEN REHEARSAL state is on the status board, RED
+      with a flag emoji while it is running. The box reads its OWN flag off its
+      OWN disk — three revisions were spent on a control-side marker standing in
+      for this fact, and it disagreed with the boxes the first time it mattered.
+      ANSI is emitted unconditionally: this output is read THROUGH `fleet.py
+      run`, so stdout is a pipe, and an isatty gate would strip the colour in
+      exactly the place the operator reads it.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -312,6 +319,59 @@ def get_session_summary():
         return None
 
 
+_RED = "\033[1;31m"
+_RST = "\033[0m"
+
+
+def _rehearsal_line() -> str:
+    """r111 — the pre-open rehearsal's state, read from THIS box's own flag.
+
+    ON  (flag absent)  -> RED, with a flag emoji. The trading path runs outside
+                          RTH against live inputs. It cannot place — entries_open()
+                          requires is_rth() AND is_orb_complete(), in paper and
+                          in live alike — but it is a mode that is running, and
+                          a running mode should be visible.
+    OFF (flag present) -> plain. The trading path is dormant until 09:30.
+
+    ⚠️ FAILS TOWARD SAYING "ON". An unreadable path reports the rehearsal as
+    running, because the flag's ABSENCE is what enables it: if we cannot read
+    the disk we cannot claim the thing is disabled, and the honest default is
+    the louder one.
+    """
+    try:
+        _off = os.path.exists(os.path.join(INSTALL_DIR, "data", "REHEARSAL_OFF"))
+    except Exception:                                          # noqa: BLE001
+        _off = False
+    if _off:
+        return "\U0001F4A4 Rehearsal:    OFF (trading path dormant until 09:30)"
+    return (f"{_RED}\U0001F6A9 Rehearsal:    ON - the trading path runs outside "
+            f"RTH (places nothing){_RST}")
+
+
+def _log_level_line() -> str:
+    """r112 — the EFFECTIVE log level, in caps, red while it is DEBUG.
+
+    ⚠️ THE FLAG WINS, AND THAT IS WHAT MAKES THIS TRUTHFUL. main.py applies
+    `data/DEBUG_LOG` over config.LOG_LEVEL on every tick, so reading the config
+    constant alone would report INFO on a box that is writing DEBUG. The flag is
+    checked first, exactly as the bot checks it.
+    ⚠️ RED BECAUSE IT IS A COST, NOT A FAULT. DEBUG buries the decision lines a
+    postmortem needs under raw feed payloads — 2026-08-24 ran ~300k lines a box.
+    It is a mode you choose and should be reminded you are still in.
+    """
+    try:
+        if os.path.exists(os.path.join(INSTALL_DIR, "data", "DEBUG_LOG")):
+            return (f"{_RED}\U0001F41E Log level:    DEBUG - verbose, and it "
+                    f"buries the decision lines{_RST}")
+    except Exception:                                          # noqa: BLE001
+        pass
+    try:
+        from config import LOG_LEVEL as _LL
+    except Exception:                                          # noqa: BLE001
+        _LL = "INFO"
+    return f"\U0001F41E Log level:    {str(_LL).upper()}"
+
+
 def main():
     print()
     sep("\u2550")
@@ -332,6 +392,22 @@ def main():
     except Exception:
         _risk_disp = RISK_PER_TRADE
     print(f"  \U0001F4B5 Risk:         ${_risk_disp}")
+    # ── 🔴 r111 — THE REHEARSAL SAYS SO HERE, IN RED ─────────────────────────
+    # Operator, 2026-08-24: "the same problem I originally pointed out was that
+    # I'm going to forget about it in 3 weeks." A devtools row cannot solve that
+    # — you have to remember to go look, which is the same problem. status.py
+    # is read constantly and per box, so the state is re-asserted in front of
+    # the operator as a side effect of ordinary work rather than as an errand.
+    # ⚠️ THE BOX IS THE ONLY HONEST REPORTER. It reads its OWN flag off its OWN
+    # disk. Three revisions were spent on a control-side marker that stood in
+    # for this fact and disagreed with it the first time it mattered.
+    # ⚠️ ANSI IS EMITTED UNCONDITIONALLY — NO isatty GATE, DELIBERATELY. This
+    # output is normally read THROUGH `fleet.py run`, which captures stdout, so
+    # stdout is a PIPE and not a terminal. A conventional `if sys.stdout.isatty()`
+    # would strip the colour in exactly the place the operator reads it and
+    # leave it only when running on the box by hand — precisely backwards.
+    print(f"  {_rehearsal_line()}")
+    print(f"  {_log_level_line()}")
     # ── 🔴 r68 — MANIFOLD ROLLUP. One bulb; the board is tools/manifold_health.py
     # ⚠️ THIS IS THE LINE THAT WOULD HAVE CAUGHT 2026-08-21. The intraday tape
     # was dead from 09:30, the blind latch paged ONCE so the silence afterwards
