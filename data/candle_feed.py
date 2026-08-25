@@ -1,5 +1,15 @@
 """
-data/candle_feed.py  v4.8
+data/candle_feed.py  v4.9
+v4.9  2026-08-24  r116: TheoPrice moves to the PER-CONTRACT subscription beside
+      Greeks/Quote. It was asked of the plain ticker, which has no publisher for
+      it, so theo_series has been empty since the stream was added on 08-22 —
+      proven on QQQ by tools/probe_aux_streams.py (12 events on 12 option
+      symbols, 0 on the ticker, Greeks/Quote as controls). _on_theo now keeps
+      the FULL streamer symbol: _base_symbol collapsed every contract to "QQQ"
+      and theo_series is keyed (symbol, ts_epoch), so ~250 strikes would have
+      overwritten each other and the table would have looked populated while
+      holding one arbitrary contract. Underlying stays on the ticker — that IS
+      its symbol space; retest during RTH before calling it uncarried.
 v4.8  2026-08-23  AUDIT F3: the rescue tested for ANY 5m bar at or after
     09:30, not for THE 09:30 bar. A feed that came up late (first bar
     09:45) passed the check, the opening bar stayed missing, and
@@ -1305,7 +1315,15 @@ class CandleFeed:
             n(getattr(u, "put_call_ratio", None))))
 
     def _on_theo(self, tp):
-        sym = _base_symbol(getattr(tp, "event_symbol", "") or "")
+        # 🔴 r116 — THE FULL STREAMER SYMBOL, NOT THE BASE. TheoPrice is a
+        # PER-CONTRACT analytic: `.QQQ260825C495`, `.QQQ260825C500`, ... and
+        # `theo_series` is keyed PRIMARY KEY (symbol, ts_epoch). Collapsing to
+        # "QQQ" via _base_symbol would land every contract on the SAME key at
+        # the same second, so ~250 strikes would overwrite one another and the
+        # table would look populated while holding one arbitrary contract.
+        # That is worse than the empty table it replaces: an empty table is
+        # visibly empty, and this would have been silently wrong.
+        sym = str(getattr(tp, "event_symbol", "") or "").strip()
         if not sym:
             return
         n = self._n
@@ -1330,6 +1348,10 @@ class CandleFeed:
                             self._chain_expiry or "(none)", expiry)
                 await streamer.unsubscribe_all(Greeks)
                 await streamer.unsubscribe_all(Quote)
+                try:
+                    await streamer.unsubscribe_all(TheoPrice)   # r116
+                except Exception:                               # noqa: BLE001
+                    pass
             self._chain_subscribed.clear()
             self._quotes_buf.clear()
             self._greeks_buf.clear()
@@ -1345,6 +1367,19 @@ class CandleFeed:
                 chunk = new[i:i + 75]
                 await streamer.subscribe(Greeks, chunk)
                 await streamer.subscribe(Quote,  chunk)
+                # r116 — TheoPrice rides the SAME per-contract subscription.
+                # It was subscribed to the plain ticker with the four
+                # underlying-level aux events, where nothing publishes it:
+                # accepted, then silent since 2026-08-22. Proven on QQQ
+                # 2026-08-24 by tools/probe_aux_streams.py — 12 events on 12
+                # option symbols, 0 on the ticker, with Greeks/Quote as
+                # controls. Wrapped alone so an entitlement gap costs THIS
+                # stream and not the chain marks everything trades on.
+                try:
+                    await streamer.subscribe(TheoPrice, chunk)
+                except Exception as exc:                        # noqa: BLE001
+                    logger.warning("TheoPrice subscribe failed for %d symbols: "
+                                   "%s — continuing without it", len(chunk), exc)
             self._chain_subscribed.update(new)
             logger.info("chain marks: subscribed %d new symbols (%d total, expiry %s)",
                         len(new), len(self._chain_subscribed), expiry)
@@ -1557,11 +1592,17 @@ class CandleFeed:
                     # asked for. Each is subscribed INDEPENDENTLY and wrapped,
                     # so an entitlement gap costs THAT ONE PORT on THIS ONE BOX
                     # and is named in the log — never the whole socket.
+                    # r116 — TheoPrice is NOT here any more: it is per-CONTRACT
+                    # and now rides the chain subscription in
+                    # _reconcile_chain_subs. Underlying stays: it IS an
+                    # underlying-level event and the ticker is the right space
+                    # for it, though it has never published either — retest
+                    # during RTH before calling it uncarried, since the 45s
+                    # after-hours probe saw only 1 Trade on this arm.
                     for _ev, _label in ((Trade, "Trade"),
                                         (TimeAndSale, "TimeAndSale"),
                                         (Summary, "Summary"),
-                                        (Underlying, "Underlying"),
-                                        (TheoPrice, "TheoPrice")):
+                                        (Underlying, "Underlying")):
                         try:
                             await streamer.subscribe(_ev, [self.dx_symbol])
                             logger.info("subscribed %s %s", self.dx_symbol, _label)
