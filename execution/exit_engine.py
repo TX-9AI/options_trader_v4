@@ -1581,7 +1581,13 @@ class ExitEngine:
             if not et:
                 return 0.0
             t = datetime.fromisoformat(str(et).replace("Z", "+00:00"))
-            now = datetime.now(t.tzinfo) if t.tzinfo else datetime.now()
+            # r125 — the NAIVE fallback compared a UTC box clock against an
+            # entry_time with no zone, so a mixed pair silently measured hold
+            # time in the wrong frame. Records carry +00:00 today, making this
+            # unreachable — fixed anyway, because "unreachable" is what the
+            # 15:40 flatten branch was too.
+            from utils.time_utils import ET as _ET
+            now = datetime.now(t.tzinfo) if t.tzinfo else datetime.now(_ET)
             return (now - t).total_seconds() / 60.0
         except Exception:
             return 0.0

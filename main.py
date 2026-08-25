@@ -3865,7 +3865,8 @@ def _fetch_close_order_history(records: list) -> list:
     try:
         from data.tasty_client import get_session, get_account
         from datetime import date as _date
-        start = _date.today()
+        from utils.time_utils import now_et as _net
+        start = _net().date()      # r125 — ET date, not the box's UTC one
         for rec in records:
             et = str(rec.get("entry_time", "") or "")[:10]
             try:

@@ -104,8 +104,19 @@ STREAMS = [
     ("chain_marks",       "updated_epoch", 300,  "chain marks",       True,  False),
     ("prints",            "ts_epoch",      600,  "prints (T&S)",      False, False),
     ("last_trade",        "ts_epoch",      600,  "last trade",        False, False),
-    ("underlying_series", "ts_epoch",     3600,  "underlying",        False, False),
-    ("theo_series",       "ts_epoch",     3600,  "theo price",        False, False),
+    # 🔴 r125 — `underlying` AND `theo price` ARE OFF THE BOARD. Operator,
+    # 2026-08-25: "I don't want underlying on the manifold at all. You can also
+    # take off THEO. We tried it, it's not worth the traffic burden with no
+    # readers."
+    # · UNDERLYING never published on either symbol space — probed 2026-08-24
+    #   with Trade/Greeks/Quote as live controls, zero events on both arms. A
+    #   permanent red for a stream the venue does not send teaches the operator
+    #   to ignore red, which is the only thing the board is for.
+    # · THEO was proven reachable (r116: 12 events on 12 option symbols) and
+    #   then REMOVED in r118 after SPX lost its entire per-contract
+    #   subscription with it attached. It has no consumer and never had one.
+    # Both TABLES remain and both WRITERS remain — this removes them from the
+    # HEALTH VIEW only, so restoring a row is one line if either gains a reader.
     ("session_summary",   "ts_epoch",     3600,  "session summary",   False, True),
 ]
 
@@ -123,7 +134,29 @@ DERIVED = [
 
 
 def _rth_now(now=None) -> bool:
-    n = now or datetime.now()
+    """🔴 r125 — MARKET HOURS ARE AN EXCHANGE FACT, SO THIS ASKS IN ET.
+
+    `datetime.now()` was the BOX's clock and the boxes run UTC, so this read
+    18:12 at 14:12 ET and declared the session over while it was in progress.
+    Found 2026-08-25 from a QQQ board headed "outside RTH" at 2:12pm with
+    QQQ/1m at age=1s.
+
+    ⚠️ THE PROJECT'S RULE, operator 2026-08-25: "Backend facing code should
+    render in UTC. User facing code should render in EST." THIS IS NEITHER —
+    it renders nothing. It is a PREDICATE about the market, and the market
+    opens at 09:30 Eastern whatever a server's clock says. So the timezone
+    here is not a display choice and must not be read as one: converting a
+    STORAGE path to ET on the strength of this line would be the opposite
+    mistake. ts_epoch stays UTC; only the question "is the exchange open"
+    is asked in the exchange's own frame.
+
+    ⚠️ AND THE CONSEQUENCE WAS NOT COSMETIC. `_in_window` INVERTS on this
+    flag, so a false reading made the `_EXT` after-hours rows count as
+    in-window and their by-design staleness painted the rollup AMBER — the
+    DEGRADED on status.py mid-session. A clock error presented as a data fault.
+    """
+    from utils.time_utils import ET
+    n = now or datetime.now(ET)
     if n.weekday() >= 5:
         return False
     return dtime(9, 30) <= n.time() <= dtime(16, 0)
@@ -254,10 +287,22 @@ def rollup(rep: dict) -> str:
     """
     if rep.get("fatal"):
         return RED
+    # 🔴 r125 — AFTER-HOURS ROWS NEVER PAINT THE ROLLUP, IN EITHER DIRECTION.
+    # Operator, 2026-08-25: "I don't want manifold health degraded for
+    # after-hours sources." The prior rule excluded them during RTH only, so
+    # outside RTH they became the rollup — and a `VIX_EXT/1h` that has not
+    # ticked since yesterday afternoon is not a fault at 8pm any more than it
+    # is at 2pm. VIX simply does not trade after hours the way QQQ does.
+    # ⚠️ THIS IS A JUDGEMENT ABOUT WHAT THE BULB IS FOR, not about the data.
+    # The rows stay on the BOARD with their real ages — nothing is hidden — but
+    # the one-bulb summary now answers only "can this box trade", and no
+    # after-hours stream can answer that question either way.
     in_rth = rep.get("in_rth", True)
     crit = [s for s in rep["streams"]
-            if s["critical"] and s["bulb"] != NA and _in_window(s, in_rth)]
-    cand = [c for c in rep["candles"] if _in_window(c, in_rth)]
+            if s["critical"] and s["bulb"] != NA
+            and not s.get("after_hours") and _in_window(s, in_rth)]
+    cand = [c for c in rep["candles"]
+            if not c.get("after_hours") and _in_window(c, in_rth)]
     # ⚠️ "no candles AT ALL" stays RED — that is a dead store, not a window
     # question — but an empty IN-WINDOW set outside RTH is normal.
     if not rep["candles"]:

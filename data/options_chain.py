@@ -197,7 +197,12 @@ class OptionsChainFetcher:
         Returns:
             OptionsChain or None on failure
         """
-        today      = date.today()
+        # 🔴 r125 — TRADING DATE IS AN ET DATE. `date.today()` is the box's,
+        # and the boxes run UTC: after 20:00 ET the UTC date has already rolled,
+        # so an evening run selects TOMORROW's expiry as "0DTE". Every session
+        # after 8pm — which is when most of this fleet's build work happens.
+        from utils.time_utils import now_et as _net
+        today      = _net().date()
         target_date = date.fromisoformat(expiry) if expiry else today
         today_str  = target_date.isoformat()
 

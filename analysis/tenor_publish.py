@@ -96,7 +96,8 @@ def publish_aux_tenors(store_path: str,
 
     out: Dict[str, int] = {}
     try:
-        today = today or date.today()
+        from utils.time_utils import now_et as _net
+        today = today or _net().date()  # r125 — ET date, matching tenor_select
         picked = pick_tenors(list(chain_map.keys()), today)
         if len(picked) < 2:
             return out                      # nothing auxiliary to publish

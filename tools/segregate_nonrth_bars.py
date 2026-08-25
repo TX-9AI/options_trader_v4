@@ -157,6 +157,11 @@ def main():
         return 0
 
     if not args.no_backup:
+        # ⚠️ r125 — NAKED now() ON PURPOSE, and the only one left in the tree.
+        # This is a BACKUP FILENAME: backend-facing, never compared against a
+        # market hour, and the operator's rule is "backend renders in UTC". A
+        # box-clock UTC stamp is exactly right here. Left explicit so the next
+        # timezone sweep does not "fix" it into an inconsistency.
         bak = f"{args.db}.pre_rth_purge_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         shutil.copy2(args.db, bak)
         print(f"\nbackup written: {bak}")

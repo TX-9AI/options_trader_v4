@@ -173,18 +173,60 @@ def main() -> int:
     check("W5c an equity WITH prints is GREEN — the bulb still works",
           find(eq2, "streams", "prints (T&S)")["bulb"] == GREEN)
 
-    # ── W6: underlying / theo ARE UNTOUCHED ──────────────────────────────────
-    # Deliberate. They are option-chain events an index legitimately has, and
-    # "did not arrive" must not be laundered into "cannot exist".
-    und = find(rth, "streams", "underlying")
-    theo = find(rth, "streams", "theo price")
-    check("W6 underlying/theo stay RED at zero rows (cause unestablished)",
-          und["bulb"] == RED and theo["bulb"] == RED,
-          f"underlying={und['bulb']} theo={theo['bulb']}")
+    # ── W6: underlying / theo ARE OFF THE BOARD (r125) ───────────────────────
+    # ⚠️ THIS ASSERTION IS INVERTED FROM WHAT IT SAID BEFORE, and the reason is
+    # evidence rather than taste. It used to hold that "did not arrive" must
+    # not be laundered into "cannot exist" — right in principle, and it kept
+    # two permanent reds on the board. UNDERLYING was then PROBED (2026-08-24,
+    # tools/probe_aux_streams.py) with Trade/Greeks/Quote as live controls:
+    # zero events on BOTH symbol spaces. THEO was proven reachable and then
+    # deliberately unsubscribed in r118 after it took SPX's entire per-contract
+    # subscription down with it. Operator: "I don't want underlying on the
+    # manifold at all. You can also take off THEO. We tried it, it's not worth
+    # the traffic burden with no readers."
+    # A permanent red for a stream nobody reads teaches the operator to ignore
+    # red, which is the only thing this board is for.
+    labels = {s["label"] for s in rth["streams"]}
+    check("W6 underlying and theo price are OFF the board",
+          "underlying" not in labels and "theo price" not in labels,
+          str(sorted(labels)))
 
     # ── W7: n/a NEVER PAINTS THE ROLLUP ──────────────────────────────────────
     check("W7 an n/a stream cannot degrade the rollup",
           rollup(rth) == GREEN and pr["bulb"] == NA)
+
+    # ── W8 (r125): AFTER-HOURS ROWS NEVER PAINT THE ROLLUP, EITHER WAY ───────
+    # Operator: "I don't want manifold health degraded for after-hours
+    # sources." The prior rule excluded them during RTH only, so OUTSIDE RTH
+    # they BECAME the rollup — and a VIX_EXT/1h that has not ticked since
+    # yesterday is not a fault at 8pm any more than at 2pm; VIX simply does not
+    # trade after hours the way QQQ does.
+    for _rth in (True, False):
+        rep = {"in_rth": _rth,
+               "streams": [{"critical": True,  "bulb": GREEN, "after_hours": False},
+                           {"critical": False, "bulb": AMBER, "after_hours": True}],
+               "candles": [{"bulb": GREEN, "after_hours": False},
+                           {"bulb": AMBER, "after_hours": True},
+                           {"bulb": RED,   "after_hours": True}]}
+        check(f"W8 a stale/dead after-hours row cannot degrade the rollup "
+              f"(in_rth={_rth})", rollup(rep) == GREEN)
+    # and a REAL failure still paints it
+    check("W8c an RTH candle failure still turns the rollup RED",
+          rollup({"in_rth": True, "streams": [],
+                  "candles": [{"bulb": RED, "after_hours": False}]}) == RED)
+
+    # ── W9 (r125): THE RTH CLOCK IS ASKED IN ET ─────────────────────────────
+    # `datetime.now()` was the BOX's clock and the boxes run UTC, so this read
+    # 18:12 at 14:12 ET and declared the session over mid-session. `_in_window`
+    # INVERTS on that flag, so the after-hours rows counted as in-window and
+    # painted the rollup AMBER — a clock error presented as a data fault.
+    from datetime import datetime as _dt
+    from utils.time_utils import ET as _ET
+    from tools.manifold_health import _rth_now as _rn
+    check("W9a 14:12 ET on a weekday is IN session",
+          _rn(_dt(2026, 8, 25, 14, 12, tzinfo=_ET)) is True)
+    check("W9b 20:12 ET is not", _rn(_dt(2026, 8, 25, 20, 12, tzinfo=_ET)) is False)
+    check("W9c a Saturday is not", _rn(_dt(2026, 8, 29, 14, 12, tzinfo=_ET)) is False)
 
     print()
     if FAILURES:

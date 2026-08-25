@@ -117,7 +117,17 @@ def session_fraction_remaining(now: Optional[datetime] = None) -> Optional[float
     expected move at 09:35, which is the error that makes an afternoon entry
     look identically sized to a morning one.
     """
-    now = now or datetime.now()
+    # 🔴 r125 — IN ET. The 09:30/16:00 boundaries below are EXCHANGE hours, so
+    # the clock compared against them must be the exchange's. `datetime.now()`
+    # was the BOX's clock and the boxes run UTC: at 14:12 ET it computed from
+    # 18:12 and returned 0.036 session remaining when the true answer is ~0.42.
+    # ⚠️ THIS IS THE 0DTE TERM AND IT FEEDS STRIKE DISTANCE. Expected move
+    # scales with sqrt(remaining), so a 12x understated fraction shrank EM by
+    # ~3.5x — all day, on every box, silently. It was visible in CVX's payload
+    # as session_fraction_remaining=0.036 at 11:45 and read as "some other
+    # cutoff" until the manifold board surfaced the same clock bug.
+    from utils.time_utils import ET
+    now = now or datetime.now(ET)
     t = now.time()
     if t >= dtime(16, 0):
         return 0.0

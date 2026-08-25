@@ -180,8 +180,13 @@ class MacroManager:
                 return False, ""
 
             events     = resp.json()
-            today_str  = date.today().strftime("%m/%d/%Y")  # FF format
-            today_date = date.today()
+            # r125 — ET date. A UTC roll at 20:00 ET would ask the calendar
+            # about TOMORROW, and `Fed Day: No` on an FOMC morning is a wrong
+            # answer that reads exactly like a right one.
+            from utils.time_utils import now_et as _net
+            _t         = _net().date()
+            today_str  = _t.strftime("%m/%d/%Y")  # FF format
+            today_date = _t
 
             for event in events:
                 # FF dates: "Jun 21, 2026" format — normalize

@@ -71,7 +71,10 @@ def pick_tenors(available: Sequence[date],
     unclaimed, so a collision advances to the next candidate in that class
     rather than silently repeating a date already taken.
     """
-    today = today or date.today()
+    # r125 — ET date; see options_chain. A UTC roll at 20:00 ET drops today's
+    # expiry out of `fut` and silently promotes the next one.
+    from utils.time_utils import now_et as _net
+    today = today or _net().date()
     fut = sorted({d for d in available if d >= today})
     if not fut:
         return []
@@ -111,7 +114,9 @@ def pick_tenors(available: Sequence[date],
 
 def describe(picked: Sequence[date], today: Optional[date] = None) -> str:
     """One line for the log, so a degenerate pick is visible in the tape."""
-    today = today or date.today()
+    from utils.time_utils import now_et as _net
+    today = today or _net().date()      # r125 — ET date; the +Nd it prints is
+                                        # a TRADING-day offset, not a UTC one
     if not picked:
         return "tenors: NONE available"
     parts = [f"{d.isoformat()}(+{(d - today).days}d"

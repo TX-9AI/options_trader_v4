@@ -249,7 +249,11 @@ class SetupScorer:
             if os.path.isfile(path):
                 with open(path) as fh:
                     d = json.load(fh)
-                today = datetime.date.today().isoformat()
+                # r125 — ET date: the file it compares against is written by a
+                # process stamping ET, so a UTC read mismatches after 20:00 ET
+                # and the strength silently reverts to its default.
+                from utils.time_utils import now_et as _net
+                today = _net().date().isoformat()
                 if d.get("symbol") == my_symbol and d.get("date") == today:
                     strength = max(0.0, min(1.0, float(d.get("strength", 0.0))))
         except Exception:

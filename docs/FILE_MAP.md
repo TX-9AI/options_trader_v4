@@ -44,7 +44,7 @@ Change these with the most care; a break here reaches everything downstream.
 | module | imported by | some of the importers |
 |---|---|---|
 | `config.py` | 56 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
-| `utils/time_utils.py` | 23 | alert_manager.py, broker_reconcile.py, check_condor_spec.py, check_entry_gate.py |
+| `utils/time_utils.py` | 30 | alert_manager.py, broker_reconcile.py, check_condor_spec.py, check_entry_gate.py |
 | `strategy/base_strategy.py` | 14 | check_entry_gate.py, check_orb_geometry.py, check_signal_kwargs.py, check_sweep_spread.py |
 | `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
 | `derived/base.py` | 12 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
@@ -143,11 +143,11 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `execution/entry_engine.py`, `tests/check_orb_geometry.py`
 
 ### `analysis/tenor_publish.py`
-- **calls:** `analysis/tenor_select.py`
+- **calls:** `analysis/tenor_select.py`, `utils/time_utils.py`
 - **called by:** `data/options_chain.py`
 
 ### `analysis/tenor_select.py`
-- **calls:** (none)
+- **calls:** `utils/time_utils.py`
 - **called by:** `analysis/tenor_publish.py`
 
 ### `analysis/trade_readiness.py`
@@ -163,7 +163,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `main.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `tests/check_atr_units.py`
 
 ### `analysis/volatility_measures.py`
-- **calls:** (none)
+- **calls:** `utils/time_utils.py`
 - **called by:** `main.py`, `tests/check_derived_layer.py`
 
 ### `config.py`
@@ -195,7 +195,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `main.py`
 
 ### `data/macro_data.py`
-- **calls:** `config.py`, `data/market_data.py`
+- **calls:** `config.py`, `data/market_data.py`, `utils/time_utils.py`
 - **called by:** `main.py`, `risk/session_guard.py`, `risk/setup_scorer.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`
 
 ### `data/market_data.py`
@@ -207,7 +207,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `data/options_chain.py`
 
 ### `data/options_chain.py`
-- **calls:** `analysis/tenor_publish.py`, `config.py`, `data/open_interest.py`, `data/tasty_client.py`, `execution/tick_size.py`, `utils/math_utils.py`
+- **calls:** `analysis/tenor_publish.py`, `config.py`, `data/open_interest.py`, `data/tasty_client.py`, `execution/tick_size.py`, `utils/math_utils.py`, `utils/time_utils.py`
 - **called by:** `analysis/trade_readiness.py`, `data/gex_data.py`, `main.py`, `strategy/base_strategy.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `tests/check_entry_gate.py`, `tests/check_sweep_spread.py`
 
 ### `data/tasty_client.py`
@@ -523,7 +523,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_manifold_windows.py`
-- **calls:** `tools/manifold_health.py`
+- **calls:** `tools/manifold_health.py`, `utils/time_utils.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_missed_inert.py`
@@ -663,7 +663,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tools/manifold_health.py`
-- **calls:** `config.py`
+- **calls:** `config.py`, `utils/time_utils.py`
 - **called by:** `tests/check_manifold_windows.py`
 
 ### `tools/manifold_status.py`
@@ -700,7 +700,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/time_utils.py`
 - **calls:** `config.py`
-- **called by:** `analysis/entry_snapshot.py`, `analysis/orb_engine.py`, `analysis/trade_readiness.py`, `analysis/trend_engine.py`, `data/market_data.py`, `database/trade_logger.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `main.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `risk/setup_scorer.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `tests/check_condor_spec.py`, `tests/check_entry_gate.py`, `tests/check_exit_executes.py`, `tests/check_manage_call.py`, `tests/check_orb_resume.py`, `tests/check_rehearsal_toggle.py`
+- **called by:** `analysis/entry_snapshot.py`, `analysis/orb_engine.py`, `analysis/tenor_publish.py`, `analysis/tenor_select.py`, `analysis/trade_readiness.py`, `analysis/trend_engine.py`, `analysis/volatility_measures.py`, `data/macro_data.py`, `data/market_data.py`, `data/options_chain.py`, `database/trade_logger.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `main.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `risk/setup_scorer.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `tests/check_condor_spec.py`, `tests/check_entry_gate.py`, `tests/check_exit_executes.py`, `tests/check_manage_call.py`, `tests/check_manifold_windows.py`, `tests/check_orb_resume.py`, `tests/check_rehearsal_toggle.py`, `tools/manifold_health.py`
 
 ### `warehouse/__init__.py`
 - **calls:** (none)
