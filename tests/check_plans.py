@@ -113,6 +113,46 @@ def main():
           sw["checks"]["pierce_depth"][1] == "n/a",
           str(sw["checks"].get("pierce_depth")))
 
+    # ── RUNAWAY: the debit R problem ────────────────────────────────────
+    class _D:
+        def __init__(self, k, ask, delta, gamma, theta):
+            self.strike, self.ask, self.bid = k, ask, ask - 0.1
+            self.delta, self.gamma, self.theta = delta, gamma, theta
+    class _Orb:
+        state = "INVALIDATED"; invalidation_reason = "runaway"
+
+    dcalls = [_D(k, max(.20, 4.0-(k-350)*0.55), max(.05, .62-(k-350)*.07),
+                 0.045, 0.28) for k in range(348, 362, 2)]
+    dctx = {"price": 353.0, "chain": _Chain(dcalls, []), "orb": _Orb(),
+            "orb_high": 351.88, "orb_low": 349.20, "atr": 1.20,
+            "session_fraction_remaining": 0.55}
+    rw = e._runaway(dctx)
+    check("D1 the debit plan mirrors the stop distance into the target",
+          rw and rw.get("invalidation") == 351.88, f"stop={rw.get('invalidation')}")
+
+    # 🔴 D2 IS THE ONE THAT MATTERS. Under a LINEAR delta a symmetric spot
+    # target gives R = 1.00 for every debit on every tape — the gate would be
+    # decorative, passing everything at exactly the floor. GAMMA is the whole
+    # asymmetry: a long option gains delta toward the target and loses it
+    # toward the stop. If this ever reads 1.00 again, the convexity term has
+    # been dropped and the R gate has stopped measuring anything.
+    flat = [_D(c.strike, c.ask, c.delta, 0.0, c.theta) for c in dcalls]
+    fctx = dict(dctx); fctx["chain"] = _Chain(flat, [])
+    rf = e._runaway(fctx)
+    check("D2 gamma is what makes debit R differ from exactly 1.00",
+          abs(rf["r"] - 1.00) < 0.01 and rw["r"] > 1.00,
+          f"delta-only={rf['r']}  with-gamma={rw['r']}")
+
+    # ⚠️ THETA IS RECORDED IN DOLLARS AND NEVER NETTED INTO R — operator's
+    # instruction. A theta-burn layer belongs in fitting, not in an entry gate.
+    th = rw["checks"].get("theta_dollars")
+    check("D3 theta is recorded in dollars and gates nothing",
+          th is not None and th[1] == "n/a" and th[0] > 0, str(th))
+
+    check("D4 a 1R target that the tape cannot reach is refused",
+          e._runaway(dict(dctx, atr=0.20))["verdict"] == "DECLINE",
+          "travel gate")
+
     # ── P7: THE TABLES — spine + long-format checks ─────────────────────
     import sqlite3, time as _t
 

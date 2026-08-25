@@ -484,6 +484,162 @@ class PlanEngine(DerivedEngine):
                     f"hold {(hold or 0)*100:.0f}%, {age} bars old, R {r:.2f}"),
         }
 
+    def _runaway(self, ctx: dict) -> Optional[dict]:
+        """The DEBIT continuation on an ORB that ran without retesting.
+
+        ════════════════════════════════════════════════════════════════════
+        THE DEBIT R PROBLEM, AND HOW THIS SOLVES IT
+        ════════════════════════════════════════════════════════════════════
+        A credit spread's risk is DEFINED — width minus credit, known at
+        declaration. A debit's stop is a SPOT level, so R needs an estimate of
+        what the contract is worth when spot reaches it.
+
+        🔴 OPERATOR'S RULING, 2026-08-25: *"the stop distance has to dictate
+        the target... we can use some of our available indicators to inform us
+        if a 1-r target passes the sanity check (and address theta separately).
+        We can add a theta burn layer during fitting later, but calculate this
+        one in dollars at entry."*
+
+        So: **STOP DISTANCE IN SPOT SETS THE TARGET IN SPOT.** The stop is the
+        ORB boundary (structural, not chosen); the target is the same distance
+        the other way.
+
+        ⚠️ **AND HERE IS THE TRAP THAT MAKES THE NAIVE VERSION USELESS.**
+        A first-order delta estimate gives
+
+            prem_at_target ≈ prem + delta·d
+            prem_at_stop   ≈ prem − delta·d
+            R = (delta·d) / (delta·d) = **1.00, EXACTLY, ALWAYS.**
+
+        A symmetric spot target under a linear delta produces R = 1.00 for
+        EVERY debit trade on every tape. The gate would be decorative — it
+        would pass everything at precisely the floor and measure nothing.
+
+        **THE ASYMMETRY IS GAMMA, AND IT IS THE WHOLE EDGE OF A DEBIT.** A long
+        option GAINS delta moving toward the target and LOSES it moving toward
+        the stop, so the same spot distance is worth more up than down:
+
+            prem_at_target ≈ prem + delta·d + ½·gamma·d²
+            prem_at_stop   ≈ prem − delta·d + ½·gamma·d²   (gamma cushions BOTH)
+
+        Gamma is positive for a long option in both directions — it lifts the
+        gain and softens the loss — so R > 1 by construction, and HOW MUCH is
+        a real property of the contract rather than an artefact of the
+        arithmetic. That is what makes the number worth gating on.
+
+        ⚠️ SECOND ORDER IS STILL AN APPROXIMATION. It degrades on a large move
+        and it assumes IV holds. `gamma_lift` is recorded separately so the fit
+        can see how much of R came from convexity rather than direction.
+
+        ⚠️ THETA IS IN DOLLARS AND NEVER NETTED INTO R. Operator's
+        instruction. A debit fights decay the whole way to the target, but
+        folding an estimated burn into the entry R would bury a fitted guess
+        inside a structural number. Recorded, visible, gates nothing.
+        """
+        orb = ctx.get("orb")
+        chain = ctx.get("chain")
+        spot = float(ctx.get("price") or 0)
+        orb_hi = ctx.get("orb_high")
+        orb_lo = ctx.get("orb_low")
+        if chain is None or spot <= 0 or not orb_hi or not orb_lo:
+            return None
+        state = str(getattr(orb, "state", "") or "")
+        reason = str(getattr(orb, "invalidation_reason", "") or "")
+        if "runaway" not in reason.lower():
+            return {"strategy": "RunawayContinuation", "verdict": "NO PLAN",
+                    "checks": {},
+                    "why": f"ORB has not run away (state={state or 'unknown'}, "
+                           f"reason={reason or 'none'}) — no handoff to take"}
+
+        is_long = spot > float(orb_hi)
+        stop_spot = float(orb_hi) if is_long else float(orb_lo)
+        risk_spot = abs(spot - stop_spot)
+        if risk_spot <= 0:
+            return {"strategy": "RunawayContinuation", "verdict": "NO PLAN",
+                    "checks": {}, "why": "price is AT the boundary — no risk "
+                                         "distance, so no target either"}
+        # ⚠️ THE TARGET IS THE STOP DISTANCE MIRRORED. Not a fitted multiple,
+        # not a level someone liked — the structure sets both ends.
+        target_spot = spot + risk_spot if is_long else spot - risk_spot
+
+        # ── the contract ────────────────────────────────────────────────
+        pool = (getattr(chain, "calls", []) if is_long
+                else getattr(chain, "puts", [])) or []
+        if not pool:
+            return None
+        # nearest strike to spot, the staged pick's shape
+        c = min(pool, key=lambda x: abs(float(getattr(x, "strike", 0) or 0) - spot))
+        try:
+            prem = float(c.ask)
+            delta = abs(float(getattr(c, "delta", 0) or 0))
+            gamma = float(getattr(c, "gamma", 0) or 0)
+            theta = abs(float(getattr(c, "theta", 0) or 0))
+        except Exception:                                       # noqa: BLE001
+            return None
+        if prem <= 0 or delta <= 0:
+            return {"strategy": "RunawayContinuation", "verdict": "NO PLAN",
+                    "checks": {}, "why": "contract has no premium or no delta"}
+
+        d = risk_spot
+        lift = 0.5 * gamma * d * d
+        gain = delta * d + lift
+        loss = max(0.01, delta * d - lift)      # gamma cushions the loss too
+        r = round(gain / loss, 2)
+
+        # ⚠️ THETA IN DOLLARS AT ENTRY. Per contract, for the hours remaining.
+        frac = float(ctx.get("session_fraction_remaining") or 0.0)
+        hours_left = 6.5 * frac
+        theta_dollars = round(theta * (hours_left / 24.0) * 100.0, 2)
+
+        # ── THE SANITY CHECK: can the tape actually cover the distance? ──
+        atr = float(ctx.get("atr") or 0)
+        travel = (risk_spot / atr) if atr > 0 else None
+
+        why, ok = [], True
+        _rv, _rr = r_verdict(r)
+        if _rv == "FAIL":
+            ok = False
+            why.append(f"{_rr} — TARGET {target_spot:.2f} (the stop distance "
+                       f"mirrored), STOP {stop_spot:.2f} (the ORB boundary)")
+        if travel is None:
+            ok = False
+            why.append("ATR unavailable — cannot say whether the target is "
+                       "reachable, and an unmeasurable input is not a pass")
+        elif travel > 1.5:
+            ok = False
+            why.append(f"target is {travel:.2f} ATR away ({risk_spot:.2f} on "
+                       f"ATR {atr:.2f}) — the tape does not move that far that "
+                       f"often; a 1R target that cannot be reached is not 1R")
+        checks = {
+            "travel_atr":    ((travel, "PASS" if travel <= 1.5 else "FAIL")
+                              if travel is not None else None),
+            "r":             (r, r_verdict(r)[0]),
+            "delta":         (delta, "n/a"),
+            # RECORDED, NEVER NETTED INTO R — the operator's instruction.
+            "theta_dollars": (theta_dollars, "n/a"),
+            # How much of R came from CONVEXITY rather than direction. Without
+            # this term R would be exactly 1.00 on every debit, always.
+            "gamma_lift":    (round(lift, 4), "n/a"),
+        }
+        return {
+            "strategy": "RunawayContinuation",
+            "direction": "long" if is_long else "short",
+            "checks": checks,
+            "trigger_price": round(spot, 2),
+            "invalidation": round(stop_spot, 2),
+            "short_strike": float(getattr(c, "strike", 0) or 0),
+            "underlying_at_decision": spot,
+            "debit": round(prem, 2),
+            "risk": round(loss, 2),
+            "r": r,
+            "verdict": "TAKE" if ok else "DECLINE",
+            "why": "; ".join(why) if why else
+                   (f"stop {stop_spot:.2f} is {risk_spot:.2f} away; target "
+                    f"{target_spot:.2f} mirrors it at {travel:.2f} ATR; "
+                    f"R {r:.2f} (gamma lift {lift:.3f}); theta "
+                    f"${theta_dollars:.2f}/contract to the close"),
+        }
+
     # ── the tables ──────────────────────────────────────────────────────
     # 🔴 r126b — TWO TABLES, AND THE SPLIT IS THE WHOLE DESIGN.
     #
@@ -534,6 +690,14 @@ class PlanEngine(DerivedEngine):
         # nothing now.
         "SweepCreditSpread":  ("level_hold_rate", "acceptance", "reclaim_age",
                                "r", "event_spent", "pierce_depth"),
+        # 🔴 r129 — RUNAWAY CONTINUATION, the first DEBIT plan. `travel_atr`
+        # is the sanity check the operator asked for: a 1R target is only real
+        # if the tape can actually cover that distance in the time left.
+        # `theta_dollars` is RECORDED IN DOLLARS AT ENTRY and NEVER netted
+        # into R — his instruction, and the right one; a theta-burn layer is
+        # a fitting-phase question, not an entry gate.
+        "RunawayContinuation": ("travel_atr", "r", "delta", "theta_dollars",
+                                "gamma_lift"),
     }
 
     def _ensure(self):
@@ -625,7 +789,8 @@ class PlanEngine(DerivedEngine):
     # ── the board ───────────────────────────────────────────────────────
     def derive(self, ctx: dict) -> int:
         plans = []
-        for fn in (self._butterfly, self._participation, self._sweep):
+        for fn in (self._butterfly, self._participation, self._sweep,
+                   self._runaway):
             try:
                 p = fn(ctx)
             except Exception as exc:                            # noqa: BLE001
