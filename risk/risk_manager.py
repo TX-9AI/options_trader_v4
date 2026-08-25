@@ -219,6 +219,15 @@ class RiskManager:
         risk_per_contract = risk_per_share * CONTRACT_MULTIPLIER
         grade_mult        = GRADE_SIZE_MULTIPLIER.get(grade, 1.0)
 
+        # ⚠️ r122 — THE BUTTERFLY HALF-SIZE SURVIVES THE GRADE FLATTENING, and
+        # deliberately. It is a VOLATILITY rule (VIX 15-20), not a grade rule,
+        # so it is not the mechanism the operator retired. Operator, 2026-08-25:
+        # "the butterfly is a debit, but I think we will need to see a few
+        # trades before it earns a 1.0 sizing trait. The current is ok for that
+        # one." AVGO has ONE butterfly all-time; the strategy has not earned
+        # full size, and half-size is the conservative default while it proves
+        # itself. Left multiplying grade_mult (now always 1.0) rather than
+        # rewritten, so the two rules stay visibly separate.
         if is_butterfly and butterfly_half_size:
             grade_mult = grade_mult * 0.5
 

@@ -1257,7 +1257,24 @@ GRADE_B_MIN_SCORE           = 0.55
 # value is the hard cap (strength is 0..1). Small on purpose — a tie-breaker,
 # never an override. Calibrate from the signal ledger once entries accrue.
 BRIEF_CONVICTION_WEIGHT     = 0.05
-GRADE_SIZE_MULTIPLIER       = {"A": 1.5, "B": 1.0}
+# ── 🔴 r122 — FLAT 1.0. THE GRADE NO LONGER SIZES THE TRADE. ─────────────────
+# Operator, 2026-08-25: "right now sizing has to be a 1.0 across all trades...
+# In the future, we may fit based on indicators but we are not there right now."
+# ⚠️ IT WAS SIZING ON A LETTER THAT CARRIES NO INFORMATION. The operator's own
+# reading of the ORB setup: survivors are "all structurally A unless we start
+# grading how deep the impulsive candle sits inside the range" — and the data
+# agrees, PLTR 51 A-grades, TSLA 30, AVGO 29. Worse, where the letter DID vary
+# it pointed the wrong way: TSLA Grade A 30 trades net -$2,237 against Grade B
+# 11 trades net +$125. A 1.5x multiplier on A was therefore betting MORE on the
+# band that lost MORE, on at least one box.
+# ⚠️ AND IT SILENTLY BROKE THE RISK BUDGET. A 1.5x multiplier means an A-grade
+# trade risks $1,575 against a $1,050 setting — NVDA this morning sized 2
+# contracts at $603 = $1,206 deployed, over budget, because of this line. A
+# risk number that the grade can inflate by half is not a risk number.
+# The dict stays (callers read it, and .get defaults are how the C-grade
+# rejection reads) — only the values are flattened, so restoring a multiplier
+# later is a one-line change rather than a re-wiring.
+GRADE_SIZE_MULTIPLIER       = {"A": 1.0, "B": 1.0}
 
 # ─── VOLATILITY / TREND ───────────────────────────────────────────────────────
 

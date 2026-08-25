@@ -168,5 +168,24 @@ for dirpath, _, files in os.walk(ROOT):
 check("G7 the r120 observations are still UNREAD — observe first",
       not readers2, str(readers2))
 
+# ── G8 (r122) — THE GRADE NO LONGER SIZES THE TRADE ─────────────────────────
+# Operator, 2026-08-25: "sizing has to be a 1.0 across all trades... we may fit
+# based on indicators but we are not there right now." The letter was sizing on
+# information it does not carry (ORB survivors are near-uniformly A) and where
+# it DID vary it pointed the wrong way (TSLA grade A net -$2,237 vs B +$125).
+# It also silently broke the risk budget: 1.5x on an A risks $1,575 against a
+# $1,050 setting.
+import config as _cfg
+check("G8a every grade multiplier is 1.0",
+      all(abs(v - 1.0) < 1e-9 for v in _cfg.GRADE_SIZE_MULTIPLIER.values()),
+      str(_cfg.GRADE_SIZE_MULTIPLIER))
+check("G8b an A and a B size identically",
+      _cfg.GRADE_SIZE_MULTIPLIER.get("A") == _cfg.GRADE_SIZE_MULTIPLIER.get("B"))
+# the butterfly VIX halving is a DIFFERENT rule and stays — operator: "the
+# current is ok for that one" until it has more than one trade behind it.
+_rsrc = open(os.path.join(ROOT, "risk/risk_manager.py")).read()
+check("G8c the butterfly VIX half-size is deliberately untouched",
+      "if is_butterfly and butterfly_half_size:" in _rsrc)
+
 print(f"\n{'PASS' if not FAILURES else 'FAIL'}: {len(FAILURES)} problem(s) {FAILURES}")
 sys.exit(1 if FAILURES else 0)
