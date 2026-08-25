@@ -640,6 +640,136 @@ class PlanEngine(DerivedEngine):
                     f"${theta_dollars:.2f}/contract to the close"),
         }
 
+    def _condor(self, ctx: dict) -> Optional[dict]:
+        """The iron condor — ONE PLAN, TWO TRIGGERS, and both sides priced.
+
+        🔴 WHY THIS IS ONE PLAN AND NOT TWO. On 2026-08-25 CRM opened a PUT
+        credit spread at 12:08 ET and then signalled a second leg on **406
+        consecutive ticks** without trading, leaving NOTHING in any log. The
+        cause: `_can_open_credit_spread` refused every one of them — the open
+        leg was a PUT and the second-leg signal was also a PUT, so Rule 3
+        (never two of a side) returned False silently. It took five queries to
+        establish that, and the answer was visible nowhere.
+
+        ⇒ A CONDOR IS A STRUCTURE, SO THE PLAN IS THE STRUCTURE. It declares
+        BOTH sides, prices BOTH, and carries `leg2_pending` — which side is
+        still open to be filled. "Half a condor waiting for its complement" is
+        a real state that lasts hours, and under a two-plan model it is
+        expressible only as the absence of a second plan, which is exactly how
+        406 refusals produced silence.
+
+        ⚠️ R IS THE COMBINED STRUCTURE, NOT A SIDE. Both spreads collect; only
+        ONE can lose at expiry (price cannot finish beyond both shorts), so
+        risk is width minus the TOTAL credit, not per-leg. Scoring one leg
+        alone systematically understates the trade — a 0.30 side and a 0.30
+        side are not a 0.30 condor.
+        """
+        chain = ctx.get("chain")
+        spot = float(ctx.get("price") or 0)
+        if chain is None or spot <= 0:
+            return None
+        atr = float(ctx.get("atr") or 0)
+        hi = ctx.get("session_high") or ctx.get("orb_high")
+        lo = ctx.get("session_low") or ctx.get("orb_low")
+        if not hi or not lo:
+            return {"strategy": "IronCondor", "verdict": "NO PLAN",
+                    "checks": {}, "why": "no range — both boundaries must be "
+                                         "known before a condor can be planned"}
+        hi, lo = float(hi), float(lo)
+
+        calls = {float(getattr(c, "strike", 0) or 0): c
+                 for c in (getattr(chain, "calls", []) or [])}
+        puts = {float(getattr(p, "strike", 0) or 0): p
+                for p in (getattr(chain, "puts", []) or [])}
+        # ⚠️ ⟨PRIOR⟩ half an ATR beyond each boundary. Structural in shape —
+        # the boundary sets it — but the 0.5 is stated, not fitted.
+        up_target = hi + 0.5 * atr
+        dn_target = lo - 0.5 * atr
+        ck = min((k for k in sorted(calls) if k >= up_target), default=None)
+        pk = max((k for k in sorted(puts) if k <= dn_target), default=None)
+
+        c_credit = p_credit = None
+        if ck is not None and (ck + 5) in calls:
+            try:
+                c_credit = round(float(calls[ck].bid) - float(calls[ck+5].ask), 2)
+            except Exception:                                   # noqa: BLE001
+                c_credit = None
+        if pk is not None and (pk - 5) in puts:
+            try:
+                p_credit = round(float(puts[pk].bid) - float(puts[pk-5].ask), 2)
+            except Exception:                                   # noqa: BLE001
+                p_credit = None
+
+        # which side is already on the book
+        open_sides = set()
+        for t in (ctx.get("open_trades") or []):
+            if t.get("is_condor_leg"):
+                open_sides.add(str(t.get("option_side", "")))
+        pending = None
+        if open_sides and len(open_sides) < 2:
+            pending = "call" if "put" in open_sides else "put"
+
+        # ⚠️ R ON THE COMBINED STRUCTURE. Only one side can lose at expiry.
+        total = sum(x for x in (c_credit, p_credit) if x is not None)
+        r = None
+        if c_credit is not None and p_credit is not None:
+            risk = round(5.0 - total, 2)
+            r = round(total / risk, 2) if risk > 0 else None
+        elif total:
+            # one side priceable — R on that side alone, and SAY SO
+            risk = round(5.0 - total, 2)
+            r = round(total / risk, 2) if risk > 0 else None
+
+        width_atr = ((hi - lo) / atr) if atr > 0 else None
+        why, ok = [], True
+        if ck is None or pk is None:
+            ok = False
+            why.append(f"no strike beyond one boundary "
+                       f"(call>={up_target:.2f}, put<={dn_target:.2f})")
+        if width_atr is not None and width_atr < 1.0:
+            ok = False
+            why.append(f"range is only {width_atr:.2f} ATR wide — too tight to "
+                       f"sell both sides of")
+        _rv, _rr = r_verdict(r)
+        if _rv == "FAIL":
+            ok = False
+            why.append(f"{_rr} — combined credit ${total:.2f} against "
+                       f"${(5.0-total):.2f} of risk")
+        checks = {
+            "r":               ((r, r_verdict(r)[0]) if r is not None else None),
+            "call_side_ready": ((float(ck), "PASS") if ck is not None else None),
+            "put_side_ready":  ((float(pk), "PASS") if pk is not None else None),
+            # ⚠️ 1.0 = a leg is OPEN and its complement is still wanted. This
+            # is the CRM state that produced 406 silent refusals.
+            "leg2_pending":    ((1.0 if pending else 0.0, "n/a")),
+            "range_width_atr": ((width_atr, "PASS" if width_atr >= 1.0 else "FAIL")
+                                if width_atr is not None else None),
+        }
+        return {
+            "strategy": "IronCondor",
+            "direction": "range",
+            "checks": checks,
+            # the CALL trigger is the spine's trigger_price; the put side's
+            # is carried on the plan and shown in `why`.
+            "trigger_price": round(up_target, 2),
+            "invalidation": round(float(ck) if ck else up_target, 2),
+            "short_strike": float(ck) if ck is not None else None,
+            "long_strike": float(ck) + 5 if ck is not None else None,
+            "short_put_strike": float(pk) if pk is not None else None,
+            "long_put_strike": float(pk) - 5 if pk is not None else None,
+            "underlying_at_decision": spot,
+            "credit": round(total, 2) if total else None,
+            "risk": round(5.0 - total, 2) if total else None,
+            "r": r,
+            "verdict": "TAKE" if ok else "DECLINE",
+            "why": "; ".join(why) if why else
+                   (f"CCS {ck:.0f}/{ck+5:.0f} + PCS {pk:.0f}/{pk-5:.0f}, "
+                    f"combined ${total:.2f} on a {width_atr:.2f}-ATR range, "
+                    f"R {r:.2f}"
+                    + (f" · LEG 2 PENDING: the {pending} side is still open"
+                       if pending else "")),
+        }
+
     # ── the tables ──────────────────────────────────────────────────────
     # 🔴 r126b — TWO TABLES, AND THE SPLIT IS THE WHOLE DESIGN.
     #
@@ -698,6 +828,14 @@ class PlanEngine(DerivedEngine):
         # a fitting-phase question, not an entry gate.
         "RunawayContinuation": ("travel_atr", "r", "delta", "theta_dollars",
                                 "gamma_lift"),
+        # 🔴 r130 — IRON CONDOR. ONE PLAN, TWO TRIGGERS. `leg2_pending` is the
+        # column that makes a half-built structure legible: on 2026-08-25 CRM
+        # signalled a second leg on 406 CONSECUTIVE TICKS with a put already
+        # open and NOTHING in any log, because `_can_open_credit_spread`
+        # returned False for both Rule 1 and Rule 3 without a word. A condor
+        # that is half on is a real state and it now has a row.
+        "IronCondor":         ("r", "call_side_ready", "put_side_ready",
+                               "leg2_pending", "range_width_atr"),
     }
 
     def _ensure(self):
@@ -790,7 +928,7 @@ class PlanEngine(DerivedEngine):
     def derive(self, ctx: dict) -> int:
         plans = []
         for fn in (self._butterfly, self._participation, self._sweep,
-                   self._runaway):
+                   self._runaway, self._condor):
             try:
                 p = fn(ctx)
             except Exception as exc:                            # noqa: BLE001

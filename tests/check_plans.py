@@ -153,6 +153,45 @@ def main():
           e._runaway(dict(dctx, atr=0.20))["verdict"] == "DECLINE",
           "travel gate")
 
+    # ── CONDOR: one plan, two triggers ──────────────────────────────────
+    ccalls = [_C(k, max(.05, 3.0-(k-193)*.45), max(.10, 3.1-(k-193)*.45))
+              for k in range(190, 206, 5)]
+    cputs = [_C(k, max(.05, 3.0-(191-k)*.45), max(.10, 3.1-(191-k)*.45))
+             for k in range(180, 196, 5)]
+    cbase = {"price": 192.0, "chain": _Chain(ccalls, cputs), "atr": 1.6,
+             "session_high": 196.0, "session_low": 188.0,
+             "orb_high": 195.0, "orb_low": 189.0}
+    cd = e._condor(cbase)
+    check("K1 the condor plan prices BOTH sides in one plan",
+          cd and cd.get("short_strike") is not None
+          and cd.get("short_put_strike") is not None,
+          f"CCS {cd.get('short_strike')} / PCS {cd.get('short_put_strike')}")
+
+    # 🔴 K2 IS THE CRM FIX. On 2026-08-25 a second leg signalled on 406
+    # CONSECUTIVE TICKS with a put already open and left nothing in any log,
+    # because _can_open_credit_spread refused Rule 3 silently. "Half a condor
+    # waiting for its complement" is a real state that lasts hours; under a
+    # two-plan model it is expressible only as the ABSENCE of a second plan,
+    # which is exactly how 406 refusals produced silence.
+    cd2 = e._condor(dict(cbase,
+                         open_trades=[{"is_condor_leg": 1, "option_side": "put"}]))
+    check("K2 a half-built condor is VISIBLE — leg2_pending is a row, not silence",
+          cd2["checks"]["leg2_pending"][0] == 1.0
+          and cd["checks"]["leg2_pending"][0] == 0.0,
+          f"open={cd2['checks']['leg2_pending'][0]} none={cd['checks']['leg2_pending'][0]}")
+
+    # ⚠️ R IS THE COMBINED STRUCTURE. Only ONE side can lose at expiry, so
+    # risk is width minus TOTAL credit. Scoring a single leg systematically
+    # understates the trade — a 0.30 side and a 0.30 side are not a 0.30 condor.
+    tot = (cd.get("credit") or 0)
+    check("K3 R is computed on the COMBINED credit, not one side",
+          cd.get("risk") is not None and abs((5.0 - tot) - cd["risk"]) < 0.01,
+          f"credit={tot} risk={cd.get('risk')}")
+
+    check("K4 a range too tight to sell both sides of is refused",
+          e._condor(dict(cbase, atr=9.0))["verdict"] == "DECLINE",
+          "range_width_atr")
+
     # ── P7: THE TABLES — spine + long-format checks ─────────────────────
     import sqlite3, time as _t
 
