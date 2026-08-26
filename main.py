@@ -1795,6 +1795,25 @@ def _capture_fire_snapshot(ctx: dict, record: dict) -> None:
     except Exception as exc:                                   # noqa: BLE001
         logger.debug("fire snapshot skipped: %s", exc)
 
+    # 🔴 LINK THE FILL TO THE PLAN THAT INTENDED IT (r144).
+    # ⚠️ `plan_ledger.trade_ids` has existed since the file was written and
+    # NOTHING EVER WROTE TO IT — 863 plans across 15 boxes, zero linked.
+    # Without this, a plan records what it EXPECTED and the trade records what
+    # it RETURNED, and nothing joins them: "did TAKE plans make money" — the
+    # literal bottom line of docs/VISION.md — is unanswerable.
+    # ⚠️ HOOKED HERE because this function already runs on EVERY fill and
+    # already holds the trade record. A link that depends on each strategy
+    # remembering to pass a plan id is a link the next strategy will not have.
+    try:
+        from derived.registry import plan_ledger as _pl
+        _led = _pl(INSTRUMENT)
+        _tid = (record or {}).get("trade_id", "")
+        _strat = (record or {}).get("strategy", "") or ""
+        if _led is not None and _tid:
+            _led.link_trade(_strat, _tid)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("plan link skipped: %s", exc)
+
 
 def _capture_entry_snapshot(ctx: dict, record: dict, direction: str) -> bool:
     """Persist the entry-time FVG/structure picture onto the trade row.

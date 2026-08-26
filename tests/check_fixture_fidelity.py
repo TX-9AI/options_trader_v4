@@ -272,6 +272,31 @@ def main():
     check("X9 no derived engine coerces the GEXSnapshot object to a float",
           not _bad_gex, ", ".join(_bad_gex) or "none")
 
+    # ── 🔴 X10 — THE PLAN->TRADE JOIN MUST ACTUALLY BE CALLED ────────────
+    # `plan_ledger.trade_ids` existed since the file was written, `transition()`
+    # accepted a trade_id the whole time, the append logic was correct — and
+    # NOTHING EVER CALLED IT. 863 plans across 15 boxes, zero linked.
+    # ⚠️ THAT COSTS THE VISION'S ENTIRE METRIC. Without the join a plan records
+    # what it EXPECTED and a trade records what it RETURNED, and "did TAKE
+    # plans make money" cannot be asked. Worse, an R floor fitted from declared
+    # R alone is the anti-goal docs/VISION.md exists to forbid: the engine
+    # measured against its own outputs.
+    _msrc2 = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
+    _mt = ast.parse(_msrc2)
+    _calls = [n for n in ast.walk(_mt)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+              and n.func.attr == "link_trade"]
+    check("X10 the plan->trade join is called from production code",
+          bool(_calls), f"{len(_calls)} call site(s)")
+
+    # ⚠️ AND IT MUST RUN ON THE FILL PATH, not somewhere optional.
+    _fn = next((n for n in ast.walk(_mt)
+                if isinstance(n, ast.FunctionDef)
+                and n.name == "_capture_fire_snapshot"), None)
+    check("X10b it is wired into the per-fill hook",
+          _fn is not None and "link_trade" in ast.unparse(_fn),
+          "_capture_fire_snapshot")
+
     print()
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))

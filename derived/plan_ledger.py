@@ -237,6 +237,67 @@ class PlanLedger:
         except Exception:                                       # noqa: BLE001
             return []
 
+    def link_trade(self, strategy: str, trade_id: str) -> Optional[str]:
+        """Attach a filled trade to the LIVE plan that produced it.
+
+        🔴 THE JOIN THAT WAS BUILT AND NEVER CONNECTED (r144). `trade_ids` has
+        been a column since this file was written, `transition()` has accepted
+        a `trade_id` argument the whole time, and the append logic is correct —
+        and NOTHING IN THE REPO EVER CALLED IT WITH ONE. Measured 2026-08-26:
+        863 plans across 15 boxes, ZERO with a trade_id.
+        ⚠️ WHAT THAT COSTS IS THE VISION'S ENTIRE METRIC. docs/VISION.md: *"P&L
+        and return on risk. Dollars."* Without this link a plan records what it
+        EXPECTED and the trade records what it RETURNED, and nothing joins the
+        two — so "did TAKE plans make money" is unanswerable, and any R floor
+        fitted from declared R alone is the anti-goal that document exists to
+        forbid: the engine measured against its own outputs.
+
+        ⚠️ LOOKED UP, NOT THREADED. Plan ids live in three different places
+        (`state._orb_plan_id`, `IronCondorStrategy._plan_id`,
+        `PlanEngine._declared`), so requiring every call site to pass one is a
+        rule the next strategy will forget — the same failure that left the
+        sweep on 11:11 and the butterfly on 11:00. Resolving it here means a
+        new strategy is linked by existing.
+
+        ⚠️ ⟨ASSUMPTION⟩ MOST-RECENT-LIVE-PLAN-OF-THAT-STRATEGY. When two plans
+        of one strategy are live at once — both condor legs — this attaches to
+        the newer. That is a heuristic, not a proof, and it is recorded as one:
+        a caller holding an exact plan_id should call `transition()` directly.
+        """
+        if self._store is None or not trade_id:
+            return None
+        try:
+            cands = [p for p in self.live_plans()
+                     if not strategy or p.get("strategy") == strategy]
+            if not cands:
+                logger.debug("[plan] no live plan for %s — trade %s unlinked",
+                             strategy, trade_id[:8])
+                return None
+            pid = max(cands, key=lambda p: p.get("created_ts") or 0)["plan_id"]
+            cur = self._store.conn.execute(
+                "SELECT trade_ids FROM plan_ledger WHERE plan_id=?", (pid,))
+            row = cur.fetchone()
+            ids = []
+            if row and row[0]:
+                try:
+                    ids = json.loads(row[0]) or []
+                except Exception:                              # noqa: BLE001
+                    ids = []
+            if trade_id in ids:
+                return pid
+            ids.append(trade_id)
+            self._store.conn.execute(
+                "UPDATE plan_ledger SET trade_ids=? WHERE plan_id=?",
+                (json.dumps(ids), pid))
+            self._store.commit()
+            logger.info("[plan] linked trade %s -> plan %s (%s)",
+                        trade_id[:8], pid[:8], strategy)
+            return pid
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning("[plan] link_trade failed for %s/%s: %s",
+                           strategy, trade_id[:8], exc)
+            return None
+
     def mark_restart_wipe(self) -> int:
         """Called at boot: any plan left LIVE by a dead process is recorded.
 
