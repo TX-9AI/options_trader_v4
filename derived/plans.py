@@ -148,6 +148,30 @@ NEAR_MONEY_PCT    = 0.15    # strikes beyond this do not participate in gamma
 # plan and which credit_edge had already recorded weeks ago: pricing a short
 # call beyond an "upper" tine that had drifted below spot — an ITM short call,
 # something nobody would sell.
+
+def _n(v, spec: str = ".2f") -> str:
+    """Format a value that may be None. None renders as 'n/a', never raises.
+
+    🔴 THE 2026-08-26 CRASH. Every plan's `why` string formatted `r`, `credit`
+    and the strikes with `{x:.2f}`. Under RELAXED entries `r_verdict(None)`
+    returns MUTED — NOT FAIL — so nothing is appended to `why`, `ok` stays
+    True, and execution falls straight into the f-string with r=None:
+    `TypeError: unsupported format string passed to NoneType.__format__`.
+    IronCondor raised it on all 15 boxes every tick and produced no rows for a
+    whole session; the fork hit it wherever strikes were unpriceable.
+    ⚠️ THIS IS THE MUTED_NO_R CASE, which we identified the night before and
+    handled in the VERDICT while leaving it live in the MESSAGE. A value that
+    can be absent must be absent-safe EVERYWHERE it is read, not only where it
+    is judged.
+    """
+    if v is None:
+        return "n/a"
+    try:
+        return format(v, spec)
+    except Exception:                                          # noqa: BLE001
+        return str(v)
+
+
 CEILING, FLOOR = "ceiling", "floor"
 
 
@@ -455,7 +479,7 @@ class PlanEngine(DerivedEngine):
             "underlying_at_decision": spot,
             "verdict": "TAKE" if ok else "DECLINE",
             "why": "; ".join(why) if why else
-                   (f"pin {conc:.1f}x neighbours, reachable at {reach:.2f} EM, "
+                   (f"pin {_n(conc, '.1f')}x neighbours, reachable at {reach:.2f} EM, "
                     f"dealers holding — R {r if r is not None else float('nan'):.2f}"),
             "pin": pin, "net_gamma": net, "conc": conc, "share": share,
             "reach": reach, "debit": debit, "r": r,
@@ -495,9 +519,9 @@ class PlanEngine(DerivedEngine):
         _rv, _rr = r_verdict(r)
         ok = _rv in ("PASS", "MUTED")
         why = ("" if ok else
-               f"{_rr} — TARGET {sk:.2f} (short strike expiring worthless) "
-               f"pays ${credit:.2f}; STOP {orb_hi:.2f} (a close back through "
-               f"the ORB high) risks ${risk:.2f}")
+               f"{_rr} — TARGET {_n(sk, '.2f')} (short strike expiring worthless) "
+               f"pays ${_n(credit, '.2f')}; STOP {orb_hi:.2f} (a close back through "
+               f"the ORB high) risks ${_n(risk, '.2f')}")
         checks = {
             "r":       ((r, r_verdict(r)[0]) if r is not None else None),
             "credit":  (credit, "n/a"),
@@ -514,7 +538,7 @@ class PlanEngine(DerivedEngine):
             "short_put_strike": sk, "long_put_strike": sk - 5,
             "underlying_at_decision": spot,
             "verdict": "TAKE" if ok else "DECLINE",
-            "why": why or f"R {r:.2f} clears the floor",
+            "why": why or f"R {_n(r)} clears the floor",
             "credit": credit, "risk": risk, "r": r,
         }
 
@@ -645,10 +669,10 @@ class PlanEngine(DerivedEngine):
         _rv, _rr = r_verdict(r)
         if _rv == "FAIL":
             ok = False
-            why.append(f"{_rr} — TARGET {sk:.2f} "
-                       f"(short strike expiring worthless) pays ${credit:.2f}; "
+            why.append(f"{_rr} — TARGET {_n(sk, '.2f')} "
+                       f"(short strike expiring worthless) pays ${_n(credit, '.2f')}; "
                        f"STOP {extreme:.2f} (a close beyond the sweep extreme) "
-                       f"risks ${risk:.2f}")
+                       f"risks ${_n(risk, '.2f')}")
         checks = {
             "level_hold_rate": ((hold, "PASS" if hold >= 0.75 else "FAIL")
                                 if hold is not None else None),
@@ -677,7 +701,8 @@ class PlanEngine(DerivedEngine):
             "verdict": "TAKE" if ok else "DECLINE",
             "why": "; ".join(why) if why else
                    (f"{name} @{pool:.2f} swept to {extreme:.2f} and reclaimed, "
-                    f"hold {(hold or 0)*100:.0f}%, {age} bars old, R {r:.2f}"),
+                    f"hold {(hold or 0)*100:.0f}%, {age} bars old, "
+                    f"R {_n(r)}"),
         }
 
     def _runaway(self, ctx: dict) -> Optional[dict]:
@@ -837,7 +862,7 @@ class PlanEngine(DerivedEngine):
             "why": "; ".join(why) if why else
                    (f"stop {stop_spot:.2f} is {risk_spot:.2f} away; target "
                     f"{target_spot:.2f} mirrors it at {travel:.2f} ATR; "
-                    f"R {r:.2f} (gamma lift {lift:.3f}); theta "
+                    f"R {_n(r)} (gamma lift {_n(lift, '.3f')}); theta "
                     f"${theta_dollars:.2f}/contract to the close"),
         }
 
@@ -927,15 +952,15 @@ class PlanEngine(DerivedEngine):
         if ck is None or pk is None:
             ok = False
             why.append(f"no strike beyond one boundary "
-                       f"(call>={up_target:.2f}, put<={dn_target:.2f})")
+                       f"(call>={_n(up_target)}, put<={_n(dn_target)})")
         if width_atr is not None and width_atr < 1.0:
             ok = False
-            why.append(f"range is only {width_atr:.2f} ATR wide — too tight to "
+            why.append(f"range is only {_n(width_atr, '.2f')} ATR wide — too tight to "
                        f"sell both sides of")
         _rv, _rr = r_verdict(r)
         if _rv == "FAIL":
             ok = False
-            why.append(f"{_rr} — combined credit ${total:.2f} against "
+            why.append(f"{_rr} — combined credit ${_n(total, '.2f')} against "
                        f"${(5.0-total):.2f} of risk")
         checks = {
             "r":               ((r, r_verdict(r)[0]) if r is not None else None),
@@ -965,9 +990,10 @@ class PlanEngine(DerivedEngine):
             "r": r,
             "verdict": "TAKE" if ok else "DECLINE",
             "why": "; ".join(why) if why else
-                   (f"CCS {ck:.0f}/{ck+5:.0f} + PCS {pk:.0f}/{pk-5:.0f}, "
-                    f"combined ${total:.2f} on a {width_atr:.2f}-ATR range, "
-                    f"R {r:.2f}"
+                   (f"CCS {_n(ck, '.0f')}/{_n(ck + 5 if ck is not None else None, '.0f')} "
+                    f"+ PCS {_n(pk, '.0f')}/{_n(pk - 5 if pk is not None else None, '.0f')}, "
+                    f"combined ${_n(total)} on a {_n(width_atr)}-ATR range, "
+                    f"R {_n(r)}"
                     + (f" · LEG 2 PENDING: the {pending} side is still open"
                        if pending else "")),
         }
@@ -1467,7 +1493,7 @@ class PlanEngine(DerivedEngine):
                                "geometry": (0.0, "FAIL")},
                     "trigger_price": rail, "underlying_at_decision": spot,
                     "why": _killed.get(round(rail, 4),
-                                       f"the {tf} {side} tine at {rail:.2f} is "
+                                       f"the {tf} {side} tine at {_n(rail, '.2f')} is "
                                        f"not a valid candidate on the session "
                                        f"map"),
                 })
@@ -1500,13 +1526,13 @@ class PlanEngine(DerivedEngine):
             why, ok = [], True
             if sk is None:
                 ok = False
-                why.append(f"no strike beyond the {tf} {side} tine {rail:.2f}")
+                why.append(f"no strike beyond the {tf} {side} tine {_n(rail, '.2f')}")
             _rv, _rr = r_verdict(r)
             if _rv == "FAIL":
                 ok = False
-                why.append(f"{_rr} — TARGET {sk:.2f} (short strike expiring "
+                why.append(f"{_rr} — TARGET {_n(sk, '.2f')} (short strike expiring "
                            f"worthless), STOP a close beyond the tine "
-                           f"{rail:.2f}")
+                           f"{_n(rail, '.2f')}")
             out.append({
                 "strategy": "ForkCreditSpread", "direction": f"{tf}_{side}",
                 "checks": {
@@ -1536,9 +1562,10 @@ class PlanEngine(DerivedEngine):
                 "r": r,
                 "verdict": "TAKE" if ok else "DECLINE",
                 "why": "; ".join(why) if why else
-                       (f"{tf} {side} tine at {rail:.2f} ({dist_pct:.2f}% from "
-                        f"spot, slope {slope:+.4f}/bar); sell {sk:.0f}/{lk:.0f} "
-                        f"just beyond it for ${credit:.2f}, R {r:.2f}"),
+                       (f"{tf} {side} tine at {_n(rail)} ({_n(dist_pct)}% from "
+                        f"spot, slope {_n(slope, '+.4f')}/bar); sell "
+                        f"{_n(sk, '.0f')}/{_n(lk, '.0f')} just beyond it for "
+                        f"${_n(credit)}, R {_n(r)}"),
             })
         return out
 

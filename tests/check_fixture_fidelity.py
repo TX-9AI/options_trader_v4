@@ -152,6 +152,29 @@ def main():
           "verdict': 'NO PLAN'" in _du or '"verdict": "NO PLAN"' in _du,
           "raise -> NO PLAN row")
 
+    # ── 🔴 X7 — NO PLAN MAY CRASH ON AN ABSENT NUMBER ────────────────────
+    # The fleet's actual failure: every `why` string formatted r/credit/strikes
+    # with {x:.2f}. Under RELAXED, r_verdict(None) returns MUTED — NOT FAIL —
+    # so nothing is appended to `why`, `ok` stays True, and execution falls
+    # into the f-string with r=None: TypeError. IronCondor raised it on all 15
+    # boxes every tick for a whole session.
+    # ⚠️ WE HANDLED MUTED_NO_R IN THE VERDICT THE NIGHT BEFORE AND LEFT IT LIVE
+    # IN THE MESSAGE. A value that can be absent must be absent-safe EVERYWHERE
+    # it is read, not only where it is judged.
+    risky = {"r", "credit", "total", "sk", "lk", "ck", "pk", "lift",
+             "up_target", "dn_target", "width_atr", "dist_pct", "slope",
+             "rail", "risk", "hold", "conc"}
+    unguarded = []
+    for n in ast.walk(tree):
+        if isinstance(n, ast.JoinedStr):
+            for v in n.values:
+                if (isinstance(v, ast.FormattedValue)
+                        and v.format_spec is not None
+                        and ast.unparse(v.value) in risky):
+                    unguarded.append(f"L{v.lineno}:{ast.unparse(v.value)}")
+    check("X7 no possibly-absent value is formatted with a raw format spec",
+          not unguarded, ", ".join(unguarded) or "none")
+
     print()
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))
