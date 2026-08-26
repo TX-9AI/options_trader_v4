@@ -382,6 +382,30 @@ def main():
           next(p for p in fps if p["direction"] == "1d_call")["checks"]["tine_slope"][0],
           "1h slope > 1d slope")
 
+    # ── 🔴 P12 — NO SENTINEL MAY READ AS A MEASUREMENT ───────────────────
+    # The operator caught this in the live table: UNH wrote "pin 99.00 EM away
+    # — not reachable" when reach was UNMEASURABLE. `reach or 99` printed a
+    # placeholder that looks exactly like a measured number. Two siblings had
+    # the same shape: `conc or 0` ("0.0x neighbours") and `hold or 0` ("0%").
+    # ⚠️ THIS IS P10's RULE — an unmeasurable check is NULL, never 0.0/PASS —
+    # WHICH WAS NEVER APPLIED TO THE PROSE. The table said "unknown" while the
+    # sentence next to it stated a figure. Of the two, the sentence is what a
+    # human reads.
+    _psrc = open(os.path.join(_root, "derived", "plans.py"), encoding="utf-8").read()
+    _sent = []
+    for _n in ast.walk(ast.parse(_psrc)):
+        if isinstance(_n, ast.JoinedStr):
+            for _v in _n.values:
+                if isinstance(_v, ast.FormattedValue):
+                    _e = ast.unparse(_v.value)
+                    # `X or <number>` inside a message is a sentinel. A string
+                    # default ("unknown"/"none") is honest and is allowed.
+                    if (" or " in _e and not _e.startswith("_n(")
+                            and not ("'" in _e or '"' in _e)):
+                        _sent.append(f"L{_v.lineno}:{_e}")
+    check("P12 no numeric sentinel is printed as though it were measured",
+          not _sent, ", ".join(_sent) or "none")
+
     # ── P7: THE TABLES — spine + long-format checks ─────────────────────
     import sqlite3, time as _t
 

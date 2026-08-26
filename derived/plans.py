@@ -499,12 +499,22 @@ class PlanEngine(DerivedEngine):
             why.append(f"net gamma NEGATIVE ({net:.0f}) — the pin PUSHES")
         if conc is None or conc < PIN_CONC_MIN or (share or 0) < PIN_SHARE_MIN:
             ok = False
-            why.append(f"pin DIFFUSE ({(conc or 0):.1f}x neighbours, "
-                       f"{(share or 0)*100:.0f}% of gamma)")
+            # 🔴 NO SENTINELS IN A MESSAGE (r143). `conc or 0` printed
+            # "0.0x neighbours" for an UNMEASURABLE concentration — a number
+            # that reads exactly like a measured one. Same defect the operator
+            # caught in the live table: UNH wrote "pin 99.00 EM away" from
+            # `reach or 99`, a placeholder that looks like data.
+            # ⚠️ THIS IS THE SAME RULE AS P10 (an unmeasurable CHECK is NULL,
+            # never 0.0/PASS) — it just was never applied to the PROSE. The
+            # table and the sentence must agree about what was not known.
+            why.append(f"pin DIFFUSE ({_n(conc, '.1f')}x neighbours, "
+                       f"{_n(share * 100 if share is not None else None, '.0f')}"
+                       f"% of gamma)")
         if reach is None or reach > PIN_REACH_MAX:
             ok = False
-            why.append(f"pin {(reach or 99):.2f} EM away — not reachable "
-                       f"({abs(pin-spot):.2f} to travel)")
+            why.append(f"pin {_n(reach)} EM away — not reachable "
+                       f"({_n(abs(pin - spot) if (pin and spot) else None)} "
+                       f"to travel)")
         elif reach < PIN_REACH_MIN:
             ok = False
             why.append(f"already at the pin ({reach:.2f} EM)")
@@ -773,7 +783,8 @@ class PlanEngine(DerivedEngine):
             "verdict": "TAKE" if ok else "DECLINE",
             "why": "; ".join(why) if why else
                    (f"{name} @{pool:.2f} swept to {extreme:.2f} and reclaimed, "
-                    f"hold {(hold or 0)*100:.0f}%, {age} bars old, "
+                    f"hold {_n(hold * 100 if hold is not None else None, '.0f')}%, "
+                    f"{age} bars old, "
                     f"R {_n(r)}"),
         }
 
