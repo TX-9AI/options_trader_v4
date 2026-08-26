@@ -74,6 +74,28 @@ def main():
           f"read {sorted(fields) or 'none'}; not on ForkTrigger: "
           f"{sorted(bad_f) or 'none'}")
 
+    # ── 🔴 X2b — THE CHAIN CONTRACT, THE THIRD OBJECT I GOT WRONG ────────
+    # `getattr(c, "oi", 0)` — the real field is `open_interest`. It returned
+    # the default 0 on every contract, so the gamma map was ALWAYS empty and
+    # all 15 boxes reported "no gamma flip — there is no pin" every tick of
+    # every session. The butterfly has never once been evaluated.
+    from data.options_chain import OptionContract as _OC
+    _cf = set()
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == "getattr" and len(n.args) >= 2
+                and isinstance(n.args[0], ast.Name)
+                and n.args[0].id in ("c", "p", "sh", "lo", "ct")
+                and isinstance(n.args[1], ast.Constant)):
+            _cf.add(n.args[1].value)
+    _real_c = set(getattr(_OC, "__annotations__", {})) | {
+        a for a in dir(_OC) if not a.startswith("_")}
+    _bad_c = _cf - _real_c
+    check("X2b every option-contract field plans.py reads EXISTS on it",
+          not _bad_c,
+          f"read {sorted(_cf) or 'none'}; not on OptionContract: "
+          f"{sorted(_bad_c) or 'none'}")
+
     # ── the sweep object Rule 4 interrogates ──────────────────────────────
     msrc = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
     mtree = ast.parse(msrc)

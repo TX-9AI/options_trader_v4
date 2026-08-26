@@ -23,9 +23,14 @@ def check(label, cond, detail=""):
 
 
 class _C:
+    # ⚠️ `open_interest`, NOT `oi` — the real OptionContract field. This
+    # fixture carried `oi` and so did the production code, so P1-P3 passed
+    # against a name that does not exist on any real contract. The double had
+    # to be wrong in the SAME way for the tests to go green, which is exactly
+    # what happens when one person writes both in one sitting.
     def __init__(self, strike, bid, ask, gamma=0.0, oi=0.0):
         self.strike, self.bid, self.ask = strike, bid, ask
-        self.gamma, self.oi = gamma, oi
+        self.gamma, self.open_interest = gamma, oi
 
 
 class _Chain:

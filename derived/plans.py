@@ -327,6 +327,16 @@ class PlanEngine(DerivedEngine):
     def _gamma_by_strike(chain, spot: float):
         """Signed dealer gamma per strike, near the money only.
 
+        🔴 THE FIELD IS `open_interest`, NOT `oi` (r139). I read `getattr(c,
+        "oi", 0)`, which returns the DEFAULT 0 on every contract, so
+        `oi > 0` was never true, the gamma map was always empty, and all 15
+        boxes reported "no gamma flip near the money — there is no pin" every
+        tick of every session. The butterfly has never once been evaluated.
+        ⚠️ THIRD INSTANCE OF THE SAME ERROR IN ONE DAY — ctm.all() vs
+        all_rails(), bars_since_reclaim vs bars_ago, now oi vs open_interest.
+        Every one was a field name I ASSUMED instead of reading, and every one
+        failed SILENTLY because getattr with a default cannot raise.
+
         ⚠️ ⟨ASSUMPTION⟩ dealers long calls / short puts. NOT verified against
         this fleet's own GEX code. The pin's LOCATION barely moves under it
         (360 in 72/74 TSLA snapshots on 2026-08-25 either way) but the
@@ -336,13 +346,13 @@ class PlanEngine(DerivedEngine):
         per = defaultdict(float)
         for c in (getattr(chain, "calls", []) or []):
             g = float(getattr(c, "gamma", 0) or 0)
-            oi = float(getattr(c, "oi", 0) or 0)
+            oi = float(getattr(c, "open_interest", 0) or 0)
             k = float(getattr(c, "strike", 0) or 0)
             if g > 0 and oi > 0 and spot and abs(k-spot)/spot <= NEAR_MONEY_PCT:
                 per[k] += g * oi
         for p in (getattr(chain, "puts", []) or []):
             g = float(getattr(p, "gamma", 0) or 0)
-            oi = float(getattr(p, "oi", 0) or 0)
+            oi = float(getattr(p, "open_interest", 0) or 0)
             k = float(getattr(p, "strike", 0) or 0)
             if g > 0 and oi > 0 and spot and abs(k-spot)/spot <= NEAR_MONEY_PCT:
                 per[k] -= g * oi
@@ -538,7 +548,15 @@ class PlanEngine(DerivedEngine):
             "short_put_strike": sk, "long_put_strike": sk - 5,
             "underlying_at_decision": spot,
             "verdict": "TAKE" if ok else "DECLINE",
-            "why": why or f"R {_n(r)} clears the floor",
+            # 🔴 SAY WHAT ACTUALLY HAPPENED, NOT WHAT THE HAPPY PATH ASSUMES.
+            # ⚠️ THIS SENTENCE WAS FALSE ON LIVE DATA: PLTR wrote "R 0.10
+            # clears the floor" against a floor of 1.00. Under RELAXED the
+            # hurdle is MUTED, so `why` stays empty and this fallback asserted
+            # a comparison that never ran. The VERDICT was defensible; the
+            # REASON was a lie, in the one table we intend to fit against.
+            # A row that misstates WHY it was taken is worse than one that
+            # says nothing, because the fit cannot tell the two apart.
+            "why": why or (f"R {_n(r)} — {r_verdict(r)[1]}"),
             "credit": credit, "risk": risk, "r": r,
         }
 

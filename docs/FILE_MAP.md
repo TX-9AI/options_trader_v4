@@ -49,8 +49,8 @@ Change these with the most care; a break here reaches everything downstream.
 | `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
 | `derived/base.py` | 13 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
 | `strategy/__init__.py` | 11 | check_audit_20260823.py, check_condor_spec.py, check_criteria.py, criteria.py |
+| `data/options_chain.py` | 10 | base_strategy.py, check_entry_gate.py, check_fixture_fidelity.py, check_sweep_spread.py |
 | `database/trade_logger.py` | 10 | check_condor_pairing.py, check_condor_stop_suppression.py, check_orb_resume.py, condor_roll.py |
-| `data/options_chain.py` | 9 | base_strategy.py, check_entry_gate.py, check_sweep_spread.py, daily_fork_credit_spread.py |
 | `data/tasty_client.py` | 9 | candle_feed.py, condor_roll.py, entry_engine.py, exit_engine.py |
 | `execution/exit_engine.py` | 9 | check_condor_spec.py, check_condor_stop_suppression.py, check_exit_executes.py, check_ladder_wired.py |
 | `analysis/pitchfork.py` | 8 | check_condor_rails.py, check_condor_spec.py, forks.py, iron_condor_strategy.py |
@@ -208,7 +208,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/options_chain.py`
 - **calls:** `analysis/tenor_publish.py`, `config.py`, `data/open_interest.py`, `data/tasty_client.py`, `execution/tick_size.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `analysis/trade_readiness.py`, `data/gex_data.py`, `main.py`, `strategy/base_strategy.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `tests/check_entry_gate.py`, `tests/check_sweep_spread.py`
+- **called by:** `analysis/trade_readiness.py`, `data/gex_data.py`, `main.py`, `strategy/base_strategy.py`, `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `tests/check_entry_gate.py`, `tests/check_fixture_fidelity.py`, `tests/check_sweep_spread.py`
 
 ### `data/tasty_client.py`
 - **calls:** `config.py`
@@ -535,7 +535,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_fixture_fidelity.py`
-- **calls:** `analysis/condor_trigger_map.py`, `analysis/liquidity_mapper.py`
+- **calls:** `analysis/condor_trigger_map.py`, `analysis/liquidity_mapper.py`, `data/options_chain.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_gates.py`
