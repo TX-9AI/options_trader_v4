@@ -3,6 +3,13 @@
 **Written 2026-08-26 by the assistant that caused the problem.**
 **For: Fable. Read this before touching `derived/plans.py`.**
 
+> **RESOLVED — r146, 2026-08-26.** The seven builders are deleted; the plan is
+> rebuilt as the strategy's own informer in `strategy/plan.py`; the session
+> map lives in `analysis/session_map.py`; every strategy (ORB included, zero
+> hurdles) narrates through it; `derived/plans.py` v2.0 is the board. As-built
+> record: `docs/PLAN_SPEC.md` §8. Pinned by `tests/check_plan_wiring.py`
+> (born red at cddfa06). Kept for the accounting below.
+
 ---
 
 ## THE ONE-SENTENCE VERSION

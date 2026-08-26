@@ -1,5 +1,17 @@
 """
-strategy/orb_strategy.py  v4.1
+strategy/orb_strategy.py  v4.2
+v4.2  2026-08-26  r146 — RECORDED THROUGH THE PLAN, ZERO HURDLES. Operator,
+      2026-08-26: *"Include orb in that, zero hurdles."* The three refusals
+      this file makes AFTER the engine confirms (no contract, zero premium,
+      ATR below the reachable floor) and the fire itself now write a
+      plan_tick row through `self.planner` (strategy/plan.py, `record_only`).
+      ⚠️ NOTHING GATES. `executable()` is never called on this plan; no R
+      hurdle, no geometry, no window is applied to ORB. The 2026-08-25 ruling
+      — *"leave orb alone. That one can't get encumbered with extra hurdles"*
+      — stands; this is narration of decisions the file already made, so
+      "why did ORB not fire this morning" has an answer in the table. The
+      engine-state-not-confirmed case is recorded by main.py, which is the
+      only place that knows the engine was not asked.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -53,6 +65,7 @@ import config
 from typing import Optional, List, Tuple
 
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
+from strategy.plan import Plan
 from analysis.orb_engine import ORBData, ORBState
 from analysis.market_state import MarketState
 from analysis.volatility_engine import VolatilityState
@@ -107,6 +120,15 @@ class ORBStrategy(BaseOptionsStrategy):
     Liquidity-aware: distinguishes catalyst sweeps from obstacle sweeps.
     """
 
+    # RECORD ONLY. ORB opens its own plan_ledger rows (main.py's open_plan
+    # calls stand), so `self_ledgers=True`; `record_only=True` documents that
+    # its verdict is never consulted.
+    PLAN_CHECKS = ("engine_state", "contract", "premium", "atr_pct")
+
+    def __init__(self):
+        self.planner = Plan("ORBStrategy", self.PLAN_CHECKS,
+                         record_only=True, self_ledgers=True)
+
     @property
     def name(self) -> str:
         return "ORBStrategy"
@@ -119,13 +141,18 @@ class ORBStrategy(BaseOptionsStrategy):
                          chain: OptionsChain,
                          macro: MacroSnapshot,
                          current_price: float) -> Optional[OptionsSignal]:
+        t = self.planner.tick(current_price)
 
         if orb.state not in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT):
-            return None
+            return t.refuse("engine_state", f"ORB engine is {orb.state} — not a "
+                                            f"confirmed break+retest")
+        t.check("engine_state", None, True)
 
         direction   = orb.break_direction
         option_side = "call" if direction == "long" else "put"
         break_level = orb.orb_high if direction == "long" else orb.orb_low
+        t.direction = direction
+        t.anchor(trigger=break_level, invalidation=orb.stop_level)
 
         liq_result = self._analyze_liquidity(
             orb, liq_map, current_price, direction, break_level
@@ -254,7 +281,9 @@ class ORBStrategy(BaseOptionsStrategy):
         )
         if contract is None:
             logger.warning("ORB: no valid option contract found")
-            return None
+            return t.refuse("contract", f"no valid {option_side} contract near "
+                                        f"target strike {target_strike}")
+        t.check("contract", contract.strike, True)
 
         signal.strike        = contract.strike
         signal.expiry        = contract.expiry
@@ -275,7 +304,8 @@ class ORBStrategy(BaseOptionsStrategy):
         # clean the break and retest were.
         if signal.entry_premium <= 0:
             logger.warning("ORB: option has zero premium - skipping")
-            return None
+            return t.refuse("premium", f"{option_side} {contract.strike} has zero premium")
+        t.check("premium", signal.entry_premium, True)
         # 🔴 r96 — READ THE PERCENT FIELD, NOT THE FRACTION. This line read
         # `atr_normalized` (atr/price, a FRACTION) and compared it against
         # ORB_ATR_FLOOR_PCT, which is 0.05 meaning 0.05 PERCENT. The gate
@@ -292,13 +322,17 @@ class ORBStrategy(BaseOptionsStrategy):
         _atr_pct = float(getattr(vol_state, "atr_pct", None)
                          or (float(getattr(vol_state, "atr_normalized", 0.0) or 0.0)
                              * 100.0))
+        t.check("atr_pct", _atr_pct or None,
+                None if not _atr_pct else _atr_pct >= ORB_ATR_FLOOR_PCT)
         if _atr_pct and _atr_pct < ORB_ATR_FLOOR_PCT:
             logger.info(
                 "ORB: NO TRADE - ATR %.3f%% is below the reachable floor "
                 "(%.2f%%). Measured: below 0.05%% no strike was reached on any "
                 "of 5,517 bars, so the target cannot pay regardless of setup "
                 "quality.", _atr_pct, ORB_ATR_FLOOR_PCT)
-            return None
+            return t.refuse("atr_pct", f"ATR {_atr_pct:.3f}% below the reachable "
+                                       f"floor {ORB_ATR_FLOOR_PCT:.2f}% — the "
+                                       f"target cannot pay")
 
         logger.info(
             f"🎯 ORB SIGNAL {direction.upper()}: "
@@ -314,7 +348,7 @@ class ORBStrategy(BaseOptionsStrategy):
             f"fed_day={macro.is_fed_day} "
             f"confluence={signal.confluence_factors}"
         )
-        return signal
+        return t.take(signal)
 
     # ─── Liquidity Analysis ───────────────────────────────────────────────────
 

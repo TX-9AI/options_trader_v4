@@ -1,5 +1,23 @@
 """
-strategy/runaway_continuation.py  v4.1
+strategy/runaway_continuation.py  v4.2
+v4.2  2026-08-26  r146 — THE PLAN IS WIRED, AND THE SIGNAL CAN NOW TRADE.
+      (1) Every refusal goes through `self.plan` (strategy/plan.py): four
+      bare `return None`s that logged nothing — window, price, ATR floor,
+      ORB direction, the runaway itself — now write a DECLINE row naming
+      the gate. This strategy had ZERO `_gate()` call sites (handoff table).
+      (2) 🔴 P0 — THE SIGNAL WAS ALWAYS INVALID. `target_delta` was written
+      here and READ NOWHERE (`grep target_delta` — one writer, zero readers,
+      the r97 sweep defect exactly). The signal carried no strike, premium or
+      contract, so `OptionsSignal.is_valid`'s single-leg arm (`strike > 0 and
+      entry_premium > 0`) was False on every fire and main.py logged
+      `Invalid signal from RunawayContinuation` and returned. The flagship v4
+      entry rule could never place a trade. The contract is now resolved
+      HERE against the chain the dispatcher already passes, by the existing
+      delta-nearest selector, and the plan prices the what-if off that real
+      contract: stop = the ORB boundary, target = the stop distance
+      mirrored, R from delta/gamma over those distances.
+      (3) The R hurdle is consulted: STRICT refuses below the floor, RELAXED
+      records and proceeds (strategy/criteria.py owns the switch).
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -102,6 +120,7 @@ import config
 from strategy import relaxed
 from utils.math_utils import safe_float
 from strategy.base_strategy import OptionsSignal as Signal
+from strategy.plan import Plan, _n
 
 logger = logging.getLogger(__name__)
 
@@ -190,9 +209,19 @@ class RunawayContinuationStrategy:
 
     name = "RunawayContinuation"
 
+    # The plan is the INFORMER: it prices what this spec would buy, applies
+    # the R hurdle, and records every check. The spec below is the decision.
+    PLAN_CHECKS = ("entry_window", "price", "atr_pct", "orb_direction",
+                   "runaway_confirmed", "contract", "debit", "delta",
+                   "stop_distance", "target_distance", "r")
+
+    def __init__(self):
+        self.planner = Plan(self.name, self.PLAN_CHECKS)
+
     def generate_signal(self, *, orb, atr_pct: float, price_now: float,
                         prev_close: float, now_et: str, chain=None,
                         **_ignored) -> Optional[Signal]:
+        t = self.planner.tick(price_now)
         # ── 1. window ────────────────────────────────────────────────────────
         # A runaway confirmed at 11:29 still fires; theta is survivable that
         # early and the move is in evidence. After the cutoff it is not.
@@ -202,7 +231,9 @@ class RunawayContinuationStrategy:
         # adds noise to the log this mode exists to read.
         _cut = relaxed.window("00:00", CUTOFF_ET, "00:00", "14:00")[1]
         if now_et and now_et >= _cut:
-            return None
+            return t.refuse("entry_window",
+                            f"{now_et} ET is past the debit cutoff {_cut}")
+        t.check("entry_window", None, True)
 
         # ── 2. the ATR gate, BEFORE anything else ────────────────────────────
         # Checked first deliberately: if the tape cannot pay, nothing about the
@@ -210,14 +241,19 @@ class RunawayContinuationStrategy:
         price_now = safe_float(price_now)
         prev_close = safe_float(prev_close)
         if not price_now or price_now <= 0 or price_now > 1e7:
-            return None
+            return t.refuse("price", f"price unusable ({price_now})")
+        t.check("price", price_now, True)
         delta = target_delta(atr_pct)
+        t.check("atr_pct", safe_float(atr_pct), delta is not None)
         if delta is None:
             logger.debug(
                 "[runaway] no trade: ATR %.3f%% below the reachable floor "
                 "(%.2f%%). Measured: below 0.05%% NO strike was reached on "
                 "5,517 bars.", atr_pct or 0.0, ATR_FLOOR_PCT)
-            return None
+            return t.refuse("atr_pct",
+                            f"ATR {_n(atr_pct, '.3f')}% below the reachable floor "
+                            f"{ATR_FLOOR_PCT:.2f}% (0 of 5,517 bars reached the "
+                            f"required move below 0.05%)")
 
         # ── 3. direction comes from the ORB, not from a prediction ──────────
         state = str(getattr(orb, "state", "") or "")
@@ -226,11 +262,63 @@ class RunawayContinuationStrategy:
         elif "SHORT" in state.upper():
             direction, side = "short", "put"
         else:
-            return None
+            return t.refuse("orb_direction",
+                            f"ORB state '{state or 'none'}' carries no direction")
+        t.direction = direction
+        t.check("orb_direction", 1.0 if direction == "long" else -1.0, True)
 
         # ── 4. the runaway itself ────────────────────────────────────────────
+        tp50 = getattr(orb, "tp50", None) or getattr(orb, "underlying_tp50", None)
+        boundary = (getattr(orb, "orb_high", None) if direction == "long"
+                    else getattr(orb, "orb_low", None))
+        t.anchor(trigger=tp50, invalidation=boundary)
         if not runaway_confirmed(orb, price_now, prev_close, direction):
-            return None
+            t.check("runaway_confirmed", 0.0, False)
+            return t.refuse("runaway_confirmed",
+                            f"no 1m close beyond the 50% TP {_n(tp50)} holding at "
+                            f"this tick (prev close {_n(prev_close)}, now "
+                            f"{price_now:.2f})")
+        t.check("runaway_confirmed", 1.0, True)
+
+        # ── 5. THE CONTRACT — resolved here, off the chain the dispatcher
+        # passes, so the signal is executable and the plan prices the real
+        # thing. (v4.2: `target_delta` had no reader; see the header.)
+        if chain is None:
+            return t.starved("chain")
+        contract = None
+        try:
+            from data.options_chain import get_chain_fetcher
+            # delta-nearest OTM selector (mark > 0.05, |delta| <= 0.55); it
+            # logs under the sweep's name because that is where it was born
+            contract = get_chain_fetcher().select_sweep_strike(
+                chain, direction, delta)
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning("[runaway] strike selection raised: %s", exc)
+            contract = None
+        if contract is None or not (getattr(contract, "mark", 0) or 0) > 0:
+            t.check("contract", None, False)
+            return t.refuse("contract",
+                            f"no liquid {side} near |delta| {delta:.2f} on the "
+                            f"chain (mark > 0.05, |delta| <= 0.55)")
+        t.check("contract", contract.strike, True)
+
+        # ── 6. THE WHAT-IF. Stop = the ORB boundary (the structure that
+        # proved the move); target = the stop distance MIRRORED, no fitted
+        # multiple. R from delta/gamma over those two distances.
+        stop_d = (abs(price_now - float(boundary)) if boundary else None)
+        if not stop_d or stop_d <= 0:
+            t.check("stop_distance", stop_d, False)
+            return t.refuse("stop_distance",
+                            f"price {price_now:.2f} is at/inside the ORB boundary "
+                            f"{_n(boundary)} — no risk distance, so no target")
+        prem = float(getattr(contract, "ask", 0) or getattr(contract, "mark", 0) or 0)
+        t.debit_directional(prem, getattr(contract, "delta", 0.0),
+                            getattr(contract, "gamma", 0.0), stop_d, stop_d,
+                            invalidation=boundary, trigger=tp50)
+        ok, why = t.executable()
+        if not ok:
+            return t.refuse("r", why)
+        t.note(why)
 
         sig = Signal(
             strategy_name=self.name,
@@ -238,19 +326,28 @@ class RunawayContinuationStrategy:
             direction=direction,
             option_side=side,
             underlying_entry=price_now,
+            underlying_stop=float(boundary),
+            underlying_target=(price_now + stop_d if direction == "long"
+                               else price_now - stop_d),
             orb_range_high=getattr(orb, "orb_high", 0.0),
             orb_range_low=getattr(orb, "orb_low", 0.0),
+            strike=contract.strike,
+            expiry=getattr(contract, "expiry", ""),
+            entry_premium=contract.mark,
+            contract=contract,
         )
-        # target delta rides on the signal; strike selection resolves it against
-        # the live chain. Recorded either way so the reachability decision is
-        # auditable after the fact rather than inferred from the fill.
+        # Recorded so the reachability decision is auditable after the fact
+        # rather than inferred from the fill.
         sig.target_delta = delta
         sig.atr_pct_at_entry = atr_pct
         sig.disarms_retest = True
 
         relaxed.tag(sig)
         logger.info(
-            "[runaway] FIRE %s %s  ATR=%.3f%% -> target delta %.2f  "
+            "[runaway] FIRE %s %s %g mark=%.2f delta=%.3f  ATR=%.3f%% -> target "
+            "delta %.2f  stop %.2f target %.2f  R %s  "
             "(retest DISARMED - price never came back for it)",
-            direction, side, atr_pct, delta)
-        return sig
+            direction, side, contract.strike, contract.mark,
+            abs(float(getattr(contract, "delta", 0) or 0)), atr_pct, delta,
+            float(boundary), sig.underlying_target, _n(t.r))
+        return t.take(sig)

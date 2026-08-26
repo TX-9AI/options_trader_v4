@@ -1,5 +1,15 @@
 """
-strategy/trend_credit_spread.py  v4.2
+strategy/trend_credit_spread.py  v4.3
+v4.3  2026-08-26  r146 — THE PLAN IS WIRED. This strategy had ZERO `_gate()`
+      call sites and fourteen `return None`s, each with a good log line that
+      never left the log. Every one now goes through `self.planner`
+      (strategy/plan.py) and writes a DECLINE row naming the gate; the
+      what-if is priced off the REAL spread this spec selects (short at the
+      first-inside strike, wing at TCS_WING_WIDTH, credit from bid-ask):
+      R = credit / (width - credit), real width, never an assumed $5. The R
+      hurdle is consulted: STRICT refuses below the floor, RELAXED records
+      and proceeds. The trigger/invalidation the plan records are the ORB
+      bound this file already fixes; the plan moves nothing.
 v4.2  2026-08-24  r100 — REMOVED `ms=""` from the OptionsSignal constructor. Not
       a field; TC.6 raised TypeError on every fire and has never produced a
       signal since r65.
@@ -128,6 +138,7 @@ from config import (
 # shared math now lives in a module OWNED BY NEITHER, so neither strategy can
 # retune the other by accident — and TC.6 no longer needs the condor to exist.
 from strategy import credit_vertical as cv
+from strategy.plan import Plan, _n
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +165,13 @@ class TrendCreditSpread:
 
     name = "TrendCreditSpread"
 
+    PLAN_CHECKS = ("active", "entry_window", "condor_active", "trend_vote",
+                   "adx", "bound", "outside_range", "strike_inside_range",
+                   "contract", "pop", "wing", "credit", "width", "risk",
+                   "ev", "nickel_floor", "r")
+
     def __init__(self):
-        pass
+        self.planner = Plan(self.name, self.PLAN_CHECKS)
 
     @staticmethod
     def _wing_width() -> float:
@@ -191,14 +207,21 @@ class TrendCreditSpread:
           8. a protective wing
           9. positive EV, and a credit with room to exist
         """
+        t = self.planner.tick(current_price)
         try:
             if not TREND_CREDIT_ACTIVE:
-                return None
+                return t.refuse("active", "TREND_CREDIT_ACTIVE is off")
             now = now_et or datetime.now(ET)
+            _hm = f"{now.hour:02d}:{now.minute:02d}"
             if (now.hour, now.minute) >= TCS_ENTRY_END_ET:   # r60: own constant, flagged provisional
-                return None
+                return t.refuse("entry_window",
+                                f"{_hm} ET is past TCS_ENTRY_END_ET "
+                                f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}")
             if (now.hour, now.minute) < TCS_START_ET:
-                return None
+                return t.refuse("entry_window",
+                                f"{_hm} ET is before TCS_START_ET "
+                                f"{TCS_START_ET[0]:02d}:{TCS_START_ET[1]:02d}")
+            t.check("entry_window", None, True)
             # ── NO COOLDOWN. REMOVED 2026-08-14 ──────────────────────────────
             # It was added as an emergency brake when TC.6 rapid-fired the fleet,
             # and at that moment it was the wrong instrument for the right
@@ -216,7 +239,7 @@ class TrendCreditSpread:
             # suppresses valid re-entries without preventing a single bad one.
             if condor_active:
                 logger.info("[tcs] deferring — a condor plan holds this symbol")
-                return None
+                return t.refuse("condor_active", "a condor plan holds this symbol")
 
             # ── DIRECTION FROM THE LIVE TREND VOTE ───────────────────────────
             # The same source CNT.1's breakout branch uses. Nothing from the
@@ -228,11 +251,13 @@ class TrendCreditSpread:
             _adx = float(getattr(trend, "primary_adx", 0.0) or 0.0)
             if _dir not in ("BULLISH", "BEARISH"):
                 logger.info("[tcs] no directional trend vote (%s) — SKIP", _dir)
-                return None
+                return t.refuse("trend_vote", f"trend vote is {_dir}, not directional")
+            t.check("trend_vote", 1.0 if _dir == "BULLISH" else -1.0, True)
+            t.check("adx", _adx, _adx >= CONT_BREAKOUT_MIN_ADX)
             if _adx < CONT_BREAKOUT_MIN_ADX:
                 logger.info("[tcs] ADX %.1f below %.1f — SKIP",
                             _adx, CONT_BREAKOUT_MIN_ADX)
-                return None
+                return t.refuse("adx", f"ADX {_adx:.1f} below {CONT_BREAKOUT_MIN_ADX:.1f}")
 
             # ── THE FLOOR OF THE MOVE = THE SESSION EXTREME ──────────────────
             # Bull trend -> sell PUTS beneath the session LOW.
@@ -285,11 +310,16 @@ class TrendCreditSpread:
             else:
                 side, bound = "call", orb_low
                 direction = "short"
+            t.direction = direction
             if not bound or bound <= 0:
                 logger.warning("[tcs] no opening-range %s — the bound is the "
                                "anchor, SKIP rather than trade without one",
                                "high" if side == "put" else "low")
-                return None
+                return t.starved("bound")
+            # The bound IS the trigger the exit references and the
+            # invalidation (a close back through it). Frozen by this file.
+            t.anchor(trigger=bound, invalidation=bound)
+            t.check("bound", bound, True)
 
             # ── NO EM FLOOR. DIS-INHERITED FROM THE CONDOR ───────────────────
             # The condor needs an EM-derived minimum distance because it sells
@@ -312,11 +342,15 @@ class TrendCreditSpread:
             # artefact for a week (CNT.1, fixed 2026-08-14).
             _outside = (current_price > bound if side == "put"
                         else current_price < bound)
+            t.check("outside_range", current_price - bound, _outside)
             if not _outside:
                 logger.info("[tcs] price %.2f is back INSIDE the range (bound "
                             "%.2f) — the move that set the level has failed, "
                             "SKIP", current_price, bound)
-                return None
+                return t.refuse("outside_range",
+                                f"price {current_price:.2f} is back inside the "
+                                f"range (bound {bound:.2f}) — the move that set "
+                                f"the level has failed")
 
             sigma = float(getattr(vol_state, "atr_current", 0.0) or 0.0)
             bars = cv.bars_left(now, TCS_POP_BAR_MIN, HARD_CLOSE_ET)
@@ -348,13 +382,17 @@ class TrendCreditSpread:
                     "[tcs] no strike falls INSIDE the opening range "
                     "%.2f–%.2f (increments too wide) — SKIP",
                     _lo or 0.0, _hi or 0.0)
-                return None
+                return t.refuse("strike_inside_range",
+                                f"no strike inside the opening range "
+                                f"{_n(_lo)}–{_n(_hi)} (increments too wide)")
             target = _inside[0] if side == "call" else _inside[-1]
+            t.check("strike_inside_range", target, True)
             short = cv.find_contract_at_strike(contracts, target)
             if short is None:
                 logger.info("[tcs] first-inside strike %.2f has no contract — SKIP",
                             target)
-                return None
+                return t.refuse("contract", f"first-inside strike {target:.2f} has no contract")
+            t.check("contract", short.strike, True)
 
             # POP still gates. QUOTE-WIDTH DELIBERATELY DOES NOT (operator,
             # 2026-08-18): "sell the illiquid one if you can get mark or better."
@@ -366,11 +404,13 @@ class TrendCreditSpread:
             # "missing safety check"; it silently substituted a DIFFERENT strike
             # than the one specified, which is how 400 got sold on 2026-08-18.
             _pop_chk = cv.pop(abs(short.strike - current_price), sigma, bars)
+            t.check("pop", _pop_chk, _pop_chk >= TCS_MIN_POP)
             if _pop_chk < TCS_MIN_POP:
                 logger.info(
                     "[tcs] first-inside %s strike %.2f POP %.2f < %.2f at %.1f "
                     "bars — SKIP", side, short.strike, _pop_chk, TCS_MIN_POP, bars)
-                return None
+                return t.refuse("pop", f"POP {_pop_chk:.2f} < {TCS_MIN_POP:.2f} at "
+                                       f"{bars:.1f} bars for strike {short.strike:.2f}")
             logger.info(
                 "[tcs] strike = first inside range from the %s: %.2f "
                 "(range %.2f–%.2f, %d strike(s) inside)",
@@ -384,33 +424,58 @@ class TrendCreditSpread:
             if long_c is None or long_c.strike == short.strike:
                 logger.info("[tcs] no protective wing at %.2f — SKIP "
                             "(undefined risk is never sold)", long_strike)
-                return None
+                return t.refuse("wing", f"no protective wing at {long_strike:.2f} "
+                                        f"(undefined risk is never sold)")
+            t.check("wing", long_c.strike, True)
 
             credit = max(0.0, (short.bid or 0.0) - (long_c.ask or 0.0))
+            # ── THE WHAT-IF, priced off the spread THIS spec chose ────────
+            t.credit_spread(short.strike, long_c.strike, credit,
+                            invalidation=bound, trigger=bound)
             pop = cv.pop(abs(short.strike - current_price), sigma, bars)
             if pop <= 0.0:
                 logger.info("[tcs] POP unresolvable (sigma %.4f, bars %.1f) — "
                             "SKIP. A missing input is not a safe trade.",
                             sigma, bars)
-                return None
+                return t.refuse("pop", f"POP unresolvable (sigma {sigma:.4f}, "
+                                       f"bars {bars:.1f}) — a missing input is "
+                                       f"not a safe trade")
             req = TCS_LOSS_GIVEN_BREACH * (1.0 - pop) / pop
+            t.check("ev", credit / width - req, credit / width > req)
             if credit / width <= req:
                 logger.info(
                     "[tcs] NEGATIVE EV — credit %.2f = %.1f%% of width %.0f, "
                     "needs > %.1f%% at POP %.2f — SKIP",
                     credit, 100.0 * credit / width, width, 100.0 * req, pop)
-                return None
+                return t.refuse("ev", f"negative EV — credit {credit:.2f} = "
+                                      f"{100.0 * credit / width:.1f}% of width "
+                                      f"{width:.0f}, needs > {100.0 * req:.1f}% at "
+                                      f"POP {pop:.2f}")
             floor_n = TCS_MIN_CREDIT_NICKEL_MULT * TCS_NICKEL_REF
+            t.check("nickel_floor", credit - floor_n, credit >= floor_n)
             if credit < floor_n:
                 logger.info("[tcs] credit %.2f below %.1fx nickel (%.2f) — "
                             "no room to profit, SKIP",
                             credit, TCS_MIN_CREDIT_NICKEL_MULT, floor_n)
-                return None
+                return t.refuse("nickel_floor",
+                                f"credit {credit:.2f} below "
+                                f"{TCS_MIN_CREDIT_NICKEL_MULT:.1f}x nickel "
+                                f"({floor_n:.2f}) — no room to profit")
 
-            return self._build_signal(side, short, long_c, direction, bound,
-                                      current_price, ms, bars)
+            # ── THE R HURDLE — strict refuses, relaxed records ────────────
+            ok, why = t.executable()
+            if not ok:
+                logger.info("[tcs] R %s refused: %s", _n(t.r), why)
+                return t.refuse("r", why)
+            t.note(why)
+
+            return t.take(self._build_signal(side, short, long_c, direction,
+                                             bound, current_price, ms, bars))
         except Exception as exc:                               # noqa: BLE001
             logger.warning("[tcs] generate_signal failed: %s", exc)
+            if not t.closed:
+                t.refuse("raised", f"{type(exc).__name__}: {exc}",
+                         verdict="NO PLAN")
             return None
 
     def _build_signal(self, side, short, long_c, direction, boundary,

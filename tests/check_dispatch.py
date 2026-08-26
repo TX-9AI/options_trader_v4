@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_dispatch.py  v4.1
+tests/check_dispatch.py  v4.2
+v4.2  2026-08-26  r146: the runaway fixture supplies a chain and the pin is that
+      the signal is VALID (strike, premium, contract resolved) — it never was
+      before r146; without a chain the strategy is starved, not fired.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -141,10 +144,35 @@ def main(argv):
         class _LM:
             recent_sweep = None
 
-        r = RunawayContinuationStrategy().generate_signal(
+        # r146 — the runaway now resolves its own contract off the chain the
+        # dispatcher passes (its signal was ALWAYS invalid before: strike 0,
+        # premium 0, `target_delta` had no reader). So the fixture supplies a
+        # chain, and the pin is that the signal is VALID, not merely non-None.
+        class _C:
+            def __init__(s, k, mark, delta, gamma=0.01):
+                s.strike, s.mark, s.ask, s.bid = k, mark, mark + 0.02, mark - 0.02
+                s.delta, s.gamma, s.theta = delta, gamma, -0.05
+                s.expiry, s.option_type, s.symbol = "2026-08-26", "call", f"C{k}"
+                s.open_interest = 100
+
+        class _Chain:
+            calls = [_C(102.0, 0.90, 0.40), _C(103.0, 0.45, 0.25), _C(104.0, 0.20, 0.12)]
+            puts = []
+
+        r0 = RunawayContinuationStrategy().generate_signal(
             orb=_ORB(), atr_pct=0.14, price_now=101.6, prev_close=101.55,
             now_et="10:15")
+        check("RunawayContinuation without a chain is starved, not fired",
+              r0 is None)
+        import os as _os
+        _os.environ["OT_RELAXED_ENTRY"] = "1"      # mute the R hurdle for the pin
+        r = RunawayContinuationStrategy().generate_signal(
+            orb=_ORB(), atr_pct=0.14, price_now=101.6, prev_close=101.55,
+            now_et="10:15", chain=_Chain())
         check("RunawayContinuation.generate_signal RUNS and fires", r is not None)
+        check("RunawayContinuation signal is VALID (strike+premium+contract "
+              "resolved — r146 P0)", r is not None and r.is_valid,
+              f"strike={getattr(r, 'strike', None)} prem={getattr(r, 'entry_premium', None)}")
 
         s2 = SweepCreditSpreadStrategy().generate_signal(
             liq_map=_LM(), price_now=600.0, now_et="13:30", atr_pct=0.10)

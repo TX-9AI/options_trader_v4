@@ -1,5 +1,15 @@
 """
-strategy/condor_roll.py  v4.5
+strategy/condor_roll.py  v4.6
+v4.6  2026-08-26  r146 — THE ROLL HAS A PLAN. `check_and_execute_roll` writes
+      a `CreditRoll` row through strategy/plan.py at every decision: HOLD
+      (no paired condor / already final form / neither side tested / no
+      risk-free roll — with the best candidate's roll_credit, close_cost,
+      credit_after and tested_width, the "economical question" the operator
+      named), ROLL when executed, NO PLAN when the chain is absent. The roll
+      logic is unchanged; this narrates the decision it already makes.
+      Operator: *"we are already trying to find the farthest strike that
+      satisfies the economical question & that is worthy of a tick by tick
+      plan."*
 v4.5  2026-08-24  r106 THE TENT — operator's post-roll escalation, combining his
       rungs 2 and 3: on a 1-min CLOSE beyond a short strike of an already-rolled
       structure, take the PROFITABLE side off (computed from marks, never
@@ -101,8 +111,14 @@ from typing import Optional, List, Tuple
 
 from config import STRIKE_INCREMENT, CONTRACT_MULTIPLIER
 from utils.time_utils import fmt_et_short
+from strategy.plan import Plan
 
 logger = logging.getLogger(__name__)
+
+# The roll's informer — management, not entry. Verdicts HOLD / ROLL / NO PLAN.
+_ROLL_PLAN = Plan("CreditRoll", ("legs", "final_form", "tested", "roll_credit",
+                                 "close_cost", "credit_after", "tested_width",
+                                 "risk_free"), self_ledgers=True)
 
 
 @dataclass
@@ -224,27 +240,60 @@ def check_and_execute_roll(pos_mgr, chain, current_price: float, state) -> bool:
     """If both condor verticals are open and one side is tested, roll the
     untested side into a broken wing — but ONLY if that roll makes the tested
     side risk-free. Returns True if a roll was executed."""
+    t = _ROLL_PLAN.tick(current_price)
     if chain is None:
+        t.starved("chain")
         return False
 
     legs = [r for r in pos_mgr.get_open_records() if r.get("is_condor_leg")]
+    t.check("legs", len(legs), len(legs) == 2)
     if len(legs) != 2:
+        t.hold(f"{len(legs)} condor leg(s) open — a roll needs a pair")
         return False
     # Final-form guard: never touch a position that has already been rolled.
     if any(r.get("is_broken_wing") for r in legs):
+        t.check("final_form", 1.0, False)
+        t.hold("structure already rolled — final form, no further adjustment")
         return False
+    t.check("final_form", 0.0, True)
 
     tested, untested = classify_tested(legs, current_price)
     if tested is None:
+        t.check("tested", 0.0, False)
+        t.hold("neither short strike tested at this price")
         return False
+    t.check("tested", 1.0, True)
+    t.direction = tested["option_side"]
+    t.anchor(trigger=tested.get("short_strike"))
 
     banked_credit = sum(float(l.get("credit_received", l.get("entry_premium", 0.0)))
                         for l in legs)
     plan = find_risk_free_roll(tested, untested, chain, current_price, banked_credit)
+    if plan is not None:
+        t.check("roll_credit", plan.roll_credit, plan.roll_credit > 0)
+        t.check("close_cost", plan.close_cost, True)
+        t.check("credit_after", plan.total_credit_after, True)
+        t.check("tested_width", plan.tested_width, True)
+        t.check("risk_free", 1.0 if plan.risk_free else 0.0, plan.risk_free)
     if plan is None or not plan.risk_free:
         # No roll available that removes tested-side risk — manage normally.
+        if plan is None:
+            t.hold(f"{tested['option_side']} side tested at "
+                   f"{tested.get('short_strike', 0):g} but the untested vertical "
+                   f"cannot be priced — no roll")
+        else:
+            t.hold(f"{tested['option_side']} side tested at "
+                   f"{tested.get('short_strike', 0):g}; best roll to "
+                   f"{plan.new_short_strike:g}/{plan.new_long_strike:g} collects "
+                   f"{plan.roll_credit:.2f} less {plan.close_cost:.2f} to close = "
+                   f"{plan.total_credit_after:.2f} cumulative vs tested width "
+                   f"{plan.tested_width:.2f} — NOT risk-free, holding")
         return False
 
+    t.hold(f"ROLL {plan.untested_side} to {plan.new_short_strike:g}/"
+           f"{plan.new_long_strike:g}: roll credit {plan.roll_credit:.2f}, close "
+           f"cost {plan.close_cost:.2f}, cumulative {plan.total_credit_after:.2f} "
+           f">= tested width {plan.tested_width:.2f} — risk-free", verdict="ROLL")
     return _execute_roll(pos_mgr, tested, untested, plan, state, chain)
 
 

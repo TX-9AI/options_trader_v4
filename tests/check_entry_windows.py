@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""check_entry_windows.py — v1.0
+"""check_entry_windows.py — v1.1
+v1.1  2026-08-26  r146: W7 re-pinned to each strategy's PLAN_CHECKS after the
+      builder engine was deleted.
 
 🔴 ONE START TIME FOR EVERY CREDIT SPREAD, AND ONE MINUTE OF DAYLIGHT.
 
@@ -107,9 +109,20 @@ def main():
     # ⚠️ NO PLAN BUILDER CHECKED THE CLOCK AT ALL until r142. A fork plan read
     # TAKE at 11:05 while the strategy could not act until 11:31 — the row
     # looked tradeable and was not, and nothing in the table said why.
-    from derived.plans import PlanEngine as _PE
-    _missing = [k for k, v in _PE.CHECKS.items() if "entry_window" not in v]
-    check("W7 every plan declares an entry_window check",
+    # r146 — the plan is now the strategy's own (strategy/plan.py); each
+    # strategy declares the checks it owns as PLAN_CHECKS. ORB is exempt by
+    # ruling (record-only, zero hurdles) and the roll is management.
+    from strategy.runaway_continuation import RunawayContinuationStrategy
+    from strategy.trend_credit_spread import TrendCreditSpread
+    from strategy.sweep_credit_spread import SweepCreditSpreadStrategy
+    from strategy.gex_pin_butterfly import GEXPinButterflyStrategy
+    from strategy.iron_condor_strategy import IronCondorStrategy
+    from strategy.daily_fork_credit_spread import DailyForkCreditSpread
+    _missing = [c.__name__ for c in (
+        RunawayContinuationStrategy, TrendCreditSpread, SweepCreditSpreadStrategy,
+        GEXPinButterflyStrategy, IronCondorStrategy, DailyForkCreditSpread)
+        if "entry_window" not in getattr(c, "PLAN_CHECKS", ())]
+    check("W7 every entry strategy's plan declares an entry_window check",
           not _missing, ", ".join(_missing) or "none")
 
     print()

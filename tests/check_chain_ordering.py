@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""check_chain_ordering.py — v1.0
+"""check_chain_ordering.py — v1.1
+v1.1  2026-08-26  r146: C7-C11 re-pinned against the plan BOARD (derived/plans
+      v2.0) after the seven builders were deleted. The property survives —
+      no strategy may vanish from plan_tick — the mechanism is now NOT ASKED
+      rows with the dispatcher's reason, plus the asked-and-silent canary.
 
 🔴 THE 2026-08-26 SILENT FAILURE. The chain and GEX were fetched ~20 lines
 BELOW `run_analysis()`, but the derived engines run INSIDE it. So every plan
@@ -112,80 +116,51 @@ def main():
     check("C6 plan_check exists after INIT too",
           "plan_check" in names)
 
-    # ── C7: and a tick with NO chain still leaves the tables in place ─────
-    # (the empty table is the measurement — "ran, found nothing")
-    e = PlanEngine(store=st, symbol="TEST", ledger=None)
-    try:
-        e.run({"price": 100.0})                # no chain, no triggers
-    except Exception:                                          # noqa: BLE001
-        pass
-    # ⚠️ SUPERSEDED BY C10. This asserted a chainless tick leaves the table
-    # EMPTY — which was true when a starved builder returned None, and is now
-    # exactly the wrong outcome: a starved tick must write a NO PLAN row per
-    # plan NAMING the absent input. An empty table would be the silence this
-    # whole revision exists to remove.
-    n = st.conn.execute("SELECT count(*) FROM plan_tick").fetchone()[0]
-    check("C7 a chainless tick writes NO PLAN rows, not silence",
-          "plan_tick" in names and n > 0, f"{n} rows")
-
-    # ── C8: NO PLAN MAY BE SILENTLY OVERWRITTEN ──────────────────────────
-    # ⚠️ plan_tick's key was (ts_epoch, symbol, strategy) — right in r126 when
-    # every builder returned ONE plan. The fork returns FOUR, so INSERT OR
-    # REPLACE dropped three with no error: 5 produced, 4 stored. `direction`
-    # is now part of the key.
-    class _C:
-        def __init__(s, k, b, a): s.strike, s.bid, s.ask = k, b, a
-    class _Ch:
-        def __init__(s, c, p): s.calls, s.puts = c, p
-    class _T:
-        def __init__(s, tf, side, rail):
-            s.tf, s.side, s.rail, s.slope = tf, side, rail, 0.05
-            s.trigger, s.median, s.active = 0, 200.0, True
-    class _CTM:
-        def __init__(s, t): s._t = t
-        def all_rails(s): return s._t
-
-    px = 201.4
-    ch = _Ch([_C(k, max(.03, 3.2-(k-px)*.30), max(.08, 3.4-(k-px)*.30))
-              for k in range(195, 231, 5)],
-             [_C(k, max(.03, 3.2-(px-k)*.30), max(.08, 3.4-(px-k)*.30))
-              for k in range(170, 211, 5)])
-    st2 = _Store()
-    e2 = PlanEngine(store=st2, symbol="T2", ledger=None)
-    made = e2.derive({"price": px, "chain": ch, "condor_triggers": _CTM(
-        [_T("1h", "call", 203.2), _T("1h", "put", 196.8),
-         _T("1d", "call", 212.5), _T("1d", "put", 188.0)])})
-    stored = st2.conn.execute("SELECT count(*) FROM plan_tick").fetchone()[0]
-    check("C8 every plan produced is a row stored — none overwritten",
-          made == stored and stored >= 4, f"{made} produced, {stored} stored")
-
-    dirs = {r[0] for r in st2.conn.execute(
-        "SELECT direction FROM plan_tick WHERE strategy='ForkCreditSpread'")}
-    check("C9 all four fork directions survive in one tick",
-          dirs == {"1h_call", "1h_put", "1d_call", "1d_put"},
-          ", ".join(sorted(dirs)))
-
-    # ── 🔴 C10 — NO BUILDER MAY VANISH ───────────────────────────────────
-    # A builder returning None writes NO ROW, so "could not evaluate" and
-    # "does not exist" are indistinguishable. That hid the real defect for a
-    # whole session: ForkCreditSpread and IronCondor were ABSENT from plan_tick
-    # while five other plans wrote 80-95 rows each.
+    # ── C7-C11 (r146) — THE BOARD, not the builders ───────────────────────
+    # v1.0's C7-C11 exercised the seven plan builders deleted in r146. What
+    # survives is the property they were protecting: NO STRATEGY MAY VANISH
+    # FROM plan_tick. The board now writes a NOT ASKED row for every
+    # registered strategy the dispatch never called, carrying the
+    # dispatcher's reason.
+    from strategy import plan as _plan
+    from strategy.runaway_continuation import RunawayContinuationStrategy
+    from strategy.sweep_credit_spread import SweepCreditSpreadStrategy
+    RunawayContinuationStrategy(); SweepCreditSpreadStrategy()   # register
     st3 = _Store()
     e3 = PlanEngine(store=st3, symbol="T3", ledger=None)
-    e3.derive({"price": 201.4})              # starved of everything
-    got = {r[0] for r in st3.conn.execute("SELECT strategy FROM plan_tick")}
-    want = {"GEXPinButterfly", "TrendParticipation", "SweepCreditSpread",
-            "RunawayContinuation", "IronCondor", "CreditRoll",
-            "ForkCreditSpread"}
-    check("C10 a starved tick still writes a row for EVERY plan",
-          got == want, f"missing: {', '.join(sorted(want - got)) or 'none'}")
-
-    # ⚠️ AND THE ROW MUST NAME THE ABSENT INPUT — "NO PLAN" alone would just
-    # relocate the mystery.
-    reasons = [r[0] for r in st3.conn.execute("SELECT reason FROM plan_tick")]
-    check("C11 each starved row names which input was absent",
-          all("absent from ctx" in (r or "") for r in reasons),
-          f"{len(reasons)} rows")
+    e3.derive({"price": 201.4})                    # tick 1 opens
+    _plan.skipped("RunawayContinuation", "ORB has not run away")
+    e3.derive({"price": 201.5})                    # tick 2 closes tick 1
+    rows = {r[0]: (r[1], r[2]) for r in st3.conn.execute(
+        "SELECT strategy, verdict, reason FROM plan_tick")}
+    check("C7 a strategy the dispatch never asked still gets a row",
+          "RunawayContinuation" in rows and rows["RunawayContinuation"][0] == "NOT ASKED",
+          str(rows.get("RunawayContinuation")))
+    check("C8 the NOT ASKED row carries the dispatcher's reason",
+          "ORB has not run away" in (rows.get("RunawayContinuation", ("", ""))[1] or ""))
+    check("C9 a strategy with no stated reason still gets a row saying so",
+          "SweepCreditSpread" in rows and "no reason" in (rows["SweepCreditSpread"][1] or ""),
+          str(rows.get("SweepCreditSpread")))
+    # ⚠️ AND A STRATEGY THAT WAS ASKED BUT WROTE NOTHING IS FLAGGED — that
+    # is the canary for an unwired `return None`.
+    _plan.asked("SweepCreditSpread", None)
+    e3.derive({"price": 201.6})
+    r3 = st3.conn.execute(
+        "SELECT verdict, reason FROM plan_tick WHERE strategy='SweepCreditSpread' "
+        "ORDER BY ts_epoch DESC LIMIT 1").fetchone()
+    check("C10 asked-and-silent writes a NO PLAN row naming the unwired return",
+          r3 is not None and r3[0] == "NO PLAN" and "wrote no plan row" in (r3[1] or ""),
+          str(r3))
+    # ⚠️ NULL, never 0.0 — an unmeasured check stays n/a (VW.1, pinned).
+    t = RunawayContinuationStrategy.__new__(RunawayContinuationStrategy)
+    _pt = _plan.REGISTRY["RunawayContinuation"].tick(100.0)
+    _pt.check("atr_pct", None, None)
+    _pt.refuse("atr_pct", "unmeasured")
+    rc = st3.conn.execute(
+        "SELECT value, verdict FROM plan_check WHERE strategy='RunawayContinuation' "
+        "AND check_name='atr_pct' ORDER BY ts_epoch DESC LIMIT 1").fetchone()
+    check("C11 an unmeasured check is NULL / FAIL-by-refusal, never 0.0/PASS",
+          rc is not None and rc[0] is None, str(rc))
 
     # ⚠️ AND condor_triggers MUST REACH THE ENGINES — the second input with
     # exactly the chain's defect: published mid-dispatch, after run_analysis.

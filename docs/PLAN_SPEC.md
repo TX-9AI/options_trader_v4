@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.2 · 2026-08-26 · r146 — AS BUILT. See §8 before reading anything below.**
 **v1.0 · 2026-08-25 · FIRST PASS, EXPLICITLY UNFITTED.**
 Operator: *"every strategy SPEC now needs a plan — use your best judgement on the
 1st pass. We will fit later. Allow for relaxed and tight entry conditions."*
@@ -283,3 +284,80 @@ trigger, its distance from firing, and the evidence that justified it —
 a major build and it will likely set us back."* Eight strategies, a schema
 change, a dispatch rewrite, and the tick loop inverted from evaluate-and-fire to
 declare-then-compare.
+
+---
+
+## 8. AS BUILT — r146 (2026-08-26). This section governs where it disagrees with §3-§6.
+
+**What r126-r145 delivered was not this document.** It was a second
+implementation of every strategy inside `derived/plans.py` that guessed at what
+the real one would do and recorded the guess (zero calls into `strategy/`; see
+`docs/HANDOFF_PLAN_ARCHITECTURE_REBUILD.md`). Operator, 2026-08-26: *"The
+strategy is the spec, the specification. The plan is how it executes according
+to the spec … I don't need two strategies for every strategy."* r146 tears the
+mirror out and builds the plan as he described it.
+
+**THE SHAPE.** `strategy/plan.py` — one `Plan` per strategy, held as
+`self.planner`. The strategy detects the setup, fixes the trigger and the
+invalidation, selects the contracts and EXECUTES. The plan is the informer it
+consults on the way: it prices the what-if off the contracts the strategy
+chose (credit/debit, risk, **R**), runs the antagonistic checks — the
+**session-map geometry** (`analysis/session_map.py`, the 2026-08-25 ruling)
+and the **R hurdle** (`strategy/criteria.py`) — records every check every
+tick into `plan_tick`/`plan_check` (schema unchanged from r126b), feeds the
+edge-triggered gate reporter, and hands back a verdict the strategy honours.
+
+```
+t = self.planner.tick(price)
+…  return t.refuse("gate", "why")          # every spec refusal — writes the row
+…  return t.starved("chain")               # a missing input — NO PLAN row naming it
+…  t.level(level, role, name, orb_hi, orb_lo)   # geometry; False = eliminated
+…  t.credit_spread(short, long, credit)     # the what-if, REAL width
+…  ok, why = t.executable()                 # R hurdle: STRICT refuses, RELAXED records
+…  return t.take(signal)                    # the fire — clears the gate, opens the ledger row
+```
+
+**THE PLAN NEVER DETECTS A SETUP AND NEVER SELECTS A STRIKE.** `§3
+declare_plan()` is NOT built and will not be: a plan that declares is a plan
+that decides. The inversion §3 asks for — *"what price from here …"* — is
+answered by the strategies that already fix a trigger (ORB, the condor's tine,
+the sweep's pool, TC.6's bound) and recorded as `trigger_price` /
+`invalidation` / `dist_to_trigger` on every row.
+
+**THE CASCADE (§6) IS NOT BUILT.** Dispatch is still the priority chain.
+What §6 wanted from it — *"everything that was still on the table at each
+tick"* — is delivered by the board instead: `derived/plans.py` v2.0 writes a
+**NOT ASKED** row, carrying the dispatcher's reason (`main.py` v4.16 states
+it at every skip point), for every strategy the chain never called. So every
+tick has one row per strategy: TAKE / DECLINE / NO PLAN / NOT ASKED / HOLD /
+ROLL. Replacing `if signal is None` is a separate decision.
+
+**STRICT / RELAXED (§5).** Under STRICT a plan below `R_FLOOR` (1.00,
+`OT_PLAN_R_FLOOR`) REFUSES and the strategy returns None — **this changes what
+trades on a strict box**, deliberately; it is the "gating on 1:1" the operator
+asked for. Under RELAXED the R value is recorded, the row carries the
+`r_muted` check, and the trade proceeds. The R floor can therefore only ever be
+fitted from strict sessions. Triggers and invalidations are never widened.
+
+**ORB — zero hurdles, recorded.** Operator, 2026-08-26: *"Include orb in
+that, zero hurdles."* ORB's three post-confirmation refusals and its fire
+write rows; `executable()` is never called on it; main.py records the
+engine-not-confirmed state. The 2026-08-25 ruling stands.
+
+**R DEFINITIONS.** Credit vertical: `credit / (width − credit)`, real width
+(the builders assumed $5 everywhere). Debit directional (runaway): stop = the
+ORB boundary, target = the stop distance mirrored, `gain = δ·d + ½γd²`,
+`loss = δ·d − ½γd²`. Butterfly: `(width − debit)/debit` — NOT YET PRICED,
+because the butterfly spec never selects its legs (its signal cannot be valid
+today; parked anyway).
+
+**FOUND WHILE WIRING.** `RunawayContinuation`'s signal was ALWAYS invalid —
+`target_delta` had one writer and zero readers, no strike/premium/contract,
+`is_valid` False on every fire (`main.py`: "Invalid signal from
+RunawayContinuation"). Fixed in r146: the strategy resolves its contract off
+the chain the dispatcher already passes. The flagship v4 entry rule could not
+have placed a trade before this revision.
+
+**NOTED, NOT CHANGED (operator's call):** the condor and daily fork select
+strikes ONCE at plan-build; they do not follow the sloped tine to the trigger,
+which the fork thesis ("that's the level, but sloped") implies they should.

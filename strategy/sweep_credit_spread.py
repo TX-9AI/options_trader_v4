@@ -1,5 +1,19 @@
 """
-strategy/sweep_credit_spread.py  v4.3
+strategy/sweep_credit_spread.py  v4.4
+v4.4  2026-08-26  r146 — THE PLAN IS WIRED. Six `_gate()` rungs and fifteen
+      bare `return None`s (window, ATR, boundary side, chain, wing, credit …)
+      all go through `self.planner` (strategy/plan.py) and write a DECLINE row
+      naming the gate; `_gate()` is retained as a thin alias into the plan's
+      edge-triggered reporter so nothing that called it breaks. NEW: the
+      reclaimed pool is checked against the SHARED SESSION MAP
+      (analysis/session_map.py) — a ceiling below the 5-minute opening range,
+      or a floor above it, is INVALIDATED BY GEOMETRY per the operator's
+      2026-08-25 ruling, before any strike is priced. `orb_high`/`orb_low`
+      are new optional kwargs; absent, geometry records n/a and the spec
+      proceeds. The what-if is priced off the REAL spread (short at the first
+      strike beyond the sweep, wing at WING_WIDTH, credit from bid-ask):
+      R = credit / (width - credit). The R hurdle is consulted: STRICT refuses
+      below the floor, RELAXED records and proceeds.
 v4.3  2026-08-24  r107 THE SHORT STRIKE IS THE FIRST STRIKE BEYOND THE SWEEP
       EXTREME — pierced if there is one, the next one out if there is not, never
       one inside. Operator, 2026-08-24: "It swept. That's legitimately a sweep.
@@ -113,6 +127,7 @@ import config
 from strategy import relaxed
 from strategy import credit_vertical as cv     # r97 — shared spread math
 from strategy.base_strategy import OptionsSignal as Signal
+from strategy.plan import Plan, _n
 from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
@@ -121,10 +136,9 @@ logger = logging.getLogger(__name__)
 def _gate(name: str, reason: str) -> None:
     """r73 — report this rung, edge-triggered. NEVER changes the verdict.
 
-    ⚠️ THE RUNGS WERE ALREADY WELL-WRITTEN AND ALREADY WRONG-LEVELLED. Every
-    line below was a logger.debug, so on 2026-08-21 the fleet declined every
-    setup all session and could not say which rung said no. This does not
-    rewrite the reasons — it makes them visible and queryable.
+    v4.4 — kept as an alias for any caller outside this file; inside it the
+    rungs now go through `PlanTick.refuse()`, which reports the same way AND
+    writes the plan_check row the reporter never could.
     """
     try:
         from analysis.gate_report import get_gate_reporter
@@ -415,16 +429,29 @@ class SweepCreditSpreadStrategy:
 
     name = "SweepCreditSpread"
 
+    PLAN_CHECKS = ("sweep", "named", "reclaimed", "invalidated", "age",
+                   "rejection", "pierce_depth", "boundary", "side_of_pool",
+                   "entry_window", "atr_pct", "geometry", "short_anchor",
+                   "contract", "wing", "credit", "width", "risk", "r")
+
+    def __init__(self):
+        self.planner = Plan(self.name, self.PLAN_CHECKS)
+
     def generate_signal(self, *, liq_map, price_now: float, now_et: str,
                         atr_pct: float = None, chain=None,
+                        orb_high: float = None, orb_low: float = None,
                         **_ignored) -> Optional[Signal]:
+        t = self.planner.tick(price_now)
         sweep = getattr(liq_map, "recent_sweep", None)
         # ⚠️ COERCE BEFORE ANY COMPARISON. A NaN price passed `price_now >= pool`
         # (False) and then `price_now <= pool` (also False), so BOTH side checks
         # let it through and the strategy fired on nan, -1.0 and -inf.
         price_now = safe_float(price_now)
-        if not sweep or not price_now or price_now <= 0 or price_now > 1e7:
-            return None
+        if not price_now or price_now <= 0 or price_now > 1e7:
+            return t.refuse("price", f"price unusable ({price_now})")
+        if not sweep:
+            return t.refuse("sweep", "no recent sweep on the liquidity map")
+        t.check("sweep", 1.0, True)
 
         # ── 1. it must be a NAMED pool ───────────────────────────────────────
         # An unnamed swing high is not a liquidity pool. The name is what makes
@@ -432,7 +459,8 @@ class SweepCreditSpreadStrategy:
         # high/low, session extremes - and `level_grade` ranks them by type.
         name = str(getattr(sweep, "swept_named_level", "") or "")
         if not name:
-            return None
+            return t.refuse("named", "swept level is unnamed — not a liquidity pool")
+        t.check("named", 1.0, True)
 
         # ── 2. it must have RECLAIMED and NOT been accepted through ─────────
         # ⚠️ BOTH CONDITIONS, AND THEY ARE NOT THE SAME. `reclaimed` says price
@@ -441,13 +469,16 @@ class SweepCreditSpreadStrategy:
         # BREAKOUT, and selling a boundary that has already given way is the
         # worst version of this trade.
         if not getattr(sweep, "reclaimed", False):
-            return None
+            return t.refuse("reclaimed", f"{name} swept but no bar has CLOSED "
+                                         f"back inside — a wick is a touch, not "
+                                         f"a decision")
+        t.check("reclaimed", 1.0, True)
         if getattr(sweep, "invalidated", False):
             logger.debug("[sweep_cs] no trade: %s reclaimed then INVALIDATED - "
                          "price accepted through; that is a breakout", name)
-            _gate("invalidated", f"{name} reclaimed then invalidated - "
-                                 f"price accepted through; that is a breakout")
-            return None
+            return t.refuse("invalidated", f"{name} reclaimed then invalidated - "
+                                           f"price accepted through; that is a breakout")
+        t.check("invalidated", 0.0, True)
 
         # ── 3. it must be YOUNG - measured from the RECLAIM ─────────────────
         # SWP.10: `bars_ago` now counts from the reclaim bar, not the sweep bar.
@@ -455,44 +486,65 @@ class SweepCreditSpreadStrategy:
         # 5-20 minutes of confirmation latency the pipeline itself imposed, and
         # the median scored sweep was an HOUR old.
         age = int(getattr(sweep, "bars_ago", 999) or 999)
-        if age > relaxed.widen(MAX_AGE_BARS, 3.0, name="max_age_bars"):
+        _max_age = relaxed.widen(MAX_AGE_BARS, 3.0, name="max_age_bars")
+        t.check("age", age, age <= _max_age)
+        if age > _max_age:
             logger.debug("[sweep_cs] no trade: %s reclaimed %d bars ago "
                          "(max %d)", name, age, MAX_AGE_BARS)
-            _gate("age", f"{name} reclaimed {age} bars ago (max {MAX_AGE_BARS})")
-            return None
+            return t.refuse("age", f"{name} reclaimed {age} bars ago (max {_max_age:g})")
 
         # ── 4. the rejection must be real ───────────────────────────────────
         rej = float(getattr(sweep, "rejection_pct", 0.0) or 0.0)
+        t.check("rejection", rej, rej >= MIN_REJECTION_PCT)
         if rej < MIN_REJECTION_PCT:
-            return None
+            return t.refuse("rejection", f"{name} rejection {rej*100:.3f}% below "
+                                         f"the {MIN_REJECTION_PCT*100:.3f}% floor")
         # ⚠️ AND NOT TOO DEEP. A deep pierce is a WEAK level, not a strong
         # rejection - measured: >0.50% pierces survived on 19% against 33-34%
         # for shallow ones, with 1.28% median adverse against 0.46%.
-        if rej > relaxed.widen(MAX_REJECTION_PCT, 3.0, name="pierce_ceiling"):
+        _max_rej = relaxed.widen(MAX_REJECTION_PCT, 3.0, name="pierce_ceiling")
+        t.check("pierce_depth", rej, rej <= _max_rej)
+        if rej > _max_rej:
             logger.debug("[sweep_cs] no trade: %s pierced %.3f%% - too deep, "
                          "the level barely rejected (19%% survival measured)",
                          name, rej * 100.0)
-            _gate("pierce_depth",
-                  f"{name} pierced {rej*100:.3f}% - too deep; a deep pierce is "
-                  f"a WEAK level (19% survival measured)")
-            return None
+            return t.refuse("pierce_depth",
+                            f"{name} pierced {rej*100:.3f}% - too deep; a deep "
+                            f"pierce is a WEAK level (19% survival measured)")
 
         # ── 5. which boundary did the pool become? ──────────────────────────
         b = boundary_from_sweep(getattr(sweep, "kind", ""))
         if not b:
-            return None
+            return t.refuse("boundary", f"sweep kind '{getattr(sweep, 'kind', '')}' "
+                                        f"names no boundary")
         boundary, side = b
+        t.direction = side
         pool = float(getattr(sweep, "pool_price", 0.0) or 0.0)
         if pool <= 0:
-            return None
+            return t.starved("pool_price")
+        t.check("boundary", pool, True)
+        # The pool is the level the spread is sold against: the trigger the
+        # reclaim answered, and the invalidation (acceptance back through it).
+        t.anchor(trigger=pool, invalidation=pool)
 
         # ⚠️ PRICE MUST ALREADY BE ON THE PROFITABLE SIDE OF THE BOUNDARY. If it
         # is not, the reclaim has not actually happened from this strategy's
         # point of view and the spread would be opened already tested.
-        if boundary == "ceiling" and price_now >= pool:
-            return None
-        if boundary == "floor" and price_now <= pool:
-            return None
+        _on_side = (price_now < pool) if boundary == "ceiling" else (price_now > pool)
+        t.check("side_of_pool", price_now - pool, _on_side)
+        if not _on_side:
+            return t.refuse("side_of_pool",
+                            f"price {price_now:.2f} is not on the profitable side "
+                            f"of the {boundary} {pool:.2f} — the spread would open "
+                            f"already tested")
+
+        # ── GEOMETRY: THE SHARED SESSION MAP (v4.4) ─────────────────────
+        # A ceiling below the opening range, or a floor above it, is
+        # INVALIDATED — never re-cast as the other side. Unmeasured (no ORB
+        # yet) records n/a and the spec proceeds; that is not a pass.
+        _geo = t.level(pool, boundary, name, orb_high, orb_low)
+        if _geo is False:
+            return t.refuse("geometry", t.last_why)
 
         # ── 6. window and volatility ────────────────────────────────────────
         # ⚠️ RELAXED WIDENS THE WINDOW AND THE DEPTH BAND - SELECTION gates,
@@ -509,7 +561,9 @@ class SweepCreditSpreadStrategy:
         _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET,
                                        relaxed_latest=LATEST_ET)
         if now_et and not (_early <= now_et <= _late):
-            return None
+            return t.refuse("entry_window", f"{now_et} ET is outside the sweep "
+                                            f"window {_early}-{_late}")
+        t.check("entry_window", None, True)
         # ⚠️ SHORT-VOL CONDITION, inverted from the runaway trade. A credit
         # spread needs the level to HOLD. From tests/magnitude_estimator.py:
         # above 0.20% ATR the tape produced a 0.5% move on 92% of 90-bar
@@ -518,11 +572,14 @@ class SweepCreditSpreadStrategy:
         # Unknown ATR is permitted (the gate is optional); NON-FINITE is not.
         _atr = safe_float(atr_pct)
         if atr_pct is not None and _atr is None:
-            return None
+            return t.refuse("atr_pct", f"ATR is non-finite ({atr_pct})")
+        t.check("atr_pct", _atr, None if _atr is None else _atr <= ATR_MAX_PCT)
         if _atr is not None and _atr > ATR_MAX_PCT:
             logger.debug("[sweep_cs] no trade: ATR %.3f%% too hot for a "
                          "boundary to hold", atr_pct)
-            return None
+            return t.refuse("atr_pct", f"ATR {_atr:.3f}% above {ATR_MAX_PCT:.2f}% — "
+                                       f"too hot for a boundary to hold (0.5% move "
+                                       f"on 92% of 90-bar windows)")
 
         sig = Signal(
             strategy_name=self.name,
@@ -566,8 +623,11 @@ class SweepCreditSpreadStrategy:
             logger.warning("[sweep_cs] %s swept to %.2f and the %s chain has no "
                            "strike beyond it - SKIP. This is a chain problem, "
                            "not a setup problem.", name, _swept_px, side)
-            return None
+            return t.refuse("short_anchor", f"{name} swept to {_swept_px:.2f} and "
+                                            f"the {side} chain has no strike beyond "
+                                            f"it — a chain problem, not a setup one")
         sig.short_anchor = _ps
+        t.check("short_anchor", _ps, True)
         if abs(_ps - _swept_px) > 1e-9:
             logger.info("[sweep_cs] %s: sweep extreme %.2f cleared no strike; "
                         "short is the first strike BEYOND it at %.2f "
@@ -609,14 +669,17 @@ class SweepCreditSpreadStrategy:
             _contracts = None
         if not _contracts:
             logger.info("[sweep_cs] no %s contracts on the chain - SKIP", side)
-            return None
+            return t.starved("chain")
 
         _short = cv.find_contract_at_strike(_contracts, sig.short_anchor)
         if _short is None or not (getattr(_short, "mark", 0) or 0) > 0:
             logger.info("[sweep_cs] no priced %s contract at the pierced strike "
                         "%.2f - SKIP (the anchor is the trade; a different "
                         "strike is a different trade)", side, sig.short_anchor)
-            return None
+            return t.refuse("contract", f"no priced {side} contract at the pierced "
+                                        f"strike {sig.short_anchor:.2f} — the anchor "
+                                        f"is the trade")
+        t.check("contract", _short.strike, True)
 
         _long_strike = (_short.strike - WING_WIDTH if side == "put"
                         else _short.strike + WING_WIDTH)
@@ -624,17 +687,30 @@ class SweepCreditSpreadStrategy:
         if _long is None or _long.strike == _short.strike:
             logger.info("[sweep_cs] no protective wing at %.2f - SKIP "
                         "(undefined risk is never sold)", _long_strike)
-            return None
+            return t.refuse("wing", f"no protective wing at {_long_strike:.2f} "
+                                    f"(undefined risk is never sold)")
+        t.check("wing", _long.strike, True)
 
         # bid/ask, never mark: the credit has to be one the market would pay.
         _credit = max(0.0, (getattr(_short, "bid", 0.0) or 0.0)
                       - (getattr(_long, "ask", 0.0) or 0.0))
+        # ── THE WHAT-IF, priced off the spread THIS spec chose ───────────
+        t.credit_spread(_short.strike, _long.strike, _credit,
+                        invalidation=pool, trigger=pool)
         if _credit <= 0:
             logger.info("[sweep_cs] %s %.2f/%.2f pays no credit (bid %.2f vs "
                         "wing ask %.2f) - SKIP", side, _short.strike,
                         _long.strike, getattr(_short, "bid", 0.0) or 0.0,
                         getattr(_long, "ask", 0.0) or 0.0)
-            return None
+            return t.refuse("credit", f"{side} {_short.strike:.2f}/{_long.strike:.2f} "
+                                      f"pays no credit (bid {getattr(_short, 'bid', 0.0) or 0.0:.2f} "
+                                      f"vs wing ask {getattr(_long, 'ask', 0.0) or 0.0:.2f})")
+        # ── THE R HURDLE — strict refuses, relaxed records ───────────────
+        _ok, _why = t.executable()
+        if not _ok:
+            logger.info("[sweep_cs] R %s refused: %s", _n(t.r), _why)
+            return t.refuse("r", _why)
+        t.note(_why)
 
         sig.is_credit_vertical = True
         sig.net_credit = _credit
@@ -654,4 +730,4 @@ class SweepCreditSpreadStrategy:
                     "spread  age %d bars  rejection %.3f%%",
                     name, boundary, _short.strike, _long.strike, _credit,
                     pool, _swept_px, side.upper(), age, rej * 100.0)
-        return sig
+        return t.take(sig)

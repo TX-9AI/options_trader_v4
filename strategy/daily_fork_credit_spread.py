@@ -1,5 +1,14 @@
 """
-strategy/daily_fork_credit_spread.py  v1.1
+strategy/daily_fork_credit_spread.py  v1.2
+v1.2  2026-08-26  r146 — THE PLAN IS WIRED, mirroring iron_condor_strategy
+      v4.5: every refusal in `decide()` and `check_leg_triggers()` writes a
+      row through `self.planner` (strategy/plan.py); the 1d rails are checked
+      against the SHARED SESSION MAP (analysis/session_map.py) and a side
+      whose tine fails geometry is not priced (both fail = no plan); the
+      leg's what-if is R = credit / (width - credit) off the real spread,
+      and the R hurdle is consulted at leg time (STRICT refuses, RELAXED
+      records). This file had ZERO gate reporting before. Same note as the
+      condor: strikes are chosen at plan-build, not at the sloped tine.
 v1.1  2026-08-24  r100 — `is_iron_condor=True` in the constructor is not a field
       (it is a property alias); the 1d fork leg raised TypeError on every fire.
       Now sets is_credit_vertical.
@@ -53,6 +62,8 @@ from zoneinfo import ZoneInfo
 
 from strategy import credit_vertical as cv
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
+from strategy.plan import Plan, _n
+from analysis.session_map import CEILING, FLOOR
 from analysis.market_state import MarketState
 from analysis.volatility_engine import VolatilityState
 from data.options_chain import OptionContract, OptionsChain
@@ -115,9 +126,14 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
     Each leg is independent; second leg is allowed, never expected.
     """
 
+    PLAN_CHECKS = ("entry_window", "fork", "vix", "expected_move", "geometry",
+                   "strike_clears_anchor", "guardrail", "trigger", "contract",
+                   "credit", "width", "risk", "r")
+
     def __init__(self):
         self._plan: Optional[DailyForkPlan] = None
         self._last_reset_date: Optional[str] = None
+        self.planner = Plan(self.name, self.PLAN_CHECKS, self_ledgers=True)
 
     @property
     def name(self) -> str:
@@ -174,23 +190,47 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
         self._reset_if_new_day()
         now_et = datetime.now(ET)
         hm = (now_et.hour, now_et.minute)
+        t = self.planner.tick(current_price)
 
         if hm < _DAILY_START or hm >= _DAILY_CUTOFF:
-            return None
+            return t.refuse("entry_window",
+                            f"{hm[0]:02d}:{hm[1]:02d} ET is outside the 1d-fork "
+                            f"window {_DAILY_START[0]:02d}:{_DAILY_START[1]:02d}-"
+                            f"{_DAILY_CUTOFF[0]:02d}:{_DAILY_CUTOFF[1]:02d}")
+        t.check("entry_window", None, True)
         if self._plan is not None:
+            t.hold("plan already built this session — legs watched by "
+                   "check_leg_triggers")
             return self._plan
 
         if not rails_1d:
             logger.debug("DailyFork: no 1d rails available — no plan")
-            return None
+            return t.refuse("fork", "no 1d rails available")
+        t.check("fork", 1.0, True)
 
+        t.check("vix", macro.vix, macro.vix < VIX_BUTTERFLY_DISABLE)
         if macro.vix >= VIX_BUTTERFLY_DISABLE:
             logger.info("DailyFork: blocked VIX=%.1f", macro.vix)
-            return None
+            return t.refuse("vix", f"VIX {macro.vix:.1f} >= {VIX_BUTTERFLY_DISABLE}")
 
         em = self._expected_move_from_straddle(chain, current_price)
+        t.check("expected_move", em or None, None if em <= 0 else True)
         if em <= 0:
-            return None
+            return t.starved("expected_move")
+
+        # ── GEOMETRY: THE SHARED SESSION MAP (v1.2) ──────────────────────
+        _oh = (ctx or {}).get("orb_high")
+        _ol = (ctx or {}).get("orb_low")
+        _call_ok = t.level(float(rails_1d["upper"]), CEILING, "1d upper tine", _oh, _ol)
+        _call_why = t.last_why
+        _put_ok = t.level(float(rails_1d["lower"]), FLOOR, "1d lower tine", _oh, _ol)
+        _put_why = t.last_why
+        if _call_ok is False and _put_ok is False:
+            return t.refuse("geometry", f"{_call_why}; {_put_why}")
+        if _call_ok is False:
+            logger.info("DailyFork: call side eliminated by geometry — %s", _call_why)
+        if _put_ok is False:
+            logger.info("DailyFork: put side eliminated by geometry — %s", _put_why)
 
         em_floor = em * CONDOR_EM_FLOOR_FRAC
         _em_call = current_price + em_floor
@@ -213,25 +253,40 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
             spot=current_price, sigma=_sigma, bars=_bars,
             min_pop=CONDOR_MIN_POP, max_width_pct=CONDOR_MAX_QUOTE_WIDTH)
 
+        if _call_ok is False:
+            short_call = None
+        if _put_ok is False:
+            short_put = None
+        t.check("strike_clears_anchor",
+                (1 if short_call else 0) + (1 if short_put else 0),
+                bool(short_call or short_put))
+        if short_call is None and short_put is None:
+            logger.info("DailyFork: no strike clears the 1d anchor on either side")
+            return t.refuse("strike_clears_anchor",
+                            "no strike clears the 1d anchor on either side")
         if short_call is None or short_put is None:
-            logger.info("DailyFork: no strike clears 1d anchor (call=%s put=%s)",
+            logger.info("DailyFork: one-sided plan (call=%s put=%s)",
                         "ok" if short_call else "none",
                         "ok" if short_put else "none")
-            return None
 
         guardrail = em * CONDOR_EXPECTED_MOVE_GUARDRAIL_MULT
-        if max(short_call.strike - current_price,
-               current_price - short_put.strike) > guardrail:
+        _reach = max((short_call.strike - current_price) if short_call else 0.0,
+                     (current_price - short_put.strike) if short_put else 0.0)
+        t.check("guardrail", _reach - guardrail, _reach <= guardrail)
+        if _reach > guardrail:
             logger.info("DailyFork: strikes exceed %.1f-pt guardrail", guardrail)
-            return None
+            return t.refuse("guardrail", f"strike distance {_reach:.2f} exceeds "
+                                         f"the {guardrail:.1f}-pt guardrail")
 
         wing = self._wing_width()
         plan = DailyForkPlan(
             vix_at_plan            = float(getattr(macro, "vix", 0.0) or 0.0),
-            short_call_strike      = short_call.strike,
-            long_call_strike       = short_call.strike + wing * STRIKE_INCREMENT,
-            short_put_strike       = short_put.strike,
-            long_put_strike        = short_put.strike  - wing * STRIKE_INCREMENT,
+            short_call_strike      = short_call.strike if short_call else 0.0,
+            long_call_strike       = (short_call.strike + wing * STRIKE_INCREMENT
+                                      if short_call else 0.0),
+            short_put_strike       = short_put.strike if short_put else 0.0,
+            long_put_strike        = (short_put.strike - wing * STRIKE_INCREMENT
+                                      if short_put else 0.0),
             expected_move          = em,
             underlying_at_decision = current_price,
             decided_at             = now_et.strftime("%H:%M ET"),
@@ -242,9 +297,12 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
         logger.info(
             "📅 1D FORK PLAN: call=%g/%g  put=%g/%g  EM=$%.2f  VIX=%.1f  "
             "rail_U=%.2f/L=%.2f",
-            short_call.strike, plan.long_call_strike,
-            plan.long_put_strike, short_put.strike,
+            plan.short_call_strike, plan.long_call_strike,
+            plan.long_put_strike, plan.short_put_strike,
             em, macro.vix, plan.call_rail_at_decision, plan.put_rail_at_decision)
+        t.hold(f"plan built: call {plan.short_call_strike:g}/{plan.long_call_strike:g} "
+               f"put {plan.short_put_strike:g}/{plan.long_put_strike:g} — "
+               f"waiting on a tine")
         return plan
 
     # ── trigger check ───────────────────────────────────────────────────────
@@ -260,8 +318,10 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
            This answers "is a 1d trigger active?" not "should we fire?"
         """
         plan = self._plan
+        t = self.planner.tick(current_price)
         if plan is None:
-            return None
+            return t.refuse("plan", "no session plan built (decide() has not "
+                                    "produced one)")
 
         # Approach telemetry
         if plan.max_price_seen <= 0:
@@ -271,7 +331,8 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
 
         hm = (datetime.now(ET).hour, datetime.now(ET).minute)
         if hm >= _DAILY_CUTOFF:
-            return None
+            return t.refuse("entry_window", f"{hm[0]:02d}:{hm[1]:02d} ET is past "
+                                            f"the 1d-fork cutoff")
 
         # Get live trigger levels from the per-tick map
         call_trigger = put_trigger = None
@@ -295,8 +356,8 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
             mid = (plan.call_rail_at_decision + plan.put_rail_at_decision) / 2
             put_trigger  = mid - _APPROACH * (mid - plan.put_rail_at_decision)
 
-        call_hit = current_price >= call_trigger
-        put_hit  = current_price <= put_trigger
+        call_hit = current_price >= call_trigger and plan.short_call_strike > 0
+        put_hit  = current_price <= put_trigger and plan.short_put_strike > 0
 
         if call_hit and put_hit:
             side = ("call" if (current_price - call_trigger) >= (put_trigger - current_price)
@@ -306,12 +367,26 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
         elif put_hit:
             side = "put"
         else:
-            return None
+            _dc, _dp = call_trigger - current_price, current_price - put_trigger
+            if plan.short_call_strike > 0 and (plan.short_put_strike <= 0 or _dc <= _dp):
+                t.anchor(trigger=call_trigger, invalidation=plan.short_call_strike)
+                t.direction = "call"
+            else:
+                t.anchor(trigger=put_trigger, invalidation=plan.short_put_strike)
+                t.direction = "put"
+            t.check("trigger", None, False)
+            return t.hold(f"neither 1d tine hit — call trigger {call_trigger:.2f} / "
+                          f"put trigger {put_trigger:.2f}, price {current_price:.2f}")
 
-        return self._build_signal(plan, side, chain)
+        t.direction = side
+        t.anchor(trigger=call_trigger if side == "call" else put_trigger)
+        t.check("trigger", 1.0, True)
+        return self._build_signal(plan, side, chain, t)
 
     def _build_signal(self, plan: DailyForkPlan, side: str,
-                      chain: OptionsChain) -> Optional[OptionsSignal]:
+                      chain: OptionsChain, t=None) -> Optional[OptionsSignal]:
+        if t is None:
+            t = self.planner.tick(plan.underlying_at_decision, side)
         contracts    = chain.calls if side == "call" else chain.puts
         short_strike = plan.short_call_strike if side == "call" else plan.short_put_strike
         long_strike  = plan.long_call_strike  if side == "call" else plan.long_put_strike
@@ -321,12 +396,21 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
         if short_c is None or long_c is None:
             logger.warning("DailyFork: could not find %s contracts %g/%g",
                            side, short_strike, long_strike)
-            return None
+            return t.refuse("contract", f"could not find {side} contracts "
+                                        f"{short_strike:g}/{long_strike:g}")
+        t.check("contract", short_strike, True)
 
         net_credit = short_c.mark - long_c.mark
+        t.credit_spread(short_strike, long_strike, net_credit,
+                        invalidation=short_strike)
         if net_credit <= 0:
             logger.info("DailyFork: %s credit=%.2f — skip", side, net_credit)
-            return None
+            return t.refuse("credit", f"{side} credit {net_credit:.2f} <= 0")
+        _ok, _why = t.executable()
+        if not _ok:
+            logger.info("DailyFork: %s leg R %s refused: %s", side, _n(t.r), _why)
+            return t.refuse("r", _why)
+        t.note(_why)
 
         signal = OptionsSignal(
             vix_at_signal         = float(plan.vix_at_plan or 0.0),
@@ -364,7 +448,7 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
             "stop=$%.2f nickel=$%.2f",
             side.upper(), short_strike, long_strike,
             net_credit, net_credit * (1 + CONDOR_STOP_LOSS_PCT), CONDOR_NICKEL_CLOSE)
-        return signal
+        return t.take(signal)
 
     def reset_plan(self):
         self._plan = None

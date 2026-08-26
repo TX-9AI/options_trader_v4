@@ -1,5 +1,16 @@
 """
-main.py  v4.15
+main.py  v4.16
+v4.16 2026-08-26  r146 — THE PLAN BOARD IS FED FROM DISPATCH. Every point where
+      a strategy is NOT asked this tick (halted, outside the session, no
+      chain, position open, ORB engine not confirmed, no runaway, slot
+      claimed by an earlier strategy, DIRECTIONAL_ONLY, no 1d rails) tells
+      `strategy.plan.skipped()` why, and `_safe_strategy` tells
+      `strategy.plan.asked()` what was called — so `derived/plans.py` v2.0
+      can write a NOT ASKED row for the silent strategies and flag any
+      strategy that was asked and wrote nothing. The sweep now receives
+      `orb_high`/`orb_low` (the r134 assembly-point values) for its
+      session-map geometry check. Dispatch ORDER and every gate are
+      unchanged; this narrates the decisions the chain already makes.
 v4.15 2026-08-24  r112: DEBUG is a LIVE FLAG (data/DEBUG_LOG, devtools item 69),
       applied at import and on every tick — so it overrides however a box came
       to be in DEBUG, and removing it genuinely restores LOG_LEVEL. No restart,
@@ -2193,6 +2204,24 @@ def _note_evaluation(name: str, ctx, signal) -> None:
         pass
 
 
+def _plan_skip(name: str, reason: str) -> None:
+    """r146 — tell the plan board a strategy is NOT asked this tick. Wrapped;
+    the board is a contributor and can never affect dispatch."""
+    try:
+        from strategy import plan as _plan_board
+        _plan_board.skipped(name, reason)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+def _plan_skip_all(reason: str) -> None:
+    try:
+        from strategy import plan as _plan_board
+        _plan_board.skipped_all(reason)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def _safe_strategy(name: str, fn, ctx=None):
     """v4.9 — run ONE strategy evaluation in isolation.
 
@@ -2215,6 +2244,12 @@ def _safe_strategy(name: str, fn, ctx=None):
     """
     try:
         sig = fn()
+        # r146 — the plan board learns this strategy was ASKED. AFTER fn().
+        try:
+            from strategy import plan as _plan_board
+            _plan_board.asked(name, sig)
+        except Exception:                                      # noqa: BLE001
+            pass
         # r66 — one note per evaluation, fired or not. ⚠️ AFTER fn(), so the
         # note can never influence what it records.
         if ctx is not None:
@@ -2774,6 +2809,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # trades (open positions keep being managed to exit). Override via configure.sh.
     if risk_mgr.is_halted():
         logger.info("Entry blocked: DAILY LOSS LIMIT reached — halted. Override via configure.sh.")
+        _plan_skip_all("DAILY LOSS LIMIT reached — halted")
         return
 
     # r102 — OUTSIDE RTH THIS IS A REHEARSAL, NOT A TRADING PASS. can_enter
@@ -2788,6 +2824,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         # proved nothing looked identical to a pass that proved everything.
         (logger.info if _rehearsing else logger.debug)(
             "%sEntry blocked: %s", "[rehearsal] " if _rehearsing else "", reason)
+        _plan_skip_all(f"entry blocked: {reason}")
         return
     if _rehearsing:
         logger.info("[rehearsal] gates PASS (%s) — running the full dispatch; "
@@ -2835,6 +2872,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     chain = ctx.get("chain") or get_chain_fetcher().fetch_chain()
     if chain is None:
         logger.warning("Could not fetch options chain — skipping entry attempt")
+        _plan_skip_all("no options chain this tick")
         return
 
     macro = ctx["macro"]
@@ -2955,6 +2993,17 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         if orb_sig:
             signal = orb_sig
             get_orb_engine().mark_triggered()
+    elif _afd_orb:
+        _plan_skip("ORBStrategy", "past the afternoon debit cutoff")
+    else:
+        # r146 — the silence that cost 2026-08-26: "ORB did not set up" and
+        # "ORB was never asked" were the same absence. The engine's state IS
+        # the reason, and only this file knows it.
+        _plan_skip("ORBStrategy",
+                   f"ORB engine {getattr(orb, 'state', '?')} — not a confirmed "
+                   f"break+retest; range "
+                   f"{float(getattr(orb, 'orb_low', 0) or 0):.2f}-"
+                   f"{float(getattr(orb, 'orb_high', 0) or 0):.2f}")
 
     # ── Post-runaway routing (v-runaway-fix 2026-07-24) ───────────────────────
     # A RUNAWAY ORB (broke the range and ran to 50% TP with no retest) is a
@@ -2990,6 +3039,12 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         _atr_pct = 0.0
 
     # ── Priority 2: RUNAWAY CONTINUATION ────────────────────────────────────
+    if signal is not None:
+        _plan_skip("RunawayContinuation", f"slot claimed by {signal.strategy_name}")
+    elif not _is_runaway:
+        _plan_skip("RunawayContinuation",
+                   f"ORB has not run away (invalidation_reason="
+                   f"{getattr(orb, 'invalidation_reason', '') or 'none'})")
     if signal is None and _is_runaway:
         _prev_close = None
         try:
@@ -3021,6 +3076,8 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # Sells the boundary a swept named pool just became. It runs AFTER the
     # runaway because a runaway proved directional force, and fading a level
     # into that force is the low-quality reversal that bled in v3.
+    if signal is not None:
+        _plan_skip("SweepCreditSpread", f"slot claimed by {signal.strategy_name}")
     if signal is None:
         sc_sig = _safe_strategy("SweepCreditSpread",
                                 lambda: _sweep_cs_strategy.generate_signal(
@@ -3029,6 +3086,8 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                                     now_et        = _now_et_hhmm,
                                     atr_pct       = _atr_pct,
                                     chain         = chain,
+                                    orb_high      = ctx.get("orb_high"),
+                                    orb_low       = ctx.get("orb_low"),
                                 ), ctx)
         if sc_sig:
             sc_sig.condor_trigger_source = "sweep_reversal"
@@ -3075,6 +3134,8 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # first line. Wired anyway so the plumbing is exercised and audited NOW
     # rather than on the day it is unparked, ~2 weeks after real open interest
     # starts accumulating (2026-08-19).
+    if signal is not None:
+        _plan_skip("GEXPinButterfly", f"slot claimed by {signal.strategy_name}")
     if signal is None:
         _atm_iv = None
         try:
@@ -3197,6 +3258,12 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # PAIRING GATE: _can_open_credit_spread(side) enforces Rule 1 (max 2 open)
     # and Rule 3 (never 2 calls or 2 puts). It reads the DB every call; cheap
     # because it's one query against open_trades which is already loaded.
+    if signal is not None:
+        _plan_skip("IronCondorStrategy", f"slot claimed by {signal.strategy_name}")
+        _plan_skip("DailyForkCreditSpread", f"slot claimed by {signal.strategy_name}")
+    elif DIRECTIONAL_ONLY:
+        _plan_skip("IronCondorStrategy", "DIRECTIONAL_ONLY box")
+        _plan_skip("DailyForkCreditSpread", "DIRECTIONAL_ONLY box")
     if signal is None and not DIRECTIONAL_ONLY:
         _sess_hi, _sess_lo = _session_extremes(ctx)
 
@@ -3216,6 +3283,8 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 _rails_1d = rails_for(ctx, INSTRUMENT, "1d")
             except Exception:                                  # noqa: BLE001
                 pass
+            if not _rails_1d:
+                _plan_skip("DailyForkCreditSpread", "no 1d rails this tick")
             if _rails_1d:
                 _safe_strategy("DailyForkPlan", lambda: _daily_fork_cs_strategy.decide(
                     ms=ms, vol_state=ctx["vol"], chain=chain, macro=macro,
@@ -3262,6 +3331,8 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # ── TC.6 TREND CREDIT SPREAD ─────────────────────────────────────────────
     # v4.3: no longer deferred by condor_active. It fires when _can_open_credit_spread
     # allows its side. condor_trigger_source="trend_orb" is stamped on the record.
+    if signal is not None:
+        _plan_skip("TrendCreditSpread", f"slot claimed by {signal.strategy_name}")
     if signal is None:
         _tcs_hi, _tcs_lo = _session_extremes(ctx)
         _orb_hi, _orb_lo = _opening_range(ctx)
@@ -4000,6 +4071,8 @@ def main_loop(state: BotState):
                 # will detect the pair on subsequent ticks and offer the
                 # broken-wing adjustment.
                 _open_sides = _open_credit_sides()
+                _plan_skip_all("position open — managing; only the second-leg "
+                               "window asks the credit strategies")
                 if len(_open_sides) == 1:
                     _need_side = "put" if "call" in _open_sides else "call"
                     _sl_chain  = ctx.get("chain")
@@ -4055,7 +4128,8 @@ def main_loop(state: BotState):
                             lambda: _sweep_cs_strategy.generate_signal(
                                 liq_map=ctx["liq_map"], price_now=_sl_price,
                                 now_et=_sl_hhmm, atr_pct=_sl_atr,
-                                chain=_sl_chain), ctx)
+                                chain=_sl_chain, orb_high=ctx.get("orb_high"),
+                                orb_low=ctx.get("orb_low")), ctx)
                         if (_sl3 is not None and _sl3.is_valid
                                 and _sl3.option_side == _need_side
                                 and _can_open_credit_spread(_sl3.option_side,

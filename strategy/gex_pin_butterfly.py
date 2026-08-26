@@ -1,5 +1,17 @@
 """
-strategy/gex_pin_butterfly.py  v4.1
+strategy/gex_pin_butterfly.py  v4.2
+v4.2  2026-08-26  r146 — THE PLAN IS WIRED. Every refusal (parked, no GEX,
+      not PINNING, pin strength, window, no expected move, pin too near/far)
+      goes through `self.planner` (strategy/plan.py) and writes a DECLINE row
+      naming the gate; `_gate()` kept as an alias. ⚠️ THE WHAT-IF IS NOT
+      PRICED HERE YET, DELIBERATELY: this spec sets `center_strike` and never
+      selects the three legs, so the signal cannot be valid (`is_butterfly`
+      is never set; the single-leg `is_valid` arm needs a strike and premium
+      it does not have) — the same one-writer-zero-readers defect r97 found
+      in the sweep and r146 found in the runaway. Building the legs is a
+      spec decision (which wing width, how far from the pin) and is NOT made
+      here; until it is, R records n/a and the hurdle is not consulted.
+      Parked anyway (ENABLED False), so nothing trades on it.
 Apex on the GEX pin, OUT OF THE MONEY. Buy the move to the magnet.
 
 v4.0  2026-08-19  First version. **The wrong trade** - see v4.1.
@@ -128,6 +140,7 @@ from typing import Optional
 import config
 from strategy import relaxed
 from strategy.base_strategy import OptionsSignal as Signal
+from strategy.plan import Plan
 from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
@@ -211,34 +224,51 @@ class GEXPinButterflyStrategy:
 
     name = "GEXPinButterfly"
 
+    PLAN_CHECKS = ("enabled", "gex", "pinning", "pin_concentration",
+                   "entry_window", "expected_move", "pin_em_fraction", "r")
+
+    def __init__(self):
+        self.planner = Plan(self.name, self.PLAN_CHECKS)
+
     def generate_signal(self, *, gex, price_now: float, now_et: str,
                         atm_iv: float = None, chain=None,
                         **_ignored) -> Optional[Signal]:
+        t = self.planner.tick(price_now)
         # ⚠️ PARKED. Complete code, not a stub. It is OFF because its INPUT is
         # not trustworthy - enabling it now would trade a gamma-squared artifact.
         if not ENABLED:
-            return None
+            return t.refuse("enabled", "PARKED — GEX_BUTTERFLY_ENABLED is False "
+                                       "(open interest not yet trustworthy)")
         price_now = safe_float(price_now)
-        if not gex or not price_now or price_now <= 0:
-            return None
+        if not price_now or price_now <= 0:
+            return t.refuse("price", f"price unusable ({price_now})")
+        if not gex:
+            return t.starved("gex")
 
         env = str(getattr(gex, "gex_environment", "") or "")
         conc = float(getattr(gex, "pin_concentration", 0.0) or 0.0)
         pin = float(getattr(gex, "pin_strike", 0.0) or 0.0)
         if env != "PINNING" or pin <= 0:
-            return None
+            return t.refuse("pinning", f"GEX environment is {env or 'unknown'} "
+                                       f"(pin {pin:g}) — not PINNING")
+        t.check("pinning", pin, True)
+        t.anchor(trigger=pin)
 
         # ── 2. the pin must be STRONG, and it matters more the further out ──
-        if conc < relaxed.widen(PIN_CONC_MIN, 0.6, floor=0.10,
-                                name="pin_conc_min"):
+        _conc_min = relaxed.widen(PIN_CONC_MIN, 0.6, floor=0.10, name="pin_conc_min")
+        t.check("pin_concentration", conc, conc >= _conc_min)
+        if conc < _conc_min:
             logger.debug("[gex_bfly] no trade: pin concentration %.3f < %.2f - "
                          "PINNING without a dominant strike", conc, PIN_CONC_MIN)
-            return None
-            _gate("pin_concentration", "pin concentration below floor")
+            return t.refuse("pin_concentration",
+                            f"pin concentration {conc:.3f} < {_conc_min:.2f} — "
+                            f"PINNING without a dominant strike")
 
         _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET)
         if now_et and not (_early <= now_et <= _late):
-            return None
+            return t.refuse("entry_window", f"{now_et} ET is outside the "
+                                            f"butterfly window {_early}-{_late}")
+        t.check("entry_window", None, True)
 
         # ── 3. OTM, and inside the expected move ────────────────────────────
         em = expected_move(price_now, atm_iv)
@@ -246,27 +276,29 @@ class GEXPinButterflyStrategy:
             # ⚠️ NO EXPECTED MOVE MEANS NO TRADE, not a fallback. Guessing one
             # would put the whole distance band on a number nobody measured.
             logger.debug("[gex_bfly] no trade: no ATM IV, so no expected move")
-            _gate("no_atm_iv", "no ATM IV, so no expected move — not a fallback")
-            return None
+            return t.refuse("expected_move", "no ATM IV, so no expected move — "
+                                             "not a fallback")
+        t.check("expected_move", em, True)
 
         dist = abs(pin - price_now)
         frac = dist / em
+        _em_max = relaxed.widen(EM_MAX_FRAC, 1.3, name="em_max_frac")
+        t.check("pin_em_fraction", frac, EM_MIN_FRAC <= frac <= _em_max)
         if frac < EM_MIN_FRAC:
             logger.debug("[gex_bfly] no trade: pin is %.0f%% of the expected "
                          "move away - too near, the debit is expensive and the "
                          "payoff ratio poor", frac * 100)
-            _gate("pin_too_near",
-                  f"pin is {frac*100:.0f}% of expected move (floor "
-                  f"{EM_MIN_FRAC*100:.0f}%) - debit expensive, payoff poor")
-            return None
-        if frac > relaxed.widen(EM_MAX_FRAC, 1.3, name="em_max_frac"):
+            return t.refuse("pin_em_fraction",
+                            f"pin is {frac*100:.0f}% of expected move (floor "
+                            f"{EM_MIN_FRAC*100:.0f}%) - debit expensive, payoff poor")
+        if frac > _em_max:
             logger.debug("[gex_bfly] no trade: pin is %.0f%% of the expected "
                          "move away - the chain says price probably cannot get "
                          "there", frac * 100)
-            _gate("pin_too_far",
-                  f"pin is {frac*100:.0f}% of expected move - the chain says "
-                  f"price probably cannot get there")
-            return None
+            return t.refuse("pin_em_fraction",
+                            f"pin is {frac*100:.0f}% of expected move (ceiling "
+                            f"{_em_max*100:.0f}%) - the chain says price probably "
+                            f"cannot get there")
 
         side = "call" if pin > price_now else "put"
         sig = Signal(
@@ -286,4 +318,6 @@ class GEXPinButterflyStrategy:
         logger.info("[gex_bfly] FIRE  apex %.2f (%s, %.0f%% of a %.2f expected "
                     "move)  pin conc %.2f  spot %.2f",
                     pin, side.upper(), frac * 100, em, conc, price_now)
-        return sig
+        # R is n/a until the legs are built (see v4.2 header) — not gated.
+        t.note("legs not yet selected by this spec; R unmeasurable, hurdle not consulted")
+        return t.take(sig)

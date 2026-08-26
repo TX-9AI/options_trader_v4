@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """
-tests/gen_write_map.py  v4.0
+tests/gen_write_map.py  v4.1
 Generates docs/WRITE_MAP.md — what every box writes, and who writes it.
+
+v4.1  2026-08-26  r146 — THE MAP WAS ORDER-DEPENDENT AND FAILED THE GATE ON
+      CONTROL WHILE PASSING IN THE SANDBOX. `scan()` recorded a READ only if
+      the table's creator/writer had ALREADY been scanned, and `_files()`
+      walked directories in FILESYSTEM order (os.walk, unsorted). So a reader
+      that sat in a directory walked before its writer's directory was
+      silently dropped — and which directory walks first differs between two
+      machines. It surfaced the moment r146 moved plan_tick's creator from
+      derived/ to strategy/. Fixed: directories are walked sorted, and reads
+      are collected in a SECOND pass after every writer is known. The output
+      is now a function of the tree alone.
 
 v4.0  2026-08-25  Operator's ask: "a document that answers what does every box
 write and who writes it — like a file map, but for journal writers."
@@ -69,7 +80,7 @@ DB_OF_PREFIX = {
 
 def _files():
     for dp, dn, fn in os.walk(ROOT):
-        dn[:] = [d for d in dn if d not in SKIP_DIRS]
+        dn[:] = sorted(d for d in dn if d not in SKIP_DIRS)   # v4.1: deterministic
         for f in sorted(fn):
             if f.endswith(".py"):
                 yield os.path.relpath(os.path.join(dp, f), ROOT)
@@ -77,11 +88,13 @@ def _files():
 
 def scan():
     creates, writes, reads, dbs = {}, {}, {}, {}
+    sources = {}
     for rel in _files():
         try:
-            src = open(os.path.join(ROOT, rel), encoding="utf-8").read()
+            sources[rel] = open(os.path.join(ROOT, rel), encoding="utf-8").read()
         except Exception:                                       # noqa: BLE001
             continue
+    for rel, src in sources.items():
         for t in RE_CREATE.findall(src):
             creates.setdefault(t, set()).add(rel)
             if rel in DB_OF_DIR:
@@ -95,14 +108,15 @@ def scan():
                          (RE_DELETE, "delete")):
             for t in rx.findall(src):
                 writes.setdefault(t, {}).setdefault(rel, set()).add(kind)
+    # v4.1 — SECOND PASS, after every writer is known. A read is only a read
+    # of a table this tree writes; deciding that mid-walk made the answer
+    # depend on directory order.
+    for rel, src in sources.items():
         for t in RE_SELECT.findall(src):
             # a module that only writes also names the table in its INSERT;
             # reads are recorded separately so "who consumes this" is answerable
-            if t in creates or t in writes or t in reads:
+            if t in creates or t in writes:
                 reads.setdefault(t, set()).add(rel)
-        for d in RE_DBFILE.findall(src):
-            if d in ("self", "args", "d"):
-                continue
     return creates, writes, reads, dbs
 
 
