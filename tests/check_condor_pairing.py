@@ -113,9 +113,26 @@ def _load_gate_fns():
         import textwrap, ast as _ast
         tree = _ast.parse(src)
         fn_src = []
+        # ⚠️ MODULE-LEVEL CONSTANTS COME TOO. Rule 4's helpers read
+        # _TREND_TRIGGERS / _SWEEP_TRIGGERS / _FORK_TRIGGERS / _PAIRING_TABLE,
+        # and this extractor only ever collected FunctionDef nodes — so the
+        # functions arrived without the names they close over and NameError'd
+        # at call time rather than at exec time.
+        for node in tree.body:
+            if isinstance(node, _ast.Assign) and any(
+                    getattr(t, "id", "").startswith(
+                        ("_TREND_", "_SWEEP_", "_FORK_", "_PAIRING_"))
+                    for t in node.targets):
+                fn_src.append("\n".join(
+                    src.splitlines()[node.lineno - 1: node.end_lineno]))
         for node in _ast.walk(tree):
             if isinstance(node, _ast.FunctionDef) and node.name in (
-                "_can_open_credit_spread", "_open_credit_sides"
+                # ⚠️ r132 — Rule 4 made the gate read the open LEGS (for their
+                # trigger source), not just their sides, and added the pairing
+                # helpers. An AST-extracted function needs every name it calls
+                # present in the namespace or it NameErrors at call time.
+                "_can_open_credit_spread", "_open_credit_sides",
+                "_open_credit_legs", "_trigger_class", "_pairing_allowed"
             ):
                 lines = src.splitlines()
                 fn_lines = lines[node.lineno - 1: node.end_lineno]
@@ -225,8 +242,14 @@ def main() -> int:
     class _MockContract:
         def __init__(self, strike): self.strike = strike
     class _MockSignal:
-        def __init__(self, side, short_strike):
+        # ⚠️ r132 — A TRIGGER SOURCE IS NOW LOAD-BEARING. Rule 4 refuses a pair
+        # whose trigger classes it cannot identify (fail closed), so a geometry
+        # fixture with no source never reaches the geometry check. These tests
+        # are ABOUT geometry, so they carry a pairing the table permits
+        # (fork leg 1 → sweep leg 2) and vary only the strikes.
+        def __init__(self, side, short_strike, source="sweep_reversal"):
             self.option_side = side
+            self.condor_trigger_source = source
             if side == "call":
                 self.short_call_contract = _MockContract(short_strike)
                 self.short_put_contract  = None

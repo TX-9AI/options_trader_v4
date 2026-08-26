@@ -2216,6 +2216,17 @@ def _session_extremes(ctx: dict):
     return hi, lo
 
 
+def _open_credit_legs() -> list:
+    """The open credit verticals themselves — Rule 4 needs leg 1's TRIGGER,
+    not just its side. `condor_trigger_source` is stamped at fill (v4.2)."""
+    try:
+        from database.trade_logger import get_trade_logger
+        return [t for t in get_trade_logger().get_open_trades()
+                if t.get("is_condor_leg") and t.get("status") == "open"]
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
 def _open_credit_sides() -> set:
     """Which credit-vertical sides ('call'/'put') are open right now.
 
@@ -2232,14 +2243,90 @@ def _open_credit_sides() -> set:
         return set()
 
 
+# ═══ RULE 4 — THE TRIGGER PAIRING TABLE ═══════════════════════════════════
+# 🔴 OPERATOR'S RULING, 2026-08-25. Which trigger opened LEG 1 constrains what
+# may complete it. Until now the gate knew SIDES ONLY, so any trigger could
+# pair with any other.
+#
+#   TREND CS first  → ONLY a SWEEP completes it. *"If a trend credit spread is
+#                     the first leg, the only other permissible leg would be a
+#                     sweep, and for a sweep there has to be a rejection or we
+#                     don't sell it."*
+#   SWEEP first     → a FORK TINE completes it, *"geometrically placed on the
+#                     right side."*
+#   FORK TINE first → *"Another (opposite) fork tine (upper, lower) or sweep
+#                     will work."*
+#
+# 🔴 AND A TREND CS MAY NEVER FOLLOW ANYTHING. Operator, on a trend CS after a
+# sweep: *"that move invalidates the whole premise of a 'trend' credit
+# spread."* A sweep asserts a level REJECTED — a reversal; a trend CS asserts a
+# trend RUNNING in that same tape. Both cannot be true about one session, so it
+# is a premise conflict, not a slot conflict. The trend CS is therefore a
+# LEG-1-ONLY trigger.
+#
+# ⚠️ REJECTION IS REQUIRED OF THE SWEEP CLASS, NOT OF FORKS. Operator: *"a
+# qualifying PDH/PDL or other named level, but as a SWEEP — fork does not need
+# a rejection, it is assumed to be stable if it's present."* A named level is
+# only a level once price has REJECTED it on a CLOSE; a fork tine is trusted by
+# its presence. `sweep_credit_spread` already encodes exactly this — a pool
+# must be NAMED and must have RECLAIMED, "a wick through a level is a wick."
+#
+# ⚠️ FAIL CLOSED. Only the pairs named above are permitted. An unlisted
+# combination is refused and SAID OUT LOUD, never silently allowed — r124's
+# lesson, where 406 consecutive silent refusals cost five queries to explain.
+_TREND_TRIGGERS = ("trend_orb",)
+_SWEEP_TRIGGERS = ("sweep_reversal",)
+_FORK_TRIGGERS  = ("1h_fork", "1d_fork")
+
+_PAIRING_TABLE = {
+    # leg-1 trigger class : the classes permitted to COMPLETE it
+    "trend": ("sweep",),
+    "sweep": ("fork",),
+    "fork":  ("fork", "sweep"),
+}
+
+
+def _trigger_class(source: str) -> str:
+    """Map a condor_trigger_source to its pairing class, or '' if unknown."""
+    if source in _TREND_TRIGGERS:
+        return "trend"
+    if source in _SWEEP_TRIGGERS:
+        return "sweep"
+    if source in _FORK_TRIGGERS:
+        return "fork"
+    return ""
+
+
+def _pairing_allowed(leg1_source: str, leg2_source: str) -> tuple:
+    """(allowed, reason). Fails CLOSED on an unknown trigger on either side."""
+    c1, c2 = _trigger_class(leg1_source), _trigger_class(leg2_source)
+    if not c1 or not c2:
+        return False, (f"unknown trigger class (leg1 {leg1_source or '?'} → "
+                       f"leg2 {leg2_source or '?'}); refusing rather than "
+                       f"guessing at a pairing")
+    if c2 == "trend":
+        return False, ("a TREND credit spread can only ever be the FIRST leg — "
+                       "a sweep or a tine asserts a level held, a trend spread "
+                       "asserts a trend running, and completing one with the "
+                       "other invalidates the trend spread's own premise")
+    ok = c2 in _PAIRING_TABLE.get(c1, ())
+    if not ok:
+        return False, (f"a {c1.upper()} first leg cannot be completed by a "
+                       f"{c2.upper()} trigger; permitted: "
+                       f"{', '.join(_PAIRING_TABLE.get(c1, ())) or 'nothing'}")
+    return True, f"{c1.upper()} leg 1 completed by {c2.upper()} — permitted"
+
+
 def _can_open_credit_spread(side: str,
                              new_signal=None,
                              current_price: float = 0.0) -> bool:
-    """Type gate (Rules 1+3) AND geometry gate (no inversion).
+    """Type gate (Rules 1+3+4) AND geometry gate (no inversion).
 
     Rule 1: max 2 concurrent positions.
     Rule 3: new spread must be on the COMPLEMENTARY side (never two calls,
             never two puts).
+    Rule 4: the TRIGGER PAIRING TABLE above — which trigger opened leg 1
+            constrains which may complete it. Order-dependent.
     Geometry: the pair must satisfy  short_put < price < short_call.
               A second spread whose short strike lands on the wrong side of
               current price — or crosses the existing short strike — produces
@@ -2270,6 +2357,20 @@ def _can_open_credit_spread(side: str,
         logger.info("Credit pairing BLOCKED: both sides already open "
                     "(PCS + CCS) — the structure is complete, no third leg")
         return False
+    # ── 🔴 RULE 4 — THE TRIGGER PAIRING TABLE (2026-08-25) ─────────────────
+    # Runs BEFORE Rule 3's side check only in the sense that it is independent
+    # of it: a complementary side is necessary but no longer sufficient.
+    if sides and new_signal is not None:
+        _legs = _open_credit_legs()
+        _leg1 = _legs[0] if _legs else {}
+        _src1 = _leg1.get("condor_trigger_source") or ""
+        _src2 = getattr(new_signal, "condor_trigger_source", "") or ""
+        _ok4, _why4 = _pairing_allowed(_src1, _src2)
+        if not _ok4:
+            logger.info("Credit pairing BLOCKED by Rule 4: %s", _why4)
+            return False
+        logger.info("Credit pairing Rule 4 OK: %s", _why4)
+
     if side in sides:
         _open = "PCS" if "put" in sides else "CCS"
         _want = "PCS" if side == "put" else "CCS"

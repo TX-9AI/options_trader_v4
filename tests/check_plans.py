@@ -277,6 +277,79 @@ def main():
 
 
 
+    # ── FORK: the tine is a LEVEL, not a channel to cross ───────────────
+    class _T:
+        def __init__(self, tf, side, rail, slope):
+            self.tf, self.side, self.rail, self.slope = tf, side, rail, slope
+            self.trigger, self.median, self.active = rail, 200.0, True
+    class _CTM:
+        def __init__(self, t): self._t = t
+        def all(self): return self._t
+
+    fpx = 201.4
+    fcalls = [_C(k, max(.03, 3.2-(k-fpx)*.30), max(.08, 3.4-(k-fpx)*.30))
+              for k in range(195, 231, 5)]
+    fputs = [_C(k, max(.03, 3.2-(fpx-k)*.30), max(.08, 3.4-(fpx-k)*.30))
+             for k in range(170, 211, 5)]
+    fctm = _CTM([_T("1h", "call", 203.2, 0.052), _T("1h", "put", 196.8, 0.052),
+                 _T("1d", "call", 212.5, 0.004), _T("1d", "put", 188.0, 0.004)])
+    fps = e._fork({"price": fpx, "chain": _Chain(fcalls, fputs),
+                   "condor_triggers": fctm})
+    check("F1 one builder emits a plan per available timeframe AND side",
+          isinstance(fps, list) and len(fps) == 4, f"{len(fps or [])} plans")
+
+    # 🔴 BOTH TIMEFRAMES ARE VALID. Operator: "the hourly is valid too. Same
+    # rationale." A DAILY tine is a multi-session boundary — a STRONGER level
+    # than an hourly one, not a disqualified one.
+    tfs = {p["checks"]["fork_tf"][0] for p in fps}
+    check("F2 the 1d fork is NOT excluded — both timeframes plan",
+          tfs == {1.0, 2.0}, str(sorted(tfs)))
+
+    # ⚠️ NO SPAN / TRAVERSAL GATE. I began building `span_vs_session` — refuse
+    # the daily because a 0DTE cannot cross a daily channel. That is the
+    # CONDOR's logic applied to a trade that does not work that way: selling
+    # beyond a tine no more requires price to reach the opposite rail than
+    # selling beyond London High requires it to reach London Low. Operator:
+    # "The tines are what's of value, not the channel."
+    _fsrc = open(os.path.join(_root, "derived", "plans.py"), encoding="utf-8").read()
+    _fi = _fsrc.index("def _fork(")
+    _fbody = _fsrc[_fi:_fsrc.index("# ── the tables", _fi)]
+    # ⚠️ STRIP COMMENTS AND THE DOCSTRING FIRST. My first version searched the
+    # raw body for "traverse" and matched THE DOCSTRING EXPLAINING THAT THERE
+    # IS NO TRAVERSAL GATE. That is the third time tonight a guard has fired on
+    # its own explanation (r114's get_event_loop, r125's SQL localtime, now
+    # this). The rule that keeps generalising: A GUARD MUST MATCH CODE, NEVER
+    # PROSE — parse structure, or strip comments and strings before searching.
+    import ast as _ast
+    _fn = next(n for n in _ast.walk(_ast.parse(_fsrc))
+               if isinstance(n, _ast.FunctionDef) and n.name == "_fork")
+    # ⚠️ REMOVE THE DOCSTRING NODE — do not try to SUBTRACT ITS TEXT.
+    # `ast.unparse` re-normalises whitespace, so a literal .replace() of
+    # `get_docstring()` never matches and the prose survives. Deleting the node
+    # is the only reliable way; that is what "match structure, not text" means
+    # in practice.
+    _body = list(_fn.body)
+    if (_body and isinstance(_body[0], _ast.Expr)
+            and isinstance(getattr(_body[0], "value", None), _ast.Constant)
+            and isinstance(_body[0].value.value, str)):
+        _body = _body[1:]
+    _stripped = "\n".join(_ast.unparse(n) for n in _body)
+    check("F3 there is NO channel-traversal gate in the fork's CODE",
+          "span_vs_session" not in _stripped,
+          "no span gate")
+
+    # ⚠️ THE SHORT SITS JUST BEYOND THE TINE — the operator's construction,
+    # first strike past the rail, not a fitted offset from it.
+    _fc = next(p for p in fps if p["direction"] == "1h_call")
+    check("F4 the short strike is the first one BEYOND the tine",
+          _fc["short_strike"] >= 203.2 and _fc["short_strike"] - 203.2 < 5.0,
+          f"tine 203.2 → short {_fc['short_strike']}")
+
+    check("F5 tine slope is recorded — 1h drifts, 1d barely does",
+          _fc["checks"]["tine_slope"][0] >
+          next(p for p in fps if p["direction"] == "1d_call")["checks"]["tine_slope"][0],
+          "1h slope > 1d slope")
+
     # ── P7: THE TABLES — spine + long-format checks ─────────────────────
     import sqlite3, time as _t
 

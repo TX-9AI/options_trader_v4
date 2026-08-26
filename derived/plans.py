@@ -97,6 +97,161 @@ EM_SESSION_PCT    = 0.020   # session expected move as a fraction of spot
 NEAR_MONEY_PCT    = 0.15    # strikes beyond this do not participate in gamma
 
 
+
+# ═══ THE SHARED SESSION MAP ═══════════════════════════════════════════
+# 🔴 THE CENTER IS THE 5-MINUTE ORB RANGE, NOT THE OPENING PRICE. Operator,
+# 2026-08-25: *"Why don't we use the five minute ORB range as the marker?
+# Levels have to be above the ORB or below to count and they have to be the
+# right kind."* This SUPERSEDES the "opening price" wording of the ruling
+# quoted below — a ZONE rather than a POINT.
+# ⚠️ WHY IT IS BETTER, and it is not just tidier: a level sitting a few cents
+# from the open is not meaningfully above or below anything, and the first
+# five minutes routinely straddle it. A level outside the OPENING RANGE has
+# actually been left behind by the session's first move. Levels INSIDE the
+# range are neither ceiling nor floor and are eliminated as such.
+# ⚠️ CONSEQUENCE: THE MAP CANNOT EXIST BEFORE 09:35 ET. Until today's opening
+# range closes there is no marker, so there are no candidates — not an empty
+# map, NO map. Recorded rather than worked around.
+# SOURCE: `main.py::_opening_range()` — ORB_WINDOW_MINUTES=5, recomputed from
+# the tape (df_5m primary), restart-proof and available all session. TCS.3
+# proved the 1m-only version went off the left edge of a rolling window by
+# ~10:35, so the 5m path is the one to read.
+#
+# 🔴 THE ORIGINAL RULING, 2026-08-25. Verbatim: *"The mapper for our session
+# highs and lows, which are liquidity zones, and the forks have to SHARE A MAP.
+# Center of the map is gonna be where price currently sits at the open. There
+# are gonna be some levels above the price that are identified by either
+# session levels or fork tines. And the same will be below it. The levels below
+# are the only ones that can be the FLOOR and the levels above are the only
+# ones that can be the CEILING. No other combination will work."*
+#
+# ⚠️ AND THE CLARIFICATION THAT FOLLOWED, WHICH I HAD WRONG. My first reading
+# was "position governs, the label is only provenance" — so an upper tine that
+# drifted below the open would become a FLOOR candidate. He corrected it:
+# *"an upper tine below the current open is UNUSABLE as a candidate. It would
+# have to go to the lower tine to qualify for the put credit spread. Upper
+# tines can only be call credit spreads, but would be INVALIDATED BY GEOMETRY
+# if they are below the open."*
+#
+# ⇒ SO THE TWO FACTS MUST AGREE, AND DISAGREEMENT ELIMINATES:
+#     ROLE comes from the SOURCE and never changes — an upper tine and a
+#     session HIGH are CEILINGS (call credit spreads) for the whole session; a
+#     lower tine and a session LOW are FLOORS (put credit spreads).
+#     POSITION is measured against the OPENING PRICE, frozen at the open.
+#     A ceiling at or below the open is INVALID. A floor at or above it is
+#     INVALID. Neither is re-cast as the other side — the displaced upper tine
+#     does not become the floor; the LOWER tine is the floor, or there is none.
+#
+# ⚠️ THIS IS WHY IT IS STRUCTURAL RATHER THAN A GATE. An inverted condor (PCS
+# above, CCS below) cannot be CONSTRUCTED from this map, so nothing downstream
+# has to detect one. It also removes a defect I reproduced tonight in the fork
+# plan and which credit_edge had already recorded weeks ago: pricing a short
+# call beyond an "upper" tine that had drifted below spot — an ITM short call,
+# something nobody would sell.
+CEILING, FLOOR = "ceiling", "floor"
+
+
+class MapLevel:
+    """One candidate on the shared session map.
+
+    `role` is what the SOURCE says it is and is immutable. `valid` is whether
+    the geometry agrees. A level that fails geometry is KEPT with valid=False
+    and a reason, never silently dropped — the elimination is the record.
+    """
+    __slots__ = ("price", "role", "name", "source", "tf", "valid", "why")
+
+    def __init__(self, price, role, name, source, tf=""):
+        self.price = round(float(price), 4)
+        self.role = role
+        self.name = name
+        self.source = source          # "ledger" | "fork"
+        self.tf = tf                  # "1h" / "1d" for forks, "" otherwise
+        self.valid = True
+        self.why = ""
+
+    @property
+    def option_side(self):
+        """A CEILING is sold as a CALL spread. A FLOOR as a PUT spread. Always."""
+        return "call" if self.role == CEILING else "put"
+
+    def check_geometry(self, orb_high, orb_low):
+        """A CEILING must sit ABOVE the opening range; a FLOOR must sit BELOW
+        it. Inside the range is neither."""
+        inside = orb_low <= self.price <= orb_high
+        if inside:
+            self.valid = False
+            self.why = (f"{self.name} at {self.price:.2f} sits INSIDE the "
+                        f"opening range {orb_low:.2f}-{orb_high:.2f} — neither "
+                        f"above nor below it, so it is neither a ceiling nor a "
+                        f"floor this session")
+        elif self.role == CEILING and self.price < orb_low:
+            self.valid = False
+            self.why = (f"{self.name} is a CEILING at {self.price:.2f} but sits "
+                        f"BELOW the opening range low {orb_low:.2f} — "
+                        f"invalidated by geometry. A ceiling can only be sold "
+                        f"as a call credit spread, and this one is beneath the "
+                        f"session's first move; the opposite side's level is "
+                        f"the candidate, not this one re-cast")
+        elif self.role == FLOOR and self.price > orb_high:
+            self.valid = False
+            self.why = (f"{self.name} is a FLOOR at {self.price:.2f} but sits "
+                        f"ABOVE the opening range high {orb_high:.2f} — "
+                        f"invalidated by geometry; a floor can only be sold as "
+                        f"a put credit spread")
+        return self.valid
+
+
+def build_session_map(orb_high, orb_low, ledger=None, ctm=None):
+    """Every credit-spread candidate this session, on ONE map, centered on the
+    5-MINUTE OPENING RANGE. Returns (ceilings, floors, invalid) — all three,
+    because the eliminated ones are evidence too.
+
+    ⚠️ NO OPENING RANGE ⇒ NO MAP. Before 09:35 ET there is no marker, and a
+    map centered on nothing would classify every level by accident. Returning
+    empty lists here is the CORRECT answer, not a degraded one.
+    """
+    if (not orb_high or not orb_low or orb_high <= 0 or orb_low <= 0
+            or orb_high < orb_low):
+        return [], [], []
+    cands = []
+    try:
+        for lv in (getattr(ledger, "levels", None) or []):
+            k = getattr(lv, "kind", "")
+            if k not in ("high", "low"):
+                continue
+            cands.append(MapLevel(
+                lv.price, CEILING if k == "high" else FLOOR,
+                getattr(lv, "name", "") or f"{k} {lv.price:.2f}", "ledger"))
+    except Exception:                                           # noqa: BLE001
+        pass
+    try:
+        for t in (ctm.all() if ctm is not None else []):
+            # ⚠️ THE FORK'S OWN `side` IS THE ROLE. "call" == upper tine ==
+            # CEILING. It is NOT re-derived from position — that is the whole
+            # point of the ruling.
+            role = CEILING if getattr(t, "side", "") == "call" else FLOOR
+            tf = getattr(t, "tf", "")
+            cands.append(MapLevel(float(getattr(t, "rail", 0) or 0), role,
+                                  f"{tf} {'upper' if role == CEILING else 'lower'} tine",
+                                  "fork", tf))
+    except Exception:                                           # noqa: BLE001
+        pass
+
+    ceilings, floors, invalid = [], [], []
+    for c in cands:
+        if c.price <= 0:
+            continue
+        if not c.check_geometry(orb_high, orb_low):
+            invalid.append(c)
+        elif c.role == CEILING:
+            ceilings.append(c)
+        else:
+            floors.append(c)
+    ceilings.sort(key=lambda c: c.price)     # nearest the opening range first
+    floors.sort(key=lambda c: -c.price)
+    return ceilings, floors, invalid
+
+
 class PlanEngine(DerivedEngine):
     """Declares, prices and records forward plans. Writes only."""
 
@@ -1141,6 +1296,130 @@ class PlanEngine(DerivedEngine):
                        if _no_roll_reason else "")),
         }
 
+    def _fork(self, ctx: dict) -> Optional[list]:
+        """Sell just beyond a pitchfork TINE. One plan per available timeframe.
+
+        🔴 OPERATOR'S CORRECTION, 2026-08-25, and it removed a whole gate I was
+        about to build: *"The tines are what's of value, not the channel. That
+        is the distinction. Tapping a tine is the trigger for selecting a short
+        strike just outside the channel. That's the level, but sloped."*
+
+        ⚠️ **A TINE IS A LEVEL. THE CHANNEL IS NOT A DISTANCE TO BE CROSSED.**
+        I had started building a `span_vs_session` check — refuse the daily
+        fork because a 0DTE cannot traverse a daily channel. That is the
+        CONDOR's logic (price must stay between two shorts) applied to a trade
+        that does not work that way. Selling beyond a tine no more requires
+        price to reach the opposite rail than selling beyond London High
+        requires it to reach London Low. The gate was deleted before it shipped.
+
+        ⚠️ AND I HAD THE 08-22 RULING'S REASON WRONG TOO. I read
+        `daily_fork_credit_spread.py`'s docstring, which leads with a
+        DATA-AVAILABILITY note, and repeated that as the reason 1h was chosen.
+        `main.py:2340` carries the operator's actual words: *"A DAILY fork
+        demands an excursion from one anchor to the next that a single session
+        rarely meets"* — about the fork BUILDING, not about the tine's worth.
+        **Strategy docstrings carry historical and secondary framing; the
+        ruling comments in main.py carry the operative decision.** Third time
+        tonight that distinction mattered.
+
+        ⇒ BOTH TIMEFRAMES ARE VALID and this emits a plan for each available
+        one, tagged `fork_tf`. A DAILY tine is a multi-session structural
+        boundary — a STRONGER level than an hourly one, not a disqualified one.
+
+        ⚠️ THE RAIL IS FROZEN AT DECLARATION. `condor_trigger_map` recomputes
+        tine positions every tick — its own comment: "a plan from 11am reads
+        the 11am rail; by 2pm the tine has drifted by slope×bars." A plan that
+        re-read the rail would chase its own anchor, which is the circular
+        loop in miniature. `tine_slope` is RECORDED so the fit can see how far
+        an hourly tine drifted while a plan stood; a daily tine barely moves
+        intraday, which is why freezing matters more for 1h than 1d.
+        """
+        ctm = ctx.get("condor_triggers")
+        chain = ctx.get("chain")
+        spot = float(ctx.get("price") or 0)
+        if ctm is None or chain is None or spot <= 0:
+            return None
+        try:
+            trigs = list(ctm.all())
+        except Exception:                                       # noqa: BLE001
+            return None
+        if not trigs:
+            return [{"strategy": "ForkCreditSpread", "verdict": "NO PLAN",
+                     "checks": {}, "why": "no fork tines this tick"}]
+
+        out = []
+        for t in trigs:
+            tf = getattr(t, "tf", "")
+            side = getattr(t, "side", "")
+            rail = float(getattr(t, "rail", 0) or 0)
+            slope = float(getattr(t, "slope", 0) or 0)
+            trigger = float(getattr(t, "trigger", 0) or 0)
+            if rail <= 0:
+                continue
+            is_call = side == "call"
+            pool = {float(getattr(c, "strike", 0) or 0): c
+                    for c in ((getattr(chain, "calls", []) if is_call
+                               else getattr(chain, "puts", [])) or [])}
+            # ⚠️ JUST OUTSIDE THE TINE — the operator's words. First strike
+            # beyond the rail, not a fitted offset from it.
+            if is_call:
+                sk = min((k for k in sorted(pool) if k >= rail), default=None)
+                lk = sk + 5 if sk is not None else None
+            else:
+                sk = max((k for k in sorted(pool) if k <= rail), default=None)
+                lk = sk - 5 if sk is not None else None
+            credit = risk = r = None
+            if sk is not None and lk in pool:
+                try:
+                    credit = round(float(pool[sk].bid) - float(pool[lk].ask), 2)
+                    risk = round(5.0 - credit, 2)
+                    r = round(credit / risk, 2) if risk > 0 else None
+                except Exception:                               # noqa: BLE001
+                    credit = risk = r = None
+            dist_pct = abs(rail - spot) / spot * 100.0
+            why, ok = [], True
+            if sk is None:
+                ok = False
+                why.append(f"no strike beyond the {tf} {side} tine {rail:.2f}")
+            _rv, _rr = r_verdict(r)
+            if _rv == "FAIL":
+                ok = False
+                why.append(f"{_rr} — TARGET {sk:.2f} (short strike expiring "
+                           f"worthless), STOP a close beyond the tine "
+                           f"{rail:.2f}")
+            out.append({
+                "strategy": "ForkCreditSpread", "direction": f"{tf}_{side}",
+                "checks": {
+                    # ⚠️ NEVER DROP THE CHECK WHEN R IS UNMEASURABLE — write
+                    # the verdict with a NULL value. A missing ROW and a NULL
+                    # VALUE mean different things to the fit.
+                    "r": (r, r_verdict(r)[0]),
+                    "tine_distance_pct": (round(dist_pct, 3), "n/a"),
+                    "strike_beyond_tine": ((float(sk), "PASS")
+                                           if sk is not None else None),
+                    # 1.0 = 1h, 2.0 = 1d — numeric so the column stays REAL
+                    "fork_tf": (1.0 if tf == "1h" else 2.0, "n/a"),
+                    # RECORDED: how fast this tine drifts. The reason freezing
+                    # the rail matters more for 1h than 1d.
+                    "tine_slope": (round(slope, 5), "n/a"),
+                    "credit": ((credit, "n/a") if credit is not None else None),
+                },
+                "trigger_price": trigger or rail,
+                "invalidation": rail,
+                "short_strike": float(sk) if (sk is not None and is_call) else None,
+                "long_strike": float(lk) if (lk is not None and is_call) else None,
+                "short_put_strike": None if is_call else (float(sk) if sk else None),
+                "long_put_strike": None if is_call else (float(lk) if lk else None),
+                "underlying_at_decision": spot, "credit": credit, "risk": risk,
+                "r": r,
+                "verdict": "TAKE" if ok else "DECLINE",
+                "why": "; ".join(why) if why else
+                       (f"{tf} {side} tine at {rail:.2f} ({dist_pct:.2f}% from "
+                        f"spot, slope {slope:+.4f}/bar); sell {sk:.0f}/{lk:.0f} "
+                        f"just beyond it for ${credit:.2f}, R {r:.2f}"),
+            })
+        return out
+
     # ── the tables ──────────────────────────────────────────────────────
     # 🔴 r126b — TWO TABLES, AND THE SPLIT IS THE WHOLE DESIGN.
     #
@@ -1211,6 +1490,13 @@ class PlanEngine(DerivedEngine):
         # farthest strike that satisfies the economical question & that is
         # worthy of a tick by tick plan." Its verdict is THREE-WAY —
         # ROLL / CLOSE / HOLD — because "get out" is an answer, not a refusal.
+        # 🔴 r132 — THE FORK PLAN, 1h AND 1d, ONE BUILDER. Operator, 2026-08-25:
+        # *"The tines are what's of value, not the channel... Tapping a tine is
+        # the trigger for selecting a short strike just outside the channel.
+        # That's the level, but sloped."* And: *"the hourly is valid too. Same
+        # rationale."* `fork_tf` separates them for the fit.
+        "ForkCreditSpread":   ("r", "tine_distance_pct", "strike_beyond_tine",
+                               "fork_tf", "tine_slope", "credit"),
         "CreditRoll":         ("rung", "roll_room", "roll_credit", "close_cost",
                                "credit_after", "tested_width", "risk_free",
                                "tent_hedge_cost", "cum_credit_after_pct",
@@ -1308,13 +1594,18 @@ class PlanEngine(DerivedEngine):
     def derive(self, ctx: dict) -> int:
         plans = []
         for fn in (self._butterfly, self._participation, self._sweep,
-                   self._runaway, self._condor, self._roll):
+                   self._runaway, self._condor, self._roll, self._fork):
             try:
                 p = fn(ctx)
             except Exception as exc:                            # noqa: BLE001
                 logger.debug("[plans] %s failed: %s", fn.__name__, exc)
                 p = None
-            if p:
+            if isinstance(p, list):
+                # ⚠️ ONE BUILDER, MANY PLANS. The fork emits one per available
+                # timeframe; flattening here keeps every other builder's
+                # single-plan contract unchanged.
+                plans.extend(x for x in p if x)
+            elif p:
                 plans.append(p)
         if not plans:
             return 0

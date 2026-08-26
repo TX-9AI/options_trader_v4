@@ -126,6 +126,22 @@ def r_verdict(r: Optional[float]) -> Tuple[str, str]:
     """(verdict, reason) for a plan's R. The single decision point."""
     h = r_hurdle()
     if h is None:
+        # 🔴 MUTED-WITH-A-NUMBER AND MUTED-WITH-NOTHING ARE DIFFERENT ROWS.
+        # Operator, 2026-08-25. Under relaxed the hurdle does not gate, but the
+        # R VALUE is still recorded — so a relaxed session DOES carry R
+        # evidence and the floor can be fitted from it by asking what each
+        # threshold would have refused.
+        # ⚠️ EXCEPT WHEN R IS UNMEASURABLE. Strict mode FAILS on r=None ("a
+        # missing input is not a safe trade"); relaxed takes the trade anyway,
+        # and a bare NULL in `plan_check` is then indistinguishable from a
+        # column that was never written. Those rows are INVISIBLE to a
+        # threshold fit rather than merely uncounted, which silently biases the
+        # subset. Say so in the verdict instead.
+        if r is None:
+            return "MUTED_NO_R", ("R hurdle MUTED (relaxed) AND R is NOT "
+                                  "MEASURABLE — this row carries no R evidence "
+                                  "at all and must be EXCLUDED from any R fit, "
+                                  "not counted as a low-R trade")
         return "MUTED", ("R hurdle MUTED (relaxed) — the trade is taken to "
                          "exercise the exits, not because it pays")
     if r is None:
