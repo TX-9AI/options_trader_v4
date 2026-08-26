@@ -323,7 +323,9 @@ def show_today(conn):
     print()
 
     # Trade detail table
-    print(f"  {'ID':<10} {'Type':<8} {'Strike':<14} {'Grade':<6} "
+    # ⚠️ SAME CHANGE, DIFFERENT FORMAT. Every row in TODAY'S TRADES is from
+    # today, so the date would be noise; the exit TIME is what separates them.
+    print(f"  {'Closed':<8} {'Type':<8} {'Strike':<14} {'Grade':<6} "
           f"{'Entry':>7} {'Exit':>7} {'P&L':>9} {'P&L%':>7}  Exit Reason")
     sep()
     for r in rows:
@@ -341,7 +343,7 @@ def show_today(conn):
         pnl_p      = r["pnl_pct"]       or 0
 
         print(
-            f"  {r['trade_id'][:8]:<10} "
+            f"  {to_et(r['exit_time'])[6:]:<8} "
             f"{trade_type:<8} "
             f"{strike_str:<14} "
             f"{r['setup_grade'] or '?':<6} "
@@ -507,7 +509,13 @@ def show_recent(conn, n: int = 10):
         print()
         return
 
-    print(f"  {'ID':<10} {'Type':<8} {'Strike':<14} {'Contr':>5} "
+    # 🔴 DATE, NOT TRADE ID (r145). Operator, 2026-08-26: *"displaying the date
+    # of the trade would carry far more value to me (human reader) than the
+    # trade ID, which I'm never going to go back & reference... so I know if
+    # we're talking about today or what other day it happened."*
+    # ⚠️ THE ID IS STILL RECORDED — this changes the VIEW, not the row. `trades`
+    # keeps trade_id, and r144's plan->trade join depends on it.
+    print(f"  {'Closed':<14} {'Type':<8} {'Strike':<14} {'Contr':>5} "
           f"{'Entry':>7} {'Exit':>7} {'P&L':>9} {'P&L%':>7}  Reason")
     sep()
 
@@ -526,7 +534,7 @@ def show_recent(conn, n: int = 10):
         pnl_p      = r["pnl_pct"]       or 0
 
         print(
-            f"  {r['trade_id'][:8]:<10} "
+            f"  {to_et(r['exit_time']):<14} "
             f"{trade_type:<8} "
             f"{strike_str:<14} "
             f"{r['contracts'] or 0:>5} "
