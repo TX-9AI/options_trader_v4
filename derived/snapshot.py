@@ -98,7 +98,10 @@ class SnapshotEngine(DerivedEngine):
             # ── tier 4: second-order + vol measures
             "charm": _f(ctx.get("charm")),
             "vanna": _f(ctx.get("vanna")),
-            "gex": _f(ctx.get("gex")),
+            # ⚠️ ctx["gex"] is a GEXSnapshot OBJECT — _f() on it yields None,
+            # which is why this column has been NULL on every row ever
+            # written. The scalar is `net_gex`. See derived/surface.py r140.
+            "gex": _f(getattr(ctx.get("gex"), "net_gex", None)),
             "atm_iv": _f(ctx.get("atm_iv")),
             "iv_slope": _f(ctx.get("iv_slope")),
             "realised_vol_cc": _f(ctx.get("realised_vol_cc")),

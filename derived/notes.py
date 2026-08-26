@@ -102,7 +102,10 @@ class NoteWriter:
             "iv_slope": _f(ctx.get("iv_slope")),
             "charm": _f(ctx.get("charm")),
             "vanna": _f(ctx.get("vanna")),
-            "gex": _f(ctx.get("gex")),
+            # ⚠️ ctx["gex"] is a GEXSnapshot OBJECT — _f() on it yields None,
+            # which is why this column has been NULL on every row ever
+            # written. The scalar is `net_gex`. See derived/surface.py r140.
+            "gex": _f(getattr(ctx.get("gex"), "net_gex", None)),
             "levels": ctx.get("levels"),
             # ⚠️ CHARACTER IS CONTEXT ON THE NOTE, NOT A FACTOR IN IT. It says
             # what the tape was doing when this engine looked — it does not

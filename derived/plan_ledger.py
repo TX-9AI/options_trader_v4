@@ -153,7 +153,10 @@ class PlanLedger:
                 "realised_vol_cc": _f(ctx.get("realised_vol_cc")),
                 "charm": _f(ctx.get("charm")),
                 "vanna": _f(ctx.get("vanna")),
-                "gex": _f(ctx.get("gex")),
+                # ⚠️ ctx["gex"] is a GEXSnapshot OBJECT — _f() on it yields None,
+            # which is why this column has been NULL on every row ever
+            # written. The scalar is `net_gex`. See derived/surface.py r140.
+            "gex": _f(getattr(ctx.get("gex"), "net_gex", None)),
                 "session_fraction_remaining": _f(ctx.get("session_fraction_remaining")),
                 "levels": ctx.get("levels"),
                 "fork": ctx.get("fork_rails"),

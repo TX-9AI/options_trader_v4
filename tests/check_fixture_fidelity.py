@@ -250,6 +250,28 @@ def main():
     check("X8 every ctx key the plan builders read is set somewhere in the tick",
           not _unset, ", ".join(_unset) or "none")
 
+    # ── 🔴 X9 — ctx["gex"] IS AN OBJECT, NOT A NUMBER ────────────────────
+    # `_f(ctx.get("gex"))` coerced a GEXSnapshot to float and got None, so
+    # surface_series / fire_snapshot / strategy_note / plan_ledger have all
+    # written NULL gex on EVERY row ever — 1.49M rows on surface alone. I
+    # attributed this to the r133 chain-ordering bug and reported r133 as the
+    # fix; r133 was necessary but NOT sufficient. The chain arrives, the
+    # snapshot is computed, and the READ SHAPE was wrong the whole time.
+    # ⚠️ FOURTH OF THE SAME FAMILY IN ONE DAY: ctm.all(), bars_ago,
+    # open_interest, now this. Every one a shape I assumed instead of read.
+    import glob as _glob
+    _bad_gex = []
+    for _p in _glob.glob(os.path.join(_root, "derived", "*.py")):
+        _src = open(_p, encoding="utf-8").read()
+        for _n in ast.walk(ast.parse(_src)):
+            if (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name)
+                    and _n.func.id == "_f" and _n.args):
+                _a = ast.unparse(_n.args[0])
+                if _a in ('ctx.get("gex")', "ctx.get('gex')"):
+                    _bad_gex.append(f"{os.path.basename(_p)}:{_n.lineno}")
+    check("X9 no derived engine coerces the GEXSnapshot object to a float",
+          not _bad_gex, ", ".join(_bad_gex) or "none")
+
     print()
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))

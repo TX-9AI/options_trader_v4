@@ -119,7 +119,18 @@ class SurfaceEngine(DerivedEngine):
 
         now = time.time()
         expiry = str(ctx.get("expiry") or "")
-        gex = _f(ctx.get("gex"))
+        # 🔴 ctx["gex"] IS A GEXSnapshot OBJECT, NOT A NUMBER (r140).
+        # ⚠️ `_f(ctx.get("gex"))` coerced an object to float and got None, so
+        # surface_series.gex has been NULL on every row ever written — 1.49M
+        # rows across the fleet — and the dashboard prints "GEX=NoneM".
+        # I attributed this to the r133 chain-ordering bug and said r133 fixed
+        # it. r133 was necessary but NOT sufficient: the chain now arrives, the
+        # snapshot is computed, and the read shape was wrong the whole time.
+        # ⚠️ SAME FAMILY AS ctm.all(), bars_ago AND open_interest — a shape I
+        # assumed rather than read. Fourth today. The scalar wanted here is
+        # `net_gex`; the rest of the snapshot has its own columns.
+        _gx = ctx.get("gex")
+        gex = _f(getattr(_gx, "net_gex", None) if _gx is not None else None)
 
         # Smile slope across the chain at this instant, from the same window.
         try:
