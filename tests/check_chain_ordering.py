@@ -119,9 +119,14 @@ def main():
         e.run({"price": 100.0})                # no chain, no triggers
     except Exception:                                          # noqa: BLE001
         pass
+    # ⚠️ SUPERSEDED BY C10. This asserted a chainless tick leaves the table
+    # EMPTY — which was true when a starved builder returned None, and is now
+    # exactly the wrong outcome: a starved tick must write a NO PLAN row per
+    # plan NAMING the absent input. An empty table would be the silence this
+    # whole revision exists to remove.
     n = st.conn.execute("SELECT count(*) FROM plan_tick").fetchone()[0]
-    check("C7 a chainless tick leaves plan_tick present and empty",
-          "plan_tick" in names and n == 0, f"{n} rows")
+    check("C7 a chainless tick writes NO PLAN rows, not silence",
+          "plan_tick" in names and n > 0, f"{n} rows")
 
     # ── C8: NO PLAN MAY BE SILENTLY OVERWRITTEN ──────────────────────────
     # ⚠️ plan_tick's key was (ts_epoch, symbol, strategy) — right in r126 when
@@ -159,6 +164,42 @@ def main():
     check("C9 all four fork directions survive in one tick",
           dirs == {"1h_call", "1h_put", "1d_call", "1d_put"},
           ", ".join(sorted(dirs)))
+
+    # ── 🔴 C10 — NO BUILDER MAY VANISH ───────────────────────────────────
+    # A builder returning None writes NO ROW, so "could not evaluate" and
+    # "does not exist" are indistinguishable. That hid the real defect for a
+    # whole session: ForkCreditSpread and IronCondor were ABSENT from plan_tick
+    # while five other plans wrote 80-95 rows each.
+    st3 = _Store()
+    e3 = PlanEngine(store=st3, symbol="T3", ledger=None)
+    e3.derive({"price": 201.4})              # starved of everything
+    got = {r[0] for r in st3.conn.execute("SELECT strategy FROM plan_tick")}
+    want = {"GEXPinButterfly", "TrendParticipation", "SweepCreditSpread",
+            "RunawayContinuation", "IronCondor", "CreditRoll",
+            "ForkCreditSpread"}
+    check("C10 a starved tick still writes a row for EVERY plan",
+          got == want, f"missing: {', '.join(sorted(want - got)) or 'none'}")
+
+    # ⚠️ AND THE ROW MUST NAME THE ABSENT INPUT — "NO PLAN" alone would just
+    # relocate the mystery.
+    reasons = [r[0] for r in st3.conn.execute("SELECT reason FROM plan_tick")]
+    check("C11 each starved row names which input was absent",
+          all("absent from ctx" in (r or "") for r in reasons),
+          f"{len(reasons)} rows")
+
+    # ⚠️ AND condor_triggers MUST REACH THE ENGINES — the second input with
+    # exactly the chain's defect: published mid-dispatch, after run_analysis.
+    _msrc = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
+    _ra = next((n for n in ast.walk(ast.parse(_msrc))
+                if isinstance(n, ast.FunctionDef) and n.name == "run_analysis"),
+               None)
+    _rb = "\n".join(l for l in ast.unparse(_ra).split("\n")
+                    if not l.strip().startswith("#")) if _ra else ""
+    i_ctm = _rb.find("ctx['condor_triggers']")
+    i_ra = _rb.find("run_all(")
+    check("C12 condor_triggers is published BEFORE run_all",
+          i_ctm != -1 and i_ra != -1 and i_ctm < i_ra,
+          f"set@{i_ctm} run_all@{i_ra}")
 
     print()
     if _fails:

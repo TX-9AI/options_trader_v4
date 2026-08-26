@@ -1413,6 +1413,25 @@ def run_analysis(state: BotState, chain=None) -> dict:
     ctx.setdefault("expected_move_iv", None)
     ctx.setdefault("expected_move_straddle", None)
     ctx.setdefault("session_fraction_remaining", None)
+    # 🔴 r134 — THE CONDOR TRIGGER MAP ON ctx, BEFORE THE ENGINES RUN.
+    # ⚠️ THE SAME DEFECT AS THE CHAIN, A SECOND INPUT. `ctx["condor_triggers"]`
+    # was published mid-dispatch (main.py ~3081) while run_analysis ends at
+    # 1456 — so the fork builder hit `ctm is None`, returned None, and wrote
+    # NOTHING. On the fleet's first working session both ForkCreditSpread and
+    # IronCondor were simply ABSENT from plan_tick while five other plans wrote
+    # 80-95 rows each.
+    # ⚠️ THE MAP IS CHEAP AND PURE — it reads the fork series already on ctx
+    # and computes rail positions. Building it here costs no market data, and
+    # the dispatch below now REUSES this one rather than rebuilding, so every
+    # consumer this tick reads the SAME geometry (which was the map's whole
+    # purpose when it was introduced).
+    try:
+        from analysis.condor_trigger_map import build as _bctm
+        ctx["condor_triggers"] = _bctm(ctx, INSTRUMENT, CONDOR_TRIGGER_APPROACH)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("condor trigger map (pre-engines): %s", exc)
+        ctx.setdefault("condor_triggers", None)
+
     # 🔴 r134 — THE OPENING RANGE ON ctx. `_opening_range()` existed and was
     # recomputed from the tape, but its result was never PUBLISHED, so the
     # session map (which is centred on the 5-minute ORB range) had no marker
@@ -3077,12 +3096,18 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # Fork tines move with time+slope — a plan from 11am reads the 11am rail;
     # by 2pm the tine has drifted by slope×bars. Every trigger check this tick
     # reads from this map so all four strategies see the same geometry.
-    try:
-        ctx["condor_triggers"] = _build_condor_trigger_map(
-            ctx, INSTRUMENT, CONDOR_TRIGGER_APPROACH)
-    except Exception:                                          # noqa: BLE001
-        logger.debug("condor trigger map failed")
-        ctx.setdefault("condor_triggers", None)
+    # ⚠️ r134 — REUSE, DO NOT REBUILD. run_analysis now builds this map before
+    # the derived engines run. Rebuilding here would give the dispatch a map
+    # computed a few hundred milliseconds later than the one the plan engine
+    # recorded, so the plan's stated geometry and the trade's actual geometry
+    # could disagree by a tick. One map, one tick, one truth.
+    if ctx.get("condor_triggers") is None:
+        try:
+            ctx["condor_triggers"] = _build_condor_trigger_map(
+                ctx, INSTRUMENT, CONDOR_TRIGGER_APPROACH)
+        except Exception:                                      # noqa: BLE001
+            logger.debug("condor trigger map failed")
+            ctx.setdefault("condor_triggers", None)
 
     # Priority 4: Iron Condor / Vertical Credit Spreads (v4.3: all four triggers)
     # ── v4.3 CONDOR REMODEL — Four independent triggers, pairing gate ──────

@@ -277,6 +277,27 @@ class PlanEngine(DerivedEngine):
         # AN EMPTY TABLE IS A MEASUREMENT. A missing table is a mystery.
         self._ensure()
 
+
+    # 🔴 EVERY BUILDER SPEAKS WHEN STARVED (r134).
+    # ⚠️ A builder that returns None writes NO ROW, so "this plan could not be
+    # evaluated" and "this plan does not exist" look identical in plan_tick.
+    # That is the same ambiguity that cost three rounds of fleet queries this
+    # morning at the TABLE level, sitting one layer down inside each builder —
+    # and it hid the real defect for a full session: ForkCreditSpread and
+    # IronCondor were ABSENT from the table while five other plans wrote 80-95
+    # rows each, and nothing in the data said why.
+    @staticmethod
+    def _starved(name: str, ctx: dict, needs: dict, spot: float = 0.0):
+        """A NO PLAN row naming the absent inputs, or None when all present."""
+        missing = [k for k, v in needs.items()
+                   if v is None or (k == "price" and not v)]
+        if not missing:
+            return None
+        return [{"strategy": name, "verdict": "NO PLAN", "checks": {},
+                 "underlying_at_decision": spot or None,
+                 "why": (f"input(s) absent from ctx: {', '.join(missing)} — "
+                         f"this plan could not be evaluated this tick")}]
+
     # ── gamma surface ───────────────────────────────────────────────────
     @staticmethod
     def _gamma_by_strike(chain, spot: float):
@@ -356,8 +377,9 @@ class PlanEngine(DerivedEngine):
     def _butterfly(self, ctx: dict) -> Optional[dict]:
         chain = ctx.get("chain")
         spot = float(ctx.get("price") or 0)
-        if chain is None or spot <= 0:
-            return None
+        _s = self._starved("GEXPinButterfly", ctx, {"chain": chain, "price": spot}, spot)
+        if _s:
+            return _s
         per = self._gamma_by_strike(chain, spot)
         pin = self._pin(per)
         if pin is None:
@@ -445,8 +467,9 @@ class PlanEngine(DerivedEngine):
         spot = float(ctx.get("price") or 0)
         orb_hi = ctx.get("orb_high")
         orb_lo = ctx.get("orb_low")
-        if chain is None or spot <= 0 or not orb_hi or not orb_lo:
-            return None
+        _s = self._starved("TrendParticipation", ctx, {"chain": chain, "price": spot, "orb_high": orb_hi, "orb_low": orb_lo}, spot)
+        if _s:
+            return _s
         puts = {float(getattr(p, "strike", 0)): p
                 for p in (getattr(chain, "puts", []) or [])}
         inside = sorted(k for k in puts if orb_lo <= k <= orb_hi)
@@ -530,8 +553,11 @@ class PlanEngine(DerivedEngine):
         liq = ctx.get("liq_map")
         spot = float(ctx.get("price") or 0)
         chain = ctx.get("chain")
-        if liq is None or chain is None or spot <= 0:
-            return None
+        _s = self._starved("SweepCreditSpread", ctx,
+                           {"liq_map": liq, "chain": chain,
+                            "price": spot}, spot)
+        if _s:
+            return _s
         sweep = getattr(liq, "recent_sweep", None)
         if sweep is None:
             return {"strategy": "SweepCreditSpread", "verdict": "NO PLAN",
@@ -707,8 +733,9 @@ class PlanEngine(DerivedEngine):
         spot = float(ctx.get("price") or 0)
         orb_hi = ctx.get("orb_high")
         orb_lo = ctx.get("orb_low")
-        if chain is None or spot <= 0 or not orb_hi or not orb_lo:
-            return None
+        _s = self._starved("RunawayContinuation", ctx, {"chain": chain, "price": spot, "orb_high": orb_hi, "orb_low": orb_lo}, spot)
+        if _s:
+            return _s
         state = str(getattr(orb, "state", "") or "")
         reason = str(getattr(orb, "invalidation_reason", "") or "")
         if "runaway" not in reason.lower():
@@ -832,8 +859,9 @@ class PlanEngine(DerivedEngine):
         """
         chain = ctx.get("chain")
         spot = float(ctx.get("price") or 0)
-        if chain is None or spot <= 0:
-            return None
+        _s = self._starved("IronCondor", ctx, {"chain": chain, "price": spot}, spot)
+        if _s:
+            return _s
         atr = float(ctx.get("atr") or 0)
         hi = ctx.get("session_high") or ctx.get("orb_high")
         lo = ctx.get("session_low") or ctx.get("orb_low")
@@ -991,8 +1019,9 @@ class PlanEngine(DerivedEngine):
         """
         chain = ctx.get("chain")
         spot = float(ctx.get("price") or 0)
-        if chain is None or spot <= 0:
-            return None
+        _s = self._starved("CreditRoll", ctx, {"chain": chain, "price": spot}, spot)
+        if _s:
+            return _s
         legs = [t for t in (ctx.get("open_trades") or [])
                 if t.get("is_condor_leg") and str(t.get("status")) == "open"]
         if len(legs) != 2:
@@ -1348,8 +1377,21 @@ class PlanEngine(DerivedEngine):
         ctm = ctx.get("condor_triggers")
         chain = ctx.get("chain")
         spot = float(ctx.get("price") or 0)
-        if ctm is None or chain is None or spot <= 0:
-            return None
+        # 🔴 A MISSING INPUT IS A MEASUREMENT, NOT A REASON TO VANISH.
+        # ⚠️ Returning None here wrote NO ROW, so "the fork was never
+        # evaluated" was indistinguishable from "the fork engine does not
+        # exist" — the same ambiguity that cost three rounds of fleet queries
+        # this morning at the table level, repeated one layer down inside the
+        # builder. On 2026-08-26 ForkCreditSpread and IronCondor were simply
+        # ABSENT from plan_tick while five other plans wrote 80-95 rows each,
+        # and nothing in the data said why.
+        _missing = [n for n, v in (("condor_triggers", ctm), ("chain", chain))
+                    if v is None] + (["price"] if spot <= 0 else [])
+        if _missing:
+            return [{"strategy": "ForkCreditSpread", "verdict": "NO PLAN",
+                     "checks": {}, "underlying_at_decision": spot or None,
+                     "why": (f"input(s) absent from ctx: {', '.join(_missing)} "
+                             f"— the fork could not be evaluated this tick")}]
         try:
             trigs = list(ctm.all())
         except Exception:                                       # noqa: BLE001
