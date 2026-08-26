@@ -432,6 +432,8 @@ TREND_CREDIT_ACTIVE         = os.environ.get("OT_TCS_ACTIVE", "1") == "1"
 # ⚠️ THE WINDOW IS NOW 11:31 -> TCS_ENTRY_END_ET (14:00). The debit owns the
 # runaway until 11:30; the credit owns it after.
 TCS_START_ET                = (11, 31)    # afternoon only; 11:31 clears AFD.1
+# ⚠️ r141 — kept as a literal because CREDIT_ENTRY_START_ET is defined further
+# down this file; the two MUST stay equal and check_entry_windows pins it.
 # Credit must clear BOTH floors. Width-relative keeps risk/reward sane;
 # nickel-relative guarantees the trade has room to exist at all.
 # 0.10 is a STATED PRIOR inside the measured band: credit_edge ran 8-19% of
@@ -767,7 +769,21 @@ TCS_ENTRY_END_ET            = (14, 0)   # ⚠️ PROVISIONAL, INERT: TC.6's wind
                                         #   Operator specs TC.6's real v4
                                         #   window before any activation.
 BUTTERFLY_ENTRY_CUTOFF_ET   = (14, 0)   # was 15:00 and unreachable (see v3.1 header)
+# 🔴 NOON, AND IT IS NOW ACTUALLY IN FORCE (r142). Operator, 2026-08-26:
+# *"Butterfly is debit & any sooner than noon to reach a pin is unlikely to
+# hold all the way to the closing bell."*
+# ⚠️ THIS CONSTANT WAS READ BY NOTHING IN PRODUCTION — only by a test harness.
+# The live gate was `gex_pin_butterfly.EARLIEST_ET`, a getattr DEFAULT of
+# "11:00" whose key did not exist in this file, so the butterfly would have
+# opened a full HOUR before the rule the operator just stated. Same shape as
+# SWEEP_CS_EARLIEST_ET: a default is the only source, and the config value
+# everyone reads is decorative.
 BUTTERFLY_ENTRY_START_ET    = (12, 0)   # No butterfly entries before noon
+GEX_BFLY_EARLIEST_ET        = f"{BUTTERFLY_ENTRY_START_ET[0]}:{BUTTERFLY_ENTRY_START_ET[1]:02d}"
+# ⚠️ THE DEBIT CUTOFF, ALSO A DEFAULT-ONLY VALUE UNTIL NOW. 11:30 is correct
+# and load-bearing: the credit start is 11:31, so this is the one minute of
+# daylight between the two. Defined here so the pair cannot drift apart.
+RUNAWAY_CUTOFF_ET           = "11:30"
 ORB_WINDOW_MINUTES          = 5
 
 # ─── ORB STRATEGY ─────────────────────────────────────────────────────────────
@@ -1126,7 +1142,30 @@ VERTICAL_HOLD_TO_CLOSE      = os.environ.get("OT_VERTICAL_HOLD_1545", "1") == "1
 # scales sqrt(T) and silently moves every POP.
 CONDOR_POP_BAR_MIN          = float(os.environ.get("OT_CONDOR_POP_BAR_MIN", "5"))
 
-CONDOR_ENTRY_START_ET       = (11, 11)  # No condor entries before 11:11 (BB must be valid)
+# 🔴 ONE START TIME FOR EVERY CREDIT SPREAD (r141). Operator, 2026-08-26:
+# *"I would just as soon make a universal 'all credit spreads on at 1130' to
+# keep things tidy"*, then, on being shown the 08-24 ruling: *"Ok then 1130 &
+# 1131 are just as fine."*
+# ⚠️ 11:31, NOT 11:30, AND THE REASON IS THE OPERATOR'S OWN 08-24 RULING:
+# *"Handoff (credit) needs to start at 1131 - it's colliding with runaway
+# (same trigger)."* The debit cutoff test is `>= (11, 30)`, so debit is blocked
+# AT 11:30; a credit start of 11:30 hands both the same minute and reproduces
+# that collision. One minute of daylight makes the handover unambiguous.
+# ⚠️ AND SECONDS CANNOT EXPRESS IT ANYWAY — every gate compares
+# `(now.hour, now.minute)`, so 11:30:01 is indistinguishable from 11:30:59.
+# The tick is 30s besides, so a sub-minute boundary would land wherever each
+# box's restart drift put it.
+# ⚠️ THIS MOVES CONDOR LEGS LATER, 11:11 -> 11:31. The old 11:11 came from
+# otv3 and was an ADX-ramp argument for waiting LONGER after the opening gap,
+# so 11:31 is consistent with its intent. It costs the condor window 20
+# minutes against the 14:00 cutoff: 169 -> 149.
+CREDIT_ENTRY_START_ET       = (11, 31)  # every credit spread, one number
+CONDOR_ENTRY_START_ET       = CREDIT_ENTRY_START_ET   # was (11, 11)
+# ⚠️ THE FOURTH CREDIT PATH, AND IT WAS NOT IN THIS FILE AT ALL.
+# `sweep_credit_spread.py` read `getattr(config, "SWEEP_CS_EARLIEST_ET",
+# "11:11")` — the DEFAULT was the only source, so the sweep kept 11:11 while
+# the other three moved. check_sweep_spread's S8a caught it; I had not.
+SWEEP_CS_EARLIEST_ET        = f"{CREDIT_ENTRY_START_ET[0]}:{CREDIT_ENTRY_START_ET[1]:02d}"
 CONDOR_ENTRY_CUTOFF_ET      = (14, 0)   # Standard entry cutoff
 
 # ─── EXIT MANAGEMENT ──────────────────────────────────────────────────────────

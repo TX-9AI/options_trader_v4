@@ -172,6 +172,60 @@ def _n(v, spec: str = ".2f") -> str:
         return str(v)
 
 
+
+def _entry_window(strategy: str, ctx: dict):
+    """(check_tuple, refusal_or_None) — is this plan inside its entry window?
+
+    🔴 OPERATOR, 2026-08-26: *"Make sure all the strategies and plans are in
+    agreement about 1130 & 1131. If there is an attribute on the plan tick
+    table about refusing the window, it should also say so plainly."*
+
+    ⚠️ NO PLAN BUILDER CHECKED THE CLOCK AT ALL. A fork plan read TAKE at 11:05
+    while the strategy could not act until 11:31 — the row looked tradeable and
+    was not, and nothing in the table said why. That is the same
+    plausible-silence class as a dead gate: a plan that COULD NOT have fired
+    and a plan that SHOULD have fired look identical in the record, and the
+    fit cannot separate them.
+    ⚠️ READ FROM CONFIG, NEVER RESTATED. Every literal minute in this file is a
+    number that can drift away from the strategy it is supposed to mirror.
+    """
+    try:
+        from config import (CREDIT_ENTRY_START_ET, CONDOR_ENTRY_CUTOFF_ET,
+                            BUTTERFLY_ENTRY_START_ET, RUNAWAY_CUTOFF_ET)
+    except Exception:                                          # noqa: BLE001
+        return None, None
+    now = ctx.get("now_et_minutes")
+    if now is None:
+        # ⚠️ UNMEASURABLE, NOT PASSING. NULL says the clock was unreadable;
+        # 0.0/PASS would claim a check that never ran.
+        return None, None
+
+    def _m(t):
+        return t[0] * 60 + t[1] if isinstance(t, tuple) else (
+            int(t.split(":")[0]) * 60 + int(t.split(":")[1]))
+
+    if strategy in ("GEXPinButterfly",):
+        lo, hi, label = _m(BUTTERFLY_ENTRY_START_ET), _m(CONDOR_ENTRY_CUTOFF_ET), "butterfly"
+    elif strategy in ("RunawayContinuation",):
+        lo, hi, label = 0, _m(RUNAWAY_CUTOFF_ET), "debit"
+    else:
+        lo, hi, label = _m(CREDIT_ENTRY_START_ET), _m(CONDOR_ENTRY_CUTOFF_ET), "credit"
+
+    ok = lo <= now < hi
+    if ok:
+        return (1.0, "PASS"), None
+    if now < lo:
+        why = (f"OUTSIDE THE ENTRY WINDOW — it is {now // 60:02d}:{now % 60:02d} "
+               f"ET and the {label} window does not open until "
+               f"{lo // 60:02d}:{lo % 60:02d}; this plan could not be taken "
+               f"even if everything else cleared")
+    else:
+        why = (f"OUTSIDE THE ENTRY WINDOW — it is {now // 60:02d}:{now % 60:02d} "
+               f"ET and the {label} window closed at {hi // 60:02d}:{hi % 60:02d}; "
+               f"this plan could not be taken even if everything else cleared")
+    return (0.0, "FAIL"), why
+
+
 CEILING, FLOOR = "ceiling", "floor"
 
 
@@ -1648,9 +1702,9 @@ class PlanEngine(DerivedEngine):
     # Which checks each plan owns. Declared here so the table is
     # self-describing and a reader can tell "not applicable" from "not run".
     CHECKS = {
-        "GEXPinButterfly":    ("net_gamma", "pin_conc", "pin_share",
+        "GEXPinButterfly":    ("entry_window", "net_gamma", "pin_conc", "pin_share",
                                "reach_em", "r", "charm_raw", "charm_corrected"),
-        "TrendParticipation": ("r", "credit", "risk", "strike_inside_range"),
+        "TrendParticipation": ("entry_window", "r", "credit", "risk", "strike_inside_range"),
         # 🔴 r127 — SWEEP. Six kill variables, and `level_hold_rate` is the
         # only validator in the system so far that MOVES MEANINGFULLY WITHIN A
         # SESSION: TSLA's London High read 93.3% at 11:31 and 58% by the close
@@ -1659,7 +1713,7 @@ class PlanEngine(DerivedEngine):
         # operator, 2026-08-25: "the depth of the pierce is what's going to
         # discriminate on what constitutes a pierce" — fitted later, gating
         # nothing now.
-        "SweepCreditSpread":  ("level_hold_rate", "acceptance", "reclaim_age",
+        "SweepCreditSpread":  ("entry_window", "level_hold_rate", "acceptance", "reclaim_age",
                                "r", "event_spent", "pierce_depth"),
         # 🔴 r129 — RUNAWAY CONTINUATION, the first DEBIT plan. `travel_atr`
         # is the sanity check the operator asked for: a 1R target is only real
@@ -1667,7 +1721,7 @@ class PlanEngine(DerivedEngine):
         # `theta_dollars` is RECORDED IN DOLLARS AT ENTRY and NEVER netted
         # into R — his instruction, and the right one; a theta-burn layer is
         # a fitting-phase question, not an entry gate.
-        "RunawayContinuation": ("travel_atr", "r", "delta", "theta_dollars",
+        "RunawayContinuation": ("entry_window", "travel_atr", "r", "delta", "theta_dollars",
                                 "gamma_lift"),
         # 🔴 r130 — IRON CONDOR. ONE PLAN, TWO TRIGGERS. `leg2_pending` is the
         # column that makes a half-built structure legible: on 2026-08-25 CRM
@@ -1675,7 +1729,7 @@ class PlanEngine(DerivedEngine):
         # open and NOTHING in any log, because `_can_open_credit_spread`
         # returned False for both Rule 1 and Rule 3 without a word. A condor
         # that is half on is a real state and it now has a row.
-        "IronCondor":         ("r", "call_side_ready", "put_side_ready",
+        "IronCondor":         ("entry_window", "r", "call_side_ready", "put_side_ready",
                                "leg2_pending", "range_width_atr"),
         # 🔴 r131 — THE ROLL. Operator: "we are already trying to find the
         # farthest strike that satisfies the economical question & that is
@@ -1686,9 +1740,10 @@ class PlanEngine(DerivedEngine):
         # the trigger for selecting a short strike just outside the channel.
         # That's the level, but sloped."* And: *"the hourly is valid too. Same
         # rationale."* `fork_tf` separates them for the fit.
-        "ForkCreditSpread":   ("r", "tine_distance_pct", "strike_beyond_tine",
+        "ForkCreditSpread":   ("entry_window", "r", "tine_distance_pct", "strike_beyond_tine",
                                "fork_tf", "tine_slope", "credit"),
-        "CreditRoll":         ("rung", "roll_room", "roll_credit", "close_cost",
+        # every plan carries it — a window refusal is a first-class fact
+        "CreditRoll":         ("entry_window", "rung", "roll_room", "roll_credit", "close_cost",
                                "credit_after", "tested_width", "risk_free",
                                "tent_hedge_cost", "cum_credit_after_pct",
                                "floor_pct", "winner_side_profit",
@@ -1841,6 +1896,27 @@ class PlanEngine(DerivedEngine):
                 plans.append(p)
         if not plans:
             return 0
+
+        # 🔴 THE ENTRY WINDOW APPLIES TO EVERY PLAN, IN ONE PLACE (r142).
+        # ⚠️ Applied HERE rather than inside each builder so it cannot be
+        # forgotten by the next one added — the failure mode that left the
+        # sweep on 11:11 while three other paths moved.
+        # ⚠️ A TAKE OUTSIDE THE WINDOW IS DOWNGRADED TO DECLINE and says so
+        # first. The plan still records everything it computed — R, strikes,
+        # distances — because "would have been takeable but the clock forbade
+        # it" is exactly the counterfactual worth having. What it must not do
+        # is sit in the table reading TAKE when nothing could have taken it.
+        for _p in plans:
+            _chk, _why = _entry_window(_p.get("strategy", ""), ctx)
+            if _chk is None:
+                _p.setdefault("checks", {})["entry_window"] = None
+                continue
+            _p.setdefault("checks", {})["entry_window"] = _chk
+            if _why and _p.get("verdict") == "TAKE":
+                _p["verdict"] = "DECLINE"
+                _p["why"] = f"{_why}. (Otherwise: {_p.get('why', '')})"
+            elif _why and _p.get("verdict") == "DECLINE":
+                _p["why"] = f"{_why}. Also: {_p.get('why', '')}"
 
         # ⚠️ ONE LINE PER PLAN AT INFO, EVERY CYCLE. The operator reads
         # bot.log at INFO; a plan logged at DEBUG is a plan nobody sees, and

@@ -133,5 +133,28 @@ _ssrc = open(os.path.join(ROOT, "strategy/sweep_credit_spread.py")).read()
 check("S7h the strategy selects via the CHAIN, not the config constant",
       "strike_beyond_sweep(" in _ssrc and "contracts=_side_contracts" in _ssrc)
 
+# ── S8 (r123) — THE CREDIT WINDOW AGREES WITH EVERY OTHER CREDIT SPREAD ─────
+# Operator, 2026-08-25: "All credit spreads must be ungated at 1131 & clearly
+# CVX was. That is correct behavior." The 13:00 floor was a clock standing in
+# for a dispatch rule that already exists — while ORB is armed or the runaway
+# has claimed the tick, the sweep cannot fire at all, so gating on the hour as
+# well charged the trade twice for one effect.
+import strategy.sweep_credit_spread as _scs
+from config import CONDOR_ENTRY_START_ET as _cstart
+_h, _m = (int(x) for x in _scs.EARLIEST_ET.split(":"))
+check("S8a the sweep opens with the other credit spreads",
+      (_h, _m) == tuple(_cstart), f"{_scs.EARLIEST_ET} vs {_cstart}")
+check("S8b the 13:00 floor is gone", _scs.EARLIEST_ET != "13:00")
+# ⚠️ THE CEILING RESTS ON ARITHMETIC, NOT ON THE TABLE. Operator: "any later
+# doesn't take a study to know the extrinsic value has all bled out." A credit
+# trade is paid in extrinsic; on 0DTE there is none left into the close, so a
+# late entry sells something that was never worth selling. The file's own table
+# puts "after 14:30" at 39% survival — equal to the best band — so a future
+# reader WILL find that number and want to widen. Survival is not the question:
+# a boundary that holds while you collected two cents is a win on paper and
+# nothing in the account. Pinned so the widening has to meet this first.
+check("S8c the 14:00 ceiling holds despite the 39% after-14:30 finding",
+      _scs.LATEST_ET == "14:00", _scs.LATEST_ET)
+
 print(f"\n{'PASS' if not FAILURES else 'FAIL'}: {len(FAILURES)} problem(s) {FAILURES}")
 sys.exit(1 if FAILURES else 0)
