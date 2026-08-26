@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.3 · 2026-08-26 · r147 — leg two and the butterfly, §9.**
 **v1.2 · 2026-08-26 · r146 — AS BUILT. See §8 before reading anything below.**
 **v1.0 · 2026-08-25 · FIRST PASS, EXPLICITLY UNFITTED.**
 Operator: *"every strategy SPEC now needs a plan — use your best judgement on the
@@ -361,3 +362,42 @@ have placed a trade before this revision.
 **NOTED, NOT CHANGED (operator's call):** the condor and daily fork select
 strikes ONCE at plan-build; they do not follow the sloped tine to the trigger,
 which the fork thesis ("that's the level, but sloped") implies they should.
+
+---
+
+## 9. r147 — leg two is a ONE-LEVEL plan; the butterfly is unparked
+
+**The condor is opportunistic, not a structure.** Operator, 2026-08-26: *"If
+the complementary vertical spread becomes available on mapper, the plan
+should account for it and confirm a rejection of the level before deploying
+the second leg. Acceptance of the level invalidates it and the plan should
+start looking at the next available level … it cannot pre-select strikes
+beyond the next available one until it's invalidated by acceptance … We would
+not sell a complementary spread on a level that's getting breached."*
+
+- **Leg one is unchanged** — its own trigger, no thought of a second.
+- **Leg two** (`IronCondorStrategy.plan_second_leg`, plan name `CondorLeg2`)
+  runs only while exactly one credit side is open. Each tick it takes the
+  **next available level** of the complementary role from the shared session
+  map — fork tines (both timeframes) and the mapper's named pools, geometry-
+  valid, not finished today, of a class the Rule 4 pairing table permits —
+  ONE level, and prices the what-if for that level only (first strike beyond
+  it, condor wing, credit off the live chain, R at real width).
+- **Four states at the level** (`analysis/level_test.py`, the sweep detector's
+  own definitions): UNTESTED → hold · BREACHED (through it, no close back, not
+  yet accepted) → hold, **no fire** · REJECTED (tested, last 1m close back
+  inside) → fire, R hurdle strict/relaxed as everywhere · ACCEPTED
+  (`ACCEPT_CLOSES` closes beyond) → the level is **finished for the session**
+  and the plan moves to the next. Finished levels persist in `plan_ledger`
+  (strategy `CondorLeg2`, EXPIRED/accepted) and are reloaded after a restart.
+- **Consequence:** the sweep and TC.6 no longer fire a second leg directly;
+  a named pool completes a condor only as a rejected level inside this plan,
+  which is the rejection the operator always required of the sweep class.
+  `_can_open_credit_spread` still gates the fire (Rules 1/3/4 + geometry).
+
+**GEX pin butterfly — ON** (`GEX_BUTTERFLY_ENABLED`, `OT_GEX_BUTTERFLY=0`
+parks it). Apex on the pin; wings at ⟨PRIOR⟩ 0.25 × expected move rounded to
+the increment, floor one increment, ceiling the pin distance; call fly below
+the pin, put fly above it; exact strikes or no trade; net debit off marks;
+R = (width − debit)/debit — strict vetoes below 1:1, relaxed records.
+Its signal is valid for the first time (three contracts, `is_butterfly`).

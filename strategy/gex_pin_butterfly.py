@@ -1,5 +1,29 @@
 """
-strategy/gex_pin_butterfly.py  v4.2
+strategy/gex_pin_butterfly.py  v4.3
+v4.3  2026-08-26  r147 — UNPARKED, AND IT HAS LEGS. Operator: *"I want it
+      active. It already has to clear a high bar to fire. The r-value in
+      strict should veto, but allow and record on relaxed. The pin should be
+      reachable & the strikes should be relatively narrow but not so narrow
+      that it has zero breathing room. Purchased as a debit call butterfly
+      for below the pin, and put for [above] the pin."*
+      · `ENABLED` now reads config.GEX_BUTTERFLY_ENABLED, default ON.
+      · THE LEGS: apex ON the pin; wings at ⟨PRIOR⟩ WING_EM_FRAC (0.25) of
+        the expected move, rounded to the strike increment, floor ONE
+        increment (breathing room), ceiling the distance to the pin (the
+        near wing never crosses spot). Call fly when spot is BELOW the pin,
+        put fly when spot is ABOVE it — price travels to the magnet.
+      · EXACT STRIKES ONLY. `select_butterfly_strikes` centres on spot and
+        falls back to the nearest liquid strike; both would silently move the
+        apex off the pin, which is the FOUNDATIONAL condition. Three priced
+        contracts at exactly lower/pin/upper, or no trade.
+      · net_debit = lower.mark − 2·center.mark + upper.mark; max_profit =
+        width − debit; R = (width − debit)/debit through the plan, so STRICT
+        vetoes below 1:1 and RELAXED records (`r_muted`). debit/width is
+        recorded against BUTTERFLY_MAX_DEBIT_PCT_WIDTH as a check, NOT a
+        gate — the R hurdle is the economic gate, one rule fleet-wide.
+      · The signal is now VALID: is_butterfly, three contracts, direction,
+        net_debit — `is_valid`'s butterfly arm is satisfied and
+        entry_engine's `_place_butterfly` runs it unchanged.
 v4.2  2026-08-26  r146 — THE PLAN IS WIRED. Every refusal (parked, no GEX,
       not PINNING, pin strength, window, no expected move, pin too near/far)
       goes through `self.planner` (strategy/plan.py) and writes a DECLINE row
@@ -161,7 +185,11 @@ def _gate(name: str, reason: str) -> None:
 # been validated against outcomes, because the data to do it did not exist until
 # 2026-08-19. `GEX_PIN_CONCENTRATION = 0.15` in gex_data was tuned against the
 # gamma-squared surface and means nothing for real positioning.
-ENABLED = getattr(config, "GEX_BUTTERFLY_ENABLED", False)      # PARKED
+ENABLED = getattr(config, "GEX_BUTTERFLY_ENABLED", True)       # v4.3: ON
+# ⟨PRIOR⟩ wing width as a fraction of the expected move. Narrow enough that the
+# apex payoff is concentrated, wide enough that the pin has a strike of room
+# either side. Floor: one increment. Ceiling: the distance to the pin.
+WING_EM_FRAC = getattr(config, "GEX_BFLY_WING_EM_FRAC", 0.25)
 PIN_CONC_MIN = getattr(config, "GEX_BFLY_PIN_CONC_MIN", 0.25)
 EM_MIN_FRAC = getattr(config, "GEX_BFLY_EM_MIN_FRAC", 0.30)
 EM_MAX_FRAC = getattr(config, "GEX_BFLY_EM_MAX_FRAC", 1.00)
@@ -182,6 +210,9 @@ GATES = {
     # poor. **The asymmetry IS the trade**; without it there is no reason to
     # prefer this structure over anything else.
     "EM_MIN_FRAC":   "FEASIBILITY",
+    # v4.3 — SELECTION: a narrower or wider fly is a worse example of the same
+    # trade. The floor of one increment is tested inline (no knob).
+    "WING_EM_FRAC":  "SELECTION",
     # FOUNDATIONAL: PINNING, the apex ON the pin, and the pin OTM. Tested
     # inline - no knob.
 }
@@ -225,7 +256,8 @@ class GEXPinButterflyStrategy:
     name = "GEXPinButterfly"
 
     PLAN_CHECKS = ("enabled", "gex", "pinning", "pin_concentration",
-                   "entry_window", "expected_move", "pin_em_fraction", "r")
+                   "entry_window", "expected_move", "pin_em_fraction",
+                   "wing_width", "legs", "debit", "debit_pct_width", "width", "r")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
@@ -301,12 +333,68 @@ class GEXPinButterflyStrategy:
                             f"cannot get there")
 
         side = "call" if pin > price_now else "put"
+        t.direction = side
+
+        # ── 4. THE LEGS (v4.3) — apex on the pin, wings by the expected move ─
+        if chain is None:
+            return t.starved("chain")
+        inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
+        from utils.math_utils import round_to_strike
+        wing = float(round_to_strike(WING_EM_FRAC * em, inc) or 0.0)
+        wing = max(inc, min(wing, float(round_to_strike(dist, inc) or inc)))
+        t.check("wing_width", wing, wing >= inc)
+        contracts = chain.calls if side == "call" else chain.puts
+        lo_k, hi_k = pin - wing, pin + wing
+
+        def _exact(k):
+            for c in contracts or []:
+                try:
+                    if abs(float(c.strike) - k) < 1e-9 and float(c.mark or 0) > 0:
+                        return c
+                except (TypeError, ValueError, AttributeError):
+                    continue
+            return None
+        lower, center, upper = _exact(lo_k), _exact(pin), _exact(hi_k)
+        missing = [f"{k:g}" for k, c in ((lo_k, lower), (pin, center), (hi_k, upper)) if c is None]
+        t.check("legs", 3 - len(missing), not missing)
+        if missing:
+            return t.refuse("legs", f"no priced {side} contract at strike(s) "
+                                    f"{', '.join(missing)} — the apex is the trade; "
+                                    f"a nearest-strike substitute is a different one")
+        debit = float(lower.mark) - 2.0 * float(center.mark) + float(upper.mark)
+        width = float(upper.strike) - float(center.strike)
+        t.butterfly(debit, width, trigger=pin)
+        if debit <= 0:
+            return t.refuse("debit", f"{side} fly {lo_k:g}/{pin:g}/{hi_k:g} prices at "
+                                     f"{debit:.2f} — no debit, marks are stale or crossed")
+        _pct = debit / width if width else None
+        _cap = float(getattr(config, "BUTTERFLY_MAX_DEBIT_PCT_WIDTH", 0.33))
+        t.check("debit_pct_width", _pct, None if _pct is None else _pct <= _cap)
+        ok, why = t.executable()
+        if not ok:
+            logger.info("[gex_bfly] R %s refused: %s", f"{t.r:.2f}" if t.r is not None else "n/a", why)
+            return t.refuse("r", why)
+        t.note(why)
+
         sig = Signal(
             strategy_name=self.name,
             setup_type="gex_pin_butterfly",
             direction="neutral",
             option_side=side,
             underlying_entry=price_now,
+            underlying_target=pin,
+            is_butterfly=True,
+            lower_contract=lower,
+            center_contract=center,
+            upper_contract=upper,
+            butterfly_direction=side,
+            net_debit=round(debit, 4),
+            max_profit=round(width - debit, 4),
+            strike=float(center.strike),
+            expiry=getattr(center, "expiry", ""),
+            entry_premium=round(debit, 4),
+            contract=center,
+            stop_loss_pct=float(getattr(config, "BUTTERFLY_STOP_LOSS_PCT", 0.25)),
         )
         sig.center_strike = pin              # the APEX sits on the pin
         sig.pin_concentration = conc
@@ -315,9 +403,9 @@ class GEXPinButterflyStrategy:
         sig.pin_distance = round(dist, 4)
         relaxed.tag(sig)
 
-        logger.info("[gex_bfly] FIRE  apex %.2f (%s, %.0f%% of a %.2f expected "
-                    "move)  pin conc %.2f  spot %.2f",
-                    pin, side.upper(), frac * 100, em, conc, price_now)
-        # R is n/a until the legs are built (see v4.2 header) — not gated.
-        t.note("legs not yet selected by this spec; R unmeasurable, hurdle not consulted")
+        logger.info("[gex_bfly] FIRE  %s fly %g/%g/%g  debit %.2f  width %.2f  R %s  "
+                    "apex %.2f (%.0f%% of a %.2f expected move)  pin conc %.2f  spot %.2f",
+                    side.upper(), lo_k, pin, hi_k, debit, width,
+                    f"{t.r:.2f}" if t.r is not None else "n/a",
+                    pin, frac * 100, em, conc, price_now)
         return t.take(sig)

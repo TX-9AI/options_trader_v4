@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_wiring.py  v1.0  (2026-08-26, r146)
+tests/check_plan_wiring.py  v1.1  (2026-08-26)
+v1.1  r147: W2 ignores returns inside nested helper functions (the
+      butterfly's exact-strike lookup); it still flags every bare entry return.
+v1.0  r146
 
 THE PLAN IS THE STRATEGY'S INFORMER, NOT A SECOND STRATEGY — and it is WIRED.
 
@@ -75,7 +78,14 @@ def _bare_returns(path):
                     continue
                 bad.append(f"{fn.name}: no planner.tick()")
                 continue
+            # v1.1 — returns inside a NESTED helper (a local lookup function)
+            # are not entry returns; only walk the entry function's own body
+            nested = {id(x) for inner in ast.walk(fn)
+                      if isinstance(inner, ast.FunctionDef) and inner is not fn
+                      for x in ast.walk(inner)}
             for n in ast.walk(fn):
+                if id(n) in nested:
+                    continue
                 if isinstance(n, ast.Return):
                     v = n.value
                     if v is None or (isinstance(v, ast.Constant) and v.value is None):

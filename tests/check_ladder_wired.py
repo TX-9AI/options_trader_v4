@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-tests/check_ladder_wired.py  v1.0
+tests/check_ladder_wired.py  v1.1
+v1.1  2026-08-26  r147: L10 re-pinned — the second-leg window routes through
+      the condor's one-level plan and the three direct triggers are gone.
 
 r104 — THE ENTRY LADDER IS CALLED, WALKS, RATCHETS, AND NEVER CROSSES.
 
@@ -143,13 +145,19 @@ check("L9a the roll open walks rungs", "rungs" in fr.get("_execute_roll", ""))
 check("L9b in ONE call — a half-rolled position is never left to next tick",
       "for _rung in _ladder" in fr.get("_execute_roll", ""))
 
-# ── L10 (r105) — the second-leg window tries all FOUR triggers ───────────────
+# ── L10 (r147, supersedes r105) — the second-leg window is ONE plan ──────────
+# Operator, 2026-08-26: leg two is sold only on a level the tape has REJECTED,
+# one level at a time. The four direct attempts (1d fork, sweep, TC.6, and the
+# 1h tine on approach) are gone from main_loop; their levels are candidates
+# INSIDE the condor's plan_second_leg.
 src_m = open(os.path.join(ROOT, "main.py")).read()
 lm = next(n for n in ast.walk(ast.parse(src_m))
           if isinstance(n, ast.FunctionDef) and n.name == "main_loop")
 lsrc = ast.unparse(lm)
-for tag in ("CondorLeg2nd", "DailyFork2nd", "SweepCS2nd", "TrendCS2nd"):
-    check(f"L10 second leg tries {tag}", tag in lsrc)
+check("L10 second leg routes through the condor's one-level plan",
+      "CondorLeg2nd" in lsrc and "plan_second_leg(" in lsrc)
+for tag in ("DailyFork2nd", "SweepCS2nd", "TrendCS2nd"):
+    check(f"L10 second leg NO LONGER fires {tag} directly", tag not in lsrc)
 
 print(f"\n{'PASS' if not FAILURES else 'FAIL'}: {len(FAILURES)} problem(s) {FAILURES}")
 sys.exit(1 if FAILURES else 0)

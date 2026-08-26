@@ -1,5 +1,8 @@
 """
-strategy/plan.py  v1.0
+strategy/plan.py  v1.1
+v1.1  2026-08-26  r147: DISPATCH_ALIAS — the second-leg window now has one
+      caller (CondorLeg2nd -> the condor's leg-2 plan, name `CondorLeg2`);
+      the three retired second-leg aliases are removed.
 v1.0  2026-08-26  r146 — THE PLAN, REBUILT AS THE OPERATOR SPECIFIED IT.
       Replaces the seven parallel strategy re-implementations that lived in
       `derived/plans.py` r126-r145 (1,200 lines, zero calls into strategy/).
@@ -121,11 +124,9 @@ DISPATCH_ALIAS = {
     "CondorLeg": "IronCondorStrategy",
     "DailyForkPlan": "DailyForkCreditSpread",
     "DailyForkLeg": "DailyForkCreditSpread",
-    # the second-leg window (main_loop, position open)
-    "CondorLeg2nd": "IronCondorStrategy",
-    "DailyFork2nd": "DailyForkCreditSpread",
-    "SweepCS2nd": "SweepCreditSpread",
-    "TrendCS2nd": "TrendCreditSpread",
+    # the second-leg window (main_loop, position open) — r147: one caller,
+    # the condor's one-level plan, which writes under its own name
+    "CondorLeg2nd": "CondorLeg2",
 }
 
 

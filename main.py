@@ -1,5 +1,12 @@
 """
-main.py  v4.16
+main.py  v4.17
+v4.17 2026-08-26  r147 — THE SECOND-LEG WINDOW ROUTES THROUGH THE CONDOR'S
+      ONE-LEVEL PLAN (`plan_second_leg`, iron_condor_strategy v4.6). The four
+      direct second-leg attempts (1h fork on approach, 1d fork, sweep, TC.6)
+      are removed from main_loop; their levels are candidates inside the
+      plan, which fires only on a CONFIRMED REJECTION and moves to the next
+      level on ACCEPTANCE. The Rule 4 pairing table is applied here, from
+      leg one's trigger source, as the allowed level classes.
 v4.16 2026-08-26  r146 — THE PLAN BOARD IS FED FROM DISPATCH. Every point where
       a strategy is NOT asked this tick (halted, outside the session, no
       chain, position open, ORB engine not confirmed, no runaway, slot
@@ -4074,90 +4081,41 @@ def main_loop(state: BotState):
                 _plan_skip_all("position open — managing; only the second-leg "
                                "window asks the credit strategies")
                 if len(_open_sides) == 1:
-                    _need_side = "put" if "call" in _open_sides else "call"
+                    # ── 🔴 r147 — LEG TWO IS THE CONDOR'S ONE-LEVEL PLAN ────
+                    # Operator, 2026-08-26: the condor is opportunistic, not
+                    # required; the complementary spread is sold ONLY on a
+                    # level the tape has REJECTED, never on one being
+                    # breached; acceptance finishes the level and the plan
+                    # moves to the NEXT available one — one level at a time,
+                    # no strikes pre-selected beyond it.
+                    # This REPLACES the four direct second-leg attempts (1h
+                    # fork tine on approach, 1d fork, sweep, TC.6). Their
+                    # levels are candidates INSIDE the plan — tines as the
+                    # 'fork' class, the mapper's named pools as the 'sweep'
+                    # class — filtered by the Rule 4 pairing table, which is
+                    # computed HERE from leg one's trigger so the rule keeps
+                    # one home. `_can_open_credit_spread` still gates the fire
+                    # (Rule 1/3/4 + geometry).
+                    _open_side = next(iter(_open_sides))
+                    _allowed = ("fork", "sweep")
+                    try:
+                        _l1 = next((r for r in pos_mgr.get_open_records()
+                                    if r.get("is_condor_leg")), None)
+                        _c1 = _trigger_class((_l1 or {}).get("condor_trigger_source") or "")
+                        _allowed = tuple(_PAIRING_TABLE.get(_c1, ("fork", "sweep")))
+                    except Exception:                          # noqa: BLE001
+                        pass
                     _sl_chain  = ctx.get("chain")
                     _sl_price  = ctx["price"]
-                    _sl_hi, _sl_lo = _session_extremes(ctx)
-
-                    # 1h fork
-                    if _iron_condor_strategy.has_active_plan:
-                        _sl1 = _safe_strategy("CondorLeg2nd",
-                            lambda: _iron_condor_strategy.check_leg_triggers(
-                                ms=ms, chain=_sl_chain,
-                                current_price=_sl_price, ctx=ctx), ctx)
-                        if (_sl1 is not None
-                                and _sl1.option_side == _need_side
-                                and _can_open_credit_spread(_sl1.option_side,
-                                    _sl1, ctx["price"])):
-                            _execute_condor_leg(_sl1, state, ctx)
-                            _sl1 = None  # consumed
-
-                    # 1d fork
-                    if _daily_fork_cs_strategy.has_active_plan:
-                        _sl2 = _safe_strategy("DailyFork2nd",
-                            lambda: _daily_fork_cs_strategy.check_leg_triggers(
-                                current_price=_sl_price, chain=_sl_chain, ctx=ctx), ctx)
-                        if (_sl2 is not None
-                                and _sl2.option_side == _need_side
-                                and _can_open_credit_spread(_sl2.option_side,
-                                    _sl2, ctx["price"])):
-                            _execute_condor_leg(_sl2, state, ctx)
-                            _sl2 = None  # consumed
-
-                    # ── 🔴 r105 — THE SWEEP AND TC.6 CAN COMPLETE A CONDOR TOO
-                    # This block's own header says "all four triggers are
-                    # eligible to fire the complementary side" and the code
-                    # tried TWO. A sweep or a TC.6 could open a FIRST leg and
-                    # then never pair, so "a second leg is allowed, never
-                    # expected" was true by omission rather than by design —
-                    # the condor could only ever form from a fork.
-                    if True:
-                        # ⚠️ THESE ARE LOCALS OF `attempt_new_entry`, NOT of this
-                        # loop — the same ATR unit that cost every ORB trade on
-                        # 08-24, so it is derived here the same way rather than
-                        # referenced across a scope it does not cross.
-                        _sl_hhmm = now_et().strftime("%H:%M")
-                        try:
-                            _sl_atr = float(
-                                getattr(ctx["vol"], "atr_pct", None)
-                                or (float(getattr(ctx["vol"], "atr_normalized", 0.0)
-                                          or 0.0) * 100.0))
-                        except Exception:                      # noqa: BLE001
-                            _sl_atr = 0.0
-                        _sl3 = _safe_strategy("SweepCS2nd",
-                            lambda: _sweep_cs_strategy.generate_signal(
-                                liq_map=ctx["liq_map"], price_now=_sl_price,
-                                now_et=_sl_hhmm, atr_pct=_sl_atr,
-                                chain=_sl_chain, orb_high=ctx.get("orb_high"),
-                                orb_low=ctx.get("orb_low")), ctx)
-                        if (_sl3 is not None and _sl3.is_valid
-                                and _sl3.option_side == _need_side
-                                and _can_open_credit_spread(_sl3.option_side,
-                                    _sl3, ctx["price"])):
-                            _sl3.condor_trigger_source = "sweep_reversal"
-                            _execute_condor_leg(_sl3, state, ctx)
-                        else:
-                            _t_hi, _t_lo = _session_extremes(ctx)
-                            _o_hi, _o_lo = _opening_range(ctx)
-                            _sl4 = _safe_strategy("TrendCS2nd", lambda: (
-                                _trend_credit_strategy.generate_signal(
-                                    ms=None, vol_state=ctx["vol"], chain=_sl_chain,
-                                    # ⚠️ ctx, not a local: `macro` and `ms` are
-                                    # locals of attempt_new_entry and this block
-                                    # is in main_loop. Referencing them here is
-                                    # a NameError the loop catch-all would have
-                                    # swallowed as an ordinary tick failure.
-                                    macro=ctx.get("macro"), current_price=_sl_price,
-                                    trend=ctx.get("trend"),
-                                    orb_high=_o_hi, orb_low=_o_lo,
-                                    session_high=_t_hi, session_low=_t_lo,
-                                    condor_active=False)), ctx)
-                            if (_sl4 is not None
-                                    and _sl4.option_side == _need_side
-                                    and _can_open_credit_spread(_sl4.option_side,
-                                        _sl4, ctx["price"])):
-                                _sl4.condor_trigger_source = "trend_orb"
-                                _execute_condor_leg(_sl4, state, ctx)
+                    _sl2 = _safe_strategy("CondorLeg2nd",
+                        lambda: _iron_condor_strategy.plan_second_leg(
+                            ctx=ctx, chain=_sl_chain, current_price=_sl_price,
+                            open_side=_open_side, allowed_classes=_allowed), ctx)
+                    if (_sl2 is not None
+                            and _can_open_credit_spread(_sl2.option_side,
+                                                        _sl2, ctx["price"], ctx=ctx)):
+                        _execute_condor_leg(_sl2, state, ctx)
+                        _iron_condor_strategy.leg2_fired()
             else:
                 attempt_new_entry(ctx, ms, state)
 

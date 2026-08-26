@@ -1,5 +1,9 @@
 """
-config.py  v4.5
+config.py  v4.6
+v4.6  2026-08-26  r147: GEX_BUTTERFLY_ENABLED (default ON, OT_GEX_BUTTERFLY=0
+      parks it) and GEX_BFLY_WING_EM_FRAC ⟨PRIOR⟩ 0.25 — the pin butterfly is
+      unparked by operator instruction; wing width as a fraction of the
+      expected move, floor one strike increment.
 v4.5  2026-08-24  r101: ENTRY_OPEN_ET (09:35) — nothing OPENS before the opening
       range exists. Operator directive, dated, with its reason recorded beside
       the GLOBAL_NO_ENTRY_ET tombstone so the two are distinguishable.
@@ -780,6 +784,10 @@ BUTTERFLY_ENTRY_CUTOFF_ET   = (14, 0)   # was 15:00 and unreachable (see v3.1 he
 # everyone reads is decorative.
 BUTTERFLY_ENTRY_START_ET    = (12, 0)   # No butterfly entries before noon
 GEX_BFLY_EARLIEST_ET        = f"{BUTTERFLY_ENTRY_START_ET[0]}:{BUTTERFLY_ENTRY_START_ET[1]:02d}"
+# r147 — UNPARKED. Operator, 2026-08-26: "I want it active. It already has to
+# clear a high bar to fire." OT_GEX_BUTTERFLY=0 parks it again.
+GEX_BUTTERFLY_ENABLED       = os.environ.get("OT_GEX_BUTTERFLY", "1") == "1"
+GEX_BFLY_WING_EM_FRAC       = float(os.environ.get("OT_GEX_BFLY_WING_EM_FRAC", "0.25"))  # ⟨PRIOR⟩
 # ⚠️ THE DEBIT CUTOFF, ALSO A DEFAULT-ONLY VALUE UNTIL NOW. 11:30 is correct
 # and load-bearing: the credit start is 11:31, so this is the one minute of
 # daylight between the two. Defined here so the pair cannot drift apart.

@@ -14,8 +14,8 @@ Regenerated in the land gate; a stale map fails `--check`.
 | table | created by | written by | read by |
 |---|---|---|---|
 | `gate_disposition` | `analysis/gate_report.py` | `analysis/gate_report.py` (insert) | `query.py`, `tests/check_audit_20260823.py` |
-| `plan_check` | `strategy/plan.py` | `strategy/plan.py` (insert) | `tests/check_chain_ordering.py`, `tests/check_plan_wiring.py` |
-| `plan_tick` | `strategy/plan.py` | `strategy/plan.py` (insert) | `main.py`, `tests/check_chain_ordering.py`, `tests/check_plan_wiring.py` |
+| `plan_check` | `strategy/plan.py` | `strategy/plan.py` (insert) | `tests/check_chain_ordering.py`, `tests/check_leg2_levels.py`, `tests/check_plan_wiring.py` |
+| `plan_tick` | `strategy/plan.py` | `strategy/plan.py` (insert) | `main.py`, `tests/check_chain_ordering.py`, `tests/check_leg2_levels.py`, `tests/check_plan_wiring.py` |
 
 ## derived_store.db
 
@@ -28,7 +28,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `fork_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | `main.py`, `query.py`, `status.py`, `tests/check_derived_layer.py` |
 | `indicator_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | `derived/levels.py`, `query.py` |
-| `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `query.py`, `tests/check_audit_20260823.py`, `tests/check_missed_inert.py`, `tests/edge_scan.py` |
+| `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `query.py`, `strategy/iron_condor_strategy.py`, `tests/check_audit_20260823.py`, `tests/check_leg2_levels.py`, `tests/check_missed_inert.py`, `tests/edge_scan.py` |
 | `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | — |
 | `surface_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | `main.py`, `query.py` |
 
