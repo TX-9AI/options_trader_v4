@@ -60,7 +60,7 @@ def main():
     class _Sweep:
         def __init__(self, reclaimed=True, invalidated=False, bars=1):
             self.reclaimed, self.invalidated = reclaimed, invalidated
-            self.bars_since_reclaim = bars
+            self.bars_ago = bars
 
     _LIVE = {"sweep": _Sweep()}
 

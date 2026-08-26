@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-179 Python modules across 13 local packages.
+180 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -72,7 +72,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/condor_trigger_map.py`
 - **calls:** `analysis/pitchfork_observer.py`
-- **called by:** `main.py`, `tests/check_condor_pairing.py`
+- **called by:** `main.py`, `tests/check_condor_pairing.py`, `tests/check_fixture_fidelity.py`
 
 ### `analysis/entry_snapshot.py`
 - **calls:** `execution/exit_engine.py`, `utils/time_utils.py`
@@ -100,7 +100,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/liquidity_mapper.py`
 - **calls:** `config.py`, `utils/math_utils.py`
-- **called by:** `main.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `strategy/orb_strategy.py`
+- **called by:** `main.py`, `risk/setup_scorer.py`, `shadow/observer.py`, `strategy/orb_strategy.py`, `tests/check_fixture_fidelity.py`
 
 ### `analysis/market_state.py`
 - **calls:** (none)
@@ -532,6 +532,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_feed_always_on.py`
 - **calls:** `data/__init__.py`, `data/candle_feed.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_fixture_fidelity.py`
+- **calls:** `analysis/condor_trigger_map.py`, `analysis/liquidity_mapper.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_gates.py`

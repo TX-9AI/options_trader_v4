@@ -284,7 +284,7 @@ def main():
             self.trigger, self.median, self.active = rail, 200.0, True
     class _CTM:
         def __init__(self, t): self._t = t
-        def all(self): return self._t
+        def all_rails(self): return self._t
 
     fpx = 201.4
     fcalls = [_C(k, max(.03, 3.2-(k-fpx)*.30), max(.08, 3.4-(k-fpx)*.30))

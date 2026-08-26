@@ -225,7 +225,7 @@ def build_session_map(orb_high, orb_low, ledger=None, ctm=None):
     except Exception:                                           # noqa: BLE001
         pass
     try:
-        for t in (ctm.all() if ctm is not None else []):
+        for t in (ctm.all_rails() if ctm is not None else []):
             # ⚠️ THE FORK'S OWN `side` IS THE ROLE. "call" == upper tine ==
             # CEILING. It is NOT re-derived from position — that is the whole
             # point of the ruling.
@@ -484,8 +484,12 @@ class PlanEngine(DerivedEngine):
             return None
         try:
             credit = round(float(sp.bid) - float(lp.ask), 2)
-        except Exception:                                       # noqa: BLE001
-            return None
+        except Exception as exc:                                # noqa: BLE001
+            # ⚠️ NEVER VANISH ON AN EXCEPTION — a builder that returns None
+            # writes no row, and an exception caught HERE never reaches
+            # derive()'s handler, so nothing is logged either.
+            return [{"strategy": "TrendParticipation", "verdict": "NO PLAN", "checks": {},
+                     "why": f"builder raised: {type(exc).__name__}: {exc}"}]
         risk = round(5.0 - credit, 2)
         r = round(credit / risk, 2) if risk > 0 else None
         _rv, _rr = r_verdict(r)
@@ -767,8 +771,12 @@ class PlanEngine(DerivedEngine):
             delta = abs(float(getattr(c, "delta", 0) or 0))
             gamma = float(getattr(c, "gamma", 0) or 0)
             theta = abs(float(getattr(c, "theta", 0) or 0))
-        except Exception:                                       # noqa: BLE001
-            return None
+        except Exception as exc:                                # noqa: BLE001
+            # ⚠️ NEVER VANISH ON AN EXCEPTION — a builder that returns None
+            # writes no row, and an exception caught HERE never reaches
+            # derive()'s handler, so nothing is logged either.
+            return [{"strategy": "RunawayContinuation", "verdict": "NO PLAN", "checks": {},
+                     "why": f"builder raised: {type(exc).__name__}: {exc}"}]
         if prem <= 0 or delta <= 0:
             return {"strategy": "RunawayContinuation", "verdict": "NO PLAN",
                     "checks": {}, "why": "contract has no premium or no delta"}
@@ -1392,10 +1400,25 @@ class PlanEngine(DerivedEngine):
                      "checks": {}, "underlying_at_decision": spot or None,
                      "why": (f"input(s) absent from ctx: {', '.join(_missing)} "
                              f"— the fork could not be evaluated this tick")}]
+        # 🔴 `all_rails()`, NOT `all()`. I wrote this against a FIXTURE I had
+        # invented — my test double exposed `.all()`, the real CondorTriggerMap
+        # exposes `all_rails()`. So on every live tick this raised
+        # AttributeError, the bare `except` below swallowed it, and the fork
+        # returned None: NO ROW, no starved row, no "[plans] failed" line
+        # (the exception never reached derive()'s handler because it was caught
+        # in here). The plan was invisible in exactly the way r134 was built to
+        # prevent, one level deeper than r134 reached.
+        # ⚠️ A GREEN TEST AGAINST A FIXTURE I AUTHORED PROVES ONLY THAT I AM
+        # CONSISTENT WITH MYSELF. The fixture must be checked against the real
+        # interface, which is what check_fixture_fidelity now does.
         try:
-            trigs = list(ctm.all())
-        except Exception:                                       # noqa: BLE001
-            return None
+            trigs = list(ctm.all_rails())
+        except Exception as exc:                                # noqa: BLE001
+            # ⚠️ AND NEVER VANISH ON AN EXCEPTION EITHER — say what broke.
+            return [{"strategy": "ForkCreditSpread", "verdict": "NO PLAN",
+                     "checks": {}, "underlying_at_decision": spot,
+                     "why": (f"could not read the fork trigger map: "
+                             f"{type(exc).__name__}: {exc}")}]
         if not trigs:
             return [{"strategy": "ForkCreditSpread", "verdict": "NO PLAN",
                      "checks": {}, "why": "no fork tines this tick"}]

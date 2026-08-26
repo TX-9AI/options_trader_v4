@@ -262,7 +262,7 @@ def main() -> int:
     # ⚠️ r134 — a SWEEP leg 2 now needs a LIVE REJECTION, not just a permitted
     # trigger class. These fixtures are about GEOMETRY, so they carry one.
     class _LiveSweep:
-        reclaimed, invalidated, bars_since_reclaim = True, False, 1
+        reclaimed, invalidated, bars_ago = True, False, 1
 
     _geo_ctx = {"sweep": _LiveSweep(), "price": 5500.0}
 

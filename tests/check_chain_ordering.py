@@ -143,7 +143,7 @@ def main():
             s.trigger, s.median, s.active = 0, 200.0, True
     class _CTM:
         def __init__(s, t): s._t = t
-        def all(s): return s._t
+        def all_rails(s): return s._t
 
     px = 201.4
     ch = _Ch([_C(k, max(.03, 3.2-(k-px)*.30), max(.08, 3.4-(k-px)*.30))

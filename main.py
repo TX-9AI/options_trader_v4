@@ -2373,9 +2373,15 @@ def _sweep_has_rejection(ctx: dict) -> tuple:
         if getattr(sweep, "invalidated", False):
             return False, ("reclaimed then INVALIDATED — price accepted "
                            "through, so this is a breakout, not a rejection")
-        bars = int(getattr(sweep, "bars_since_reclaim", -1) or -1)
-        if bars < 0:
-            bars = int(getattr(sweep, "reclaim_age_bars", -1) or -1)
+        # 🔴 `bars_ago`, NOT `bars_since_reclaim`/`reclaim_age_bars` — NEITHER
+        # OF WHICH EXISTS on LiquiditySweep. I invented both names, and because
+        # `getattr` with a default NEVER RAISES, the age read -1 on every real
+        # sweep and this gate refused EVERY sweep pairing with a plausible
+        # reason. That is worse than the AttributeError that hid the fork: at
+        # least that one crashed. This one just quietly said no forever.
+        # SWP.10 already made `bars_ago` count from the RECLAIM bar rather than
+        # the sweep bar, which is exactly the semantics this gate wants.
+        bars = int(getattr(sweep, "bars_ago", -1) or -1)
         if bars < 0:
             return False, ("cannot measure age from the reclaim bar — an "
                            "unmeasurable rejection is not a rejection")
