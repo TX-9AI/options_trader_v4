@@ -175,6 +175,59 @@ def main():
     check("X7 no possibly-absent value is formatted with a raw format spec",
           not unguarded, ", ".join(unguarded) or "none")
 
+    # ── 🔴 X8 — EVERY ctx KEY A BUILDER READS MUST BE ONE THE TICK SETS ──
+    # ⚠️ THE QUIETEST FAILURE OF 2026-08-26. `ctx.get("atr")` was set NOWHERE.
+    # It returned 0 on every tick of every box, so the condor's "range narrower
+    # than 1 ATR is too tight" gate and the runaway's travel sanity check NEVER
+    # FIRED — 100% of condor rows read "n/a-ATR range". Three more were the
+    # same: `open_trades` (so the roll ladder reported "0 condor legs" forever
+    # and was never once evaluated against a real structure), `now_et_minutes`
+    # (so the tent's 15:45 deadline never applied), `tent_floor_pct`.
+    # ⚠️ UNLIKE ctm.all() THIS RAISES NOTHING. `.get()` with a default returns
+    # a fallback, the gate silently never applies, and no log, table or
+    # exception says a word. A dead gate looks exactly like a gate that keeps
+    # passing.
+    import re as _re
+    _m = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
+    _read = set()
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "get"
+                and isinstance(n.func.value, ast.Name)
+                and n.func.value.id == "ctx"
+                and n.args and isinstance(n.args[0], ast.Constant)):
+            _read.add(str(n.args[0].value))
+    # ⚠️ A KEY WITH A LIVE FALLBACK IS NOT A DEAD READ. `ctx.get("session_high")
+    # or ctx.get("orb_high")` is deliberate — the second key IS set. Only reads
+    # with no alternative are defects. Collected by looking for the key inside
+    # a BoolOp (`A or B`) alongside another ctx.get.
+    _fallback = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.BoolOp) and isinstance(n.op, ast.Or):
+            _ks = [str(v.args[0].value) for v in n.values
+                   if isinstance(v, ast.Call)
+                   and isinstance(v.func, ast.Attribute) and v.func.attr == "get"
+                   and v.args and isinstance(v.args[0], ast.Constant)]
+            # ⚠️ ONLY A FALLBACK TO ANOTHER ctx KEY COUNTS. `A or B` exempts A
+            # because B is the real source. A SINGLE ctx.get in a BoolOp is
+            # `ctx.get("atr") or 0` — a DEFAULT, not a fallback, and exactly
+            # the defect this check exists to find.
+            # 🔴 MY FIRST VERSION EXEMPTED IT, so reverting the atr fix left
+            # X8 GREEN. A check that cannot fail on the bug it was written for
+            # is not a check — the same trap as the geometry pin earlier today,
+            # caught the same way: by mutating the fix and watching.
+            if len(_ks) > 1:
+                _fallback.update(_ks[:-1])
+    _unset = []
+    for k in sorted(_read - _fallback):
+        if not any(_re.search(p, _m) for p in (
+                _re.escape(f'ctx["{k}"]') + r"\s*[=,]",
+                _re.escape(f'ctx.setdefault("{k}"'),
+                r'"' + _re.escape(k) + r'"\s*:')):
+            _unset.append(k)
+    check("X8 every ctx key the plan builders read is set somewhere in the tick",
+          not _unset, ", ".join(_unset) or "none")
+
     print()
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))

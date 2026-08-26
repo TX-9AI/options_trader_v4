@@ -818,7 +818,19 @@ class PlanEngine(DerivedEngine):
         theta_dollars = round(theta * (hours_left / 24.0) * 100.0, 2)
 
         # ── THE SANITY CHECK: can the tape actually cover the distance? ──
-        atr = float(ctx.get("atr") or 0)
+        # 🔴 ATR LIVES ON ctx["vol"], NOT AS A TOP-LEVEL KEY (r138).
+        # ⚠️ `ctx.get("atr")` is set NOWHERE in main.py. It returned 0 on every
+        # tick of every box, so every ATR-derived value was None and the gates
+        # that depend on them NEVER FIRED — the condor's "range narrower than
+        # 1 ATR is too tight" check and the runaway's travel_atr sanity check,
+        # both silently inert. Measured 2026-08-26: 100% of condor rows on all
+        # 15 boxes read "n/a-ATR range".
+        # ⚠️ SAME FAMILY AS ctm.all() AND bars_since_reclaim — a name I assumed
+        # instead of reading. But `ctx.get()` with a default NEVER RAISES, so
+        # this one threw no error at all: just a gate that quietly never
+        # applied. The quietest of the three, and the hardest to notice.
+        # Every other consumer in main.py uses this form:
+        atr = float(getattr(ctx.get("vol"), "atr_current", None) or 0)
         travel = (risk_spot / atr) if atr > 0 else None
 
         why, ok = [], True
@@ -895,7 +907,19 @@ class PlanEngine(DerivedEngine):
         _s = self._starved("IronCondor", ctx, {"chain": chain, "price": spot}, spot)
         if _s:
             return _s
-        atr = float(ctx.get("atr") or 0)
+        # 🔴 ATR LIVES ON ctx["vol"], NOT AS A TOP-LEVEL KEY (r138).
+        # ⚠️ `ctx.get("atr")` is set NOWHERE in main.py. It returned 0 on every
+        # tick of every box, so every ATR-derived value was None and the gates
+        # that depend on them NEVER FIRED — the condor's "range narrower than
+        # 1 ATR is too tight" check and the runaway's travel_atr sanity check,
+        # both silently inert. Measured 2026-08-26: 100% of condor rows on all
+        # 15 boxes read "n/a-ATR range".
+        # ⚠️ SAME FAMILY AS ctm.all() AND bars_since_reclaim — a name I assumed
+        # instead of reading. But `ctx.get()` with a default NEVER RAISES, so
+        # this one threw no error at all: just a gate that quietly never
+        # applied. The quietest of the three, and the hardest to notice.
+        # Every other consumer in main.py uses this form:
+        atr = float(getattr(ctx.get("vol"), "atr_current", None) or 0)
         hi = ctx.get("session_high") or ctx.get("orb_high")
         lo = ctx.get("session_low") or ctx.get("orb_low")
         if not hi or not lo:

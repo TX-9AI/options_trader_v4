@@ -1447,6 +1447,53 @@ def run_analysis(state: BotState, chain=None) -> dict:
         _oh = _ol = None
     ctx["orb_high"], ctx["orb_low"] = _oh, _ol
 
+    # 🔴 r138 — THREE MORE ctx KEYS THE PLAN BUILDERS READ AND NOBODY SET.
+    # ⚠️ Each one silently DISABLED a gate rather than raising, which is the
+    # quietest failure mode of the day: `ctx.get(k)` with a default never
+    # errors, so the code reads a fallback and the check simply never applies.
+    #   · open_trades  — _roll finds condor legs here. Absent ⇒ it reported
+    #                    "0 condor leg(s) open" on EVERY tick, so the entire
+    #                    roll/tent/close ladder has never once been evaluated
+    #                    against a real structure.
+    #   · now_et_minutes — the tent's 15:45 flatten deadline. Absent ⇒ the
+    #                    fallback of 999 minutes meant the cutoff NEVER fired.
+    #   · tent_floor_pct — the tent's economic floor, so it uses the declared
+    #                    default rather than config.
+    try:
+        from database.trade_logger import get_trade_logger as _gtl
+        ctx["open_trades"] = list(_gtl().get_open_trades())
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("ctx open_trades: %s", exc)
+        ctx.setdefault("open_trades", [])
+    # ⚠️ `now_et()` — NOT `_now_et`, which is a LOCAL VARIABLE at line 1322,
+    # and TENT_FLOOR_PCT imported by name, because `config` is not imported as
+    # a module here. Both checked against the file before writing this, which
+    # is the discipline the whole day argued for.
+    try:
+        _et = now_et()
+        ctx["now_et_minutes"] = _et.hour * 60 + _et.minute
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("ctx now_et_minutes: %s", exc)
+        ctx.setdefault("now_et_minutes", None)
+    try:
+        from config import TENT_FLOOR_PCT as _TFP
+    except Exception:                                          # noqa: BLE001
+        _TFP = 0.15
+    ctx.setdefault("tent_floor_pct", _TFP)
+    # ⚠️ AND THE TENT'S OTHER TIME SOURCE. `minutes_to_flatten` is the branch
+    # taken when now_et_minutes is None; leaving it unset meant that branch
+    # fell to a hardcoded 999 and the deadline could never fire either way.
+    # Derived from the SAME 15:45 flatten so the two can never disagree.
+    try:
+        from config import VERTICAL_HOLD_TO_ET as _VH
+        _fm = _VH[0] * 60 + _VH[1]
+        _nm = ctx.get("now_et_minutes")
+        ctx["minutes_to_flatten"] = (float(_fm - _nm) if _nm is not None
+                                     else None)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("ctx minutes_to_flatten: %s", exc)
+        ctx.setdefault("minutes_to_flatten", None)
+
     # 🔴 r133 — CHAIN AND GEX ON ctx BEFORE THE ENGINES RUN, not after.
     # ⚠️ SET EVEN WHEN None, like every other port above: a consumer must be
     # able to tell "measured as absent" from "this key does not exist".
