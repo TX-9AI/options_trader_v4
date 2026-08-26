@@ -28,7 +28,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `plan_check` | `derived/plans.py` | `derived/plans.py` (insert) | `tests/check_plans.py` |
 | `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `tests/check_audit_20260823.py`, `tests/check_missed_inert.py`, `tests/edge_scan.py` |
-| `plan_tick` | `derived/plans.py` | `derived/plans.py` (insert) | `tests/check_plans.py` |
+| `plan_tick` | `derived/plans.py` | `derived/plans.py` (insert) | `tests/check_chain_ordering.py`, `tests/check_plans.py` |
 | `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | `derived/plans.py` |
 | `surface_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 

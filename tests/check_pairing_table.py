@@ -32,7 +32,7 @@ def _load():
     """Load ONLY the pairing helpers from main.py — importing main runs a bot."""
     src = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
     tree = ast.parse(src)
-    want = {"_trigger_class", "_pairing_allowed"}
+    want = {"_trigger_class", "_pairing_allowed", "_sweep_has_rejection"}
     keep = [n for n in tree.body
             if (isinstance(n, ast.FunctionDef) and n.name in want)
             or (isinstance(n, ast.Assign)
@@ -54,9 +54,19 @@ def main():
           and klass("1h_fork") == "fork" and klass("1d_fork") == "fork",
           "trend_orb / sweep_reversal / 1h_fork / 1d_fork")
 
+    # ⚠️ A SWEEP LEG 2 NOW NEEDS A LIVE REJECTION AS WELL AS A PERMITTED
+    # CLASS, so these class-level checks must supply one — otherwise they
+    # measure the rejection gate rather than the pairing table.
+    class _Sweep:
+        def __init__(self, reclaimed=True, invalidated=False, bars=1):
+            self.reclaimed, self.invalidated = reclaimed, invalidated
+            self.bars_since_reclaim = bars
+
+    _LIVE = {"sweep": _Sweep()}
+
     # ── TREND first: sweep only ──────────────────────────────────────────
     check("R4.1 TREND leg 1 is completed by a SWEEP",
-          allowed("trend_orb", "sweep_reversal")[0])
+          allowed("trend_orb", "sweep_reversal", _LIVE)[0])
     check("R4.2 TREND leg 1 is NOT completed by a fork tine",
           not allowed("trend_orb", "1h_fork")[0])
     check("R4.3 TREND leg 1 is NOT completed by another trend spread",
@@ -77,7 +87,7 @@ def main():
     check("R4.6 FORK leg 1 is completed by another fork tine",
           allowed("1h_fork", "1d_fork")[0] and allowed("1d_fork", "1h_fork")[0])
     check("R4.7 FORK leg 1 is completed by a sweep",
-          allowed("1h_fork", "sweep_reversal")[0])
+          allowed("1h_fork", "sweep_reversal", _LIVE)[0])
     check("R4.8 FORK leg 1 is NOT completed by a trend spread",
           not allowed("1h_fork", "trend_orb")[0])
 
@@ -97,10 +107,43 @@ def main():
     # ⚠️ EVERY REFUSAL SPEAKS. r124: 406 consecutive silent refusals cost five
     # queries to explain one afternoon.
     check("R4.11 every refusal carries a reason",
-          all(bool(allowed(a, b)[1])
+          all(bool(allowed(a, b, _LIVE)[1])
               for a, b in (("trend_orb", "1h_fork"),
                            ("sweep_reversal", "trend_orb"),
                            ("x", "y"))))
+
+    # ── 🔴 THE SWEEP'S REJECTION REQUIREMENT ─────────────────────────────
+    # Operator: *"for a sweep there has to be a rejection or we don't sell
+    # it."* The class check alone says the TRIGGER TYPE is permitted; it says
+    # nothing about whether a rejection actually happened.
+    def _pair(leg1, leg2, sweep):
+        return allowed(leg1, leg2, {"sweep": sweep} if sweep else {})
+
+    check("R4.12 a sweep leg 2 with a LIVE rejection is admitted",
+          _pair("trend_orb", "sweep_reversal", _Sweep())[0])
+
+    # ⚠️ A WICK IS NOT A REJECTION — it takes a CLOSE.
+    check("R4.13 a pierce with no reclaiming CLOSE is refused",
+          not _pair("trend_orb", "sweep_reversal", _Sweep(reclaimed=False))[0])
+
+    # ⚠️ RECLAIMED-THEN-INVALIDATED IS A BREAKOUT, and selling a boundary that
+    # already gave way is the worst version of this trade.
+    check("R4.14 reclaimed-then-invalidated is refused as a breakout",
+          not _pair("trend_orb", "sweep_reversal", _Sweep(invalidated=True))[0])
+
+    # 🔴 THE CVX LOOP. `reclaimed` is a LATCHED FLAG, true for hours. Age is
+    # measured from the RECLAIM BAR, and a stale one is not an event.
+    _ok, _why = _pair("trend_orb", "sweep_reversal", _Sweep(bars=400))
+    check("R4.15 a STALE latched reclaim is refused — the CVX loop",
+          not _ok and "latched" in _why.lower(), _why[:64])
+
+    check("R4.16 NO sweep state at all is refused, not admitted",
+          not _pair("trend_orb", "sweep_reversal", None)[0])
+
+    # ⚠️ A FORK NEEDS NO REJECTION — operator: "fork does not need a rejection,
+    # it is assumed to be stable if it is present."
+    check("R4.17 a FORK leg 2 needs no rejection and no sweep state",
+          _pair("sweep_reversal", "1h_fork", None)[0])
 
     print()
     if _fails:

@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-178 Python modules across 13 local packages.
+179 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -264,7 +264,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `derived/plans.py`
 - **calls:** `analysis/liquidity_ledger.py`, `config.py`, `derived/base.py`, `strategy/criteria.py`
-- **called by:** `derived/registry.py`, `tests/check_plans.py`
+- **called by:** `derived/registry.py`, `tests/check_chain_ordering.py`, `tests/check_plans.py`
 
 ### `derived/registry.py`
 - **calls:** `data/derived_store.py`, `derived/character_engine.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/plan_ledger.py`, `derived/plans.py`, `derived/snapshot.py`, `derived/surface.py`
@@ -476,6 +476,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_audit_20260823.py`
 - **calls:** `analysis/__init__.py`, `analysis/gate_report.py`, `data/__init__.py`, `data/candle_feed.py`, `derived/plan_ledger.py`, `strategy/__init__.py`, `strategy/iron_condor_strategy.py`, `warehouse/__init__.py`, `warehouse/self_close.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_chain_ordering.py`
+- **calls:** `derived/plans.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_condor_pairing.py`

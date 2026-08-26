@@ -1093,7 +1093,7 @@ def _feed_liquidity_ledger(liq_map, df_1m) -> None:
         logger.debug("[ledger] skipped: %s", exc)
 
 
-def run_analysis(state: BotState) -> dict:
+def run_analysis(state: BotState, chain=None) -> dict:
     """Fetch all market data and run analysis pipeline."""
     cache  = get_cache()
     data   = cache.get_all()
@@ -1413,6 +1413,35 @@ def run_analysis(state: BotState) -> dict:
     ctx.setdefault("expected_move_iv", None)
     ctx.setdefault("expected_move_straddle", None)
     ctx.setdefault("session_fraction_remaining", None)
+    # 🔴 r134 — THE OPENING RANGE ON ctx. `_opening_range()` existed and was
+    # recomputed from the tape, but its result was never PUBLISHED, so the
+    # session map (which is centred on the 5-minute ORB range) had no marker
+    # and could not classify a single level. Operator: *"Why don't we use the
+    # five minute ORB range as the marker? Levels have to be above the ORB or
+    # below to count and they have to be the right kind."*
+    # ⚠️ SET EVEN WHEN None — before 09:35 ET there is genuinely no range, and
+    # a consumer must be able to tell that from "this port does not exist".
+    try:
+        _oh, _ol = _opening_range(ctx)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("opening range: %s", exc)
+        _oh = _ol = None
+    ctx["orb_high"], ctx["orb_low"] = _oh, _ol
+
+    # 🔴 r133 — CHAIN AND GEX ON ctx BEFORE THE ENGINES RUN, not after.
+    # ⚠️ SET EVEN WHEN None, like every other port above: a consumer must be
+    # able to tell "measured as absent" from "this key does not exist".
+    ctx["chain"] = chain
+    try:
+        if chain is not None:
+            from data.gex_data import compute_gex as _cg
+            ctx["gex"] = _cg(chain, ctx.get("price"))
+        else:
+            ctx.setdefault("gex", None)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("pre-analysis gex: %s", exc)
+        ctx.setdefault("gex", None)
+
     try:
         engines = getattr(state, "derived_engines", None)
         # Published on ctx so the fire-snapshot path can reach them from any
@@ -2297,7 +2326,54 @@ def _trigger_class(source: str) -> str:
     return ""
 
 
-def _pairing_allowed(leg1_source: str, leg2_source: str) -> tuple:
+def _sweep_has_rejection(ctx: dict) -> tuple:
+    """(ok, reason) — is there a LIVE, close-based rejection right now?
+
+    🔴 OPERATOR: *"for a sweep there has to be a REJECTION or we don't sell
+    it."* And separately: *"a wick can be a pierce. But it takes a CLOSE to log
+    a rejection."*
+
+    ⚠️ THIS IS THE r127 / CVX FINDING AT THE PAIRING GATE. `reclaimed` is a
+    LATCHED FLAG on a persisted pool object — once true it stays true for
+    hours. A leg-2 sweep admitted on that flag can fire long after any actual
+    rejection, which is precisely the loop observed on CVX.
+    ⚠️ SO THREE CONDITIONS, NOT ONE: reclaimed (a close returned inside),
+    NOT invalidated (price has not since accepted through — that is a
+    BREAKOUT, and selling a boundary that already gave way is the worst
+    version of this trade), and YOUNG measured from `reclaim_bar_index`, not
+    from the sweep bar.
+    ⚠️ FAILS CLOSED. No sweep object, or an unreadable one, is NOT a rejection.
+    """
+    sweep = (ctx or {}).get("sweep")
+    if sweep is None:
+        return False, "no sweep state available — that is not a rejection"
+    try:
+        if not getattr(sweep, "reclaimed", False):
+            return False, ("the level was pierced but no CLOSE returned inside "
+                           "it — a wick is not a rejection")
+        if getattr(sweep, "invalidated", False):
+            return False, ("reclaimed then INVALIDATED — price accepted "
+                           "through, so this is a breakout, not a rejection")
+        bars = int(getattr(sweep, "bars_since_reclaim", -1) or -1)
+        if bars < 0:
+            bars = int(getattr(sweep, "reclaim_age_bars", -1) or -1)
+        if bars < 0:
+            return False, ("cannot measure age from the reclaim bar — an "
+                           "unmeasurable rejection is not a rejection")
+        if bars > _SWEEP_REJECTION_MAX_BARS:
+            return False, (f"the rejection is {bars} bars old (max "
+                           f"{_SWEEP_REJECTION_MAX_BARS}) — a latched flag, "
+                           f"not a live event")
+        return True, f"live rejection, {bars} bar(s) since the reclaim close"
+    except Exception as exc:                                   # noqa: BLE001
+        return False, f"sweep state unreadable ({exc}) — not a rejection"
+
+
+# ⟨PRIOR⟩ — stated, not fitted. The plan tables will say what it should be.
+_SWEEP_REJECTION_MAX_BARS = 5
+
+
+def _pairing_allowed(leg1_source: str, leg2_source: str, ctx: dict = None) -> tuple:
     """(allowed, reason). Fails CLOSED on an unknown trigger on either side."""
     c1, c2 = _trigger_class(leg1_source), _trigger_class(leg2_source)
     if not c1 or not c2:
@@ -2314,12 +2390,26 @@ def _pairing_allowed(leg1_source: str, leg2_source: str) -> tuple:
         return False, (f"a {c1.upper()} first leg cannot be completed by a "
                        f"{c2.upper()} trigger; permitted: "
                        f"{', '.join(_PAIRING_TABLE.get(c1, ())) or 'nothing'}")
+    # 🔴 A SWEEP COMPLETING ANYTHING NEEDS A LIVE REJECTION. The class check
+    # says the TRIGGER TYPE is permitted; it says nothing about whether a
+    # rejection actually happened. Operator: *"for a sweep there has to be a
+    # rejection or we don't sell it."*
+    # ⚠️ A FORK NEEDS NO SUCH TEST — *"fork does not need a rejection, it is
+    # assumed to be stable if it's present."* The requirement rides on the
+    # SWEEP CLASS, which includes a named level (PDH/PDL) traded AS a sweep.
+    if c2 == "sweep":
+        ok_r, why_r = _sweep_has_rejection(ctx or {})
+        if not ok_r:
+            return False, (f"{c1.upper()} leg 1 may be completed by a sweep, "
+                           f"but {why_r}")
+        return True, f"{c1.upper()} leg 1 completed by SWEEP — {why_r}"
     return True, f"{c1.upper()} leg 1 completed by {c2.upper()} — permitted"
 
 
 def _can_open_credit_spread(side: str,
                              new_signal=None,
-                             current_price: float = 0.0) -> bool:
+                             current_price: float = 0.0,
+                             ctx: dict = None) -> bool:
     """Type gate (Rules 1+3+4) AND geometry gate (no inversion).
 
     Rule 1: max 2 concurrent positions.
@@ -2365,7 +2455,7 @@ def _can_open_credit_spread(side: str,
         _leg1 = _legs[0] if _legs else {}
         _src1 = _leg1.get("condor_trigger_source") or ""
         _src2 = getattr(new_signal, "condor_trigger_source", "") or ""
-        _ok4, _why4 = _pairing_allowed(_src1, _src2)
+        _ok4, _why4 = _pairing_allowed(_src1, _src2, ctx=ctx or {})
         if not _ok4:
             logger.info("Credit pairing BLOCKED by Rule 4: %s", _why4)
             return False
@@ -2881,7 +2971,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                     "claiming the dispatch slot, so the butterfly and the "
                     "credit verticals still get this tick")
             elif _can_open_credit_spread(sc_sig.option_side, sc_sig,
-                                         ctx["price"]):
+                                         ctx["price"], ctx=ctx):
                 _execute_condor_leg(sc_sig, state, ctx)
                 return
             else:
@@ -3046,7 +3136,8 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
             _clt = _safe_strategy("CondorLeg",
                 lambda: _iron_condor_strategy.check_leg_triggers(
                     ms=ms, chain=chain, current_price=ctx["price"], ctx=ctx), ctx)
-            if _clt is not None and _can_open_credit_spread(_clt.option_side):  # first leg
+            if _clt is not None and _can_open_credit_spread(
+                    _clt.option_side, ctx=ctx):        # first leg
                 if _sigj:
                     try:
                         _sigj.journal("condor_leg",
@@ -3627,8 +3718,37 @@ def main_loop(state: BotState):
                 time.sleep(POLL_INTERVAL_SECONDS)
                 continue
 
+            # ── 🔴 CHAIN AND GEX ARE FETCHED *BEFORE* run_analysis (r133) ──
+            # They used to be fetched ~20 lines BELOW this call, which meant
+            # the derived engines — which run INSIDE run_analysis — saw no
+            # chain and no gex, while the strategies further down the tick saw
+            # both. The code already named the smell at line ~1385: *"written
+            # mid-dispatch ... their availability depends on where in the tick
+            # you stand — an input present for one consumer and absent for
+            # another. No derived port may be built that way."*
+            #
+            # ⚠️ WHAT IT COST: every plan builder guards on `chain is None` and
+            # returned None, so `plans` was empty EVERY tick, `_write_tick`
+            # was never reached, and `plan_tick`/`plan_check` were never
+            # CREATED. From outside, "the engine never ran" and "the engine ran
+            # and found nothing" looked identical — it took three rounds of
+            # queries on the morning of 2026-08-26 to tell them apart.
+            # ⚠️ AND IT WAS NOT ONLY THE PLANS. surface/snapshot/notes/
+            # plan_ledger all read ctx["gex"] and coerce it, so they recorded
+            # NULL rather than branching — a silent hole in four tables.
+            #
+            # ⚠️ THIS ADDS NO MARKET-DATA LOAD. The fetch was ALREADY every
+            # tick and unconditional ("Compute GEX every tick — used by all
+            # strategies + position mgr"); only its POSITION moves.
+            _gex_chain = None
+            try:
+                from data.options_chain import get_chain_fetcher
+                _gex_chain = get_chain_fetcher().fetch_chain()
+            except Exception as exc:                           # noqa: BLE001
+                logger.debug("pre-analysis chain fetch: %s", exc)
+
             # ── Main analysis ─────────────────────────────────────────────
-            ctx = run_analysis(state)
+            ctx = run_analysis(state, chain=_gex_chain)
 
             # cheap (threshold checks over the ctx run_analysis already computed),
             # so we reclassify every tick — no throttle. Verified safe: the only
@@ -3644,9 +3764,12 @@ def main_loop(state: BotState):
 
             # ── Compute GEX every tick (used by all strategies + position mgr)
             try:
-                from data.options_chain import get_chain_fetcher
                 from data.gex_data import compute_gex as _compute_gex
-                _gex_chain = get_chain_fetcher().fetch_chain()
+                # ⚠️ r133 — NO SECOND FETCH. `_gex_chain` was fetched above
+                # and is already on ctx; re-fetching here would double the
+                # market-data calls and could disagree with what the derived
+                # engines just recorded from the FIRST chain. Same object, one
+                # tick, one truth.
                 if _gex_chain:
                     ctx["gex"]   = _compute_gex(_gex_chain, ctx["price"])
                     ctx["chain"] = _gex_chain

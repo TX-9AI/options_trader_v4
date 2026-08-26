@@ -132,7 +132,9 @@ def _load_gate_fns():
                 # helpers. An AST-extracted function needs every name it calls
                 # present in the namespace or it NameErrors at call time.
                 "_can_open_credit_spread", "_open_credit_sides",
-                "_open_credit_legs", "_trigger_class", "_pairing_allowed"
+                "_open_credit_legs", "_trigger_class", "_pairing_allowed",
+                # r134 — Rule 4 now consults the sweep's LIVE rejection state
+                "_sweep_has_rejection"
             ):
                 lines = src.splitlines()
                 fn_lines = lines[node.lineno - 1: node.end_lineno]
@@ -257,22 +259,29 @@ def main() -> int:
                 self.short_put_contract  = _MockContract(short_strike)
                 self.short_call_contract = None
 
+    # ⚠️ r134 — a SWEEP leg 2 now needs a LIVE REJECTION, not just a permitted
+    # trigger class. These fixtures are about GEOMETRY, so they carry one.
+    class _LiveSweep:
+        reclaimed, invalidated, bars_since_reclaim = True, False, 1
+
+    _geo_ctx = {"sweep": _LiveSweep(), "price": 5500.0}
+
     price = 5500.0  # call spread already open at 5530, price at 5500
 
     # PG1: put spread at 5470 → short_put=5470 < 5500 < 5530=short_call ✓
     good_put = _MockSignal("put", 5470.0)
     check("PG1 valid geometry: put@5470 + call@5530, price=5500 → ALLOWED",
-          can_fn("put", good_put, price))
+          can_fn("put", good_put, price, ctx=_geo_ctx))
 
     # PG2: put spread at 5510 → short_put=5510 > 5500=price (tested at birth)
     bad_put = _MockSignal("put", 5510.0)
     check("PG2 inversion blocked: put@5510 > price=5500 → REJECTED",
-          not can_fn("put", bad_put, price))
+          not can_fn("put", bad_put, price, ctx=_geo_ctx))
 
     # PG3: put spread at 5535 → short_put=5535 > short_call=5530 (crossed)
     crossed = _MockSignal("put", 5535.0)
     check("PG3 crossed strikes blocked: put@5535 > call@5530 → REJECTED",
-          not can_fn("put", crossed, price))
+          not can_fn("put", crossed, price, ctx=_geo_ctx))
 
     _restore(tl2, orig)
 

@@ -265,6 +265,17 @@ class PlanEngine(DerivedEngine):
         self._ledger = ledger
         self._declared: Dict[str, str] = {}     # key -> plan_id
         self._made = False
+        # 🔴 r133 — CREATE THE TABLES AT INIT, NOT ON FIRST WRITE.
+        # ⚠️ `_ensure()` used to be called only from `_write_tick`, which is
+        # only reached when there IS at least one plan. So a session that
+        # produced nothing left NO TABLES AT ALL, and "the engine is not
+        # registered", "the engine crashed on import" and "the engine ran fine
+        # and found nothing" were INDISTINGUISHABLE from outside. On the
+        # morning of 2026-08-26 that ambiguity cost three rounds of fleet
+        # queries before the real cause (no ctx["chain"], see main.py r133)
+        # was isolated.
+        # AN EMPTY TABLE IS A MEASUREMENT. A missing table is a mystery.
+        self._ensure()
 
     # ── gamma surface ───────────────────────────────────────────────────
     @staticmethod
@@ -1347,11 +1358,55 @@ class PlanEngine(DerivedEngine):
             return [{"strategy": "ForkCreditSpread", "verdict": "NO PLAN",
                      "checks": {}, "why": "no fork tines this tick"}]
 
+        # 🔴 THE SHARED SESSION MAP DECIDES WHICH TINES ARE EVEN CANDIDATES.
+        # ⚠️ I BUILT build_session_map AND THEN NEVER CALLED IT — it sat as
+        # dead code, so the whole ceiling/floor geometry the operator specified
+        # was never applied. A tine's own `side` was trusted outright, which is
+        # exactly the defect credit_edge recorded weeks ago: an "upper" tine
+        # that has drifted BELOW price still priced a short call — an ITM short
+        # call, something nobody would sell.
+        # Operator: *"an upper tine below the current open is UNUSABLE as a
+        # candidate ... upper tines can only be call credit spreads, but would
+        # be INVALIDATED BY GEOMETRY if they are below the open."*
+        orb_hi = ctx.get("orb_high")
+        orb_lo = ctx.get("orb_low")
+        _valid_rails, _killed = None, {}
+        if orb_hi and orb_lo:
+            _ce, _fl, _inv = build_session_map(float(orb_hi), float(orb_lo),
+                                               ledger=None, ctm=ctm)
+            _valid_rails = {round(c.price, 4) for c in (_ce + _fl)}
+            _killed = {round(c.price, 4): c.why for c in _inv}
+
         out = []
         for t in trigs:
             tf = getattr(t, "tf", "")
             side = getattr(t, "side", "")
             rail = float(getattr(t, "rail", 0) or 0)
+            # ⚠️ NO OPENING RANGE ⇒ NO MAP ⇒ NO PLAN. Before 09:35 there is no
+            # marker to measure against, and classifying without one would be
+            # an accident dressed as a decision.
+            if _valid_rails is None:
+                out.append({
+                    "strategy": "ForkCreditSpread", "direction": f"{tf}_{side}",
+                    "verdict": "NO PLAN",
+                    "checks": {"fork_tf": (1.0 if tf == "1h" else 2.0, "n/a")},
+                    "why": ("no opening range yet — the session map cannot "
+                            "exist before 09:35, so no tine is a candidate"),
+                })
+                continue
+            if round(rail, 4) not in _valid_rails:
+                out.append({
+                    "strategy": "ForkCreditSpread", "direction": f"{tf}_{side}",
+                    "verdict": "DECLINE",
+                    "checks": {"fork_tf": (1.0 if tf == "1h" else 2.0, "n/a"),
+                               "geometry": (0.0, "FAIL")},
+                    "trigger_price": rail, "underlying_at_decision": spot,
+                    "why": _killed.get(round(rail, 4),
+                                       f"the {tf} {side} tine at {rail:.2f} is "
+                                       f"not a valid candidate on the session "
+                                       f"map"),
+                })
+                continue
             slope = float(getattr(t, "slope", 0) or 0)
             trigger = float(getattr(t, "trigger", 0) or 0)
             if rail <= 0:
@@ -1399,6 +1454,8 @@ class PlanEngine(DerivedEngine):
                                            if sk is not None else None),
                     # 1.0 = 1h, 2.0 = 1d — numeric so the column stays REAL
                     "fork_tf": (1.0 if tf == "1h" else 2.0, "n/a"),
+                    # the tine survived the session map's ceiling/floor test
+                    "geometry": (1.0, "PASS"),
                     # RECORDED: how fast this tine drifts. The reason freezing
                     # the rail matters more for 1h than 1d.
                     "tine_slope": (round(slope, 5), "n/a"),
@@ -1520,7 +1577,17 @@ class PlanEngine(DerivedEngine):
                     underlying      REAL,            -- LIVE
                     dist_to_trigger REAL,            -- LIVE
                     r_now           REAL,            -- LIVE, comparable ACROSS plans
-                    PRIMARY KEY (ts_epoch, symbol, strategy)
+                    -- 🔴 `direction` IS PART OF THE KEY (r133). The original
+                    -- key was (ts_epoch, symbol, strategy) — correct in r126,
+                    -- when every builder returned exactly ONE plan. The fork
+                    -- builder returns FOUR (1h/1d x call/put), so INSERT OR
+                    -- REPLACE silently overwrote three of them: 5 plans
+                    -- produced, 4 rows stored, no error anywhere.
+                    -- ⚠️ FIXED TODAY BECAUSE TODAY IT IS FREE — the ordering
+                    -- bug meant these tables were NEVER CREATED on any box, so
+                    -- there is nothing to migrate. Tomorrow there would be.
+                    direction    TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (ts_epoch, symbol, strategy, direction)
                 );""")
             self._store.conn.execute("""
                 CREATE TABLE IF NOT EXISTS plan_check (
@@ -1530,7 +1597,9 @@ class PlanEngine(DerivedEngine):
                     check_name TEXT NOT NULL,
                     value     REAL,
                     verdict   TEXT,                  -- PASS / FAIL / n/a
-                    PRIMARY KEY (ts_epoch, symbol, strategy, check_name)
+                    -- same collision, same fix: one fork timeframe/side per row
+                    direction TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (ts_epoch, symbol, strategy, direction, check_name)
                 );""")
             self._store.conn.execute(
                 "CREATE INDEX IF NOT EXISTS ix_plan_tick "
@@ -1555,11 +1624,12 @@ class PlanEngine(DerivedEngine):
                 self._store.conn.execute(
                     "INSERT OR REPLACE INTO plan_tick (ts_epoch, symbol,"
                     " strategy, verdict, reason, trigger_price, invalidation,"
-                    " underlying, dist_to_trigger, r_now)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    " underlying, dist_to_trigger, r_now, direction)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (now, self.symbol, p.get("strategy"), p.get("verdict"),
                      p.get("why"), trig, p.get("invalidation"), spot,
-                     (spot - trig) if trig else None, p.get("r")))
+                     (spot - trig) if trig else None, p.get("r"),
+                     p.get("direction") or ""))
                 n += 1
             except Exception as exc:                            # noqa: BLE001
                 logger.debug("plan_tick write: %s", exc)
@@ -1579,9 +1649,10 @@ class PlanEngine(DerivedEngine):
                 try:
                     self._store.conn.execute(
                         "INSERT OR REPLACE INTO plan_check (ts_epoch, symbol,"
-                        " strategy, check_name, value, verdict)"
-                        " VALUES (?,?,?,?,?,?)",
-                        (now, self.symbol, p.get("strategy"), name, val, verdict))
+                        " strategy, check_name, value, verdict, direction)"
+                        " VALUES (?,?,?,?,?,?,?)",
+                        (now, self.symbol, p.get("strategy"), name, val,
+                         verdict, p.get("direction") or ""))
                 except Exception:                               # noqa: BLE001
                     pass
         try:

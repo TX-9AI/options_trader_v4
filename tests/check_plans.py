@@ -293,8 +293,13 @@ def main():
              for k in range(170, 211, 5)]
     fctm = _CTM([_T("1h", "call", 203.2, 0.052), _T("1h", "put", 196.8, 0.052),
                  _T("1d", "call", 212.5, 0.004), _T("1d", "put", 188.0, 0.004)])
+    # ⚠️ r134 — THE FORK NOW REQUIRES THE OPENING RANGE. Without it there is
+    # no session map, so every tine returns NO PLAN by design (the map cannot
+    # exist before 09:35). The fixture supplies a range that admits all four
+    # tines so these checks still measure what they are about.
     fps = e._fork({"price": fpx, "chain": _Chain(fcalls, fputs),
-                   "condor_triggers": fctm})
+                   "condor_triggers": fctm,
+                   "orb_high": 202.15, "orb_low": 200.60})
     check("F1 one builder emits a plan per available timeframe AND side",
           isinstance(fps, list) and len(fps) == 4, f"{len(fps or [])} plans")
 
@@ -344,6 +349,28 @@ def main():
     check("F4 the short strike is the first one BEYOND the tine",
           _fc["short_strike"] >= 203.2 and _fc["short_strike"] - 203.2 < 5.0,
           f"tine 203.2 → short {_fc['short_strike']}")
+
+    # 🔴 F5b — THE GEOMETRY MUST ACTUALLY ELIMINATE. The fixture above uses
+    # only well-placed tines, so it cannot detect a missing geometry gate: I
+    # removed the gate and every check still passed. A displaced tine — an
+    # "upper" rail sitting BELOW the opening range — must be DECLINED, because
+    # pricing a short call beyond it is an ITM short call, which is the defect
+    # credit_edge recorded weeks ago and which I reproduced.
+    _bad = _CTM([_T("1h", "call", 199.10, 0.05)])  # ceiling BELOW the range low
+    _bp = e._fork({"price": fpx, "chain": _Chain(fcalls, fputs),
+                   "condor_triggers": _bad,
+                   "orb_high": 202.15, "orb_low": 200.60})
+    check("F5b a CEILING below the opening range is eliminated by geometry",
+          len(_bp) == 1 and _bp[0]["verdict"] == "DECLINE"
+          and _bp[0]["checks"].get("geometry", (None, ""))[1] == "FAIL",
+          f"{_bp[0]['verdict']} geometry={_bp[0]['checks'].get('geometry')}")
+
+    # ⚠️ AND NO MAP BEFORE 09:35 — classifying without a marker would be an
+    # accident dressed as a decision.
+    _nr = e._fork({"price": fpx, "chain": _Chain(fcalls, fputs),
+                   "condor_triggers": fctm})
+    check("F5c with no opening range every tine is NO PLAN, not a guess",
+          all(p["verdict"] == "NO PLAN" for p in _nr), f"{len(_nr)} plans")
 
     check("F5 tine slope is recorded — 1h drifts, 1d barely does",
           _fc["checks"]["tine_slope"][0] >
