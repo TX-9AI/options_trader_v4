@@ -192,6 +192,91 @@ def main():
           e._condor(dict(cbase, atr=9.0))["verdict"] == "DECLINE",
           "range_width_atr")
 
+    # ── THE LADDER: ROLL → TENT → CLOSE ─────────────────────────────────
+    rcalls = [_C(k, max(.02, 2.6-(k-200)*.42), max(.06, 2.75-(k-200)*.42))
+              for k in range(190, 226, 5)]
+    rputs = [_C(k, max(.02, 2.6-(196-k)*.42), max(.06, 2.75-(196-k)*.42))
+             for k in range(170, 206, 5)]
+    def _legs(rolled):
+        return [{"is_condor_leg": 1, "status": "open", "option_side": "call",
+                 "short_strike": 205.0, "long_strike": 210.0,
+                 "credit_received": 0.90, "is_broken_wing": rolled},
+                {"is_condor_leg": 1, "status": "open", "option_side": "put",
+                 "short_strike": 190.0, "long_strike": 185.0,
+                 "credit_received": 0.85, "is_broken_wing": rolled}]
+    rbase = {"chain": _Chain(rcalls, rputs), "tent_floor_pct": 0.15}
+
+    # ⚠️ THE ROLL IS RUNG 1 AND IS STRICTLY BETTER — it COLLECTS credit. The
+    # tent is the rung BELOW it, never an alternative. condor_roll.py says so
+    # in its own words and the plan must not invert them.
+    # 🔴 THREE STATES ONLY: ROLL, else HEDGE (tent), else CLOSE. Operator,
+    # 2026-08-25: *"I don't think any of my specs ever advise do nothing."*
+    # A HOLD on a TESTED structure was MINE, not his, and it is gone.
+    # ⚠️ "SHORT OF RISK-FREE" IS NOT A ROLL — the roll's entire purpose is
+    # making the tested side risk-free, and the source refuses to execute one
+    # that does not (`if plan is None or not plan.risk_free: return False`).
+    # So it belongs in the same bucket as no roll at all: fall to the tent.
+    l1 = e._roll(dict(rbase, price=206.0, open_trades=_legs(False)))
+    check("L1 a TESTED structure never answers HOLD — three states only",
+          l1["verdict"] in ("ROLL", "TENT", "CLOSE"),
+          f"{l1['verdict']} rung={l1['checks']['rung'][0]}")
+
+    check("L1b a roll short of risk-free falls THROUGH to the tent, not HOLD",
+          l1["checks"]["rung"][0] == 2.0 or l1["verdict"] == "ROLL",
+          f"rung={l1['checks']['rung'][0]} {l1['verdict']}")
+
+    # ⚠️ THE ONLY LEGITIMATE HOLDS: nothing tested (no adverse move to answer)
+    # and an unmarkable leg (the source calls acting on an unpriced chain the
+    # worst of the three silent declines).
+    _lh = e._roll(dict(rbase, price=197.0, open_trades=_legs(False)))
+    check("L1c an UNTESTED structure may HOLD — nothing has gone wrong yet",
+          _lh["verdict"] == "HOLD", _lh["verdict"])
+
+    # ⚠️ NEVER BUY BACK THE TESTED SHORT. My first draft did exactly that and
+    # the operator caught it: "why would we be buying the tested side???" It is
+    # the most expensive leg on the board, which is why a textbook roll costs
+    # more than closing. The real ladder never does it.
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(_root, "derived", "plans.py"), encoding="utf-8").read()
+    i = src.index("def _roll(")
+    body = "\n".join(l for l in src[i:src.index("# ── the tables", i)].split("\n")
+                      if not l.strip().startswith("#"))
+    # ⚠️ TEST THE PROPERTY, NOT A TOKEN. My first version banned the string
+    # `close_cost` — but close_cost is now a LEGITIMATE field: the cost of
+    # closing the UNTESTED vertical, which is exactly what the roll does. A
+    # check that forbids a word rather than a behaviour is the same error as
+    # a guard that matches its own comment.
+    # THE REAL PROPERTY: whatever the plan proposes to close or re-strike must
+    # be the UNTESTED side. Here the call is tested, so the plan must name the
+    # PUT side as its direction and must not move the call short.
+    # THE REAL PROPERTY: whatever the plan proposes must act on the UNTESTED
+    # side or on a HEDGE — never on the tested short itself.
+    check("L2 the plan never re-strikes the TESTED short",
+          l1.get("short_strike") != 205.0,
+          f"direction={l1.get('direction')} short={l1.get('short_strike')}")
+
+    # ⚠️ PRICED BEFORE IT IS PAID. If the hedge's debit ALONE puts the
+    # structure past the floor, the tent is not built and the position closes.
+    l3 = e._roll(dict(rbase, price=206.0, open_trades=_legs(True)))
+    check("L3 an unaffordable tent CLOSES rather than being bought",
+          l3["verdict"] == "CLOSE" and l3["checks"]["rung"][0] == 2.0,
+          f"{l3['verdict']} at {l3['checks']['cum_credit_after_pct'][0]}%")
+
+    # ⚠️ THE FLOOR MEASURES CUMULATIVE CREDIT, not one leg's original credit —
+    # otherwise a structure can bleed indefinitely one adjustment at a time.
+    check("L4 the floor is measured on CUMULATIVE credit",
+          "cum_credit_after_pct" in l3["checks"],
+          str(l3["checks"]["cum_credit_after_pct"]))
+
+    # ⚠️ THE TENT DEADLINE IS DERIVED FROM THE 15:45 CREDIT FLATTEN, never a
+    # number of its own. An invented cutoff is a SECOND TIME AUTHORITY: at
+    # 15:30 it would advertise a close the exit engine was not going to make.
+    _rsrc = open(os.path.join(_root, "derived", "plans.py"), encoding="utf-8").read()
+    check("L6 the tent's deadline reads VERTICAL_HOLD_TO_ET, not its own clock",
+          "VERTICAL_HOLD_TO_ET" in _rsrc)
+
+
+
     # ── P7: THE TABLES — spine + long-format checks ─────────────────────
     import sqlite3, time as _t
 

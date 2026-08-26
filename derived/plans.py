@@ -770,6 +770,377 @@ class PlanEngine(DerivedEngine):
                        if pending else "")),
         }
 
+    def _roll(self, ctx: dict) -> Optional[dict]:
+        """THE ESCALATION LADDER, made visible: ROLL → TENT → CLOSE.
+
+        🔴 THIS PLAN DESCRIBES CODE THAT ALREADY EXISTS. `strategy/condor_roll.py`
+        v4.5 (r106, 2026-08-24) implements the ladder; NOTHING here changes it.
+        What did not exist is the per-tick answer to "which rung am I on, what
+        would the next rung cost RIGHT NOW, and does it still clear the floor?"
+        — and that is the same gap as everywhere else tonight.
+
+        ⚠️ I NEARLY DESIGNED A DIFFERENT MECHANISM FROM MEMORY. My first draft
+        priced a textbook roll — BUY BACK the tested short, sell a farther one —
+        which the operator caught immediately: *"why would we be buying the
+        tested side???"* Buying back a tested short is the most expensive leg on
+        the board, which is exactly why that roll costs more than closing. The
+        real ladder never does it. Read the file, not the recollection.
+
+        ════════════════════════════════════════════════════════════════════
+        THE THREE RUNGS, FROM condor_roll.py
+        ════════════════════════════════════════════════════════════════════
+        **RUNG 1 — ROLL.** Available while the condor is UNROLLED. It closes the
+        old UNTESTED vertical and opens a farther one, COLLECTING credit. The
+        code says it plainly: the tent "is the rung BELOW the roll, not an
+        alternative to it: an unrolled condor still has the roll available and
+        the roll is strictly better (it collects credit rather than paying a
+        debit)."
+
+        **RUNG 2 — THE TENT.** Only ONCE ROLLED (`is_broken_wing`), and only on
+        a 1-min CLOSE beyond a short strike. Take the PROFITABLE side off —
+        which side is winning is computed from marks, never assumed — and buy a
+        long of the **OPPOSITE TYPE**, equidistant from the remaining short as
+        its wing: `hedge_k = short_k − width` for a call side, `+ width` for a
+        put. That leaves price under the tent.
+
+        **RUNG 3 — CLOSE.** When the tent cannot be built OR cannot be afforded.
+
+        ════════════════════════════════════════════════════════════════════
+        THE ECONOMIC TEST, VERBATIM FROM THE CODE
+        ════════════════════════════════════════════════════════════════════
+            cum_credit  = credit(keep) + credit(breached)
+            net_after   = cum_credit − winner_take − hedge_ask
+            REFUSE if   net_after <= cum_credit × (1 − TENT_FLOOR_PCT)
+
+        ⚠️ **PRICED BEFORE IT IS PAID.** If the hedge's debit ALONE puts the
+        structure past the floor, the tent is not built and the position closes.
+        That ordering is the whole discipline — the alternative is discovering
+        the cost after wearing it.
+
+        ⚠️ **THE FLOOR MEASURES THE WHOLE ADJUSTED POSITION.** The survivor is
+        re-booked as `Structure.TENT` carrying CUMULATIVE credit, so the 15%
+        floor applies to everything collected across the roll and the tent, not
+        to one leg's original credit. Measuring a rung against its own credit
+        alone would let a structure bleed indefinitely one adjustment at a time.
+        """
+        chain = ctx.get("chain")
+        spot = float(ctx.get("price") or 0)
+        if chain is None or spot <= 0:
+            return None
+        legs = [t for t in (ctx.get("open_trades") or [])
+                if t.get("is_condor_leg") and str(t.get("status")) == "open"]
+        if len(legs) != 2:
+            return {"strategy": "CreditRoll", "verdict": "NO PLAN",
+                    "checks": {},
+                    "why": f"{len(legs)} condor leg(s) open — the ladder needs "
+                           f"a two-legged structure"}
+        rolled = any(t.get("is_broken_wing") for t in legs)
+        _no_roll_reason = ""      # set when rung 1 exists but has no room
+
+        def _mark(t):
+            """What it costs to buy this vertical back. None when unmarkable."""
+            pool = {float(getattr(c, "strike", 0) or 0): c
+                    for c in ((getattr(chain, "calls", []) if
+                               t.get("option_side") == "call"
+                               else getattr(chain, "puts", [])) or [])}
+            sh, lo = pool.get(float(t.get("short_strike") or 0)), \
+                     pool.get(float(t.get("long_strike") or 0))
+            if sh is None or lo is None:
+                return None
+            try:
+                return round(float(sh.ask) - float(lo.bid), 2)
+            except Exception:                                   # noqa: BLE001
+                return None
+
+        cum_credit = sum(float(t.get("credit_received")
+                               or t.get("entry_premium") or 0) for t in legs)
+        floor_pct = float(ctx.get("tent_floor_pct") or 0.15)
+
+        # ── which leg is TESTED — proximity, not penetration ─────────────
+        # 🔴 MIRRORS `classify_tested`: "A side is 'tested' when price is
+        # within proximity_strikes of that side's short strike (OR BEYOND
+        # IT)" — `current_price >= short − prox`, prox = one strike increment.
+        # ⚠️ MY FIRST VERSION REQUIRED PENETRATION (`spot >= short`) and the
+        # operator's own scenario caught it: price touching 204.6 against a
+        # 205 short is TESTED by the source and was NOT by mine. That is the
+        # whole point of the rung — you act while price is AT the strike, not
+        # after it has gone through, because through is where the roll stops
+        # being affordable.
+        _PROX = 5.0                      # STRIKE_INCREMENT, as in the source
+        breached = None
+        for t in legs:
+            k = float(t.get("short_strike") or 0)
+            if ((spot >= k - _PROX) if t.get("option_side") == "call"
+                    else (spot <= k + _PROX)):
+                breached = t
+                break
+
+        if breached is None:
+            return {"strategy": "CreditRoll", "verdict": "HOLD",
+                    "checks": {"rung": (1.0 if not rolled else 2.0, "n/a"),
+                               "cum_credit_after_pct": (100.0, "PASS"),
+                               "floor_pct": (floor_pct * 100, "n/a")},
+                    "trigger_price": None, "underlying_at_decision": spot,
+                    "why": (f"neither short is tested — the ladder is armed at "
+                            f"rung {'2 (rolled)' if rolled else '1 (roll)'} and "
+                            f"waiting")}
+
+        # ── RUNG 1: the RISK-FREE ROLL, mirroring find_risk_free_roll ────
+        #
+        # 🔴 **THE TESTED SIDE NEVER MOVES.** Operator, 2026-08-25, and he was
+        # right to demand it in writing before landing: *"confirm to me that
+        # we're rolling the untested side I repeat the tested side stays on the
+        # board."* Verified in condor_roll.py: `untested_side` is "the side we
+        # roll toward price"; `tested_side` is "the threatened side (goes
+        # risk-free)"; step 1 closes the "old UNTESTED vertical".
+        #
+        # THE MECHANISM: roll the CHEAP far-OTM untested vertical TOWARD price,
+        # collecting credit. When cumulative credit covers the tested side's
+        # WIDTH, the tested side can no longer lose money —
+        #
+        #     banked_credit + roll_credit − close_cost  >=  tested_width
+        #
+        # — and the structure is a broken-wing butterfly. The threatened short
+        # is protected by credit taken from the other side, never by buying it
+        # back. Buying back a tested short is the most expensive leg on the
+        # board; that is why the textbook roll costs more than closing, and why
+        # this ladder does not do it.
+        #
+        # ⚠️ SMALLEST ROLL THAT REACHES RISK-FREE, not the largest credit. The
+        # source returns the FIRST risk-free candidate marching toward price —
+        # least new risk on the rolled side. Taking the richest instead would
+        # drag the untested short closer to price for credit nobody needed.
+        if not rolled:
+            u = keep_side = next((t for t in legs if t is not breached), None)
+            if u is None:
+                return None
+            u_side = u.get("option_side")
+            u_pool = {float(getattr(c, "strike", 0) or 0): c
+                      for c in ((getattr(chain, "puts", []) if u_side == "put"
+                                 else getattr(chain, "calls", [])) or [])}
+            u_sh = u_pool.get(float(u.get("short_strike") or 0))
+            u_lo = u_pool.get(float(u.get("long_strike") or 0))
+            t_width = abs(float(breached.get("short_strike") or 0)
+                          - float(breached.get("long_strike") or 0))
+            wing = abs(float(u.get("short_strike") or 0)
+                       - float(u.get("long_strike") or 0))
+            if u_sh is None or u_lo is None:
+                return {"strategy": "CreditRoll", "verdict": "HOLD",
+                        "checks": {"rung": (1.0, "n/a")},
+                        "trigger_price": float(breached.get("short_strike") or 0),
+                        "underlying_at_decision": spot,
+                        "why": (f"no mark for the untested {u_side} vertical — "
+                                f"declining this pass, position left as-is "
+                                f"(the roll's silent-refusal lesson)")}
+            close_cost = max(round(float(u_sh.ask) - float(u_lo.bid), 2), 0.0)
+            inc = 5.0
+            cands, k = [], float(u.get("short_strike") or 0)
+            if u_side == "put":
+                k += inc
+                while k <= spot:
+                    cands.append(k); k += inc
+            else:
+                k -= inc
+                while k >= spot:
+                    cands.append(k); k -= inc
+            best = None
+            for ns_k in cands:
+                nl_k = ns_k - wing if u_side == "put" else ns_k + wing
+                ns, nl = u_pool.get(ns_k), u_pool.get(nl_k)
+                if ns is None or nl is None:
+                    continue
+                try:
+                    rc = round((float(ns.bid) + float(ns.ask)) / 2
+                               - (float(nl.bid) + float(nl.ask)) / 2, 2)
+                except Exception:                               # noqa: BLE001
+                    continue
+                if rc <= 0:
+                    continue
+                after = round(cum_credit + rc - close_cost, 2)
+                cand = (ns_k, nl_k, rc, after, after >= t_width)
+                if best is None or after > best[3]:
+                    best = cand
+                if cand[4]:            # first risk-free wins — smallest roll
+                    best = cand
+                    break
+            # 🔴 NO ROLL AVAILABLE ⇒ FALL THROUGH TO THE TENT, NOT TO CLOSE.
+            # Operator, 2026-08-25: *"If the first roll is off the table, try
+            # inverted with the hedge, if that's off the table (economic or
+            # cutoff entry times), then close it."*
+            # ⚠️ MY FIRST VERSION RETURNED CLOSE HERE and skipped rung 2
+            # entirely. That is the worse error of the two available: it exits
+            # a position that still had a cheaper protective option, and it
+            # does so precisely when price has run far enough that the untested
+            # short has no room left — which is exactly when the hedge matters
+            # most.
+            # 🔴 TWO WAYS RUNG 1 CAN BE OFF THE TABLE, AND BOTH FALL THROUGH.
+            # Operator, 2026-08-25: *"I thought if no roll exists, go inverted
+            # with the hedge. Not 'do nothing' — I don't think any of my specs
+            # ever advise do nothing."*
+            # ⚠️ HIS SPEC HAS THREE STATES: roll, else hedge, else close. I
+            # introduced a fourth (HOLD) and it was mine, not his.
+            # ⚠️ AND "SHORT OF RISK-FREE" IS NOT A ROLL. The roll's ENTIRE
+            # PURPOSE is making the tested side risk-free — the source refuses
+            # to execute one that does not (`if plan is None or not
+            # plan.risk_free: return False`). So a roll that falls short is not
+            # a smaller version of the trade; it is a DIFFERENT and worse one,
+            # and it belongs in the same bucket as no roll at all.
+            if best is None or not best[4]:
+                _no_roll_reason = (
+                    (f"the untested {u_side} short has no room left toward "
+                     f"{spot:.2f}")
+                    if best is None else
+                    (f"the best roll of the untested {u_side} side reaches "
+                     f"${best[3]:.2f} against a tested width of ${t_width:.2f} "
+                     f"— ${t_width - best[3]:.2f} SHORT of risk-free, and a "
+                     f"roll that does not make the tested side risk-free is "
+                     f"not the trade"))
+                rolled = True          # fall through to the tent below
+            else:
+                ns_k, nl_k, rc, after, rf = best
+                checks = {
+                    "rung": (1.0, "n/a"),
+                    "roll_credit": (rc, "PASS" if rc > 0 else "FAIL"),
+                    "close_cost": (close_cost, "n/a"),
+                    "credit_after": (after, "n/a"),
+                    "tested_width": (t_width, "n/a"),
+                    # ⚠️ RISK-FREE means the tested side CANNOT LOSE, not that the
+                    # trade is guaranteed to win. Cumulative credit covers that
+                    # side's width; the rolled side carries the new risk.
+                    "risk_free": (1.0 if rf else 0.0, "PASS" if rf else "FAIL"),
+                }
+                return {
+                    "strategy": "CreditRoll", "direction": u_side, "checks": checks,
+                    "trigger_price": float(breached.get("short_strike") or 0),
+                    "invalidation": float(breached.get("short_strike") or 0),
+                    "short_strike": ns_k if u_side == "call" else None,
+                    "short_put_strike": ns_k if u_side == "put" else None,
+                    "underlying_at_decision": spot, "credit": rc,
+                    "verdict": "ROLL",
+                    "why": (f"the {breached.get('option_side')} short "
+                        f"{float(breached.get('short_strike') or 0):.2f} is TESTED "
+                        f"and STAYS ON THE BOARD; roll the UNTESTED {u_side} "
+                        f"{float(u.get('short_strike') or 0):.0f}/"
+                        f"{float(u.get('long_strike') or 0):.0f} → "
+                        f"{ns_k:.0f}/{nl_k:.0f} toward price for ${rc:.2f} "
+                        f"(closing the old costs ${close_cost:.2f}); cumulative "
+                        f"${cum_credit:.2f} → ${after:.2f} against a tested "
+                        f"width of ${t_width:.2f}"
+                        + " — TESTED SIDE GOES RISK-FREE"),
+                }
+
+        # ── RUNG 2: rolled already ⇒ price the TENT before paying for it ──
+        keep = next(t for t in legs if t is not breached)
+        v_keep, v_breach = _mark(keep), _mark(breached)
+        if v_keep is None or v_breach is None:
+            return {"strategy": "CreditRoll", "verdict": "HOLD",
+                    "checks": {"rung": (2.0, "n/a"),
+                               "floor_pct": (floor_pct * 100, "n/a")},
+                    "trigger_price": float(breached.get("short_strike") or 0),
+                    "underlying_at_decision": spot,
+                    "why": "a leg has no mark — declining this pass and leaving "
+                           "the position as-is (the roll's silent-refusal lesson)"}
+
+        c_keep = float(keep.get("credit_received") or keep.get("entry_premium") or 0)
+        c_br = float(breached.get("credit_received")
+                     or breached.get("entry_premium") or 0)
+        p_keep, p_br = c_keep - v_keep, c_br - v_breach
+        winner, loser = ((keep, breached) if p_keep >= p_br else (breached, keep))
+        winner_take = _mark(winner) or 0.0
+
+        side = loser.get("option_side")
+        short_k = float(loser.get("short_strike") or 0)
+        width = abs(short_k - float(loser.get("long_strike") or 0))
+        hedge_k = short_k - width if side == "call" else short_k + width
+        # ⚠️ OPPOSITE TYPE. A long PUT hedges a call side, a long CALL hedges a
+        # put side — the operator's own construction, and the code's.
+        hpool = {float(getattr(c, "strike", 0) or 0): c
+                 for c in ((getattr(chain, "puts", []) if side == "call"
+                            else getattr(chain, "calls", [])) or [])}
+        hedge = hpool.get(hedge_k)
+        hedge_ask = float(getattr(hedge, "ask", 0) or 0) if hedge else 0.0
+        net_after = round(cum_credit - winner_take - hedge_ask, 2)
+        pct = (net_after / cum_credit * 100.0) if cum_credit else 0.0
+        affordable = hedge_ask > 0 and net_after > cum_credit * (1 - floor_pct)
+
+        # ⚠️ THE CUTOFF IS THE CREDIT FLATTEN, NOT A NUMBER I CHOSE.
+        # Operator: the tent is off the table on "economic OR CUTOFF ENTRY
+        # TIMES". My first version invented a 20-minute prior — and he
+        # corrected the premise it rested on: *"We have a 1545 credit
+        # flatten."* `VERTICAL_HOLD_TO_ET = (15, 45)` and exit_engine closes
+        # credit verticals there.
+        # 🔴 SO AN INVENTED CUTOFF WAS WORSE THAN REDUNDANT — IT WAS A SECOND
+        # TIME AUTHORITY. At 15:30 it would have returned CLOSE while the exit
+        # engine intended to hold to 15:45, so the plan would advertise a close
+        # the system was not going to perform. Two clocks disagreeing about the
+        # same position is the failure class that costs a session to diagnose.
+        # The tent's deadline is DERIVED from the flatten: buying a hedge with
+        # minutes left before the position is closed anyway is paying a debit
+        # for cover that expires with it.
+        from config import VERTICAL_HOLD_TO_ET
+        _flat_min = VERTICAL_HOLD_TO_ET[0] * 60 + VERTICAL_HOLD_TO_ET[1]
+        _now = ctx.get("now_et_minutes")
+        mins = (float(_flat_min - _now) if _now is not None
+                else float(ctx.get("minutes_to_flatten") or 999))
+        # ⟨PRIOR⟩ the hedge needs SOME life to be worth its debit; 15 min is
+        # stated, not fitted, and it is measured against the FLATTEN.
+        _TENT_MIN_MINUTES = 15.0
+        in_window = mins >= _TENT_MIN_MINUTES
+        checks = {
+            "rung": (2.0, "n/a"),
+            "roll_room": (0.0 if _no_roll_reason else 1.0,
+                          "FAIL" if _no_roll_reason else "PASS"),
+            "tent_hedge_cost": ((hedge_ask, "PASS" if hedge_ask > 0 else "FAIL")
+                                if hedge is not None else None),
+            "cum_credit_after_pct": (round(pct, 1),
+                                     "PASS" if affordable else "FAIL"),
+            "floor_pct": (floor_pct * 100, "n/a"),
+            "winner_side_profit": (round(max(p_keep, p_br), 2), "n/a"),
+            # minutes to the 15:45 CREDIT FLATTEN, not to the bell
+            "minutes_to_close": (mins, "PASS" if in_window else "FAIL"),
+        }
+        if not in_window:
+            return {
+                "strategy": "CreditRoll", "direction": side, "checks": checks,
+                "trigger_price": short_k, "underlying_at_decision": spot,
+                "verdict": "CLOSE",
+                "why": (f"only {mins:.0f} min to the 15:45 CREDIT FLATTEN — "
+                        f"inside the tent's ⟨PRIOR⟩ {_TENT_MIN_MINUTES:.0f}-min "
+                        f"deadline. A hedge is a DEBIT bought for cover that "
+                        f"expires with a position the exit engine is about to "
+                        f"flatten anyway"
+                        + (f". {_no_roll_reason}" if _no_roll_reason else "")),
+            }
+        if not affordable:
+            return {
+                "strategy": "CreditRoll", "direction": side, "checks": checks,
+                "trigger_price": short_k, "underlying_at_decision": spot,
+                "verdict": "CLOSE",
+                "why": ((f"no priced {'put' if side == 'call' else 'call'} hedge "
+                         f"at {hedge_k:.2f} — a tent that cannot be built is a "
+                         f"close") if hedge is None or hedge_ask <= 0 else
+                        (f"the hedge at {hedge_k:.2f} costs ${hedge_ask:.2f}; "
+                         f"that ALONE puts the structure at {pct:.1f}% of "
+                         f"cumulative credit ${cum_credit:.2f}, past the "
+                         f"{floor_pct*100:.0f}% floor. NOT BUYING IT — closing")
+                        + (f". {_no_roll_reason}" if _no_roll_reason else "")),
+            }
+        return {
+            "strategy": "CreditRoll", "direction": side, "checks": checks,
+            "trigger_price": short_k, "underlying_at_decision": spot,
+            "short_strike": hedge_k,
+            "verdict": "TENT",
+            "why": (f"keep the {side} {short_k:.0f}/{float(loser.get('long_strike') or 0):.0f}, "
+                    f"take the {winner.get('option_side')} side off at "
+                    f"${winner_take:.2f}, hedge LONG "
+                    f"{'put' if side == 'call' else 'call'} {hedge_k:.2f} at "
+                    f"${hedge_ask:.2f} — cumulative credit ${cum_credit:.2f} → "
+                    f"${net_after:.2f} ({pct:.1f}%), clears the "
+                    f"{floor_pct*100:.0f}% floor"
+                    + (f" — reached because {_no_roll_reason}"
+                       if _no_roll_reason else "")),
+        }
+
     # ── the tables ──────────────────────────────────────────────────────
     # 🔴 r126b — TWO TABLES, AND THE SPLIT IS THE WHOLE DESIGN.
     #
@@ -836,6 +1207,15 @@ class PlanEngine(DerivedEngine):
         # that is half on is a real state and it now has a row.
         "IronCondor":         ("r", "call_side_ready", "put_side_ready",
                                "leg2_pending", "range_width_atr"),
+        # 🔴 r131 — THE ROLL. Operator: "we are already trying to find the
+        # farthest strike that satisfies the economical question & that is
+        # worthy of a tick by tick plan." Its verdict is THREE-WAY —
+        # ROLL / CLOSE / HOLD — because "get out" is an answer, not a refusal.
+        "CreditRoll":         ("rung", "roll_room", "roll_credit", "close_cost",
+                               "credit_after", "tested_width", "risk_free",
+                               "tent_hedge_cost", "cum_credit_after_pct",
+                               "floor_pct", "winner_side_profit",
+                               "minutes_to_close"),
     }
 
     def _ensure(self):
@@ -928,7 +1308,7 @@ class PlanEngine(DerivedEngine):
     def derive(self, ctx: dict) -> int:
         plans = []
         for fn in (self._butterfly, self._participation, self._sweep,
-                   self._runaway, self._condor):
+                   self._runaway, self._condor, self._roll):
             try:
                 p = fn(ctx)
             except Exception as exc:                            # noqa: BLE001
