@@ -1697,7 +1697,10 @@ class PlanEngine(DerivedEngine):
                      p.get("direction") or ""))
                 n += 1
             except Exception as exc:                            # noqa: BLE001
-                logger.debug("plan_tick write: %s", exc)
+                # ⚠️ WARNING — a row that fails to write is data lost, and
+                # r133 spent three query rounds on exactly this kind of silence.
+                logger.warning("plan_tick write FAILED for %s: %s: %s",
+                               p.get("strategy"), type(exc).__name__, exc)
                 continue
             # ── the checks THIS plan owns, one row each ──────────────────
             for name in self.CHECKS.get(p.get("strategy"), ()):
@@ -1727,6 +1730,15 @@ class PlanEngine(DerivedEngine):
         return n
 
     # ── the board ───────────────────────────────────────────────────────
+    # Builder -> the strategy name its rows carry, so a RAISED builder still
+    # files under the name a reader would look for.
+    _PLAN_NAME_BY_FN = {
+        "_butterfly": "GEXPinButterfly", "_participation": "TrendParticipation",
+        "_sweep": "SweepCreditSpread", "_runaway": "RunawayContinuation",
+        "_condor": "IronCondor", "_roll": "CreditRoll",
+        "_fork": "ForkCreditSpread",
+    }
+
     def derive(self, ctx: dict) -> int:
         plans = []
         for fn in (self._butterfly, self._participation, self._sweep,
@@ -1734,8 +1746,23 @@ class PlanEngine(DerivedEngine):
             try:
                 p = fn(ctx)
             except Exception as exc:                            # noqa: BLE001
-                logger.debug("[plans] %s failed: %s", fn.__name__, exc)
-                p = None
+                # 🔴 WARNING, NOT DEBUG, AND IT WRITES A ROW (r136).
+                # ⚠️ THIS LINE COST A FULL DAY. IronCondor produced no row AND
+                # no INFO line for an entire session — the only shape that fits
+                # is a raise here — while this handler whispered at DEBUG into a
+                # journal handler set to INFO. So the exception was logged
+                # nowhere, the plan was absent from the table, and three
+                # separate queries (plan_tick, journalctl, logs/) all came back
+                # empty in a way that looked like "the builder does not exist".
+                # ⚠️ AND A LOG LINE IS NOT ENOUGH — the TABLE must carry it too,
+                # or the failure is invisible to anyone reading the data rather
+                # than the journal. Same rule as r134's starved rows.
+                logger.warning("[plans] %s RAISED: %s: %s — this plan is "
+                               "absent this tick", fn.__name__,
+                               type(exc).__name__, exc)
+                p = [{"strategy": self._PLAN_NAME_BY_FN.get(fn.__name__, fn.__name__),
+                      "verdict": "NO PLAN", "checks": {},
+                      "why": (f"builder RAISED {type(exc).__name__}: {exc}")}]
             if isinstance(p, list):
                 # ⚠️ ONE BUILDER, MANY PLANS. The fork emits one per available
                 # timeframe; flattening here keeps every other builder's

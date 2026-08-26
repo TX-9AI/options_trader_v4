@@ -135,6 +135,23 @@ def main():
     check("X4 no builder returns None from an except — every failure speaks",
           not silent, ", ".join(silent) or "none")
 
+    # ── 🔴 X5 — A RAISING BUILDER MUST BE LOUD AND MUST LEAVE A ROW ──────
+    # ⚠️ IronCondor produced NO row and NO INFO line for a whole session. The
+    # only shape that fits is a raise in derive()'s handler — which logged at
+    # DEBUG into a journal handler set to INFO, so the exception appeared
+    # NOWHERE. plan_tick, journalctl and logs/ all came back empty in a way
+    # that looked exactly like "this builder does not exist".
+    import ast as _a
+    _d = next(n for n in _a.walk(tree)
+              if isinstance(n, _a.FunctionDef) and n.name == "derive")
+    _du = _a.unparse(_d)
+    check("X5 derive() logs a raising builder at WARNING, not DEBUG",
+          "logger.warning" in _du and "logger.debug" not in _du)
+
+    check("X6 a raising builder still yields a plan row",
+          "verdict': 'NO PLAN'" in _du or '"verdict": "NO PLAN"' in _du,
+          "raise -> NO PLAN row")
+
     print()
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))
