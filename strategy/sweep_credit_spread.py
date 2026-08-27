@@ -127,7 +127,7 @@ import config
 from strategy import relaxed
 from strategy import credit_vertical as cv     # r97 — shared spread math
 from strategy.base_strategy import OptionsSignal as Signal
-from strategy.criteria import stop_survivable
+from strategy.criteria import stop_survivable, R_FLOOR
 from strategy.plan import Plan, _n
 from utils.math_utils import safe_float
 
@@ -505,7 +505,7 @@ class SweepCreditSpreadStrategy:
                    "rejection", "pierce_depth", "boundary", "side_of_pool",
                    "entry_window", "atr_pct", "geometry", "short_anchor",
                    "contract", "wing", "credit", "width", "risk",
-                   "stop_vs_spread", "r")
+                   "stop_vs_spread", "wing_r_best", "r")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
@@ -772,17 +772,73 @@ class SweepCreditSpreadStrategy:
 
         _long_strike = (_short.strike - WING_WIDTH if side == "put"
                         else _short.strike + WING_WIDTH)
-        _long = cv.find_contract_at_strike(_contracts, _long_strike)
-        if _long is None or _long.strike == _short.strike:
-            logger.info("[sweep_cs] no protective wing at %.2f - SKIP "
-                        "(undefined risk is never sold)", _long_strike)
-            return t.refuse("wing", f"no protective wing at {_long_strike:.2f} "
-                                    f"(undefined risk is never sold)")
+        # ── 🔴 r156 — THE WING IS SEARCHED, NOT ASSUMED. R IS THE TARGET. ────
+        # Operator, 2026-08-27: *"strike selection must net r of 1 or better"*
+        # and *"the integrity of the trade mechanics comes first."*
+        #
+        # ⚠️ WHAT THIS REPLACES: a single wing at `WING_WIDTH = 5.0`, a FIXED
+        # DOLLAR AMOUNT — one strike increment on SPX and SIX on CVX. That is
+        # how a 6-wide spread collecting $0.58 (R 0.13) looked normal to the
+        # code. R was then checked AFTER the fact and, under relaxed, muted.
+        #
+        # ⚠️ R IS NOW A CONSTRUCTION TARGET, NOT A FILTER. The short strike is
+        # STRUCTURAL — it comes from the level and never moves. The wing is the
+        # only free variable, and the tradeoff is monotonic: narrower wing ->
+        # less credit, less risk, HIGHER R. So there is a computable answer to
+        # "the narrowest wing that clears the floor", or a definite "none does".
+        #
+        # ⚠️ AND IT IS NOT MUTED BY RELAXED. Operator: *"make the r-value a
+        # requirement outright... and relax something else to loosen the
+        # entry."* Relaxed continues to widen the EVIDENCE dials it always did
+        # (sweep_max_age_bars, sweep_pierce_ceiling, level_hold_min); it no
+        # longer waives the economics. `R_FLOOR` is read directly here rather
+        # than through `r_hurdle()`, which returns None under relaxed.
+        #
+        # ⚠️ WIDEST-FIRST, TAKE THE BEST R. Every listed strike beyond the short
+        # is a candidate; each is priced on bid/ask and scored. The chosen wing
+        # is the one with the highest R that clears the floor — not merely the
+        # first that does — because a wider wing sometimes pays enough more
+        # credit to beat a narrow one on ratio.
+        _cands = []
+        for _c in (_contracts or []):
+            try:
+                _k = float(getattr(_c, "strike", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if _k <= 0 or _k == _short.strike:
+                continue
+            # the wing sits BEYOND the short: below it for a put, above for a call
+            if side == "put" and _k >= _short.strike:
+                continue
+            if side == "call" and _k <= _short.strike:
+                continue
+            _w = abs(_short.strike - _k)
+            _cr = max(0.0, (getattr(_short, "bid", 0.0) or 0.0)
+                      - (getattr(_c, "ask", 0.0) or 0.0))
+            _rk = _w - _cr
+            if _cr <= 0 or _rk <= 0:
+                continue
+            _cands.append((round(_cr / _rk, 4), _c, _cr, _w))
+        if not _cands:
+            return t.refuse("wing", f"no priceable protective wing beyond "
+                                    f"{_short.strike:.2f} (undefined risk is "
+                                    f"never sold)")
+        _cands.sort(key=lambda x: -x[0])
+        _best_r, _long, _credit, _bw = _cands[0]
+        t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
+        if _best_r < R_FLOOR:
+            # ⚠️ NO WING CLEARS THE FLOOR ⇒ NO TRADE, IN EITHER MODE. An OTM
+            # credit spread reaches R 1.0 only when the credit is at least half
+            # the width; if the widest and narrowest wings both fall short, the
+            # short strike is simply too far out to pay for its own risk today.
+            return t.refuse("wing_r_best",
+                            f"no wing clears R {R_FLOOR:.2f} — best is "
+                            f"{_best_r:.2f} at {_long.strike:.2f} "
+                            f"({_bw:.2f} wide, credit ${_credit:.2f}). The "
+                            f"short strike cannot pay for its own risk; this "
+                            f"is structure, not selection, so relaxed does not "
+                            f"waive it")
         t.check("wing", _long.strike, True)
-
-        # bid/ask, never mark: the credit has to be one the market would pay.
-        _credit = max(0.0, (getattr(_short, "bid", 0.0) or 0.0)
-                      - (getattr(_long, "ask", 0.0) or 0.0))
         # ── THE WHAT-IF, priced off the spread THIS spec chose ───────────
         t.credit_spread(_short.strike, _long.strike, _credit,
                         invalidation=pool, trigger=pool)
