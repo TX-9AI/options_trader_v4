@@ -200,9 +200,10 @@ def runaway_confirmed(orb, price_now: float, prev_close: float,
     # the open (AMZN CRM CVX GOOGL META NFLX PLTR TSLA) and every one declined
     # here. r148 unblocked the direction lookup two lines up and this refused
     # them at the very next gate — the SAME defect twice in one function.
-    tp50 = (getattr(orb, "target_50pct", None)
-            or getattr(orb, "tp50", None)
-            or getattr(orb, "underlying_tp50", None))
+    # ⚠️ NO FALLBACK NAMES. `tp50`/`underlying_tp50` exist on NOTHING; keeping
+    # them as a chain leaves the ghost in the file for the next reader to copy,
+    # and check_attr_fidelity flags them. One name, the real one.
+    tp50 = getattr(orb, "target_50pct", None)
     if not tp50 or not prev_close or not price_now:
         return False
     if direction == "long":
@@ -310,9 +311,7 @@ class RunawayContinuationStrategy:
         t.check("orb_direction", 1.0 if direction == "long" else -1.0, True)
 
         # ── 4. the runaway itself ────────────────────────────────────────────
-        tp50 = (getattr(orb, "target_50pct", None)      # r149 — the real field
-                    or getattr(orb, "tp50", None)
-                    or getattr(orb, "underlying_tp50", None))
+        tp50 = getattr(orb, "target_50pct", None)   # the only name that exists
         boundary = (getattr(orb, "orb_high", None) if direction == "long"
                     else getattr(orb, "orb_low", None))
         t.anchor(trigger=tp50, invalidation=boundary)

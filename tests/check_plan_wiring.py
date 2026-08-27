@@ -221,7 +221,12 @@ def main():
 
     class _ORB:
         state = "OPEN_LONG"
-        orb_high, orb_low, tp50 = 101.0, 100.0, 101.5
+        # ⚠️ `target_50pct` — the field the REAL ORBData declares. This double
+        # carried `tp50`, a name that exists on nothing, and the strategy
+        # read the same ghost — so these checks were GREEN while the gate
+        # they exercise refused every runaway on the fleet. A fixture must
+        # match the real class, not the caller's assumption.
+        orb_high, orb_low, target_50pct = 101.0, 100.0, 101.5
         invalidation_reason = "runaway"
 
     class _C:
