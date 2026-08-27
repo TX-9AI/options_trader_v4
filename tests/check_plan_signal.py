@@ -108,7 +108,6 @@ def main():
     # "09:40 ET is before..." and "09:41 ET is before..." are different strings.
     for rel in ("strategy/trend_credit_spread.py",
                 "strategy/iron_condor_strategy.py",
-                "strategy/daily_fork_credit_spread.py",
                 "strategy/gex_pin_butterfly.py",
                 "strategy/sweep_credit_spread.py"):      # r161: the sweep is dormant too
         s = open(os.path.join(_root, rel), encoding="utf-8").read()

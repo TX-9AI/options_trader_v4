@@ -1,5 +1,31 @@
 """
-analysis/liquidity_mapper.py  v4.1
+analysis/liquidity_mapper.py  v4.2
+v4.2  2026-08-27  r163 — THE FORK'S TINES ARE MOVING LIQUIDITY LEVELS, AND A
+      TOUCH IS THEIR EVENT. Operator, 2026-08-27: *"it's basically a moving
+      level that sweep is allowed to use, but with a touch, not a reject. The
+      plan would still need to select a strike beyond the move that caused
+      the touch."* And: *"a moving target liquidity mapper but with the
+      elements of slope and time."*
+      · `LiquidityPool` gains `moving`, `slope_per_min`, `as_of` — a tine is a
+        named pool whose price is a function of TIME: `price_at(ts)` =
+        price − slope·(minutes to now). PDH/PDL have slope 0 and are unchanged.
+      · `LiquiditySweep` gains `touch` (the event was a TOUCH, not a reclaim)
+        and `moving`, so consumers can key a spent lock by NAME rather than by
+        a price that drifts every bar.
+      · `publish_tines(lmap, ctm, df_1m)` — called at the assembly point after
+        the condor trigger map is built: each active rail ("1h upper tine",
+        "1d lower tine") becomes a moving named pool, and `_detect_touches`
+        walks the last TOUCH_LOOKBACK_BARS 1m bars evaluating the rail WHERE
+        IT WAS ON EACH BAR (slope × bars back), not where it is now. A bar
+        whose high reaches the upper rail(t) (low reaches the lower) is a
+        touch; the event is born READY (`reclaimed=True` — the touch IS the
+        trigger); `sweep_price` is the EXTREME of the touching move so the
+        plan selects the short strike beyond it; ACCEPT_CLOSES closes beyond
+        rail(t) since the first touch INVALIDATE it (a tine that is broken
+        is not a tine). Emitted as a `LiquiditySweep` with kind high_sweep /
+        low_sweep so `boundary_from_sweep` and the sweep's plan need no
+        special case. The tine's per-tick position also lands on the map as
+        a pool, so the session map's geometry ruling applies to it.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -189,6 +215,7 @@ LIQ.6 (2026-08-15) — A WHOLESALE CHANGE TO WHAT A NAMED POOL IS.
 """
 
 import logging
+import time
 import os as _os
 import re
 from dataclasses import dataclass, field
@@ -219,6 +246,16 @@ class LiquidityPool:
     # Named pools carry extra confluence weight
     name:           str    = ""         # e.g. "PDH", "PDL", "Asia High", "London Low"
     is_named:       bool   = False      # True for PDH/PDL/session levels
+    # v4.2 — a MOVING level (a fork tine): price is a function of time
+    moving:         bool   = False
+    slope_per_min:  float  = 0.0        # signed price drift per WALL minute
+    as_of:          float  = 0.0        # epoch of `price`
+
+    def price_at(self, ts_epoch: float) -> float:
+        """The level where it WAS at `ts_epoch`. A fixed pool returns itself."""
+        if not self.moving or not self.as_of:
+            return self.price
+        return self.price - self.slope_per_min * ((self.as_of - float(ts_epoch)) / 60.0)
 
 
 @dataclass
@@ -250,6 +287,9 @@ class LiquiditySweep:
     # holding?". The fields below carry what a RUNNING invalidation test needs.
     invalidated:    bool    = False     # LIQ.3: price has since ACCEPTED beyond
     closes_beyond_live: int = 0         # LIQ.3: closes beyond SINCE the sweep
+    # v4.2 — a TOUCH of a MOVING level (a fork tine): born ready, no reclaim
+    touch:          bool    = False
+    moving:         bool    = False
 
 
 @dataclass
@@ -955,6 +995,129 @@ class LiquidityMapper:
 
 
 _liquidity_mapper: Optional[LiquidityMapper] = None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# v4.2 — TINES AS MOVING LIQUIDITY LEVELS; A TOUCH IS THE EVENT
+# ══════════════════════════════════════════════════════════════════════════
+TOUCH_LOOKBACK_BARS = 30        # 1m bars searched for a touch (SELECTION)
+_TF_MINUTES_WALL = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "1d": 390}
+
+
+def _rail_slope_per_min(slope_per_bar: float, tf: str) -> float:
+    return float(slope_per_bar or 0.0) / float(_TF_MINUTES_WALL.get(tf, 60))
+
+
+def publish_tines(lmap: LiquidityMap, ctm, df_1m) -> int:
+    """Put every active fork tine on the liquidity map as a MOVING named pool
+    and detect TOUCHES of it on the 1m tape. Returns the number of touch
+    events emitted. Never raises.
+
+    ⚠️ THE RAIL IS EVALUATED WHERE IT WAS ON EACH BAR. `price_at(bar_ts)`
+    walks the slope back in wall minutes; a bar that would reach today's
+    value of the rail but did not reach the rail as it stood then is NOT a
+    touch. That is the "slope and time" the operator named.
+    """
+    try:
+        if lmap is None or ctm is None:
+            return 0
+        rails = list(ctm.all_rails())
+    except Exception:                                          # noqa: BLE001
+        return 0
+    if not rails:
+        return 0
+    try:
+        now_ts = float(df_1m.index[-1].timestamp()) if df_1m is not None and len(df_1m) else time.time()
+    except Exception:                                          # noqa: BLE001
+        now_ts = time.time()
+    emitted = 0
+    # drop yesterday's tine pools/touches before re-publishing this tick's
+    lmap.pools = [p for p in lmap.pools if not getattr(p, "moving", False)]
+    lmap.sweeps = [sw for sw in lmap.sweeps if not getattr(sw, "moving", False)]
+    for r in rails:
+        try:
+            tf = str(getattr(r, "tf", "") or "")
+            side = str(getattr(r, "side", "") or "")
+            rail = float(getattr(r, "rail", 0.0) or 0.0)
+            slope = _rail_slope_per_min(getattr(r, "slope", 0.0), tf)
+        except Exception:                                      # noqa: BLE001
+            continue
+        if rail <= 0 or side not in ("call", "put"):
+            continue
+        kind = "high" if side == "call" else "low"
+        name = f"{tf} {'upper' if side == 'call' else 'lower'} tine"
+        pool = LiquidityPool(price=round(rail, 4), kind=kind, timeframe=tf,
+                             name=name, is_named=True, moving=True,
+                             slope_per_min=slope, as_of=now_ts)
+        lmap.pools.append(pool)
+        ev = _detect_touch(pool, df_1m, now_ts)
+        if ev is not None:
+            lmap.sweeps.append(ev)
+            emitted += 1
+            if lmap.recent_sweep is None or ev.bars_ago < getattr(lmap.recent_sweep, "bars_ago", 999):
+                lmap.recent_sweep = ev
+    return emitted
+
+
+def _detect_touch(pool: LiquidityPool, df_1m, now_ts: float) -> Optional[LiquiditySweep]:
+    """A TOUCH of a moving level on the last TOUCH_LOOKBACK_BARS 1m bars.
+
+    upper tine: a bar's HIGH >= rail(t)  ·  lower tine: a bar's LOW <= rail(t)
+    sweep_price = the EXTREME of the touching move (the strike goes beyond it)
+    invalidated = ACCEPT_CLOSES closes beyond rail(t) since the FIRST touch
+    bars_ago    = bars since the LAST touch
+    """
+    try:
+        if df_1m is None or len(df_1m) < 2:
+            return None
+        df = df_1m.tail(TOUCH_LOOKBACK_BARS)
+        highs = df["high"].astype(float).tolist()
+        lows = df["low"].astype(float).tolist()
+        closes = df["close"].astype(float).tolist()
+        stamps = [float(t.timestamp()) for t in df.index]
+    except Exception:                                          # noqa: BLE001
+        return None
+    upper = pool.kind == "high"
+    first = last = -1
+    extreme = None
+    beyond = 0
+    for i, ts in enumerate(stamps):
+        lvl = pool.price_at(ts)
+        hit = highs[i] >= lvl if upper else lows[i] <= lvl
+        if hit:
+            if first < 0:
+                first = i
+            last = i
+            ex = highs[i] if upper else lows[i]
+            extreme = ex if extreme is None else (max(extreme, ex) if upper else min(extreme, ex))
+        if first >= 0:
+            if (closes[i] > lvl) if upper else (closes[i] < lvl):
+                beyond += 1
+    if first < 0:
+        return None
+    n = len(stamps)
+    level_now = pool.price
+    px = closes[-1] or level_now
+    pierce = abs(float(extreme) - level_now) / px if px else 0.0
+    return LiquiditySweep(
+        pool_price=round(level_now, 4),
+        sweep_price=round(float(extreme), 4),
+        kind="high_sweep" if upper else "low_sweep",
+        rejection_candles=0,
+        rejection_pct=round(pierce, 6),
+        confirmed=True,
+        bar_index=first,
+        reclaim_bar_index=last,
+        bars_ago=(n - 1) - last,
+        timeframe=pool.timeframe,
+        swept_named_level=pool.name,
+        reclaimed=True,                 # the TOUCH is the trigger
+        closes_beyond=0,
+        invalidated=beyond >= _ACCEPT_CLOSES,
+        closes_beyond_live=beyond,
+        touch=True,
+        moving=True,
+    )
 
 
 def get_liquidity_mapper() -> LiquidityMapper:

@@ -1,5 +1,8 @@
 """
-database/trade_logger.py  v4.4
+database/trade_logger.py  v4.5
+v4.5  2026-08-27  r163: the spent-level lock for a stopped-out trade on a
+      MOVING level (a fork tine) is keyed by the level's NAME, not its
+      drifting price — the sweep plan reads the same key.
 v4.4  2026-08-24  r103: orb_entry_since() — did an ORB trade actually open at or
       after a confirming bar? The adjudicator for fired-vs-missed, so a MISSED
       row is never written for a setup a prior process took and recorded.
@@ -647,6 +650,12 @@ class TradeLogger:
                     _pool = self._get_field(trade_id, "pool_price")
                     _side = self._get_field(trade_id, "option_side") or ""
                     _sym  = self._get_field(trade_id, "symbol") or ""
+                    # r163 — a MOVING level (a fork tine) is keyed by NAME, since
+                    # its price drifts every bar; the sweep plan reads the same key.
+                    _lvl_name = self._get_field(trade_id, "swept_level_name") or ""
+                    if "tine" in _lvl_name:
+                        from strategy.sweep_credit_spread import _name_key
+                        _pool = _name_key(_lvl_name)
                     if _pool:
                         from strategy.sweep_credit_spread import mark_spent
                         mark_spent(_sym, _side, float(_pool),

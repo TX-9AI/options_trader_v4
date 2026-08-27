@@ -1,5 +1,21 @@
 """
-strategy/sweep_credit_spread.py  v4.6
+strategy/sweep_credit_spread.py  v4.7
+v4.7  2026-08-27  r163 — A FORK TINE IS A MOVING LEVEL THIS STRATEGY MAY USE,
+      ON A TOUCH. Operator, 2026-08-27: *"it's basically a moving level that
+      sweep is allowed to use, but with a touch, not a reject. The plan would
+      still need to select a strike beyond the move that caused the touch."*
+      And: *"it's allowed to be the 1st leg of a condor too, but again as a
+      touch not identical to sweep which requires rejection."*
+      The mapper (liquidity_mapper v4.2) publishes each tine as a moving
+      named pool and emits a TOUCH event shaped like a sweep (born ready,
+      `touch=True`, `sweep_price` = the extreme of the touching move). This
+      plan treats it as any other sweep EXCEPT: (1) under the condor's
+      AUTHORIZATION (leg two) a touch is NEVER selected — leg two requires a
+      rejection at the site; (2) the spent-level lock is keyed by NAME for a
+      moving level, since its price drifts every bar; (3) the signal's
+      `condor_trigger_source` is `{tf}_fork`, so a tine-touch leg one is
+      classed as a fork under Rule 4. The daily-fork strategy is retired —
+      its whole job is now the mapper's publication plus this plan.
 v4.6  2026-08-27  r160 — THE PLAN PREPARES, THE STRATEGY EXECUTES WITH THE
       PLAN'S VARIABLES. Operator, 2026-08-27, read back and confirmed: the
       plan "evaluates the current tick what would need to be true on the
@@ -612,7 +628,8 @@ class SweepCreditSpreadStrategy:
     # reports (current, required, met). Thresholds are this file's GATES.
     CONDITIONS = {
         "named":        "the swept level is a NAMED pool",
-        "reclaimed":    "a bar has CLOSED back inside the pool (a wick is a touch)",
+        "reclaimed":    "a bar has CLOSED back inside the pool (a wick is a touch) — "
+                        "or the level is a MOVING tine, whose TOUCH is the trigger",
         "invalidated":  "price has NOT accepted through it after the reclaim",
         "age":          f"reclaimed within MAX_AGE_BARS ({MAX_AGE_BARS}; relaxed x3)",
         "rejection":    f"rejection >= {MIN_REJECTION_PCT*100:.3f}%",
@@ -657,10 +674,15 @@ class SweepCreditSpreadStrategy:
         # PREPARE; the strategy's conditions decide whether it FIRES.
         sweep = None
         if required_side:
+            # ⚠️ LEG TWO REQUIRES A REJECTION AT THE SITE. A tine TOUCH is not
+            # one (operator, 2026-08-27), so touch events are never selected
+            # here — only a real sweep of the authorized side.
             want_kind = "low_sweep" if required_side == "put" else "high_sweep"
             best = None
             for sw in (getattr(liq_map, "sweeps", None) or []):
                 if str(getattr(sw, "kind", "") or "") != want_kind:
+                    continue
+                if getattr(sw, "touch", False):
                     continue
                 if best is None or (getattr(sw, "bars_ago", 999) < getattr(best, "bars_ago", 999)):
                     best = sw
@@ -678,7 +700,8 @@ class SweepCreditSpreadStrategy:
                    f"liquidity map to prepare — waiting for a named pool to be swept")
             return prep
         prep.sweep = sweep
-        t.check("sweep", 1.0, True)
+        _touch = bool(getattr(sweep, "touch", False))
+        t.check("sweep", 2.0 if _touch else 1.0, True)   # 2 = a tine TOUCH
 
         # ── the declared conditions, each with its current reading ─────────
         name = str(getattr(sweep, "swept_named_level", "") or "")
@@ -719,7 +742,9 @@ class SweepCreditSpreadStrategy:
                   _atr is None or _atr <= ATR_MAX_PCT)
 
         # ── structural: untradeable regardless of the trigger ─────────────
-        _spent, _spent_why = is_spent(_symbol_of(), side, pool)
+        # a moving level's price drifts every bar: the lock is keyed by NAME
+        _spent, _spent_why = is_spent(_symbol_of(), side,
+                                      pool if not _touch else _name_key(name))
         t.check("spent_level", 1.0 if _spent else 0.0, not _spent)
         if _spent:
             prep.structural.append(("spent_level", f"{name} {pool:.2f} is SPENT — {_spent_why}"))
@@ -791,7 +816,8 @@ class SweepCreditSpreadStrategy:
                                     prep.ready = True
 
         # ── the narration: which of the three states is this tick ──────────
-        head = f"{prep.name} {boundary} {pool:.2f} ({side} spread)"
+        head = (f"{prep.name} {boundary} {pool:.2f} ({side} spread"
+                f"{', TOUCH of a moving tine' if _touch else ''})")
         if prep.starved:
             t.starved(*prep.starved)
             return prep
@@ -845,6 +871,13 @@ class SweepCreditSpreadStrategy:
         sig.rejection_pct = prep.rej
         sig.atr_pct_at_entry = atr_pct
         sig.max_loss_pct = MAX_LOSS_PCT
+        # a tine touch is classed as a FORK trigger under Rule 4; a real
+        # sweep as sweep_reversal. Leg two can only ever be the latter.
+        if getattr(prep.sweep, "touch", False):
+            sig.condor_trigger_source = f"{getattr(prep.sweep, 'timeframe', '') or '1h'}_fork"
+            sig.touch_of_tine = True
+        else:
+            sig.condor_trigger_source = "sweep_reversal"
         sig.is_credit_vertical = True
         sig.net_credit = prep.credit
         if prep.side == "call":
@@ -860,6 +893,14 @@ class SweepCreditSpreadStrategy:
         logger.info("[sweep_cs] FIRE  %s swept -> %s  %s  age %d bars  rejection %.3f%%",
                     prep.name, prep.boundary, prep.trade_line(), prep.age, prep.rej * 100.0)
         return prep.tick.take(sig)
+
+
+def _name_key(name: str) -> float:
+    """A stable numeric key for a MOVING level's spent lock: the level's price
+    drifts every bar, so `mark_spent`/`is_spent` (keyed by rounded price) are
+    given a hash of the NAME instead. Deterministic across restarts."""
+    import zlib
+    return float(zlib.crc32((name or "").encode("utf-8")) % 1_000_000)
 
 
 def _symbol_of() -> str:

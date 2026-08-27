@@ -57,7 +57,7 @@ ENTRY_FNS = {"generate_signal", "decide", "check_leg_triggers",
              "_build_leg_signal", "_build_signal"}
 STRATEGIES = ["orb_strategy", "runaway_continuation", "trend_credit_spread",
               "sweep_credit_spread", "gex_pin_butterfly",
-              "iron_condor_strategy", "daily_fork_credit_spread"]
+              "iron_condor_strategy"]          # r163: daily fork retired
 
 
 def _bare_returns(path):

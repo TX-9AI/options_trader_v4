@@ -59,6 +59,20 @@ book, so **BOS is not used.**
 
 ## 2. Sweep Credit Spread — `sweep_credit_spread.py`
 
+> **r163 (2026-08-27) — THE FORK'S TINES ARE LEVELS THIS STRATEGY MAY USE, ON A
+> TOUCH.** Operator: *"it's basically a moving level that sweep is allowed to
+> use, but with a touch, not a reject. The plan would still need to select a
+> strike beyond the move that caused the touch."* The liquidity mapper
+> publishes every active 1h/1d tine as a MOVING named pool (price is a
+> function of time — slope × minutes) and emits a TOUCH event when a 1m bar
+> reaches the rail *where it was on that bar*; two closes beyond it since the
+> touch invalidate it. The sweep's plan prepares the spread beyond the
+> touching extreme and fires **leg one** on the touch, classed `{tf}_fork`.
+> **Leg two never takes a touch** — a rejection at the site is required. The
+> spent lock is keyed by the tine's NAME. The 1d fork strategy
+> (`daily_fork_credit_spread.py`) is retired: its whole job is now the
+> mapper's publication plus this plan. See PLAN_SPEC §12.
+
 **A named pool was swept and rejected. Sell the boundary it just became.**
 
     sweep UP into a pool, rejected   -> CEILING -> CALL credit spread

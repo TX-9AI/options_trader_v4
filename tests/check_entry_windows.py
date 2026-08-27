@@ -117,10 +117,9 @@ def main():
     from strategy.sweep_credit_spread import SweepCreditSpreadStrategy
     from strategy.gex_pin_butterfly import GEXPinButterflyStrategy
     from strategy.iron_condor_strategy import IronCondorStrategy
-    from strategy.daily_fork_credit_spread import DailyForkCreditSpread
     _missing = [c.__name__ for c in (
         RunawayContinuationStrategy, TrendCreditSpread, SweepCreditSpreadStrategy,
-        GEXPinButterflyStrategy, IronCondorStrategy, DailyForkCreditSpread)
+        GEXPinButterflyStrategy, IronCondorStrategy)
         if "entry_window" not in getattr(c, "PLAN_CHECKS", ())]
     check("W7 every entry strategy's plan declares an entry_window check",
           not _missing, ", ".join(_missing) or "none")

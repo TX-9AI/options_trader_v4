@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.7 · 2026-08-27 · r163 — a tine is a moving liquidity level; a touch is its event (§12).**
 **v1.6 · 2026-08-27 · r161 — the butterfly earns its entry (§11).**
 **v1.5 · 2026-08-27 · r160 — the plan is anticipatory, the strategy confirmatory; the condor authorizes and manages. §10 supersedes §8 where they differ.**
 **v1.3 · 2026-08-26 · r147 — leg two and the butterfly, §9.**
@@ -515,3 +516,42 @@ no capital, no competition."*
   with the fly prepared, waiting on pinning; no exact apex strike is
   declined, never substituted; the open-position branch asks it; the
   append does not drop the vertical.
+
+---
+
+## 12. r163 — a tine is a moving liquidity level; a touch is its event
+
+Operator, 2026-08-27: the daily fork is *"essentially a moving target
+liquidity mapper but with the elements of slope and time"* — *"basically a
+moving level that sweep is allowed to use, but with a touch, not a reject.
+The plan would still need to select a strike beyond the move that caused the
+touch."* And: *"it's allowed to be the 1st leg of a condor too, but again as a
+touch not identical to sweep which requires rejection."*
+
+- **The mapper owns the level** (`liquidity_mapper` v4.2). `publish_tines`
+  runs at the assembly point right after the condor trigger map: each active
+  rail becomes a moving named pool ("1h upper tine", "1d lower tine") with
+  `price_at(t)` = price − slope·(minutes back). `_detect_touch` walks the
+  last 30 one-minute bars and compares each bar to the rail **where it was
+  on that bar** — a bar that reaches today's value but not the rail as it
+  stood then is not a touch. The event is emitted as a sweep-shaped
+  `LiquiditySweep` (`touch=True`, `moving=True`, born `reclaimed`,
+  `sweep_price` = the extreme of the touching move); `ACCEPT_CLOSES` closes
+  beyond `rail(t)` since the first touch invalidate it.
+- **The sweep's plan uses it** (v4.7) exactly as a pool, with three
+  differences: under the condor's authorization a touch is never selected
+  (leg two requires a rejection); the spent lock is keyed by the tine's
+  name, since its price drifts; the signal is classed `{tf}_fork` under
+  Rule 4. The strike is selected beyond the touching extreme, as for any
+  sweep.
+- **The daily-fork strategy is deleted** (373 lines + its dispatch). The
+  1h and 1d tines reach the trade through one detector, one plan and one
+  construction path.
+- **Hypotheticals T1–T7:** a rising rail is touched by a bar that reached
+  it where it was (99.95 vs 99.90 then, 100.00 now); the same bar against a
+  falling rail is no touch; two closes beyond invalidate; the touch fires
+  leg one with the short beyond the high, classed `1h_fork`; as leg two the
+  touch is never selected; an invalidated tine holds naming `invalidated`; a
+  stopped-out tine stays spent by name after its price has moved. Two
+  hypotheticals were wrong before the code was — both pricing a wing that
+  could not clear R≥1 — and the plan refused them.

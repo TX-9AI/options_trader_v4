@@ -1,5 +1,6 @@
 """
-strategy/plan.py  v1.2
+strategy/plan.py  v1.3
+v1.3  2026-08-27  r163: the DailyFork aliases retire with the strategy.
 v1.2  2026-08-27  r160: DISPATCH_ALIAS — SweepForLeg2 -> SweepCreditSpread; the
       CondorLeg2 alias retires with the deleted level-selection.
 v1.1  2026-08-26  r147: DISPATCH_ALIAS — the second-leg window now has one
@@ -125,8 +126,6 @@ DISPATCH_ALIAS = {
     "ORB": "ORBStrategy",
     "CondorPlan": "IronCondorStrategy",
     "CondorLeg": "IronCondorStrategy",
-    "DailyForkPlan": "DailyForkCreditSpread",
-    "DailyForkLeg": "DailyForkCreditSpread",
     # the second-leg window (main_loop, position open) — r160: the sweep is
     # asked under the condor's authorization and writes under its own name
     "SweepForLeg2": "SweepCreditSpread",

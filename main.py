@@ -1,5 +1,19 @@
 """
-main.py  v4.19
+main.py  v4.20
+v4.20 2026-08-27  r163 — THE TINES ARE MOVING LIQUIDITY LEVELS; THE DAILY FORK
+      STRATEGY IS RETIRED. Operator, 2026-08-27: a tine is *"basically a
+      moving level that sweep is allowed to use, but with a touch, not a
+      reject"*, and *"it's allowed to be the 1st leg of a condor too, but
+      again as a touch."* At the assembly point, right after the condor
+      trigger map, `publish_tines` puts every active 1h/1d tine on the
+      liquidity map as a MOVING named pool and emits a TOUCH event
+      (liquidity_mapper v4.2); the sweep's plan (v4.7) prepares the spread
+      beyond the touching move and fires leg one on the touch; leg two never
+      selects a touch (a rejection is required). The daily-fork dispatch
+      (plan cache, leg triggers, its own construction) is deleted along
+      with strategy/daily_fork_credit_spread.py. main no longer overwrites
+      the sweep signal's `condor_trigger_source` (a tine touch is classed
+      `{tf}_fork`).
 v4.19 2026-08-27  r161 — THE BUTTERFLY FIRES REGARDLESS OF OPEN POSITIONS.
       Operator, 2026-08-27: *"I want it to be able to fire regardless if any
       other open trades are found. Reason: it has such a high hurdle to
@@ -950,7 +964,6 @@ from utils import mem_trace          # MEM.2 — in-process tracemalloc, env-gat
 # No-op unless OT_MEM_TRACE is set; tracemalloc is not imported otherwise.
 mem_trace.start(logger)
 from strategy.iron_condor_strategy import IronCondorStrategy
-from strategy.daily_fork_credit_spread import DailyForkCreditSpread
 from analysis.condor_trigger_map import build as _build_condor_trigger_map
 from strategy.trend_credit_spread import TrendCreditSpread
 
@@ -973,7 +986,6 @@ _runaway_strategy = RunawayContinuationStrategy()
 _sweep_cs_strategy = SweepCreditSpreadStrategy()
 _gex_bfly_strategy = GEXPinButterflyStrategy()
 _iron_condor_strategy = IronCondorStrategy()
-_daily_fork_cs_strategy = DailyForkCreditSpread()
 # TC.6 — trend credit spread. Sits with the other strategy instances and is
 # UNGUARDED on purpose: it imports only config + IronCondorStrategy, both
 # already hard dependencies here, so a guarded import would hide a real
@@ -1474,6 +1486,18 @@ def run_analysis(state: BotState, chain=None) -> dict:
     except Exception as exc:                                   # noqa: BLE001
         logger.debug("condor trigger map (pre-engines): %s", exc)
         ctx.setdefault("condor_triggers", None)
+    # 🔴 r163 — THE TINES GO ON THE LIQUIDITY MAP AS MOVING LEVELS, and a TOUCH
+    # of one is emitted as a sweep-shaped event (liquidity_mapper v4.2). The
+    # sweep's plan then prepares a spread beyond the touching move like any
+    # other pool; the daily-fork strategy is retired.
+    try:
+        from analysis.liquidity_mapper import publish_tines as _pub_tines
+        _n_touch = _pub_tines(ctx.get("liq_map"), ctx.get("condor_triggers"),
+                              ctx.get("df_1m"))
+        if _n_touch:
+            logger.debug("tines: %d touch event(s) on the map", _n_touch)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("tine publication skipped: %s", exc)
 
     # 🔴 r134 — THE OPENING RANGE ON ctx. `_opening_range()` existed and was
     # recomputed from the tape, but its result was never PUBLISHED, so the
@@ -3135,7 +3159,10 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                                     orb_low       = ctx.get("orb_low"),
                                 ), ctx)
         if sc_sig:
-            sc_sig.condor_trigger_source = "sweep_reversal"
+            # r163 — the strategy classes its own trigger now: a tine TOUCH is
+            # `{tf}_fork`, a real sweep is `sweep_reversal`. Only fill a blank.
+            if not getattr(sc_sig, "condor_trigger_source", ""):
+                sc_sig.condor_trigger_source = "sweep_reversal"
             # ── 🔴 r97 — VALIDATE BEFORE CLAIMING THE SLOT ───────────────────
             # ⚠️ AN INVALID SIGNAL USED TO CONSUME THE DISPATCH ANYWAY. Setting
             # `signal` here gates the butterfly and ALL FOUR credit-vertical
@@ -3303,65 +3330,21 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # PAIRING GATE: _can_open_credit_spread(side) enforces Rule 1 (max 2 open)
     # and Rule 3 (never 2 calls or 2 puts). It reads the DB every call; cheap
     # because it's one query against open_trades which is already loaded.
+    # ── 🔴 r163 — THE DAILY FORK IS RETIRED AS A STRATEGY ─────────────────
+    # Operator, 2026-08-27: a tine is *"basically a moving level that sweep is
+    # allowed to use, but with a touch, not a reject."* The 1d and 1h tines
+    # are published to the liquidity map as MOVING named pools at the assembly
+    # point (liquidity_mapper v4.2 `publish_tines`), a TOUCH is emitted as a
+    # sweep-shaped event, and the SWEEP's plan above prepares the spread
+    # beyond the touching move. DailyForkCreditSpread — its plan cache, its
+    # leg triggers, its own vertical construction — is deleted. The condor
+    # constructs nothing (r158). What remains here is the record that this
+    # block once dispatched two fork strategies, and the reason it no longer
+    # does.
     if signal is not None:
         _plan_skip("IronCondorStrategy", f"slot claimed by {signal.strategy_name}")
-        _plan_skip("DailyForkCreditSpread", f"slot claimed by {signal.strategy_name}")
     elif DIRECTIONAL_ONLY:
         _plan_skip("IronCondorStrategy", "DIRECTIONAL_ONLY box")
-        _plan_skip("DailyForkCreditSpread", "DIRECTIONAL_ONLY box")
-    if signal is None and not DIRECTIONAL_ONLY:
-        _sess_hi, _sess_lo = _session_extremes(ctx)
-
-        # ── 🔴 r158 — THE CONDOR NO LONGER PLANS OR FIRES A FIRST LEG ───
-        # Operator, 2026-08-27: *"Condor leg one is not a trade. It's a
-        # condition."* and *"The condor doesn't construct anything."*
-        # ⚠️ LEG ONE IS "A CREDIT VERTICAL IS OPEN", whoever opened it — the
-        # sweep, the daily fork or TCS all open first legs already (three of
-        # the four call sites below). The condor was the only one that also
-        # CONSTRUCTED, which is what made it look like a strategy.
-        # `decide()`, `check_leg_triggers()` and `_build_leg_signal()` are
-        # deleted (366 lines); the condor is now a permission layer only.
-
-        # ── 1d fork plan (session-scoped fork cache) ────────────────────
-        if not _daily_fork_cs_strategy.has_active_plan:
-            _rails_1d = None
-            try:
-                from analysis.pitchfork_observer import rails_for
-                _rails_1d = rails_for(ctx, INSTRUMENT, "1d")
-            except Exception:                                  # noqa: BLE001
-                pass
-            if not _rails_1d:
-                _plan_skip("DailyForkCreditSpread", "no 1d rails this tick")
-            if _rails_1d:
-                _safe_strategy("DailyForkPlan", lambda: _daily_fork_cs_strategy.decide(
-                    ms=ms, vol_state=ctx["vol"], chain=chain, macro=macro,
-                    current_price=ctx["price"], rails_1d=_rails_1d,
-                    session_high=_sess_hi, session_low=_sess_lo, ctx=ctx), ctx)
-
-        # ── Fire credit verticals — any side whose trigger is hit ───────
-        # Each attempt is gated by _can_open_credit_spread(side). Tries
-        # both sides of both fork triggers; takes the first hit. Sweep and
-        # TC.6 fire below in their own blocks (same gate applies there).
-        _ctm = ctx.get("condor_triggers")
-
-        # ── r158 — no 1h-fork condor leg. See the note above: the condor
-        # constructs nothing, and a first leg is whatever another strategy
-        # opened.
-
-        # 1d fork triggers
-        if _daily_fork_cs_strategy.has_active_plan:
-            _dft = _safe_strategy("DailyForkLeg",
-                lambda: _daily_fork_cs_strategy.check_leg_triggers(
-                    current_price=ctx["price"], chain=chain, ctx=ctx), ctx)
-            if _dft is not None and _can_open_credit_spread(_dft.option_side):  # first leg
-                if _sigj:
-                    try:
-                        _sigj.journal("condor_leg",
-                                      leg={"underlying": round(ctx["price"], 2),
-                                           "source": "1d_fork"})
-                    except Exception:
-                        pass
-                _execute_condor_leg(_dft, state, ctx)
 
     # ── TC.6 TREND CREDIT SPREAD ─────────────────────────────────────────────
     # v4.3: no longer deferred by condor_active. It fires when _can_open_credit_spread
@@ -4174,7 +4157,6 @@ def main_loop(state: BotState):
                 if _auth_side:
                     _plan_skip("RunawayContinuation", _auth_why)
                     _plan_skip("TrendCreditSpread", _auth_why)
-                    _plan_skip("DailyForkCreditSpread", _auth_why)
                     _sl_chain = ctx.get("chain")
                     _sl2 = _safe_strategy("SweepForLeg2",
                         lambda: _sweep_cs_strategy.generate_signal(

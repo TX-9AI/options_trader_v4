@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.1  (2026-08-27)
+tests/check_plan_prepares.py  v1.2  (2026-08-27)
+v1.2  r163: T1-T7 — the tine as a MOVING level: a touch is found against the
+      rail where it WAS (slope x time), not where it is now; a falling rail
+      the high never reached is no touch; acceptance invalidates; the sweep's
+      plan fires leg one on the touch with the short beyond the move; as leg
+      two the touch is never selected; the spent lock is keyed by name.
 v1.1  r161: B1-B7 — the butterfly's plan (weak pin holds with the fly
       prepared; R<1 declined, relaxed included; no exact apex strike declined)
       and its exemption from the single-position rule (asked with a position
@@ -346,6 +351,102 @@ def main():
     pm.add_open_position({"trade_id": "bf1", "is_butterfly": True})
     check("B7 add_open_position APPENDS — the vertical under management is not dropped",
           [r["trade_id"] for r in pm._open_records] == ["v1", "bf1"])
+
+    # ── THE TINE AS A MOVING LEVEL (r163) — slope, time, touch ────────────
+    from analysis.liquidity_mapper import (publish_tines, LiquidityMap,
+                                           _ACCEPT_CLOSES as _AC)
+    import pandas as pd
+
+    class _Rail:
+        def __init__(self, tf, side, rail, slope):
+            self.tf, self.side, self.rail, self.slope = tf, side, rail, slope
+            self.trigger, self.median, self.active = rail, rail, True
+
+    class _CTM:
+        def __init__(self, *rails): self._r = list(rails)
+        def all_rails(self): return self._r
+
+    def _bars(rows, t0=2_000_000):
+        idx = pd.to_datetime([t0 + 60 * i for i in range(len(rows))], unit="s", utc=True)
+        return pd.DataFrame({"open": [r[2] for r in rows], "high": [r[0] for r in rows],
+                             "low": [r[1] for r in rows], "close": [r[2] for r in rows]}, index=idx)
+
+    # a 1h upper tine at 100.00 NOW, rising 0.60/bar of 1h = 0.01/min; 10 bars
+    # back it stood at 99.90. T1: a bar 10 minutes ago with high 99.95 touches
+    # the rail AS IT WAS (99.90) even though it is below the rail NOW (100.00).
+    rows = [(99.5, 99.0, 99.3)] * 5 + [(99.95, 99.4, 99.6)] + [(99.7, 99.2, 99.5)] * 4 + [(99.8, 99.3, 99.6)]
+    lm = LiquidityMap()
+    n = publish_tines(lm, _CTM(_Rail("1h", "call", 100.0, 0.60)), _bars(rows))
+    ev = lm.recent_sweep
+    check("T1 slope+time: a bar that reached the rail WHERE IT WAS is a touch (rail now 100.00, "
+          "then 99.90, high 99.95)",
+          n == 1 and ev is not None and ev.touch and ev.kind == "high_sweep"
+          and ev.swept_named_level == "1h upper tine" and abs(ev.sweep_price - 99.95) < 1e-9
+          and ev.reclaimed and not ev.invalidated,
+          f"n={n} ev={ev and (ev.kind, ev.sweep_price, ev.bars_ago)}")
+    pool = next(p for p in lm.pools if p.moving)
+    check("T1b the tine is on the map as a MOVING named pool with price_at(t)",
+          pool.is_named and abs(pool.price_at(pool.as_of - 600) - 99.90) < 1e-6,
+          f"{pool.name} now {pool.price} 10m-ago {pool.price_at(pool.as_of - 600):.4f}")
+    # T2: same tape, a FALLING rail (was 100.10 ten minutes ago): the 99.95
+    # high never reached it -> NO touch. Today's value alone would say otherwise.
+    lm2 = LiquidityMap()
+    n2 = publish_tines(lm2, _CTM(_Rail("1h", "call", 100.0, -0.60)), _bars(rows))
+    check("T2 a bar below the rail as it stood then is NOT a touch, whatever the rail reads now", n2 == 0)
+    # T3: two closes above the rail(t) since the first touch -> ACCEPTED -> invalidated
+    rows3 = [(99.5, 99.0, 99.3)] * 5 + [(100.3, 99.6, 100.2), (100.5, 99.9, 100.3)] * 1 + [(100.4, 100.0, 100.3)] * 4
+    lm3 = LiquidityMap()
+    publish_tines(lm3, _CTM(_Rail("1h", "call", 100.0, 0.0)), _bars(rows3))
+    ev3 = lm3.recent_sweep
+    check(f"T3 {_AC}+ closes beyond the rail since the touch -> the tine is INVALIDATED",
+          ev3 is not None and ev3.touch and ev3.invalidated and ev3.closes_beyond_live >= _AC,
+          str(ev3 and ev3.closes_beyond_live))
+
+    # T4: the sweep's plan takes the TOUCH as leg one: short beyond the move's
+    # extreme, no reclaim required. Price is back inside (99.6 < 100).
+    S2 = sw.SweepCreditSpreadStrategy(); S2.planner.symbol = "TST"
+    # short 100 (first strike beyond the 99.95 high) bid 1.28; wing 101 ask 0.72
+    # -> credit 0.56 on width 1, risk 0.44, R 1.27. (R>=1 on a credit vertical
+    # needs credit >= half the width — a first draft priced the wing at 0.80
+    # and the plan refused it at R 0.85. The hypothetical was wrong.)
+    calls_t = [_C(k, m - 0.02, m + 0.02) for k, m in
+               ((100, 1.30), (101, 0.70), (102, 0.35), (103, 0.15), (104, 0.06), (105, 0.03))]
+    P.begin_tick(30.0)
+    sigt = S2.generate_signal(liq_map=lm, chain=_Chain([], calls_t), price_now=99.6,
+                              now_et="13:30", atr_pct=0.08, orb_high=99.2, orb_low=98.4)
+    rt4 = _row(st, "SweepCreditSpread", 30.0)
+    check("T4 a tine TOUCH fires leg one: call spread with the short BEYOND the touching high, "
+          "classed as a fork trigger",
+          sigt is not None and sigt.option_side == "call" and sigt.short_call_contract.strike > 99.95
+          and sigt.condor_trigger_source == "1h_fork" and getattr(sigt, "touch_of_tine", False)
+          and rt4 and rt4[0] == "TAKE" and "TOUCH" in rt4[1],
+          f"{rt4} short={sigt and sigt.short_call_contract.strike}")
+    # T5: under the condor's authorization (leg two) the same touch is NOT selected
+    P.begin_tick(31.0)
+    sig5 = S2.generate_signal(liq_map=lm, chain=_Chain([], calls_t), price_now=99.6,
+                              now_et="13:30", atr_pct=0.08, orb_high=99.2, orb_low=98.4,
+                              required_side="call")
+    rt5 = _row(st, "SweepCreditSpread", 31.0)
+    check("T5 as LEG TWO the touch is never selected — a rejection is required",
+          sig5 is None and rt5 and rt5[0] == "HOLD" and "waiting for a named pool" in rt5[1], str(rt5))
+    # T6: an invalidated tine touch does not fire
+    P.begin_tick(32.0)
+    sig6 = S2.generate_signal(liq_map=lm3, chain=_Chain([], calls_t), price_now=100.3,
+                              now_et="13:30", atr_pct=0.08, orb_high=99.2, orb_low=98.4)
+    rt6 = _row(st, "SweepCreditSpread", 32.0)
+    check("T6 an ACCEPTED (invalidated) tine does not fire; the row names invalidated",
+          sig6 is None and rt6 and "invalidated" in rt6[1], str(rt6))
+    # T7: spent by NAME survives the rail drifting
+    sw.mark_spent(sw._symbol_of(), "call", sw._name_key("1h upper tine"), "stopped out 13:40")
+    lm7 = LiquidityMap()
+    publish_tines(lm7, _CTM(_Rail("1h", "call", 99.98, 0.60)), _bars(rows))    # rail has drifted
+    P.begin_tick(33.0)
+    sig7 = S2.generate_signal(liq_map=lm7, chain=_Chain([], calls_t), price_now=99.6,
+                              now_et="13:30", atr_pct=0.08, orb_high=99.2, orb_low=98.4)
+    rt7 = _row(st, "SweepCreditSpread", 33.0)
+    check("T7 a stopped-out tine stays SPENT by name although its price has moved",
+          sig7 is None and rt7 and rt7[0] == "DECLINE" and "spent_level" in rt7[1], str(rt7))
+    sw._SPENT.clear()
 
     print()
     if _fails:

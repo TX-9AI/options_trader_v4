@@ -146,8 +146,7 @@ def main():
     # pins that it stays that way — a condor that starts searching wings has
     # started constructing again.
     for rel in ("strategy/sweep_credit_spread.py",
-                "strategy/trend_credit_spread.py",
-                "strategy/daily_fork_credit_spread.py"):
+                "strategy/trend_credit_spread.py"):      # r163: daily fork retired
         c = "\n".join(l for l in open(os.path.join(_root, rel),
                                       encoding="utf-8").read().split("\n")
                       if not l.strip().startswith("#"))
