@@ -161,7 +161,27 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
 
 
 def main(argv=None) -> int:
-    apply = os.environ.get("OT_RETENTION_APPLY") == "1"
+    """`--apply` arms it. So does OT_RETENTION_APPLY=1, for the CLI.
+
+    🔴 r162 — WHY THE ARGUMENT EXISTS. This shipped DRY BY DEFAULT, armed only
+    by an environment variable, pending a review of the policy numbers that was
+    never scheduled. `self_close` has called `main([])` since it was written —
+    an EMPTY argv, with no environment set — so **the purge ran dry every night
+    for two months, printed what it WOULD delete, and deleted nothing.**
+    ⚠️ THE COST, 2026-08-27: `feed_store.db` reached 1.5-1.8 GB per box, the
+    6.7 GiB roots hit 100%, and the fleet went blind MID-SESSION. QQQ and MU
+    crash-looped; recovering them cost their swapfiles, a failed VACUUM that
+    left the database LARGER, and a 14-box volume rebuild to 10 GiB.
+    ⚠️ AND IT WAS INVISIBLE BY CONSTRUCTION. A dry run logs the same line every
+    night. **Sixty identical log lines are indistinguishable from a job that
+    works** — the same failure class as the pytest chain that was decorative
+    for weeks and the tooling check that printed green on a broken environment.
+    ⚠️ SO THE ARMING IS NOW EXPLICIT AT THE CALL SITE, not ambient in an
+    environment nobody sets. `self_close` passes `--apply`; a human running it
+    by hand still gets DRY unless they ask for it.
+    """
+    argv = list(argv or [])
+    apply = ("--apply" in argv) or os.environ.get("OT_RETENTION_APPLY") == "1"
     removed = purge(apply=apply)
     total = sum(removed.values())
     if not removed:
@@ -170,6 +190,14 @@ def main(argv=None) -> int:
     verb = "removed" if apply else "WOULD remove"
     _log(f"{verb} {total:,} row(s)" + ("" if apply else "  [DRY — set "
                                        "OT_RETENTION_APPLY=1 to arm]"))
+    # ── 🔴 r162 — A DRY PURGE AT SHUTDOWN IS A DEFECT, NOT A LOG LINE ────────
+    # ⚠️ THE WHOLE FAILURE WAS SILENCE. Sixty nights of "WOULD remove 1.7M
+    # rows" at INFO is indistinguishable from a job that works — nobody reads
+    # an unchanging line. Name the consequence so the next silence is visible.
+    if not apply and total:
+        _log(f"⚠️⚠️ RETENTION IS DRY — {total:,} row(s) were NOT removed. The "
+             f"store will keep growing; this is how the fleet reached 100% "
+             f"disk and went blind mid-session on 2026-08-27.")
     for label in sorted(removed, key=lambda k: -removed[k]):
         if removed[label]:
             _log(f"   {label:<28} {removed[label]:>9,}")

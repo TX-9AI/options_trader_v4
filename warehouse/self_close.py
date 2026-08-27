@@ -147,7 +147,12 @@ def main(argv=None) -> int:
     # over — the machine still comes down, which is what ends the bill.
     try:
         from warehouse import retention_purge
-        retention_purge.main([])
+        # 🔴 r162 — `--apply`, EXPLICITLY. This called `main([])` for two months,
+        # which armed nothing: the purge read OT_RETENTION_APPLY from an
+        # environment the service never sets, so it logged what it WOULD delete
+        # and deleted nothing, every night, invisibly. The fleet went blind
+        # mid-session on 2026-08-27 as a result.
+        retention_purge.main(["--apply"])
     except Exception as exc:                                    # noqa: BLE001
         _log(f"retention purge skipped: {exc}")
 
