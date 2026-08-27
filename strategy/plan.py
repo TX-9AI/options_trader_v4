@@ -130,6 +130,21 @@ DISPATCH_ALIAS = {
 }
 
 
+# ⚠️ LAST DORMANT (strategy, gate, reason) PER STRATEGY. Module-level because
+# a strategy object is rebuilt per tick in some paths; keyed by strategy name so
+# a genuine CHANGE of reason always writes.
+_DORMANT: dict = {}
+
+
+def clear_dormant(strategy: str = "") -> None:
+    """Forget the dormant state so the next tick writes again. Called when a
+    window OPENS, so the transition into tradeable is always recorded."""
+    if strategy:
+        _DORMANT.pop(strategy, None)
+    else:
+        _DORMANT.clear()
+
+
 def begin_tick(ts: Optional[float] = None) -> int:
     """Advance the tick clock. Called ONCE per tick by the board."""
     _TICK["n"] += 1
@@ -458,6 +473,43 @@ class PlanTick:
         prev = self.checks.get(gate, (None, None))[0]
         self.check(gate, prev, False)
         self._close(verdict, f"{gate}: {why}")
+        self.plan._report_block(gate, why)
+        return None
+
+    def dormant(self, gate: str, reason: str = ""):
+        """OUT OF WINDOW — write ONE row on the transition, then go quiet.
+
+        🔴 OPERATOR, 2026-08-27: *"I don't want the 11:30-onwards credit
+        strategies even looking at the chart before their window starts."*
+        ⚠️ WHAT THIS REPLACES: three credit strategies calling `refuse()` on
+        every tick from 09:35, each writing a plan row that said only "it is not
+        11:31 yet". On UNH that was ~900 of roughly 1,300 rows for the morning —
+        a per-minute transcript of a CLOCK, which nobody needs and which buried
+        the ORB sequence the operator was actually looking for.
+        ⚠️ THE RECORD IS NOT LOST, IT IS DEDUPLICATED. The first tick outside
+        the window writes the row; every identical tick after it is silent; the
+        next CHANGE writes again. "This strategy was dormant from 09:35" is the
+        same information as 900 copies of it, and it is readable.
+        ⚠️ THE GATE REPORTER IS UNAFFECTED — it was already edge-triggered, so
+        the dashboard's GATES panel behaves exactly as before.
+        """
+        why = reason or self.last_why or gate
+        key = (self.plan.strategy, gate, why)
+        if _DORMANT.get(self.plan.strategy) == key:
+            # ⚠️ MARK THE TICK AS HANDLED WITHOUT WRITING A ROW. `close_tick`
+            # writes a NOT ASKED row for any strategy whose `_last` tick number
+            # is stale — and for an ASKED strategy that wrote nothing it writes
+            # the far louder "a return path is not wired through its plan".
+            # Silently returning here would therefore produce a WORSE row than
+            # the one being suppressed. Stamping `_last` with the current tick
+            # is what makes the strategy genuinely quiet.
+            n, _ts = tick_now()
+            self.plan._last = (n, "DORMANT", f"{gate}: {why}")
+            _ASKED.pop(self.plan.strategy, None)
+            return None
+        _DORMANT[self.plan.strategy] = key
+        self.check(gate, None, False)
+        self._close("DORMANT", f"{gate}: {why}")
         self.plan._report_block(gate, why)
         return None
 

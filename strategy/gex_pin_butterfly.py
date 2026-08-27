@@ -297,9 +297,11 @@ class GEXPinButterflyStrategy:
                             f"PINNING without a dominant strike")
 
         _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET)
+        # 🔴 DORMANT, TIME-INVARIANT REASON (r153) — see strategy/plan.py.
         if now_et and not (_early <= now_et <= _late):
-            return t.refuse("entry_window", f"{now_et} ET is outside the "
-                                            f"butterfly window {_early}-{_late}")
+            return t.dormant("entry_window",
+                             f"outside the butterfly window {_early}-{_late}"
+                             f" — dormant, not looking at the chart")
         t.check("entry_window", None, True)
 
         # ── 3. OTM, and inside the expected move ────────────────────────────

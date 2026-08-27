@@ -213,14 +213,24 @@ class TrendCreditSpread:
                 return t.refuse("active", "TREND_CREDIT_ACTIVE is off")
             now = now_et or datetime.now(ET)
             _hm = f"{now.hour:02d}:{now.minute:02d}"
-            if (now.hour, now.minute) >= TCS_ENTRY_END_ET:   # r60: own constant, flagged provisional
-                return t.refuse("entry_window",
-                                f"{_hm} ET is past TCS_ENTRY_END_ET "
-                                f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}")
+            # 🔴 DORMANT, NOT REFUSED, AND THE REASON CARRIES NO CLOCK (r153).
+            # Operator: *"I don't want the 11:30-onwards credit strategies even
+            # looking at the chart before their window starts."*
+            # ⚠️ THE REASON MUST BE TIME-INVARIANT OR THE DEDUPE IS USELESS —
+            # "09:40 ET is before..." and "09:41 ET is before..." are different
+            # strings and would write a row every minute, which is exactly the
+            # ~900 rows of clock transcript this replaces. The WINDOW is the
+            # fact; the current time is not.
+            if (now.hour, now.minute) >= TCS_ENTRY_END_ET:
+                return t.dormant("entry_window",
+                                 f"past TCS_ENTRY_END_ET "
+                                 f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}"
+                                 f" — dormant until tomorrow")
             if (now.hour, now.minute) < TCS_START_ET:
-                return t.refuse("entry_window",
-                                f"{_hm} ET is before TCS_START_ET "
-                                f"{TCS_START_ET[0]:02d}:{TCS_START_ET[1]:02d}")
+                return t.dormant("entry_window",
+                                 f"before TCS_START_ET "
+                                 f"{TCS_START_ET[0]:02d}:{TCS_START_ET[1]:02d}"
+                                 f" — dormant, not looking at the chart")
             t.check("entry_window", None, True)
             # ── NO COOLDOWN. REMOVED 2026-08-14 ──────────────────────────────
             # It was added as an emergency brake when TC.6 rapid-fired the fleet,

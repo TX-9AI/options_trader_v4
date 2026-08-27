@@ -65,7 +65,9 @@ import config
 from typing import Optional, List, Tuple
 
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
-from strategy.plan import Plan
+# ⚠️ `_n` renders an absent value as "n/a" and never raises — the ORB sequence
+# below prints levels that can legitimately be None before the range forms.
+from strategy.plan import Plan, _n
 from analysis.orb_engine import ORBData, ORBState
 from analysis.market_state import MarketState
 from analysis.volatility_engine import VolatilityState
@@ -123,7 +125,22 @@ class ORBStrategy(BaseOptionsStrategy):
     # RECORD ONLY. ORB opens its own plan_ledger rows (main.py's open_plan
     # calls stand), so `self_ledgers=True`; `record_only=True` documents that
     # its verdict is never consulted.
-    PLAN_CHECKS = ("engine_state", "contract", "premium", "atr_pct")
+    # 🔴 THE WHOLE ORB SEQUENCE IS RECORDED, NOT JUST THE STATE LABEL (r153).
+    # Operator, 2026-08-27: *"I want the entire ORB sequence writing to the per
+    # tick log."*
+    # ⚠️ WHAT WAS WRONG: the plan wrote one line — "ORB engine is
+    # WAITING_FOR_BREAK/ARMED_SHORT/EXPIRED" — and nothing about the GEOMETRY
+    # that produced it. UNH on 2026-08-27 logged 70 ticks ARMED_SHORT and one
+    # TAKE, with no record of where the break was, how deep the retest went, or
+    # what the engine was waiting for. When the operator sees a qualifying
+    # break+retest on the chart and the bot does not take it, the table could
+    # not say why. Every field below already exists on ORBData and was simply
+    # never read.
+    PLAN_CHECKS = ("engine_state", "orb_high", "orb_low", "orb_width",
+                   "break_direction", "break_close", "bars_since_break",
+                   "retest_depth_px", "attempt_number", "stop_level",
+                   "target_50pct", "target_100pct",
+                   "contract", "premium", "atr_pct")
 
     def __init__(self):
         self.planner = Plan("ORBStrategy", self.PLAN_CHECKS,
@@ -143,9 +160,48 @@ class ORBStrategy(BaseOptionsStrategy):
                          current_price: float) -> Optional[OptionsSignal]:
         t = self.planner.tick(current_price)
 
+        # ── 🔴 NARRATE THE SEQUENCE FIRST, EVERY TICK, WHATEVER THE STATE ────
+        # These are recorded BEFORE the gate so a refusal carries the geometry
+        # with it. A row that says only "ARMED_SHORT" cannot be argued with;
+        # one that says "armed short at 396.01, broke to 395.40, 3 bars since,
+        # retest 0.22 deep, attempt 2" can be checked against the chart.
+        _bd = getattr(orb, "break_direction", "") or ""
+        t.check("orb_high", getattr(orb, "orb_high", None))
+        t.check("orb_low", getattr(orb, "orb_low", None))
+        t.check("orb_width", getattr(orb, "orb_width", None))
+        t.check("break_direction", 1.0 if _bd == "long"
+                else -1.0 if _bd == "short" else None)
+        t.check("break_close", getattr(orb, "break_candle_close", None))
+        t.check("bars_since_break", getattr(orb, "bars_since_break", None))
+        t.check("retest_depth_px", getattr(orb, "retest_depth_px", None))
+        t.check("attempt_number", getattr(orb, "attempt_number", None))
+        t.check("stop_level", getattr(orb, "stop_level", None))
+        t.check("target_50pct", getattr(orb, "target_50pct", None))
+        t.check("target_100pct", getattr(orb, "target_100pct", None))
+
         if orb.state not in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT):
-            return t.refuse("engine_state", f"ORB engine is {orb.state} — not a "
-                                            f"confirmed break+retest")
+            # ⚠️ THE REASON NAMES WHAT IT IS WAITING FOR, not just where it is.
+            _lvl = (getattr(orb, "orb_high", None) if _bd == "long"
+                    else getattr(orb, "orb_low", None))
+            _st = str(orb.state)
+            if "WAITING" in _st:
+                _await = (f"no break yet of {_n(getattr(orb,'orb_high',None))}/"
+                          f"{_n(getattr(orb,'orb_low',None))}")
+            elif "ARMED" in _st:
+                _await = (f"broke {_bd or '?'} at {_n(_lvl)}, close "
+                          f"{_n(getattr(orb,'break_candle_close',None))}, "
+                          f"{getattr(orb,'bars_since_break',0)} bars since — "
+                          f"AWAITING RETEST (wick into the range, body outside)")
+            elif "INVALIDATED" in _st:
+                _await = (f"invalidated: "
+                          f"{getattr(orb,'invalidation_reason','') or 'unknown'}"
+                          f" (attempt {getattr(orb,'attempt_number','?')})")
+            elif "EXPIRED" in _st:
+                _await = "past the 11:00 ET cutoff — no further ORB entries"
+            else:
+                _await = "state carries no further detail"
+            return t.refuse("engine_state",
+                            f"ORB {_st} — {_await}")
         t.check("engine_state", None, True)
 
         direction   = orb.break_direction

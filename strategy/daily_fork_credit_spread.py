@@ -192,11 +192,13 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
         hm = (now_et.hour, now_et.minute)
         t = self.planner.tick(current_price)
 
+        # 🔴 DORMANT, TIME-INVARIANT REASON (r153) — see strategy/plan.py.
         if hm < _DAILY_START or hm >= _DAILY_CUTOFF:
-            return t.refuse("entry_window",
-                            f"{hm[0]:02d}:{hm[1]:02d} ET is outside the 1d-fork "
-                            f"window {_DAILY_START[0]:02d}:{_DAILY_START[1]:02d}-"
-                            f"{_DAILY_CUTOFF[0]:02d}:{_DAILY_CUTOFF[1]:02d}")
+            return t.dormant("entry_window",
+                             f"outside the 1d-fork window "
+                             f"{_DAILY_START[0]:02d}:{_DAILY_START[1]:02d}-"
+                             f"{_DAILY_CUTOFF[0]:02d}:{_DAILY_CUTOFF[1]:02d}"
+                             f" — dormant, not looking at the chart")
         t.check("entry_window", None, True)
         if self._plan is not None:
             t.hold("plan already built this session — legs watched by "

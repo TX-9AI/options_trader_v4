@@ -314,13 +314,15 @@ class IronCondorStrategy(BaseOptionsStrategy):
         hm = (now_et.hour, now_et.minute)
         t = self.planner.tick(current_price)
 
+        # 🔴 DORMANT, TIME-INVARIANT REASON (r153) — see strategy/plan.py.
         if hm < CONDOR_ENTRY_START_ET or hm >= CONDOR_ENTRY_CUTOFF_ET:
-            return t.refuse("entry_window",
-                            f"{hm[0]:02d}:{hm[1]:02d} ET is outside the credit "
-                            f"window {CONDOR_ENTRY_START_ET[0]:02d}:"
-                            f"{CONDOR_ENTRY_START_ET[1]:02d}-"
-                            f"{CONDOR_ENTRY_CUTOFF_ET[0]:02d}:"
-                            f"{CONDOR_ENTRY_CUTOFF_ET[1]:02d}")
+            return t.dormant("entry_window",
+                             f"outside the credit window "
+                             f"{CONDOR_ENTRY_START_ET[0]:02d}:"
+                             f"{CONDOR_ENTRY_START_ET[1]:02d}-"
+                             f"{CONDOR_ENTRY_CUTOFF_ET[0]:02d}:"
+                             f"{CONDOR_ENTRY_CUTOFF_ET[1]:02d} — dormant, "
+                             f"not looking at the chart")
         t.check("entry_window", None, True)
         if self._plan is not None:
             t.hold("plan already built this session — legs watched by "
