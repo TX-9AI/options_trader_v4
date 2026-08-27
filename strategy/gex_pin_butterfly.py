@@ -1,5 +1,19 @@
 """
-strategy/gex_pin_butterfly.py  v4.3
+strategy/gex_pin_butterfly.py  v4.4
+v4.4  2026-08-27  r161 — THE PLAN PREPARES, THE STRATEGY EXECUTES; EXEMPT FROM
+      THE SINGLE-POSITION RULE. Operator, 2026-08-27: *"I want it to be able
+      to fire regardless if any other open trades are found. Reason: it has
+      such a high hurdle to clear. GEX pinning, pin reachable, economic
+      feasibility. If it can achieve all that, it's earned an entry."*
+      `prepare()` is the plan (the sweep's v4.6 shape): DORMANT outside the
+      slot; each declared CONDITION with its current reading; the three legs
+      SELECTED (apex on the pin, wing from the expected move, exact strikes);
+      R = (width-debit)/debit against R_FLOOR as a STRUCTURAL check — the
+      operator's third hurdle, so relaxed does not waive it (v4.3 routed it
+      through the muteable hurdle; that was wrong for a trade whose entry
+      is EARNED by feasibility). `generate_signal()` executes the prepared
+      legs. main.py v4.19 asks it every tick of its slot whether or not a
+      position is open, and appends its record (position_manager v4.4).
 v4.3  2026-08-26  r147 — UNPARKED, AND IT HAS LEGS. Operator: *"I want it
       active. It already has to clear a high bar to fire. The r-value in
       strict should veto, but allow and record on relaxed. The pin should be
@@ -165,6 +179,7 @@ import config
 from strategy import relaxed
 from strategy.base_strategy import OptionsSignal as Signal
 from strategy.plan import Plan
+from strategy.criteria import R_FLOOR
 from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
@@ -241,173 +256,225 @@ def expected_move(underlying: float, atm_iv: float, now=None) -> Optional[float]
     return underlying * atm_iv * math.sqrt(hours / 6.5) / math.sqrt(252)
 
 
+class ButterflyPreparation:
+    """What the plan hands the strategy each tick of the slot — never executable."""
+    __slots__ = ("tick", "pin", "side", "conc", "em", "frac", "wing", "lower", "center",
+                 "upper", "debit", "width", "r", "r_min", "conditions", "unmet",
+                 "structural", "starved", "ready")
+
+    def __init__(self, tick):
+        self.tick = tick
+        self.pin = self.conc = self.em = self.frac = self.wing = 0.0
+        self.side = ""
+        self.lower = self.center = self.upper = None
+        self.debit = self.width = self.r = None
+        self.r_min = R_FLOOR
+        self.conditions, self.unmet, self.structural, self.starved = {}, [], [], []
+        self.ready = False
+
+    def cond(self, name, current, required, met):
+        self.conditions[name] = (current, required, bool(met))
+        if not met:
+            self.unmet.append(name)
+        self.tick.check(name, current if isinstance(current, (int, float)) else None, bool(met))
+
+    def trade_line(self):
+        if not self.ready:
+            return "no trade prepared"
+        return (f"buy {self.lower.strike:g}/{self.center.strike:g}/{self.upper.strike:g} "
+                f"{self.side} fly  debit {self.debit:.2f}  width {self.width:.2f}  "
+                f"R {self.r:.2f} (min {self.r_min:.2f})")
+
+
 class GEXPinButterflyStrategy:
-    """Apex on the pin, OTM, as far out as the expected move allows.
+    """THE SPEC. Declares its conditions; executes with the plan's legs.
 
-    Four conditions, cheapest first:
-      1. GEX IS PINNING          - real GEX, which needs the OI data
-      2. THE PIN IS STRONG       - one strike dominates rather than smeared
-      3. THE PIN IS OTM AND      - distance is the edge; the band rejects both
-         WITHIN THE EXPECTED       "too near to be worth it" and "too far to be
-         MOVE                      reachable"
-      4. APEX ON THE PIN         - debit, defined risk, cheap because it is away
+    🔴 EXEMPT FROM THE SINGLE-POSITION RULE. Operator, 2026-08-27: *"I want it
+    to be able to fire regardless if any other open trades are found. Reason:
+    it has such a high hurdle to clear. GEX pinning, pin reachable, economic
+    feasibility. If it can achieve all that, it's earned an entry."* TRADES.md
+    §3 said the same from the start: *"no position slot, no capital, no
+    competition."* main.py asks it every tick of its slot, position open or
+    not, and appends its record rather than replacing.
     """
-
     name = "GEXPinButterfly"
 
-    PLAN_CHECKS = ("enabled", "gex", "pinning", "pin_concentration",
-                   "entry_window", "expected_move", "pin_em_fraction",
-                   "wing_width", "legs", "debit", "debit_pct_width", "width", "r")
+    CONDITIONS = {
+        "enabled":           "GEX_BUTTERFLY_ENABLED is on",
+        "pinning":           "GEX environment is PINNING with a pin strike",
+        "pin_concentration": f"pin concentration >= {PIN_CONC_MIN:.2f} (relaxed 0.6x, floor 0.10)",
+        "entry_window":      f"{EARLIEST_ET}-{LATEST_ET} ET",
+        "expected_move":     "an expected move from the chain's ATM IV (no fallback)",
+        "pin_em_fraction":   f"pin at {EM_MIN_FRAC:.0%}-{EM_MAX_FRAC:.0%} of the expected move (relaxed x1.3)",
+    }
+    STRUCTURAL = ("legs", "debit", "r")
+    PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + ("gex", "wing_width", "width", "debit_pct_width")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
 
-    def generate_signal(self, *, gex, price_now: float, now_et: str,
-                        atm_iv: float = None, chain=None,
-                        **_ignored) -> Optional[Signal]:
+    # ══════════════════════════════════════════════════════════════════════
+    # THE PLAN — evaluates the declared conditions, SELECTS the three legs.
+    # ══════════════════════════════════════════════════════════════════════
+    def prepare(self, *, gex, price_now, now_et, atm_iv=None, chain=None,
+                **_ignored) -> ButterflyPreparation:
         t = self.planner.tick(price_now)
-        # ⚠️ PARKED. Complete code, not a stub. It is OFF because its INPUT is
-        # not trustworthy - enabling it now would trade a gamma-squared artifact.
-        if not ENABLED:
-            return t.refuse("enabled", "PARKED — GEX_BUTTERFLY_ENABLED is False "
-                                       "(open interest not yet trustworthy)")
+        prep = ButterflyPreparation(t)
+        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET)
+        if now_et and not (_early <= now_et <= _late):
+            # ⚠️ TIME-INVARIANT reason (check_plan_signal PS7): the dormant row
+            # is edge-triggered on its text; a clock in it defeats the dedupe.
+            t.dormant("entry_window", f"outside the butterfly slot {_early}-{_late}")
+            return prep
+        prep.cond("entry_window", None, self.CONDITIONS["entry_window"], True)
+        prep.cond("enabled", 1.0 if ENABLED else 0.0, self.CONDITIONS["enabled"], ENABLED)
         price_now = safe_float(price_now)
         if not price_now or price_now <= 0:
-            return t.refuse("price", f"price unusable ({price_now})")
+            prep.starved.append("price_now")
+            t.starved("price_now")
+            return prep
         if not gex:
-            return t.starved("gex")
+            prep.starved.append("gex")
+            t.starved("gex")
+            return prep
+        t.check("gex", 1.0, True)
 
         env = str(getattr(gex, "gex_environment", "") or "")
         conc = float(getattr(gex, "pin_concentration", 0.0) or 0.0)
         pin = float(getattr(gex, "pin_strike", 0.0) or 0.0)
-        if env != "PINNING" or pin <= 0:
-            return t.refuse("pinning", f"GEX environment is {env or 'unknown'} "
-                                       f"(pin {pin:g}) — not PINNING")
-        t.check("pinning", pin, True)
-        t.anchor(trigger=pin)
-
-        # ── 2. the pin must be STRONG, and it matters more the further out ──
+        prep.pin, prep.conc = pin, conc
+        pinning = env == "PINNING" and pin > 0
+        prep.cond("pinning", pin or None, f"PINNING (now {env or 'unknown'})", pinning)
         _conc_min = relaxed.widen(PIN_CONC_MIN, 0.6, floor=0.10, name="pin_conc_min")
-        t.check("pin_concentration", conc, conc >= _conc_min)
-        if conc < _conc_min:
-            logger.debug("[gex_bfly] no trade: pin concentration %.3f < %.2f - "
-                         "PINNING without a dominant strike", conc, PIN_CONC_MIN)
-            return t.refuse("pin_concentration",
-                            f"pin concentration {conc:.3f} < {_conc_min:.2f} — "
-                            f"PINNING without a dominant strike")
-
-        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET)
-        # 🔴 DORMANT, TIME-INVARIANT REASON (r153) — see strategy/plan.py.
-        if now_et and not (_early <= now_et <= _late):
-            return t.dormant("entry_window",
-                             f"outside the butterfly window {_early}-{_late}"
-                             f" — dormant, not looking at the chart")
-        t.check("entry_window", None, True)
-
-        # ── 3. OTM, and inside the expected move ────────────────────────────
+        prep.cond("pin_concentration", conc, f">= {_conc_min:.2f}", conc >= _conc_min)
         em = expected_move(price_now, atm_iv)
-        if not em or em <= 0:
-            # ⚠️ NO EXPECTED MOVE MEANS NO TRADE, not a fallback. Guessing one
-            # would put the whole distance band on a number nobody measured.
-            logger.debug("[gex_bfly] no trade: no ATM IV, so no expected move")
-            return t.refuse("expected_move", "no ATM IV, so no expected move — "
-                                             "not a fallback")
-        t.check("expected_move", em, True)
+        prep.em = em or 0.0
+        prep.cond("expected_move", em or None, self.CONDITIONS["expected_move"], bool(em and em > 0))
+        if pin > 0 and em and em > 0:
+            dist = abs(pin - price_now)
+            frac = dist / em
+            prep.frac = frac
+            _em_max = relaxed.widen(EM_MAX_FRAC, 1.3, name="em_max_frac")
+            prep.cond("pin_em_fraction", frac, f"{EM_MIN_FRAC:.2f}-{_em_max:.2f}",
+                      EM_MIN_FRAC <= frac <= _em_max)
+            t.anchor(trigger=pin)
+        else:
+            prep.cond("pin_em_fraction", None, self.CONDITIONS["pin_em_fraction"], False)
 
-        dist = abs(pin - price_now)
-        frac = dist / em
-        _em_max = relaxed.widen(EM_MAX_FRAC, 1.3, name="em_max_frac")
-        t.check("pin_em_fraction", frac, EM_MIN_FRAC <= frac <= _em_max)
-        if frac < EM_MIN_FRAC:
-            logger.debug("[gex_bfly] no trade: pin is %.0f%% of the expected "
-                         "move away - too near, the debit is expensive and the "
-                         "payoff ratio poor", frac * 100)
-            return t.refuse("pin_em_fraction",
-                            f"pin is {frac*100:.0f}% of expected move (floor "
-                            f"{EM_MIN_FRAC*100:.0f}%) - debit expensive, payoff poor")
-        if frac > _em_max:
-            logger.debug("[gex_bfly] no trade: pin is %.0f%% of the expected "
-                         "move away - the chain says price probably cannot get "
-                         "there", frac * 100)
-            return t.refuse("pin_em_fraction",
-                            f"pin is {frac*100:.0f}% of expected move (ceiling "
-                            f"{_em_max*100:.0f}%) - the chain says price probably "
-                            f"cannot get there")
+        # ── SELECTION — the three legs, if the conditions hold next tick ────
+        if pin > 0 and em and em > 0:
+            side = "call" if pin > price_now else "put"
+            prep.side = side
+            t.direction = side
+            if chain is None:
+                prep.starved.append("chain")
+            else:
+                inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
+                from utils.math_utils import round_to_strike
+                wing = float(round_to_strike(WING_EM_FRAC * em, inc) or 0.0)
+                wing = max(inc, min(wing, float(round_to_strike(abs(pin - price_now), inc) or inc)))
+                prep.wing = wing
+                t.check("wing_width", wing, wing >= inc)
+                contracts = chain.calls if side == "call" else chain.puts
+                lo_k, hi_k = pin - wing, pin + wing
 
-        side = "call" if pin > price_now else "put"
-        t.direction = side
+                def _exact(k):
+                    for c in contracts or []:
+                        try:
+                            if abs(float(c.strike) - k) < 1e-9 and float(c.mark or 0) > 0:
+                                return c
+                        except (TypeError, ValueError, AttributeError):
+                            continue
+                    return None
+                lower, center, upper = _exact(lo_k), _exact(pin), _exact(hi_k)
+                missing = [f"{k:g}" for k, c in ((lo_k, lower), (pin, center), (hi_k, upper)) if c is None]
+                t.check("legs", 3 - len(missing), not missing)
+                if missing:
+                    prep.structural.append(("legs",
+                        f"no priced {side} contract at strike(s) {', '.join(missing)} — the "
+                        f"apex is the trade; a nearest-strike substitute is a different one"))
+                else:
+                    debit = float(lower.mark) - 2.0 * float(center.mark) + float(upper.mark)
+                    width = float(upper.strike) - float(center.strike)
+                    t.butterfly(debit, width, trigger=pin)
+                    if debit <= 0:
+                        prep.structural.append(("debit",
+                            f"{side} fly {lo_k:g}/{pin:g}/{hi_k:g} prices at {debit:.2f} — "
+                            f"no debit, marks stale or crossed"))
+                    else:
+                        _pct = debit / width if width else None
+                        _cap = float(getattr(config, "BUTTERFLY_MAX_DEBIT_PCT_WIDTH", 0.33))
+                        t.check("debit_pct_width", _pct, None if _pct is None else _pct <= _cap)
+                        r = (width - debit) / debit if width > debit else None
+                        # ⚠️ STRUCTURAL: R >= 1 is economic feasibility, the third
+                        # of the operator's three hurdles. Relaxed does not waive it.
+                        t.check("r", r, None if r is None else r >= R_FLOOR)
+                        if r is None or r < R_FLOOR:
+                            prep.structural.append(("r",
+                                f"{side} fly {lo_k:g}/{pin:g}/{hi_k:g} debit {debit:.2f} on "
+                                f"width {width:.2f} is R {_nr(r)} — below the {R_FLOOR:.2f} "
+                                f"floor; economic feasibility is structure, not selection"))
+                        else:
+                            prep.lower, prep.center, prep.upper = lower, center, upper
+                            prep.debit, prep.width, prep.r = debit, width, r
+                            prep.ready = True
 
-        # ── 4. THE LEGS (v4.3) — apex on the pin, wings by the expected move ─
-        if chain is None:
-            return t.starved("chain")
-        inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
-        from utils.math_utils import round_to_strike
-        wing = float(round_to_strike(WING_EM_FRAC * em, inc) or 0.0)
-        wing = max(inc, min(wing, float(round_to_strike(dist, inc) or inc)))
-        t.check("wing_width", wing, wing >= inc)
-        contracts = chain.calls if side == "call" else chain.puts
-        lo_k, hi_k = pin - wing, pin + wing
+        head = f"pin {pin:g} ({env or 'no env'}, conc {conc:.2f}, {prep.frac:.0%} of EM {prep.em:.2f})"
+        if prep.starved:
+            t.starved(*prep.starved)
+            return prep
+        if prep.structural:
+            gate, why = prep.structural[0]
+            t.refuse(gate, f"{head}: {why}")
+            return prep
+        if prep.unmet:
+            cur = "; ".join(f"{n}={_nr(prep.conditions[n][0]) if isinstance(prep.conditions[n][0], (int, float)) else 'no'}"
+                            f" (need {prep.conditions[n][1]})" for n in prep.unmet)
+            t.hold(f"{head}: PREPARED — {prep.trade_line()}. Waiting on: {cur}")
+            return prep
+        t.note(f"{head}: all {len(self.CONDITIONS)} conditions true — {prep.trade_line()}")
+        return prep
 
-        def _exact(k):
-            for c in contracts or []:
-                try:
-                    if abs(float(c.strike) - k) < 1e-9 and float(c.mark or 0) > 0:
-                        return c
-                except (TypeError, ValueError, AttributeError):
-                    continue
-            return None
-        lower, center, upper = _exact(lo_k), _exact(pin), _exact(hi_k)
-        missing = [f"{k:g}" for k, c in ((lo_k, lower), (pin, center), (hi_k, upper)) if c is None]
-        t.check("legs", 3 - len(missing), not missing)
-        if missing:
-            return t.refuse("legs", f"no priced {side} contract at strike(s) "
-                                    f"{', '.join(missing)} — the apex is the trade; "
-                                    f"a nearest-strike substitute is a different one")
-        debit = float(lower.mark) - 2.0 * float(center.mark) + float(upper.mark)
-        width = float(upper.strike) - float(center.strike)
-        t.butterfly(debit, width, trigger=pin)
-        if debit <= 0:
-            return t.refuse("debit", f"{side} fly {lo_k:g}/{pin:g}/{hi_k:g} prices at "
-                                     f"{debit:.2f} — no debit, marks are stale or crossed")
-        _pct = debit / width if width else None
-        _cap = float(getattr(config, "BUTTERFLY_MAX_DEBIT_PCT_WIDTH", 0.33))
-        t.check("debit_pct_width", _pct, None if _pct is None else _pct <= _cap)
-        ok, why = t.executable()
-        if not ok:
-            logger.info("[gex_bfly] R %s refused: %s", f"{t.r:.2f}" if t.r is not None else "n/a", why)
-            return t.refuse("r", why)
-        t.note(why)
-
+    # ══════════════════════════════════════════════════════════════════════
+    # THE STRATEGY — conditions true -> execute the plan's legs.
+    # ══════════════════════════════════════════════════════════════════════
+    def generate_signal(self, *, gex, price_now: float, now_et: str,
+                        atm_iv: float = None, chain=None,
+                        **_ignored) -> Optional[Signal]:
+        prep = self.prepare(gex=gex, price_now=price_now, now_et=now_et,
+                            atm_iv=atm_iv, chain=chain)
+        if not prep.ready or prep.unmet or prep.structural or prep.starved:
+            return prep.tick.already()
         sig = Signal(
             strategy_name=self.name,
             setup_type="gex_pin_butterfly",
             direction="neutral",
-            option_side=side,
-            underlying_entry=price_now,
-            underlying_target=pin,
+            option_side=prep.side,
+            underlying_entry=float(price_now),
+            underlying_target=prep.pin,
             is_butterfly=True,
-            lower_contract=lower,
-            center_contract=center,
-            upper_contract=upper,
-            butterfly_direction=side,
-            net_debit=round(debit, 4),
-            max_profit=round(width - debit, 4),
-            strike=float(center.strike),
-            expiry=getattr(center, "expiry", ""),
-            entry_premium=round(debit, 4),
-            contract=center,
+            lower_contract=prep.lower,
+            center_contract=prep.center,
+            upper_contract=prep.upper,
+            butterfly_direction=prep.side,
+            net_debit=round(prep.debit, 4),
+            max_profit=round(prep.width - prep.debit, 4),
+            strike=float(prep.center.strike),
+            expiry=getattr(prep.center, "expiry", ""),
+            entry_premium=round(prep.debit, 4),
+            contract=prep.center,
             stop_loss_pct=float(getattr(config, "BUTTERFLY_STOP_LOSS_PCT", 0.25)),
         )
-        sig.center_strike = pin              # the APEX sits on the pin
-        sig.pin_concentration = conc
-        sig.expected_move = round(em, 4)
-        sig.pin_em_fraction = round(frac, 4)
-        sig.pin_distance = round(dist, 4)
+        sig.center_strike = prep.pin
+        sig.pin_concentration = prep.conc
+        sig.expected_move = round(prep.em, 4)
+        sig.pin_em_fraction = round(prep.frac, 4)
+        sig.pin_distance = round(abs(prep.pin - float(price_now)), 4)
         relaxed.tag(sig)
+        logger.info("[gex_bfly] FIRE  %s  pin conc %.2f  spot %.2f",
+                    prep.trade_line(), prep.conc, float(price_now))
+        return prep.tick.take(sig)
 
-        logger.info("[gex_bfly] FIRE  %s fly %g/%g/%g  debit %.2f  width %.2f  R %s  "
-                    "apex %.2f (%.0f%% of a %.2f expected move)  pin conc %.2f  spot %.2f",
-                    side.upper(), lo_k, pin, hi_k, debit, width,
-                    f"{t.r:.2f}" if t.r is not None else "n/a",
-                    pin, frac * 100, em, conc, price_now)
-        return t.take(sig)
+
+def _nr(v):
+    return "n/a" if v is None else f"{v:.2f}"

@@ -1,5 +1,18 @@
 """
-main.py  v4.18
+main.py  v4.19
+v4.19 2026-08-27  r161 — THE BUTTERFLY FIRES REGARDLESS OF OPEN POSITIONS.
+      Operator, 2026-08-27: *"I want it to be able to fire regardless if any
+      other open trades are found. Reason: it has such a high hurdle to
+      clear. GEX pinning, pin reachable, economic feasibility. If it can
+      achieve all that, it's earned an entry."* (TRADES.md §3 from r33: "no
+      position slot, no capital, no competition".) main_loop now asks the
+      butterfly's plan every tick of its slot in BOTH branches — position
+      open or not — through `_attempt_butterfly()`, and a fire APPENDS its
+      record (`add_open_position`, position_manager v4.4) instead of
+      replacing the vertical under management. The execution tail of
+      attempt_new_entry is factored into `_execute_entry_signal()` so both
+      paths run the same sizing/entry/journal code; `additive=True` is the
+      only difference. The condor's authorization no longer skips it.
 v4.18 2026-08-27  r160 — THE CONDOR AUTHORIZES AND MANAGES; THE SWEEP PLANS AND
       EXECUTES LEG TWO. Operator, 2026-08-27: one vertical open -> only a
       complementary-side SWEEP is authorized, everything else gated off; the
@@ -3410,6 +3423,43 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                     pass
             return
 
+    _execute_entry_signal(signal, ctx, ms, state, _sigj)
+
+
+def _attempt_butterfly(ctx, ms, state, *, additive: bool) -> None:
+    """r161 — ask the butterfly's plan (dormant outside its slot) and, on a
+    fire, execute it. Called from main_loop's position-open branch with
+    additive=True; attempt_new_entry keeps its own in-chain call for the
+    no-position case (the chain there gives it the same look)."""
+    try:
+        chain = ctx.get("chain")
+        if chain is None:
+            _plan_skip("GEXPinButterfly", "no options chain this tick")
+            return
+        _atm_iv = None
+        try:
+            _atm_iv = float(getattr(chain, "atm_iv", 0.0) or 0.0) or None
+        except Exception:                                      # noqa: BLE001
+            _atm_iv = None
+        bf_sig = _safe_strategy("GEXPinButterfly",
+                                lambda: _gex_bfly_strategy.generate_signal(
+                                    gex=ctx.get("gex"), price_now=ctx["price"],
+                                    now_et=now_et().strftime("%H:%M"),
+                                    atm_iv=_atm_iv, chain=chain), ctx)
+        if bf_sig is not None:
+            _execute_entry_signal(bf_sig, ctx, ms, state, None, additive=additive)
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning("Butterfly attempt failed: %s", exc)
+
+
+def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool = False):
+    """r161 — the execution tail of attempt_new_entry, factored so the
+    butterfly can fire from main_loop while another position is open.
+    `additive=True` APPENDS the record (add_open_position); False replaces,
+    exactly as attempt_new_entry always did."""
+    macro = ctx["macro"]
+    risk_mgr = get_risk_manager()
+    entry_eng = get_entry_engine(state.paper_trading)
     if not signal.is_valid:
         logger.warning(f"Invalid signal from {signal.strategy_name}")
         if _sigj is not None:
@@ -3480,7 +3530,10 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         _capture_entry_snapshot(ctx, record, signal.direction)
         _capture_fire_snapshot(ctx, record)
         _capture_entry_contract(ctx, record)          # v5.5 (N.9)
-        get_position_manager(state.paper_trading).set_open_position(record)
+        if additive:
+            get_position_manager(state.paper_trading).add_open_position(record)
+        else:
+            get_position_manager(state.paper_trading).set_open_position(record)
         get_alert_manager().send_entry_alert(record)
         logger.info(
             f"✅ Entry: {signal.setup_type} "
@@ -4120,7 +4173,6 @@ def main_loop(state: BotState):
                 _auth_side, _auth_why = _iron_condor_strategy.authorize(_open_sides)
                 if _auth_side:
                     _plan_skip("RunawayContinuation", _auth_why)
-                    _plan_skip("GEXPinButterfly", _auth_why)
                     _plan_skip("TrendCreditSpread", _auth_why)
                     _plan_skip("DailyForkCreditSpread", _auth_why)
                     _sl_chain = ctx.get("chain")
@@ -4140,6 +4192,10 @@ def main_loop(state: BotState):
                         _execute_condor_leg(_sl2, state, ctx)
                 elif _auth_why:
                     _plan_skip_all(_auth_why)
+                # r161 — the butterfly is EXEMPT from all of the above: its
+                # plan runs every tick of its slot, and a fire is ADDED to
+                # whatever is open.
+                _attempt_butterfly(ctx, ms, state, additive=True)
             else:
                 attempt_new_entry(ctx, ms, state)
 

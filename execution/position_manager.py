@@ -1,5 +1,7 @@
 """
-execution/position_manager.py  v4.3
+execution/position_manager.py  v4.4
+v4.4  2026-08-27  r161: add_open_position() — append without replacing, for
+      the butterfly firing alongside an open vertical.
 v4.3  2026-08-24  r99 — flatten_all HOLDS credit verticals until
       VERTICAL_HOLD_TO_ET (15:45). It ran from 15:40 over every record and
       closed them with the debits; the 15:45 hold existed only in
@@ -267,8 +269,19 @@ class PositionManager:
         return failed
 
     def add_condor_leg(self, record: TradeRecord):
-        """The condor is the ONLY strategy allowed a second concurrent position
-        (its two verticals). Appends rather than replacing."""
+        """A condor vertical: appends rather than replacing."""
+        self._open_records.append(record)
+
+    def add_open_position(self, record: TradeRecord):
+        """r161 — the GEX pin butterfly is exempt from the single-position rule
+        (operator, 2026-08-27: *"I want it to be able to fire regardless if
+        any other open trades are found … If it can achieve all that, it's
+        earned an entry."* TRADES.md §3: *"no position slot, no capital, no
+        competition."*). Appends; NEVER replaces — `set_open_position` would
+        silently drop the vertical already under management."""
+        tid = record.get("trade_id") if hasattr(record, "get") else None
+        if tid and any(r.get("trade_id") == tid for r in self._open_records):
+            return
         self._open_records.append(record)
 
     def get_open_record(self) -> Optional[TradeRecord]:

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.0  (2026-08-27, r160)
+tests/check_plan_prepares.py  v1.1  (2026-08-27)
+v1.1  r161: B1-B7 — the butterfly's plan (weak pin holds with the fly
+      prepared; R<1 declined, relaxed included; no exact apex strike declined)
+      and its exemption from the single-position rule (asked with a position
+      open, record appended).
+v1.0  r160
 
 HYPOTHETICALS. Operator: *"see if each one makes logical sense afterwards by
 testing them on hypothetical conditions. if it doesn't it's probably not
@@ -269,6 +274,78 @@ def main():
           "hedge, floor stated",
           rung == "TENT" and m5 and m5[0] == "ROLL" and "TENT" in m5[1]
           and "opposite-type" in m5[1] and "15%" in m5[1], str(m5))
+
+    # ── THE BUTTERFLY (r161) — earns its entry; exempt from the slot rule ──
+    from strategy.gex_pin_butterfly import GEXPinButterflyStrategy
+    import strategy.gex_pin_butterfly as bf
+    bf.ENABLED = True
+    bf.EARLIEST_ET, bf.LATEST_ET = "09:30", "16:00"
+    B = GEXPinButterflyStrategy()
+    B.planner.symbol = "TST"
+
+    class _GEX:
+        def __init__(self, env="PINNING", pin=101.0, conc=0.60):
+            self.gex_environment, self.pin_strike, self.pin_concentration = env, pin, conc
+
+    calls_good = [_C(k, m - 0.01, m + 0.01) for k, m in
+                  ((99, 1.60), (100, 1.00), (101, 0.55), (102, 0.28), (103, 0.14))]
+    # debit 1.00 - 1.10 + 0.28 = 0.18 on width 1 -> R 4.6
+    calls_fat = [_C(k, m - 0.01, m + 0.01) for k, m in
+                 ((99, 2.00), (100, 1.50), (101, 0.55), (102, 0.28), (103, 0.14))]
+    # debit 1.50 - 1.10 + 0.28 = 0.68 on width 1 -> R 0.47
+    bcommon = dict(price_now=100.0, now_et="12:30", atm_iv=1.20)
+
+    os.environ["OT_RELAXED_ENTRY"] = "0"
+    P.begin_tick(20.0)
+    sig = B.generate_signal(gex=_GEX(conc=0.15), chain=_Chain([], calls_good), **bcommon)
+    rb1 = _row(st, "GEXPinButterfly", 20.0)
+    check("B1 PINNING but the pin is weak -> HOLD with the fly PREPARED, waiting on pin_concentration",
+          sig is None and rb1 and rb1[0] == "HOLD" and "PREPARED" in rb1[1]
+          and "buy 100/101/102" in rb1[1] and "pin_concentration" in rb1[1], str(rb1))
+    P.begin_tick(21.0)
+    sig = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_good), **bcommon)
+    rb2 = _row(st, "GEXPinButterfly", 21.0)
+    check("B2 pinning, strong, reachable, R>=1 -> fires the plan's three legs, VALID",
+          sig is not None and sig.is_valid and sig.is_butterfly and sig.center_contract.strike == 101.0
+          and abs(sig.net_debit - 0.18) < 1e-9 and rb2 and rb2[0] == "TAKE", f"{rb2}")
+    P.begin_tick(22.0)
+    sig = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_fat), **bcommon)
+    rb3 = _row(st, "GEXPinButterfly", 22.0)
+    check("B3 everything true but R 0.47 -> DECLINE r (structural)",
+          sig is None and rb3 and rb3[0] == "DECLINE" and rb3[1].startswith("r:"), str(rb3))
+    os.environ["OT_RELAXED_ENTRY"] = "1"
+    P.begin_tick(22.5)
+    sig = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_fat), **bcommon)
+    check("B3b relaxed does NOT waive economic feasibility", sig is None)
+    os.environ["OT_RELAXED_ENTRY"] = "0"
+    P.begin_tick(23.0)
+    sig = B.generate_signal(gex=_GEX(env="NEUTRAL"), chain=_Chain([], calls_good), **bcommon)
+    rb4 = _row(st, "GEXPinButterfly", 23.0)
+    check("B4 not PINNING (pin strike still published) -> HOLD, fly prepared at the pin, waiting on pinning",
+          sig is None and rb4 and rb4[0] == "HOLD" and "pinning" in rb4[1], str(rb4))
+    P.begin_tick(24.0)
+    sig = B.generate_signal(gex=_GEX(), chain=_Chain([], [c for c in calls_good if c.strike != 101.0]),
+                            **bcommon)
+    rb5 = _row(st, "GEXPinButterfly", 24.0)
+    check("B5 no exact strike at the pin -> DECLINE legs, never a substitute apex",
+          sig is None and rb5 and rb5[0] == "DECLINE" and rb5[1].startswith("legs:"), str(rb5))
+
+    # B6 — wiring: main_loop asks the butterfly in the position-open branch and
+    # appends its record; the authorization no longer skips it.
+    import ast as _ast
+    msrc = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
+    ml = next(n for n in _ast.walk(_ast.parse(msrc))
+              if isinstance(n, _ast.FunctionDef) and n.name == "main_loop")
+    mls = _ast.unparse(ml)
+    check("B6 main_loop asks the butterfly with a position OPEN, additively",
+          "_attempt_butterfly(ctx, ms, state, additive=True)" in mls
+          and '_plan_skip("GEXPinButterfly", _auth_why)' not in mls)
+    from execution.position_manager import PositionManager
+    pm = PositionManager.__new__(PositionManager)
+    pm._open_records = [{"trade_id": "v1", "is_condor_leg": True}]
+    pm.add_open_position({"trade_id": "bf1", "is_butterfly": True})
+    check("B7 add_open_position APPENDS — the vertical under management is not dropped",
+          [r["trade_id"] for r in pm._open_records] == ["v1", "bf1"])
 
     print()
     if _fails:

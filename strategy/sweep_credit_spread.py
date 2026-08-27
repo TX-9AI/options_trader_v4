@@ -644,8 +644,9 @@ class SweepCreditSpreadStrategy:
         _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET, relaxed_latest=LATEST_ET)
         in_window = (not now_et) or (_early <= now_et <= _late)
         if not in_window:
-            t.dormant("entry_window", f"{now_et} ET is outside the sweep slot "
-                                      f"{_early}-{_late}")
+            # ⚠️ TIME-INVARIANT reason (check_plan_signal PS7): the dormant row
+            # is edge-triggered on its text; a clock in it defeats the dedupe.
+            t.dormant("entry_window", f"outside the sweep slot {_early}-{_late}")
             return prep                       # dormant: nothing prepared
         prep.cond("entry_window", None, self.CONDITIONS["entry_window"], True)
 

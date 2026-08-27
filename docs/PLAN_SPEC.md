@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.6 · 2026-08-27 · r161 — the butterfly earns its entry (§11).**
 **v1.5 · 2026-08-27 · r160 — the plan is anticipatory, the strategy confirmatory; the condor authorizes and manages. §10 supersedes §8 where they differ.**
 **v1.3 · 2026-08-26 · r147 — leg two and the butterfly, §9.**
 **v1.2 · 2026-08-26 · r146 — AS BUILT. See §8 before reading anything below.**
@@ -484,3 +485,33 @@ untested → hold; tested with a risk-free roll → ROLL with the numbers;
 tested without one → NO RUNG; rolled and breached → TENT, opposite type,
 floor stated. One hypothetical was wrong before the code was — a wing
 priced at 0.30 on a 2.5-wide spread gives R 0.79 and the plan refused it.
+
+---
+
+## 11. r161 — the butterfly earns its entry, and is exempt from the slot rule
+
+Operator, 2026-08-27: *"I want it to be able to fire regardless if any other
+open trades are found. Reason: it has such a high hurdle to clear. GEX
+pinning, pin reachable, economic feasibility. If it can achieve all that,
+it's earned an entry."* TRADES.md §3 has said since r33: *"no position slot,
+no capital, no competition."*
+
+- `GEXPinButterflyStrategy.prepare()` is its plan (the §10 shape): dormant
+  outside the slot; each declared condition with its reading — enabled,
+  pinning, pin concentration, window, expected move, pin reachable
+  (30–100% of EM); the three legs SELECTED around the pin (exact strikes,
+  wing from the expected move); R = (width−debit)/debit against `R_FLOOR`
+  as a STRUCTURAL check — feasibility is the third hurdle, so relaxed does
+  not waive it. `generate_signal()` executes the prepared legs.
+- `main.py` v4.19 asks it every tick of its slot in both branches of
+  `main_loop`, position open or not, and a fire APPENDS its record
+  (`add_open_position`, position_manager v4.4) — never replacing the
+  vertical under management. The execution tail is one function
+  (`_execute_entry_signal`) for both paths. The condor's authorization no
+  longer gates it.
+- Hypotheticals (B1–B7): a weak pin holds with the fly prepared, naming
+  the wait; strong, reachable, R≥1 fires with the plan's legs; R 0.47 is
+  declined, relaxed included; NEUTRAL with a published pin strike holds
+  with the fly prepared, waiting on pinning; no exact apex strike is
+  declined, never substituted; the open-position branch asks it; the
+  append does not drop the vertical.

@@ -109,7 +109,8 @@ def main():
     for rel in ("strategy/trend_credit_spread.py",
                 "strategy/iron_condor_strategy.py",
                 "strategy/daily_fork_credit_spread.py",
-                "strategy/gex_pin_butterfly.py"):
+                "strategy/gex_pin_butterfly.py",
+                "strategy/sweep_credit_spread.py"):      # r161: the sweep is dormant too
         s = open(os.path.join(_root, rel), encoding="utf-8").read()
         tree = ast.parse(s)
         bad_call = False

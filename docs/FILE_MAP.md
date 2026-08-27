@@ -52,9 +52,9 @@ Change these with the most care; a break here reaches everything downstream.
 | `strategy/base_strategy.py` | 13 | check_entry_gate.py, check_orb_geometry.py, check_signal_kwargs.py, check_sweep_spread.py |
 | `data/options_chain.py` | 10 | base_strategy.py, check_entry_gate.py, check_sweep_spread.py, daily_fork_credit_spread.py |
 | `database/trade_logger.py` | 10 | check_condor_pairing.py, check_condor_stop_suppression.py, check_orb_resume.py, condor_roll.py |
+| `strategy/criteria.py` | 10 | check_criteria.py, check_plan_wiring.py, check_structure_viable.py, check_wing_search.py |
 | `strategy/sweep_credit_spread.py` | 10 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
 | `data/tasty_client.py` | 9 | candle_feed.py, condor_roll.py, entry_engine.py, exit_engine.py |
-| `execution/exit_engine.py` | 9 | check_condor_spec.py, check_condor_stop_suppression.py, check_exit_executes.py, check_ladder_wired.py |
 
 ## Every module
 
@@ -324,7 +324,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/position_manager.py`
 - **calls:** `analysis/orb_engine.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/exit_engine.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `strategy/structure.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_manage_call.py`
+- **called by:** `main.py`, `tests/check_manage_call.py`, `tests/check_plan_prepares.py`
 
 ### `execution/tick_size.py`
 - **calls:** `config.py`
@@ -408,15 +408,15 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/criteria.py`
 - **calls:** `strategy/__init__.py`, `strategy/relaxed.py`
-- **called by:** `strategy/daily_fork_credit_spread.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_criteria.py`, `tests/check_plan_wiring.py`, `tests/check_structure_viable.py`, `tests/check_wing_search.py`
+- **called by:** `strategy/daily_fork_credit_spread.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_criteria.py`, `tests/check_plan_wiring.py`, `tests/check_structure_viable.py`, `tests/check_wing_search.py`
 
 ### `strategy/daily_fork_credit_spread.py`
 - **calls:** `analysis/market_state.py`, `analysis/session_map.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`, `strategy/plan.py`
 - **called by:** `main.py`, `tests/check_entry_windows.py`
 
 ### `strategy/gex_pin_butterfly.py`
-- **calls:** `analysis/gate_report.py`, `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/plan.py`, `strategy/relaxed.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_butterfly_legs.py`, `tests/check_dispatch.py`, `tests/check_entry_windows.py`, `tests/stress_entry_path.py`
+- **calls:** `analysis/gate_report.py`, `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/criteria.py`, `strategy/plan.py`, `strategy/relaxed.py`, `utils/math_utils.py`, `utils/time_utils.py`
+- **called by:** `main.py`, `tests/check_butterfly_legs.py`, `tests/check_dispatch.py`, `tests/check_entry_windows.py`, `tests/check_plan_prepares.py`, `tests/stress_entry_path.py`
 
 ### `strategy/iron_condor_strategy.py`
 - **calls:** `analysis/gate_report.py`, `analysis/market_state.py`, `analysis/session_map.py`, `analysis/signal_journal.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `derived/registry.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/condor_roll.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`, `strategy/plan.py`
@@ -611,7 +611,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_plan_prepares.py`
-- **calls:** `strategy/__init__.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/sweep_credit_spread.py`
+- **calls:** `execution/position_manager.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/sweep_credit_spread.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_plan_signal.py`
