@@ -97,6 +97,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass       # r158 — the Permission carrier
 from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,21 @@ def clear_dormant(strategy: str = "") -> None:
         _DORMANT.pop(strategy, None)
     else:
         _DORMANT.clear()
+
+
+@dataclass
+class Permission:
+    """What an informing plan hands to an executing strategy. NOT a trade.
+
+    ⚠️ NO CONTRACTS, NO STRIKES, NO PREMIUM. A side, a level, its provenance
+    and the reason. The strategy asked to act on it does its own construction
+    under its own rules — which is the whole point of the split.
+    """
+    side: str = ""
+    level: float = 0.0
+    source: str = ""
+    plan_id: Any = None
+    why: str = ""
 
 
 def begin_tick(ts: Optional[float] = None) -> int:
@@ -512,6 +528,31 @@ class PlanTick:
         self._close("DORMANT", f"{gate}: {why}")
         self.plan._report_block(gate, why)
         return None
+
+    def permit(self, side: str, level: float, source: str = "",
+               plan_id=None, why: str = ""):
+        """A PERMISSION, not a signal. The plan's terminal for an informer.
+
+        🔴 OPERATOR, 2026-08-27: *"nothing in the plan is executable. It's an
+        information layer to feed the strategy and the strategy will execute."*
+        And: *"The condor doesn't construct anything. The condor plan should
+        just simply define whether a vertical spread is open and active and
+        what's permitted afterwards."*
+
+        ⚠️ THIS RETURNS NO SIGNAL AND NO CONTRACTS — deliberately. `take()`
+        hands back an OptionsSignal because the strategy that called it BUILT
+        one. A plan that is informing another strategy has nothing to hand over
+        but the fact of permission: a side, a level, and why. If this ever
+        starts returning something executable, the informer has become a second
+        strategy again, which is the exact thing being removed here.
+
+        The row is written as PERMIT so the per-tick account distinguishes
+        "informed the strategy" from "took a trade" — they are different events
+        and collapsing them is how the duplication hid.
+        """
+        self._close("PERMIT", why or f"{side} permitted at {level:g}")
+        return Permission(side=side, level=float(level or 0.0),
+                          source=source, plan_id=plan_id, why=why)
 
     def starved(self, *inputs: str):
         """An input the strategy needs is absent. NO PLAN row NAMING it —

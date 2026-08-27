@@ -489,6 +489,45 @@ def is_spent(symbol: str, side: str, pool: float):
     return (k in _SPENT), _SPENT.get(k, "")
 
 
+def _sweep_at_level(liq_map, level: float, side: str = ""):
+    """The sweep on a SUPPLIED level — an input the plan gathered, r158.
+
+    ⚠️ `liq_map.sweeps` IS THE FULL LIST; `recent_sweep` is only the latest one.
+    (Checked against LiquidityMap's own fields, not assumed — the week's other
+    defects were all names that did not exist.) When a plan supplies a level,
+    the strategy evaluates THAT sweep rather than whichever happens to be most
+    recent.
+
+    ⚠️ RETURNS None WHEN THE FEED HAS NO SWEEP THERE, and the caller reports it
+    as STARVED rather than proceeding on the wrong level. A supplied input that
+    cannot be found is missing data, not a refusal — the distinction matters
+    because starvation names the absent input and a refusal blames the setup.
+    """
+    if not level:
+        return None
+    want_side = (side or "").lower()
+    best = None
+    for sw in (getattr(liq_map, "sweeps", None) or []):
+        try:
+            pool = float(getattr(sw, "pool_price", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if not pool or abs(pool - float(level)) > 0.01:
+            continue
+        if want_side:
+            # a swept LOW is defended with puts; a swept HIGH with calls
+            kind = str(getattr(sw, "kind", "") or "")
+            if want_side == "put" and kind != "low_sweep":
+                continue
+            if want_side == "call" and kind != "high_sweep":
+                continue
+        # freshest match wins — `bars_ago` is the real field (r135)
+        if best is None or (getattr(sw, "bars_ago", 999)
+                            < getattr(best, "bars_ago", 999)):
+            best = sw
+    return best
+
+
 class SweepCreditSpreadStrategy:
     """Sell the boundary a swept pool just became.
 
@@ -500,7 +539,8 @@ class SweepCreditSpreadStrategy:
 
     name = "SweepCreditSpread"
 
-    PLAN_CHECKS = ("sweep", "named", "reclaimed", "invalidated", "age",
+    PLAN_CHECKS = ("sweep", "named", "reclaimed",
+                   "invalidated", "age",
                    "spent_level",
                    "rejection", "pierce_depth", "boundary", "side_of_pool",
                    "entry_window", "atr_pct", "geometry", "short_anchor",
@@ -513,9 +553,53 @@ class SweepCreditSpreadStrategy:
     def generate_signal(self, *, liq_map, price_now: float, now_et: str,
                         atr_pct: float = None, chain=None,
                         orb_high: float = None, orb_low: float = None,
+                        required_side: str = "", required_level: float = 0.0,
                         **_ignored) -> Optional[Signal]:
+        """`required_side` / `required_level` — r158, the condor's PERMISSION.
+
+        🔴 OPERATOR, 2026-08-27: *"the condor plan should just simply define
+        whether a vertical spread is open and active and what's permitted
+        afterwards"* and *"nothing in the plan is executable... the strategy
+        will execute."*
+
+        ⚠️ THESE NARROW, THEY NEVER WIDEN. When the condor permits a put-side
+        spread at a level, this strategy still applies EVERY one of its own
+        rules — the rejection, the age, the pierce depth, the geometry, the
+        searched wing, the R floor, `stop_survivable`, the spent-level lock. It
+        simply refuses anything that is not the permitted side and level.
+        A permission is a CONSTRAINT on what may be built, not a licence to
+        skip the rules; if it ever bypasses a gate, the condor has started
+        constructing again through the back door.
+        """
         t = self.planner.tick(price_now)
         sweep = getattr(liq_map, "recent_sweep", None)
+
+        # ── 🔴 r158 — A SUPPLIED LEVEL IS AN INPUT, NOT A CONSTRAINT ─────────
+        # Operator, 2026-08-27: *"the strategy should have a list of inputs to
+        # fire and the plan should be looking at the feed, providing those
+        # inputs. Strategy looking for inputs, plan gathering and providing
+        # those inputs."* And: *"the strategy is the bones of the execution
+        # layer, and it has to be fed inputs from the plan that is searching
+        # the data feed for the elements that the strategy requires."*
+        #
+        # ⚠️ THE FIRST VERSION OF THIS HAD THE ARROW BACKWARDS. It took the
+        # condor's level as a CONSTRAINT and REFUSED when the sweep's own
+        # `recent_sweep` disagreed — the strategy going to find its own input
+        # and then arguing with the plan about it. That is the plan policing
+        # the strategy, which is neither layer's job.
+        # ⚠️ NOW: when a level is SUPPLIED, that is the level this strategy
+        # evaluates. Every one of its own rules still applies to it — named,
+        # reclaimed, invalidated, age, rejection, pierce depth, geometry, the
+        # searched wing, the R floor, `stop_survivable`, the spent-level lock.
+        # An input is not a licence to skip a gate; it is the thing the gates
+        # are applied TO. With no level supplied, the strategy reads
+        # `recent_sweep` as before and nothing changes.
+        if required_level:
+            _supplied = _sweep_at_level(liq_map, float(required_level),
+                                        required_side)
+            if _supplied is None:
+                return t.starved("sweep_at_supplied_level")
+            sweep = _supplied
         # ⚠️ COERCE BEFORE ANY COMPARISON. A NaN price passed `price_now >= pool`
         # (False) and then `price_now <= pool` (also False), so BOTH side checks
         # let it through and the strategy fired on nan, -1.0 and -inf.

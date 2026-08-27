@@ -166,9 +166,16 @@ def main():
     row7 = st.conn.execute("SELECT verdict, reason, r_now FROM plan_tick WHERE "
                            "strategy='CondorLeg2' AND ts_epoch=4.0").fetchone()
     # puts chain: 95 mark 0.50, long 95-wing; R is well below 1 here -> strict vetoes
-    check("L8 STRICT vetoes a sub-1:1 leg two on a rejected level",
-          r7 is None and row7 and row7[0] == "DECLINE" and "r:" in (row7[1] or "")
-          and row7[2] is not None, str(row7))
+    # ⚠️ r158 — THE CONDOR NO LONGER VETOES ON R, BECAUSE IT NO LONGER BUILDS
+    # THE SPREAD. Operator, 2026-08-27: *"The condor doesn't construct
+    # anything."* A rejected level now yields a PERMISSION; the sweep applies
+    # the R floor (which relaxed cannot mute, r156/r157), the searched wing and
+    # stop_survivable. Asserting a veto here would pin the duplication back in.
+    check("L8 a rejected level yields a PERMISSION, not a veto and not a trade",
+          row7 and row7[0] == "PERMIT"
+          and getattr(r7, "side", "") == "put"
+          and not hasattr(r7, "short_put_contract"),
+          str(row7 and row7[0]))
     os.environ["OT_RELAXED_ENTRY"] = "1"
     from strategy import criteria as C
     if not C.relaxed_active():
@@ -176,14 +183,19 @@ def main():
     else:
         P.begin_tick(5.0)
         r7b = ic.plan_second_leg(ctx=ctx, chain=chain, current_price=96.4, open_side="call")
-        check("L7 REJECTED -> a VALID put vertical beyond the level",
-              r7b is not None and r7b.is_valid and r7b.option_side == "put"
-              and r7b.short_put_contract.strike < 96.0 and r7b.condor_trigger_source == "sweep_reversal",
-              f"{getattr(r7b, 'short_put_contract', None) and r7b.short_put_contract.strike}/"
-              f"{getattr(r7b, 'long_put_contract', None) and r7b.long_put_contract.strike}")
+        # ⚠️ r158 — the permission is MODE-INDEPENDENT: it says a side is
+        # permitted at a level, and that fact does not change with relaxed.
+        # What changes with mode lives in the sweep, where the economics are.
+        check("L7 REJECTED -> a permission naming the side and the level",
+              r7b is not None and getattr(r7b, "side", "") == "put"
+              and abs(getattr(r7b, "level", 0.0) - 96.0) < 0.01,
+              f"{getattr(r7b, 'side', None)}@{getattr(r7b, 'level', None)}")
         chk = {r[0]: r[1] for r in st.conn.execute(
             "SELECT check_name, verdict FROM plan_check WHERE strategy='CondorLeg2' AND ts_epoch=5.0")}
-        check("L8b RELAXED takes it and records r_muted", chk.get("r_muted") == "PASS", str(chk.get("r_muted")))
+        # ⚠️ r_muted is no longer recorded HERE — the R decision moved to the
+        # sweep with the construction. Pin that the condor records no economics.
+        check("L8b the condor records no R verdict of its own",
+              "r_muted" not in chk and "r" not in chk, str(sorted(chk)))
         ic.leg2_fired()
         check("L8c leg2_fired() clears the armed level", ic._leg2 is None)
     os.environ["OT_RELAXED_ENTRY"] = "0"

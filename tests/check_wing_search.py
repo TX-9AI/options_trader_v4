@@ -139,9 +139,13 @@ def main():
     # (TCS_WING_WIDTH_*, CONDOR_WING_WIDTH_*) split only two ways — SPX vs QQQ
     # — so every other symbol took the QQQ number regardless of its price or
     # strike ladder.
+    # ⚠️ r158 — `iron_condor_strategy.py` IS NOT IN THIS LIST ANY MORE, and its
+    # absence is the point. Operator, 2026-08-27: *"The condor doesn't construct
+    # anything."* It builds no spread, so it has no wing to search. W16 below
+    # pins that it stays that way — a condor that starts searching wings has
+    # started constructing again.
     for rel in ("strategy/sweep_credit_spread.py",
                 "strategy/trend_credit_spread.py",
-                "strategy/iron_condor_strategy.py",
                 "strategy/daily_fork_credit_spread.py"):
         c = "\n".join(l for l in open(os.path.join(_root, rel),
                                       encoding="utf-8").read().split("\n")
@@ -159,6 +163,46 @@ def main():
         check(f"W11 {name} does not look up a wing at a fixed offset",
               "find_contract_at_strike(contracts, long_strike)" not in c
               and "_find_contract_at_strike(contracts, long_strike)" not in c)
+
+    # ── 🔴 W16 — THE CONDOR CONSTRUCTS NOTHING ───────────────────────────
+    # Operator, 2026-08-27: *"Condor leg one is not a trade. It's a
+    # condition."* / *"nothing in the plan is executable. It's an information
+    # layer to feed the strategy and the strategy will execute."*
+    # ⚠️ 366 LINES DELETED — `decide()`, `check_leg_triggers()` and
+    # `_build_leg_signal()` — plus the 54-line inline builder inside
+    # `plan_second_leg`. If any of them return, the condor is a second
+    # implementation of a credit vertical again, which is the exact thing
+    # Fable was asked to remove and which had ALREADY drifted from the real
+    # one (mark instead of bid/ask, fixed wing, no stop_survivable, an R gate
+    # relaxed could waive).
+    ic2 = open(os.path.join(_root, "strategy", "iron_condor_strategy.py"),
+               encoding="utf-8").read()
+    ictree = ast.parse(ic2)
+    gone = {"decide", "check_leg_triggers", "_build_leg_signal"}
+    have = {n.name for n in ast.walk(ictree)
+            if isinstance(n, ast.FunctionDef)}
+    check("W16 the condor's construction methods are gone",
+          not (gone & have), f"still present: {sorted(gone & have) or 'none'}")
+    check("W17 the condor never calls search_wing",
+          "search_wing" not in ic2)
+    # ⚠️ AND IT MUST NOT ASSEMBLE A SIGNAL. A permission carries a side and a
+    # level; an OptionsSignal carries contracts. Building one here is how the
+    # duplication comes back.
+    fn3 = next((n for n in ast.walk(ictree)
+                if isinstance(n, ast.FunctionDef)
+                and n.name == "plan_second_leg"), None)
+    b3 = ast.unparse(fn3) if fn3 else ""
+    check("W18 plan_second_leg returns a PERMISSION, not a signal",
+          "t.permit(" in b3 and "OptionsSignal(" not in b3)
+
+    # ── W19 — the permission carries nothing executable ──────────────────
+    from strategy.plan import Permission
+    _p = Permission(side="put", level=197.5)
+    _fields = set(vars(_p))
+    check("W19 a Permission carries no contracts, strikes or premium",
+          not any(k for k in _fields
+                  if "contract" in k or "strike" in k or "premium" in k),
+          ", ".join(sorted(_fields)))
 
     print()
     if _fails:

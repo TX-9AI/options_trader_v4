@@ -3279,13 +3279,15 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     if signal is None and not DIRECTIONAL_ONLY:
         _sess_hi, _sess_lo = _session_extremes(ctx)
 
-        # ── 1h fork plan (session-scoped fork cache) ────────────────────
-        if not _iron_condor_strategy.has_active_plan:
-            _rails_1h = _condor_rails(ctx)
-            _safe_strategy("CondorPlan", lambda: _iron_condor_strategy.decide(
-                ms=ms, vol_state=ctx["vol"], chain=chain, macro=macro,
-                current_price=ctx["price"], rails=_rails_1h,
-                session_high=_sess_hi, session_low=_sess_lo, ctx=ctx), ctx)
+        # ── 🔴 r158 — THE CONDOR NO LONGER PLANS OR FIRES A FIRST LEG ───
+        # Operator, 2026-08-27: *"Condor leg one is not a trade. It's a
+        # condition."* and *"The condor doesn't construct anything."*
+        # ⚠️ LEG ONE IS "A CREDIT VERTICAL IS OPEN", whoever opened it — the
+        # sweep, the daily fork or TCS all open first legs already (three of
+        # the four call sites below). The condor was the only one that also
+        # CONSTRUCTED, which is what made it look like a strategy.
+        # `decide()`, `check_leg_triggers()` and `_build_leg_signal()` are
+        # deleted (366 lines); the condor is now a permission layer only.
 
         # ── 1d fork plan (session-scoped fork cache) ────────────────────
         if not _daily_fork_cs_strategy.has_active_plan:
@@ -3309,21 +3311,9 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         # TC.6 fire below in their own blocks (same gate applies there).
         _ctm = ctx.get("condor_triggers")
 
-        # 1h fork triggers
-        if _iron_condor_strategy.has_active_plan:
-            _clt = _safe_strategy("CondorLeg",
-                lambda: _iron_condor_strategy.check_leg_triggers(
-                    ms=ms, chain=chain, current_price=ctx["price"], ctx=ctx), ctx)
-            if _clt is not None and _can_open_credit_spread(
-                    _clt.option_side, ctx=ctx):        # first leg
-                if _sigj:
-                    try:
-                        _sigj.journal("condor_leg",
-                                      leg={"underlying": round(ctx["price"], 2),
-                                           "source": "1h_fork"})
-                    except Exception:
-                        pass
-                _execute_condor_leg(_clt, state, ctx)
+        # ── r158 — no 1h-fork condor leg. See the note above: the condor
+        # constructs nothing, and a first leg is whatever another strategy
+        # opened.
 
         # 1d fork triggers
         if _daily_fork_cs_strategy.has_active_plan:
@@ -4117,10 +4107,48 @@ def main_loop(state: BotState):
                         pass
                     _sl_chain  = ctx.get("chain")
                     _sl_price  = ctx["price"]
-                    _sl2 = _safe_strategy("CondorLeg2nd",
+                    # ── 🔴 r158 — THE PLAN INFORMS; THE STRATEGY EXECUTES ──
+                    # Operator, 2026-08-27: *"nothing in the plan is
+                    # executable. It's an information layer to feed the
+                    # strategy and the strategy will execute."*
+                    # ⚠️ `plan_second_leg` now returns a PERMISSION — a side, a
+                    # level, its provenance — and NO contracts, NO strikes, NO
+                    # premium. It used to return a fully built OptionsSignal
+                    # that this block executed directly, which made the condor
+                    # a second implementation of a credit vertical.
+                    # ⚠️ THE SWEEP CONSTRUCTS, under its own rules, which are
+                    # now STRICTER than the condor's ever were: R as a
+                    # construction target relaxed cannot mute (r156/r157), a
+                    # SEARCHED wing instead of a fixed dollar width, and
+                    # `stop_survivable` (r154) — none of which the condor's
+                    # inline builder applied.
+                    _perm = _safe_strategy("CondorLeg2nd",
                         lambda: _iron_condor_strategy.plan_second_leg(
                             ctx=ctx, chain=_sl_chain, current_price=_sl_price,
                             open_side=_open_side, allowed_classes=_allowed), ctx)
+                    _sl2 = None
+                    if _perm is not None and getattr(_perm, "side", ""):
+                        # ⚠️ THE SWEEP IS ASKED AT THE PERMITTED LEVEL. If its
+                        # own rules refuse — no wing clears R, the stop cannot
+                        # survive the spread, the level is spent — there is no
+                        # second leg and the condor stays a lone vertical. That
+                        # refusal is the sweep's to make and is recorded in its
+                        # own plan row, not overridden here.
+                        _sl2 = _safe_strategy("SweepForLeg2",
+                            lambda: _sweep_cs_strategy.generate_signal(
+                                liq_map=ctx["liq_map"],
+                                price_now=ctx["price"],
+                                # ⚠️ DERIVED HERE — `_now_et_hhmm` / `_atr_pct`
+                                # are locals of attempt_new_entry and are NOT
+                                # in scope in this block. Checked, not assumed.
+                                now_et=now_et().strftime("%H:%M"),
+                                atr_pct=float(getattr(ctx.get("vol"),
+                                                      "atr_pct", 0.0) or 0.0),
+                                chain=_sl_chain,
+                                orb_high=ctx.get("orb_high"),
+                                orb_low=ctx.get("orb_low"),
+                                required_side=_perm.side,
+                                required_level=_perm.level), ctx)
                     if (_sl2 is not None
                             and _can_open_credit_spread(_sl2.option_side,
                                                         _sl2, ctx["price"], ctx=ctx)):

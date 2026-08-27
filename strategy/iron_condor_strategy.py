@@ -300,376 +300,10 @@ class IronCondorStrategy(BaseOptionsStrategy):
 
     # ── PLAN: fork validation + strike pre-selection ───────────────────────
 
-    def decide(self, ms: MarketState, vol_state: VolatilityState,
-               chain: OptionsChain, macro: MacroSnapshot,
-               current_price: float,
-               rails: Optional[dict] = None,
-               session_high: Optional[float] = None,
-               session_low:  Optional[float] = None,
-               ctx: Optional[dict] = None) -> Optional[CondorPlan]:
-        """
-        Build the session plan: validate the 1h fork and pre-select strikes.
-        No orders, no pairing expectation. Returns the plan if the fork is
-        valid; None means no credit spreads from this strategy today.
-        """
-        self._reset_if_new_day()
-        now_et = datetime.now(ET)
-        hm = (now_et.hour, now_et.minute)
-        t = self.planner.tick(current_price)
-
-        # 🔴 DORMANT, TIME-INVARIANT REASON (r153) — see strategy/plan.py.
-        if hm < CONDOR_ENTRY_START_ET or hm >= CONDOR_ENTRY_CUTOFF_ET:
-            return t.dormant("entry_window",
-                             f"outside the credit window "
-                             f"{CONDOR_ENTRY_START_ET[0]:02d}:"
-                             f"{CONDOR_ENTRY_START_ET[1]:02d}-"
-                             f"{CONDOR_ENTRY_CUTOFF_ET[0]:02d}:"
-                             f"{CONDOR_ENTRY_CUTOFF_ET[1]:02d} — dormant, "
-                             f"not looking at the chart")
-        t.check("entry_window", None, True)
-        if self._plan is not None:
-            t.hold("plan already built this session — legs watched by "
-                   "check_leg_triggers")
-            return self._plan  # plan already built this session
-
-        # ── Fork gate ──────────────────────────────────────────────────────
-        use_rails = bool(CONDOR_PITCHFORK_ANCHOR and rails)
-        if CONDOR_REQUIRE_FORK and not use_rails:
-            _why = "absent"
-            try:
-                from analysis.pitchfork import last_reject_reason
-                rr = last_reject_reason()
-                if rr and not rails:
-                    _why = f"absent ({rr})"
-            except Exception:
-                pass
-            logger.debug("Condor: NO PLAN — no %s fork (rails=%s)",
-                         CONDOR_PF_TIMEFRAME, _why)
-            return t.refuse("fork", f"no usable {CONDOR_PF_TIMEFRAME} pitchfork "
-                                    f"(rails={_why})")
-        t.check("fork", 1.0 if use_rails else 0.0, True)
-
-        t.check("vix", macro.vix, macro.vix < VIX_BUTTERFLY_DISABLE)
-        if macro.vix >= VIX_BUTTERFLY_DISABLE:
-            logger.info("Condor blocked: VIX=%.1f", macro.vix)
-            return t.refuse("vix", f"VIX {macro.vix:.1f} >= {VIX_BUTTERFLY_DISABLE}")
-
-        em = self._expected_move_from_straddle(chain, current_price)
-        t.check("expected_move", em or None, None if em <= 0 else True)
-        if em <= 0:
-            return t.starved("expected_move")
-
-        # ── Strike selection at PLAN TIME (chain available here) ───────────
-        bb_upper = vol_state.bb_upper if vol_state.bb_upper > 0 else current_price + em
-        bb_lower = vol_state.bb_lower if vol_state.bb_lower > 0 else current_price - em
-        em_floor   = em * CONDOR_EM_FLOOR_FRAC
-        _em_call   = current_price + em_floor
-        _em_put    = current_price - em_floor
-        _sigma     = float(getattr(vol_state, "atr_current", 0.0) or 0.0)
-        _bars      = self._bars_left(now_et, CONDOR_POP_BAR_MIN)
-
-        # ── GEOMETRY: THE SHARED SESSION MAP (v4.5) ──────────────────────
-        # An upper tine is a CEILING for the session and a lower tine a FLOOR;
-        # a ceiling below the opening range (or a floor above it) is
-        # invalidated, never re-cast. Unmeasured (no ORB yet) records n/a and
-        # the spec proceeds.
-        _oh = (ctx or {}).get("orb_high")
-        _ol = (ctx or {}).get("orb_low")
-        _call_ok = _put_ok = None
-        if use_rails:
-            _call_ok = t.level(float(rails["upper"]), CEILING,
-                               f"{CONDOR_PF_TIMEFRAME} upper tine", _oh, _ol)
-            _call_why = t.last_why
-            _put_ok = t.level(float(rails["lower"]), FLOOR,
-                              f"{CONDOR_PF_TIMEFRAME} lower tine", _oh, _ol)
-            _put_why = t.last_why
-            if _call_ok is False and _put_ok is False:
-                return t.refuse("geometry", f"{_call_why}; {_put_why}")
-            if _call_ok is False:
-                logger.info("Condor: call side eliminated by geometry — %s", _call_why)
-            if _put_ok is False:
-                logger.info("Condor: put side eliminated by geometry — %s", _put_why)
-
-        if use_rails:
-            call_anchor = max(float(rails["upper"]), _em_call)
-            put_anchor  = min(float(rails["lower"]), _em_put)
-            call_rail_saved = float(rails["upper"])
-            put_rail_saved  = float(rails["lower"])
-        else:
-            call_anchor = max(current_price + em_floor, bb_upper)
-            put_anchor  = min(current_price - em_floor, bb_lower)
-            call_rail_saved = call_anchor
-            put_rail_saved  = put_anchor
-
-        if session_high is None or session_low is None:
-            logger.warning("Condor: session extremes missing — not-exceeded filter inert")
-
-        short_call = self._select_beyond_rail(
-            chain.calls, "call", call_anchor, _em_call, session_high,
-            spot=current_price, sigma=_sigma, bars_left=_bars,
-            min_pop=CONDOR_MIN_POP, max_width_pct=CONDOR_MAX_QUOTE_WIDTH)
-        short_put = self._select_beyond_rail(
-            chain.puts, "put", put_anchor, _em_put, session_low,
-            spot=current_price, sigma=_sigma, bars_left=_bars,
-            min_pop=CONDOR_MIN_POP, max_width_pct=CONDOR_MAX_QUOTE_WIDTH)
-
-        # A side eliminated by geometry is not priced — its strike is None
-        # and it can never trigger. Both sides are still stored so the leg
-        # check reads a plan of the same shape.
-        if _call_ok is False:
-            short_call = None
-        if _put_ok is False:
-            short_put = None
-        t.check("strike_clears_anchor",
-                (1 if short_call else 0) + (1 if short_put else 0),
-                bool(short_call or short_put))
-        if short_call is None and short_put is None:
-            logger.info("Condor: no strike clears anchor on either side")
-            return t.refuse("strike_clears_anchor",
-                            "no strike clears the anchor on either side")
-        if short_call is None or short_put is None:
-            logger.info("Condor: one-sided plan (call=%s put=%s)",
-                        "ok" if short_call else "none",
-                        "ok" if short_put else "none")
-
-        guardrail = em * CONDOR_EXPECTED_MOVE_GUARDRAIL_MULT
-        _reach = max((short_call.strike - current_price) if short_call else 0.0,
-                     (current_price - short_put.strike) if short_put else 0.0)
-        t.check("guardrail", _reach - guardrail, _reach <= guardrail)
-        if _reach > guardrail:
-            logger.info("Condor: strikes exceed %.1f-pt guardrail", guardrail)
-            return t.refuse("guardrail", f"strike distance {_reach:.2f} exceeds "
-                                         f"the {guardrail:.1f}-pt guardrail "
-                                         f"({CONDOR_EXPECTED_MOVE_GUARDRAIL_MULT}x EM)")
-
-        # ⚠️ r157 — THIS WING IS A PLACEHOLDER, NOT THE TRADE. The long strikes
-        # recorded on the plan below are the OLD fixed-dollar geometry; the
-        # executing path now SEARCHES the wing to an R floor and overrides
-        # them. Kept so the plan still describes a complete structure at
-        # declaration time, when the chain may not be loaded — but nothing
-        # downstream trades off them.
-        wing = self._wing_width()
-        plan = CondorPlan(
-            vix_at_plan            = float(getattr(macro, "vix", 0.0) or 0.0),
-            short_call_strike      = short_call.strike if short_call else 0.0,
-            long_call_strike       = (short_call.strike + wing * STRIKE_INCREMENT
-                                      if short_call else 0.0),
-            short_put_strike       = short_put.strike if short_put else 0.0,
-            long_put_strike        = (short_put.strike - wing * STRIKE_INCREMENT
-                                      if short_put else 0.0),
-            expected_move          = em,
-            underlying_at_decision = current_price,
-            decided_at             = now_et.strftime("%H:%M ET"),
-            call_rail_at_decision  = call_rail_saved,
-            put_rail_at_decision   = put_rail_saved,
-        )
-        self._plan = plan
-        self._ledger_open(plan, ctx)
-
-        logger.info(
-            "🦅 CONDOR PLAN: call_spread=%g/%g  put_spread=%g/%g  "
-            "EM=$%.2f  VIX=%.1f  rail_U=%.2f/L=%.2f",
-            plan.short_call_strike, plan.long_call_strike,
-            plan.long_put_strike, plan.short_put_strike,
-            em, macro.vix, call_rail_saved, put_rail_saved)
-        t.hold(f"plan built: call {plan.short_call_strike:g}/{plan.long_call_strike:g} "
-               f"put {plan.short_put_strike:g}/{plan.long_put_strike:g} — "
-               f"waiting on a tine", verdict="HOLD")
-        return plan
 
     # ── TRIGGER: check live tine position against current price ───────────
 
-    def check_leg_triggers(self, ms: MarketState,
-                            chain: OptionsChain,
-                            current_price: float,
-                            ctx: Optional[dict] = None) -> Optional[OptionsSignal]:
-        """
-        Called every tick. Returns a signal for ONE side if its tine is hit.
-        Uses the LIVE trigger level from ctx["condor_triggers"] (the moving-
-        target map) rather than the plan-time value. If the map is absent,
-        falls back to recomputing from the plan's saved rails.
 
-        ⚠️ DOES NOT CHECK _can_open_credit_spread — that is main.py's job.
-           This method answers "is a trigger active?" not "should we fire?"
-        """
-        plan = self._plan
-        t = self.planner.tick(current_price)
-        if plan is None:
-            return t.refuse("plan", "no session plan built (decide() has not "
-                                    "produced one)")
-
-        # Approach telemetry — cheap, runs every tick
-        if plan.max_price_seen <= 0:
-            plan.max_price_seen = plan.min_price_seen = current_price
-        plan.max_price_seen = max(plan.max_price_seen, current_price)
-        plan.min_price_seen = min(plan.min_price_seen, current_price)
-
-        now_et = datetime.now(ET)
-        hm = (now_et.hour, now_et.minute)
-        if hm >= CONDOR_ENTRY_CUTOFF_ET:
-            self._abandon_past_cutoff(plan, chain, current_price)
-            return t.refuse("entry_window", f"{hm[0]:02d}:{hm[1]:02d} ET is past "
-                                            f"the cutoff — plan abandoned")
-
-        # ── Fork invalidation ──────────────────────────────────────────────
-        # A filled leg is never cancelled — but there is no "filled leg" to
-        # track here any more. If the fork dies the plan expires; any already-
-        # executed vertical manages itself via its own stop/nickel rules.
-        if getattr(ms, "fork_invalidated", False):
-            logger.info("Condor: fork invalidated — plan expires (any open verticals manage standalone)")
-            self._ledger_expire("fork_invalidated")
-            self._plan = None
-            return t.refuse("fork_invalidated", "fork invalidated — plan expires")
-        t.check("fork_invalidated", 0.0, True)
-
-        # ── Live trigger level ─────────────────────────────────────────────
-        # Read from the per-tick map if available; fall back to recomputing
-        # from the plan's saved rail (which is approximately correct for
-        # the current tick on a slowly-sloping fork).
-        call_trigger = put_trigger = None
-        try:
-            ctm = (ctx or {}).get("condor_triggers")
-            if ctm is not None:
-                for ft in ctm.triggers:
-                    if ft.tf == "1h" and ft.side == "call":
-                        call_trigger = ft.trigger
-                    elif ft.tf == "1h" and ft.side == "put":
-                        put_trigger = ft.trigger
-        except Exception:
-            pass
-
-        if call_trigger is None:
-            mid_ref = (plan.call_rail_at_decision + plan.put_rail_at_decision) / 2
-            call_trigger = mid_ref + CONDOR_TRIGGER_APPROACH * (plan.call_rail_at_decision - mid_ref)
-        if put_trigger is None:
-            mid_ref = (plan.call_rail_at_decision + plan.put_rail_at_decision) / 2
-            put_trigger  = mid_ref - CONDOR_TRIGGER_APPROACH * (mid_ref - plan.put_rail_at_decision)
-
-        # a side with no strike (geometry-eliminated, v4.5) can never trigger
-        call_hit = current_price >= call_trigger and plan.short_call_strike > 0
-        put_hit  = current_price <= put_trigger and plan.short_put_strike > 0
-
-        if call_hit and put_hit:
-            # Both active this tick — take the side price has exceeded further
-            side = ("call" if (current_price - call_trigger) >= (put_trigger - current_price)
-                    else "put")
-        elif call_hit:
-            side = "call"
-        elif put_hit:
-            side = "put"
-        else:
-            # the nearer tine is the trigger this plan is waiting on
-            _dc, _dp = call_trigger - current_price, current_price - put_trigger
-            if plan.short_call_strike > 0 and (plan.short_put_strike <= 0 or _dc <= _dp):
-                t.anchor(trigger=call_trigger, invalidation=plan.short_call_strike)
-                t.direction = "call"
-            else:
-                t.anchor(trigger=put_trigger, invalidation=plan.short_put_strike)
-                t.direction = "put"
-            t.check("trigger", None, False)
-            return t.hold(f"neither tine hit — call trigger {call_trigger:.2f} / "
-                          f"put trigger {put_trigger:.2f}, price {current_price:.2f}")
-
-        t.direction = side
-        t.anchor(trigger=call_trigger if side == "call" else put_trigger)
-        t.check("trigger", 1.0, True)
-        return self._build_leg_signal(plan, side, chain, t)
-
-    def _build_leg_signal(self, plan: CondorPlan, side: str,
-                           chain: OptionsChain, t=None) -> Optional[OptionsSignal]:
-        """Build a fully-specified credit-spread OptionsSignal for one side."""
-        if t is None:
-            t = self.planner.tick(plan.underlying_at_decision, side)
-        if side == "call":
-            contracts    = chain.calls
-            short_strike = plan.short_call_strike
-            long_strike  = plan.long_call_strike
-        else:
-            contracts    = chain.puts
-            short_strike = plan.short_put_strike
-            long_strike  = plan.long_put_strike
-
-        short_contract = self._find_contract_at_strike(contracts, short_strike)
-        if short_contract is None:
-            logger.warning("Condor: could not find %s short contract %g",
-                           side, short_strike)
-            return t.refuse("contract", f"could not find {side} short contract "
-                                        f"{short_strike:g}")
-        t.check("contract", short_strike, True)
-
-        # ── 🔴 r157 — THE WING IS SEARCHED TO AN R FLOOR ─────────────────────
-        # `plan.long_*_strike` came from CONDOR_WING_WIDTH_SPX/QQQ — a FIXED
-        # DOLLAR width split two ways, so every symbol but SPX took the QQQ
-        # number regardless of its price or strike ladder. R was checked after
-        # the fact and MUTED under relaxed.
-        # ⚠️ THE SHORT STRIKE IS STRUCTURAL and does not move; the wing is the
-        # free variable, and narrower means less credit, less risk, HIGHER R.
-        # ⚠️ `R_FLOOR` DIRECTLY, never `r_hurdle()` (None under relaxed).
-        _best_r, long_contract, net_credit, _bw = cv.search_wing(
-            contracts, short_contract, side, R_FLOOR)
-        if long_contract is None:
-            return t.refuse("wing", f"no priceable {side} wing beyond "
-                                    f"{short_strike:g} (undefined risk is "
-                                    f"never sold)")
-        long_strike = long_contract.strike
-        # ── THE WHAT-IF, off the spread this plan chose ───────────────────
-        t.credit_spread(short_strike, long_strike, net_credit,
-                        invalidation=short_strike)
-        t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
-        if _best_r < R_FLOOR:
-            return t.refuse("wing_r_best",
-                            f"no {side} wing clears R {R_FLOOR:.2f} — best is "
-                            f"{_best_r:.2f} at {long_strike:g} ({_bw:g} wide, "
-                            f"credit ${net_credit:.2f}); structure, not "
-                            f"selection, so relaxed does not waive it")
-        if net_credit <= 0:
-            logger.info("Condor: %s credit <= 0 (%.2f) — skip", side, net_credit)
-            return t.refuse("credit", f"{side} credit {net_credit:.2f} <= 0")
-        # ── THE R HURDLE — strict refuses, relaxed records ────────────────
-        _ok, _why = t.executable()
-        if not _ok:
-            logger.info("Condor: %s leg R %s refused: %s", side, _n(t.r), _why)
-            return t.refuse("r", _why)
-        t.note(_why)
-
-        wing_width = abs(long_strike - short_strike)
-        signal = OptionsSignal(
-            vix_at_signal          = float(plan.vix_at_plan or 0.0),
-            strategy_name          = self.name,
-            setup_type             = f"1h_fork_{side}_credit_spread",
-            direction              = "neutral",
-            option_side            = side,
-            # 🔴 r100 — WAS `is_iron_condor=True`, WHICH IS NOT A FIELD. It is a
-            # read/write PROPERTY on OptionsSignal, so the dataclass __init__
-            # rejected it and this leg builder raised TypeError on EVERY fire —
-            # the 1h fork credit spread could never produce a signal. The alias
-            # exists so a caller setting EITHER name gets identical behaviour;
-            # that only holds for ATTRIBUTE assignment, never in the constructor.
-            is_credit_vertical         = True,
-            short_call_contract    = short_contract if side == "call" else None,
-            long_call_contract     = long_contract  if side == "call" else None,
-            short_put_contract     = short_contract if side == "put"  else None,
-            long_put_contract      = long_contract  if side == "put"  else None,
-            net_credit             = net_credit,
-            max_loss_condor        = wing_width - net_credit,
-            underlying_entry       = plan.underlying_at_decision,
-            stop_loss_pct          = CONDOR_STOP_LOSS_PCT,
-            tp_pct                 = 0.0,
-            condor_trigger_source  = "1h_fork",
-            notes                  = (
-                f"1h-fork {side} spread | EM=${plan.expected_move:.2f} | "
-                f"rail_U={plan.call_rail_at_decision:.2f} "
-                f"rail_L={plan.put_rail_at_decision:.2f} | "
-                f"standalone unless complement fires"
-            ),
-        )
-        self._add_confluence(signal, "1h pitchfork tine — premium rich at the rail")
-        logger.info(
-            "🦅 1H FORK SIGNAL (%s): sell=%g buy=%g credit=$%.2f "
-            "stop=$%.2f nickel=$%.2f",
-            side.upper(), short_strike, long_strike,
-            net_credit, net_credit * (1 + CONDOR_STOP_LOSS_PCT), CONDOR_NICKEL_CLOSE)
-        return t.take(signal)
 
     # ═══ LEG TWO — the one-level plan (v4.6) ═══════════════════════════════
 
@@ -806,64 +440,41 @@ class IronCondorStrategy(BaseOptionsStrategy):
             ks = []
         beyond = ([k for k in ks if k > L["price"]] if need_side == "call"
                   else [k for k in reversed(ks) if k < L["price"]])
-        if not beyond:
-            t.check("short_anchor", None, False)
-            return t.refuse("short_anchor", f"{head} rejected but the {need_side} "
-                                            f"chain has no priced strike beyond it")
-        short_k = beyond[0]
-        long_k = short_k + wing_pts if need_side == "call" else short_k - wing_pts
-        t.check("short_anchor", short_k, True)
-        short_c = self._find_contract_at_strike(contracts, short_k)
-        long_c = self._find_contract_at_strike(contracts, long_k)
-        if short_c is None or long_c is None:
-            return t.refuse("contract", f"no contracts at {short_k:g}/{long_k:g} "
-                                        f"for the {need_side} spread beyond {head}")
-        t.check("contract", short_k, True)
-        t.check("wing", long_k, True)
-        credit = float(short_c.mark) - float(long_c.mark)
-        t.credit_spread(short_k, long_k, credit, invalidation=L["price"],
-                        trigger=L["price"])
-        if credit <= 0:
-            return t.refuse("credit", f"{need_side} {short_k:g}/{long_k:g} credit "
-                                      f"{credit:.2f} <= 0")
-        ok, why = t.executable()
-        if not ok:
-            logger.info("CondorLeg2: %s rejected but R %s refused: %s", head, _n(t.r), why)
-            return t.refuse("r", why)
-        t.note(f"{head} REJECTED — {d.get('why', '')}")
-        t.note(why)
+        # ── ✅ PERMITTED. THE PLAN STOPS HERE. ───────────────────────────────
+        # 🔴 OPERATOR, 2026-08-27: *"The condor doesn't construct anything. The
+        # condor plan should just simply define whether a vertical spread is
+        # open and active and what's permitted afterwards."* And: *"nothing in
+        # the plan is executable. It's an information layer to feed the
+        # strategy and the strategy will execute."*
+        #
+        # ⚠️ WHAT WAS HERE, AND WHY IT IS GONE: 54 lines that picked the short
+        # strike, applied a fixed `wing_pts`, looked up both contracts, priced
+        # the credit on MARK, gated on `t.executable()` (MUTED under relaxed)
+        # and assembled an OptionsSignal. That is a vertical spread being
+        # rebuilt inside a management function — *"I don't need two strategies
+        # for every strategy"* — and it had already drifted from the real one:
+        # mark instead of bid/ask, a fixed wing instead of a search, no
+        # `stop_survivable`, and an R gate relaxed could waive.
+        #
+        # ⚠️ THE SWEEP OWNS CONSTRUCTION AND IS NOW STRICTER THAN THIS EVER WAS
+        # — R as a construction target that relaxed cannot mute (r156/r157), a
+        # SEARCHED wing rather than a fixed dollar width, `stop_survivable`
+        # (r154) and the risk-anchored stop (r155). Leg two inherits all of it
+        # by DELETION rather than by re-implementing four gates here.
+        #
+        # ⚠️ CONSEQUENCE, STATED: leg two will fire LESS. A rejected level whose
+        # chain offers no wing clearing the R floor produces no second leg and
+        # the condor stays a lone vertical. That is correct, and it compounds
+        # with relaxed already producing fewer trades.
+        return t.permit(
+            side=need_side,
+            level=L["price"],
+            source=L["source"],
+            plan_id=L.get("plan_id"),
+            why=f"{head} REJECTED — {d.get('why', '')}; a {need_side} "
+                f"complementary vertical is PERMITTED at {L['price']:g}. "
+                f"Construction belongs to the sweep.")
 
-        src = ("1h_fork" if L["tf"] == "1h" else "1d_fork") if L["source"] == "fork"             else "sweep_reversal"
-        signal = OptionsSignal(
-            strategy_name          = self.name,
-            setup_type             = f"leg2_{L['source']}_{need_side}_credit_spread",
-            direction              = "neutral",
-            option_side            = need_side,
-            is_credit_vertical     = True,
-            short_call_contract    = short_c if need_side == "call" else None,
-            long_call_contract     = long_c  if need_side == "call" else None,
-            short_put_contract     = short_c if need_side == "put"  else None,
-            long_put_contract      = long_c  if need_side == "put"  else None,
-            net_credit             = credit,
-            max_loss_condor        = abs(long_k - short_k) - credit,
-            underlying_entry       = current_price,
-            underlying_stop        = L["price"],
-            stop_loss_pct          = CONDOR_STOP_LOSS_PCT,
-            tp_pct                 = 0.0,
-            condor_trigger_source  = src,
-            notes                  = (f"leg2 on {head} REJECTED | pierce "
-                                      f"{_n(d.get('pierce'))} | complement of open "
-                                      f"{open_side} spread"),
-        )
-        signal.contract = short_c
-        signal.strike = short_k
-        signal.expiry = getattr(short_c, "expiry", "")
-        signal.entry_premium = credit
-        signal.leg2_level = L["price"]
-        signal.leg2_plan_id = L.get("plan_id")
-        logger.info("🦅 LEG2 SIGNAL (%s): %s REJECTED -> sell %g buy %g credit $%.2f R %s",
-                    need_side.upper(), head, short_k, long_k, credit, _n(t.r))
-        return t.take(signal)
 
     def leg2_fired(self) -> None:
         """main.py: the leg-2 signal was executed. Close the armed level."""
