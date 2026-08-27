@@ -1321,6 +1321,20 @@ BRIEF_CONVICTION_WEIGHT     = 0.05
 # The dict stays (callers read it, and .get defaults are how the C-grade
 # rejection reads) — only the values are flattened, so restoring a multiplier
 # later is a one-line change rather than a re-wiring.
+# 🔴 r155 — THE LONE-VERTICAL STOP, AS A FRACTION OF THE RISK.
+# Was `entry_prem * 1.15` — fifteen percent of the CREDIT, which is INVERTED:
+# the less credit collected, the tighter the stop in DOLLARS, so the structures
+# with the least premium got the least room. CVX 2026-08-27 collected $0.58 on
+# a 5-wide and was handed an 8.7-CENT stop against $442 of risk; it entered the
+# same spread seventeen times in twelve minutes, each dead inside a minute.
+# ⚠️ ANCHORED TO `width - credit` — what is actually at stake, which does not
+# shrink as the credit shrinks. Same 15%: a $0.58 credit on a 5-wide now gets
+# $0.66 of room instead of $0.087.
+# ⚠️ 15% IS CARRIED OVER, NOT RE-FITTED. It meant "15% of credit" and now means
+# "15% of risk" — a different quantity, so the number deserves its own
+# evidence. It is a ⟨PRIOR⟩ until the plan table says otherwise.
+LONE_STOP_PCT_OF_RISK       = float(os.environ.get("OT_LONE_STOP_PCT_RISK", "0.15"))
+
 GRADE_SIZE_MULTIPLIER       = {"A": 1.0, "B": 1.0}
 
 # ─── VOLATILITY / TREND ───────────────────────────────────────────────────────

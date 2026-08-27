@@ -61,6 +61,12 @@ class FakeTradeLogger:
 def _leg(trade_id: str, side: str, **extra) -> dict:
     r = dict(trade_id=trade_id, symbol="SPX", option_side=side,
              is_condor_leg=1, is_trend_credit=0, status="open",
+             # ⚠️ r155 — `spread_width` IS REQUIRED. The lone stop is now a
+             # fraction of the RISK (width - credit), not of the credit, so a
+             # fixture without a width exercises the WARNING FALLBACK rather
+             # than the real rule. Every live record carries it (main.py:2057);
+             # a double that omits it tests a path production never takes.
+             spread_width=5.0,
              entry_premium=1.00, contracts=1, stop_premium=1.25,
              target_premium=0.05, trail_stop=0.0, underlying_stop=0.0,
              direction="short", stop_suppressed_ts="", stop_suppressed_by="")
@@ -88,16 +94,22 @@ def main() -> int:
     xe.get_trade_logger = lambda: fake
     engine = xe.ExitEngine(paper_trading=True)
 
-    breach = 1.30   # entry 1.00 → breaches the lone 1.15 floor AND the
-                    # pre-fix hedged 1.25 floor, so S2 is genuinely RED
-                    # at r89b rather than passing behind the wider stop
+    # ⚠️ r155 — RE-DERIVED FOR THE RISK-ANCHORED STOP. Was 1.30, chosen to clear
+    # the old `entry * 1.15` = 1.15 floor. The lone stop is now
+    # `entry + (width - entry) * 15%` = 1.00 + 4.00*0.15 = **1.60**, so 1.30 no
+    # longer breaches anything and S1/S4 stopped exercising the stop at all.
+    # ⚠️ THE FIXTURE'S NUMBERS ENCODED THE OLD RULE — this is the same trap as
+    # a test double carrying a field name that does not exist: it kept passing
+    # for a reason unrelated to what it claims to check.
+    breach = 1.70   # entry 1.00, width 5.00 → risk 4.00 → lone stop 1.60
 
-    print("S1  lone leg — the 15% floor fires")
+    print("S1  lone leg — the risk-anchored floor fires")
     d = engine._evaluate_condor_leg(put_leg, breach, df_1m=None)
     check("S1 exits", bool(d.should_exit), f"reason={d.exit_reason!r}")
-    check("S1 reason is condor_stop (lone 15%)",
+    check("S1 reason is condor_stop (lone, risk-anchored)",
           str(d.exit_reason or "").startswith("condor_stop")
-          and "(lone 15%)" in str(d.exit_reason or ""),
+          and "of risk" in str(d.exit_reason or "")
+          and "fallback" not in str(d.exit_reason or ""),
           f"reason={d.exit_reason!r}")
 
     print("S2  complement open — the SAME move is suppressed")

@@ -564,6 +564,8 @@ from config import (VELOCITY_STALL_ENABLED, VELOCITY_STALL_ENFORCE,   # VEL.1
                     VELOCITY_GRACE_MIN, VELOCITY_STRICTNESS,
                     VELOCITY_CONFIRM_TICKS, VELOCITY_FLOOR_BY_MIN,
                     VELOCITY_MEASURED_STRATEGIES)
+# r155 — the lone-vertical stop, anchored to RISK rather than credit.
+from config import LONE_STOP_PCT_OF_RISK
 THETA_MIN_GAIN_PCT       = 0.10    # gain floor: don't protect a gain smaller than this
 MINUTES_PER_CALENDAR_DAY = 1440    # theta greek is $/share/CALENDAR day (not the 390 RTH min)
 
@@ -1569,7 +1571,7 @@ class ExitEngine:
                         record["trade_id"],
                         stop_suppressed_ts="", stop_suppressed_by="")
                 logger.info(
-                    "CONDOR STOP RE-ARMED %s: leg is alone again — lone 15%% "
+                    "CONDOR STOP RE-ARMED %s: leg is alone again — lone stop "
                     "floor active", str(record.get("trade_id", ""))[:8])
         except Exception as exc:                                # noqa: BLE001
             logger.debug("stop-suppression bookkeeping: %s", exc)
@@ -1774,12 +1776,63 @@ class ExitEngine:
           # THE SPEC, in full: a STANDALONE vertical has a stop FLOOR and
           # nothing else. A FORMED condor has no premium stop at all — it rolls
           # the untested side, failing that inverts, failing that closes.
-          stop_level = entry_prem * (1 + 0.15)
-          tier = ""
+          # ── 🔴 r155 — THE STOP IS A FRACTION OF THE RISK, NOT THE CREDIT ──
+          # Operator, 2026-08-27, after CVX entered the same 197.5/192.5 spread
+          # SEVENTEEN times in twelve minutes, each dead inside a minute:
+          # *"We need to fix the structure that that loop was exploiting."*
+          #
+          # ⚠️ WHAT IT WAS: `entry_prem * 1.15` — fifteen percent of the CREDIT.
+          # That is INVERTED. The less credit collected, the TIGHTER the stop in
+          # dollars, so the structures with the least premium got the least room:
+          #     credit $0.58 -> stop distance $0.087   <- the CVX loop
+          #     credit $1.50 -> stop distance $0.225
+          #     credit $3.00 -> stop distance $0.450
+          # A thin credit means the short strike is FAR OUT and the position is
+          # LESS threatened, and it was handed a stop a single tick clears.
+          # Eight cents of tolerance against $442 of risk.
+          #
+          # ⚠️ THE RISK IS WHAT IS ACTUALLY AT STAKE, and it does not shrink as
+          # the credit shrinks: `width - credit`. Same 15%, anchored to that:
+          #     5-wide, $0.58 credit -> risk $4.42 -> $0.66 of room
+          #     5-wide, $3.00 credit -> risk $2.00 -> $0.30 of room
+          # Room now scales with exposure instead of inversely to it.
+          #
+          # ⚠️ THIS IS NOT THE R HURDLE AND IS NOT MUTED BY RELAXED. R is a
+          # RATIO judged at entry (economics — relaxed mutes it deliberately, to
+          # collect the population it would refuse). This uses only R's
+          # DENOMINATOR as a DISTANCE, continuously, to decide when to leave. A
+          # relaxed R-0.11 trade is still taken; it simply lives long enough to
+          # produce an outcome. **A trade stopped by noise is not an
+          # observation** — today's sixteen CVX rows said nothing about whether
+          # selling that level works, because none survived to find out.
+          #
+          # ⚠️ FALLS BACK TO THE OLD RULE IF THE WIDTH IS MISSING, and says so.
+          # A stop that cannot be computed must not silently become no stop.
+          _w = 0.0
+          try:
+              _w = float(record.get("spread_width") or 0.0)
+          except (TypeError, ValueError):
+              _w = 0.0
+          _risk = _w - entry_prem if _w > 0 else 0.0
+          if _risk > 0:
+              stop_level = entry_prem + _risk * LONE_STOP_PCT_OF_RISK
+              tier = ""
+          else:
+              stop_level = entry_prem * (1 + LONE_STOP_PCT_OF_RISK)
+              tier = " [no width — credit-anchored fallback]"
+              logger.warning(
+                  "[exit] %s has no spread_width; the lone stop fell back to "
+                  "%.0f%% OF CREDIT, which is the inverted rule r155 replaced. "
+                  "The trade will stop on noise.",
+                  str(record.get("trade_id", ""))[:8],
+                  LONE_STOP_PCT_OF_RISK * 100)
 
           if current_premium >= stop_level:
               decision.should_exit = True
-              decision.exit_reason = f"condor_stop pnl={pnl_pct:.1%}{tier} (lone 15%)"
+              decision.exit_reason = (
+                  f"condor_stop pnl={pnl_pct:.1%}{tier} "
+                  f"(lone {LONE_STOP_PCT_OF_RISK:.0%} of risk, "
+                  f"stop {stop_level:.2f})")
               return decision
 
         # ── 🔴 r106 — THE TAKE-PROFIT IS RETIRED ─────────────────────────
