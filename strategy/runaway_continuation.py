@@ -256,14 +256,44 @@ class RunawayContinuationStrategy:
                             f"required move below 0.05%)")
 
         # ── 3. direction comes from the ORB, not from a prediction ──────────
+        # 🔴 AN INVALIDATED-BY-RUNAWAY ORB *IS* THIS STRATEGY'S TRIGGER (r148).
+        # ⚠️ THE BUG THIS REPLACES DISABLED THE STRATEGY ON THE EXACT SETUP IT
+        # EXISTS FOR. Direction was read by string-matching "LONG"/"SHORT"
+        # inside `orb.state`. When price runs to the 50% TP without a retest the
+        # engine sets `state = INVALIDATED` and `invalidation_reason =
+        # "runaway"` (orb_engine.py:1134-1172) — and "INVALIDATED" contains
+        # neither word, so this fell to the else and returned before step 4
+        # ever asked whether a runaway had happened.
+        # Measured live: NFLX 2026-08-27, broke the ORB low 80.08 at 09:41 and
+        # ran to the 50% TP at 79.52 with no retest — a textbook runaway. The
+        # gate read: "ORB state 'INVALIDATED' carries no direction."
+        # ⚠️ THE ENGINE HAD ALREADY RECORDED EVERYTHING NEEDED. `break_direction`
+        # is set at break time (orb_engine.py:1032/1055), is never cleared by
+        # the INVALIDATED branch, and survives save/load (601, 542). This reads
+        # the field that carries the information instead of the one that
+        # happens to be a string — the same class of defect as `all()` vs
+        # `all_rails()` and `oi` vs `open_interest`.
+        # ⚠️ ONLY reason=="runaway" QUALIFIES. `close_inside` is the OPPOSITE
+        # tape — price came back into the range — and must keep refusing here.
         state = str(getattr(orb, "state", "") or "")
+        _inval_reason = str(getattr(orb, "invalidation_reason", "") or "")
+        _break_dir = str(getattr(orb, "break_direction", "") or "").lower()
         if "LONG" in state.upper():
             direction, side = "long", "call"
         elif "SHORT" in state.upper():
             direction, side = "short", "put"
+        elif _inval_reason == "runaway" and _break_dir in ("long", "short"):
+            direction = _break_dir
+            side = "call" if _break_dir == "long" else "put"
+            logger.info("[runaway] ORB INVALIDATED by runaway — direction %s "
+                        "taken from break_direction; this is the handoff, not "
+                        "a disqualifier", direction)
         else:
             return t.refuse("orb_direction",
-                            f"ORB state '{state or 'none'}' carries no direction")
+                            f"ORB state '{state or 'none'}'"
+                            + (f" (invalidated: {_inval_reason})"
+                               if _inval_reason else "")
+                            + " carries no direction")
         t.direction = direction
         t.check("orb_direction", 1.0 if direction == "long" else -1.0, True)
 
