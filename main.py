@@ -1,5 +1,18 @@
 """
-main.py  v4.17
+main.py  v4.18
+v4.18 2026-08-27  r160 — THE CONDOR AUTHORIZES AND MANAGES; THE SWEEP PLANS AND
+      EXECUTES LEG TWO. Operator, 2026-08-27: one vertical open -> only a
+      complementary-side SWEEP is authorized, everything else gated off; the
+      condor selects nothing; management begins once leg two is born (roll
+      if threatened, tent if breached, close if uneconomical). The second-leg
+      window is now: `authorize(open_sides)` -> `required_side` -> the
+      sweep's own plan prepares and its spec fires. `plan_second_leg`,
+      `leg2_fired`, the pairing-class computation and `required_level` are
+      gone. Before the roll/tent execute, `manage()` writes the per-tick
+      management row (which rung, what the next rung costs, does it clear)
+      on the same numbers condor_roll is about to act on. Rule 4's pairing
+      table collapses to sweep everywhere (the fork tine is acceptable for
+      leg one; leg two is universally a sweep — the operator's 08-27 ruling).
 v4.17 2026-08-26  r147 — THE SECOND-LEG WINDOW ROUTES THROUGH THE CONDOR'S
       ONE-LEVEL PLAN (`plan_second_leg`, iron_condor_strategy v4.6). The four
       direct second-leg attempts (1h fork on approach, 1d fork, sweep, TC.6)
@@ -2440,11 +2453,18 @@ _TREND_TRIGGERS = ("trend_orb",)
 _SWEEP_TRIGGERS = ("sweep_reversal",)
 _FORK_TRIGGERS  = ("1h_fork", "1d_fork")
 
+# 🔴 r160 — LEG TWO IS UNIVERSALLY A SWEEP. Operator, 2026-08-27: *"the fork
+# tine is acceptable for the first leg, but the second one must universally be
+# a sweep because only a rejection at the site of the second vertical spread
+# would inspire enough confidence to sell credit there."* Every row below now
+# reads the same. The table is kept (not replaced by a constant) so an unknown
+# leg-one class still FAILS CLOSED, and so the 08-25 shape is visible in the
+# history: trend->sweep, sweep->fork, fork->fork|sweep.
 _PAIRING_TABLE = {
     # leg-1 trigger class : the classes permitted to COMPLETE it
     "trend": ("sweep",),
-    "sweep": ("fork",),
-    "fork":  ("fork", "sweep"),
+    "sweep": ("sweep",),
+    "fork":  ("sweep",),
 }
 
 
@@ -4011,6 +4031,14 @@ def main_loop(state: BotState):
                 # before (same 25% downside, no new risk). When a roll IS
                 # viable, it converts the untested side and the tested side
                 # goes risk-free instead of stopping at a loss.
+                # r160 — the MANAGEMENT PLAN's row first: which rung, what
+                # the next rung costs right now, does it clear. Narrates only;
+                # the two calls below act on the same numbers.
+                try:
+                    _iron_condor_strategy.manage(pos_mgr, ctx.get("chain"),
+                                                 ctx["price"], ctx.get("df_1m"))
+                except Exception as _mg_err:                    # noqa: BLE001
+                    logger.warning(f"Condor management row failed: {_mg_err}")
                 try:
                     from strategy.condor_roll import check_and_execute_roll
                     check_and_execute_roll(pos_mgr, ctx.get("chain"), ctx["price"], state)
@@ -4080,80 +4108,38 @@ def main_loop(state: BotState):
                 _open_sides = _open_credit_sides()
                 _plan_skip_all("position open — managing; only the second-leg "
                                "window asks the credit strategies")
-                if len(_open_sides) == 1:
-                    # ── 🔴 r147 — LEG TWO IS THE CONDOR'S ONE-LEVEL PLAN ────
-                    # Operator, 2026-08-26: the condor is opportunistic, not
-                    # required; the complementary spread is sold ONLY on a
-                    # level the tape has REJECTED, never on one being
-                    # breached; acceptance finishes the level and the plan
-                    # moves to the NEXT available one — one level at a time,
-                    # no strikes pre-selected beyond it.
-                    # This REPLACES the four direct second-leg attempts (1h
-                    # fork tine on approach, 1d fork, sweep, TC.6). Their
-                    # levels are candidates INSIDE the plan — tines as the
-                    # 'fork' class, the mapper's named pools as the 'sweep'
-                    # class — filtered by the Rule 4 pairing table, which is
-                    # computed HERE from leg one's trigger so the rule keeps
-                    # one home. `_can_open_credit_spread` still gates the fire
-                    # (Rule 1/3/4 + geometry).
-                    _open_side = next(iter(_open_sides))
-                    _allowed = ("fork", "sweep")
-                    try:
-                        _l1 = next((r for r in pos_mgr.get_open_records()
-                                    if r.get("is_condor_leg")), None)
-                        _c1 = _trigger_class((_l1 or {}).get("condor_trigger_source") or "")
-                        _allowed = tuple(_PAIRING_TABLE.get(_c1, ("fork", "sweep")))
-                    except Exception:                          # noqa: BLE001
-                        pass
-                    _sl_chain  = ctx.get("chain")
-                    _sl_price  = ctx["price"]
-                    # ── 🔴 r158 — THE PLAN INFORMS; THE STRATEGY EXECUTES ──
-                    # Operator, 2026-08-27: *"nothing in the plan is
-                    # executable. It's an information layer to feed the
-                    # strategy and the strategy will execute."*
-                    # ⚠️ `plan_second_leg` now returns a PERMISSION — a side, a
-                    # level, its provenance — and NO contracts, NO strikes, NO
-                    # premium. It used to return a fully built OptionsSignal
-                    # that this block executed directly, which made the condor
-                    # a second implementation of a credit vertical.
-                    # ⚠️ THE SWEEP CONSTRUCTS, under its own rules, which are
-                    # now STRICTER than the condor's ever were: R as a
-                    # construction target relaxed cannot mute (r156/r157), a
-                    # SEARCHED wing instead of a fixed dollar width, and
-                    # `stop_survivable` (r154) — none of which the condor's
-                    # inline builder applied.
-                    _perm = _safe_strategy("CondorLeg2nd",
-                        lambda: _iron_condor_strategy.plan_second_leg(
-                            ctx=ctx, chain=_sl_chain, current_price=_sl_price,
-                            open_side=_open_side, allowed_classes=_allowed), ctx)
-                    _sl2 = None
-                    if _perm is not None and getattr(_perm, "side", ""):
-                        # ⚠️ THE SWEEP IS ASKED AT THE PERMITTED LEVEL. If its
-                        # own rules refuse — no wing clears R, the stop cannot
-                        # survive the spread, the level is spent — there is no
-                        # second leg and the condor stays a lone vertical. That
-                        # refusal is the sweep's to make and is recorded in its
-                        # own plan row, not overridden here.
-                        _sl2 = _safe_strategy("SweepForLeg2",
-                            lambda: _sweep_cs_strategy.generate_signal(
-                                liq_map=ctx["liq_map"],
-                                price_now=ctx["price"],
-                                # ⚠️ DERIVED HERE — `_now_et_hhmm` / `_atr_pct`
-                                # are locals of attempt_new_entry and are NOT
-                                # in scope in this block. Checked, not assumed.
-                                now_et=now_et().strftime("%H:%M"),
-                                atr_pct=float(getattr(ctx.get("vol"),
-                                                      "atr_pct", 0.0) or 0.0),
-                                chain=_sl_chain,
-                                orb_high=ctx.get("orb_high"),
-                                orb_low=ctx.get("orb_low"),
-                                required_side=_perm.side,
-                                required_level=_perm.level), ctx)
+                # ── 🔴 r160 — ONE VERTICAL OPEN: ONLY ITS COMPLEMENT, ONLY A SWEEP
+                # Operator, 2026-08-27: *"If there is already an active
+                # vertical spread of type (call/put) then only a complementary
+                # vertical (call/put) SWEEP trade is authorized to fire.
+                # Everything else is gated off. The condor doesn't select
+                # anything."* The condor AUTHORIZES a side; the sweep's own
+                # plan prepares its own level and the sweep's spec fires.
+                # `_can_open_credit_spread` still gates the fire (Rules 1/3/4
+                # + geometry); Rule 4 reads sweep everywhere now.
+                _auth_side, _auth_why = _iron_condor_strategy.authorize(_open_sides)
+                if _auth_side:
+                    _plan_skip("RunawayContinuation", _auth_why)
+                    _plan_skip("GEXPinButterfly", _auth_why)
+                    _plan_skip("TrendCreditSpread", _auth_why)
+                    _plan_skip("DailyForkCreditSpread", _auth_why)
+                    _sl_chain = ctx.get("chain")
+                    _sl2 = _safe_strategy("SweepForLeg2",
+                        lambda: _sweep_cs_strategy.generate_signal(
+                            liq_map=ctx["liq_map"],
+                            price_now=ctx["price"],
+                            now_et=now_et().strftime("%H:%M"),
+                            atr_pct=float(getattr(ctx.get("vol"), "atr_pct", 0.0) or 0.0),
+                            chain=_sl_chain,
+                            orb_high=ctx.get("orb_high"),
+                            orb_low=ctx.get("orb_low"),
+                            required_side=_auth_side), ctx)
                     if (_sl2 is not None
                             and _can_open_credit_spread(_sl2.option_side,
                                                         _sl2, ctx["price"], ctx=ctx)):
                         _execute_condor_leg(_sl2, state, ctx)
-                        _iron_condor_strategy.leg2_fired()
+                elif _auth_why:
+                    _plan_skip_all(_auth_why)
             else:
                 attempt_new_entry(ctx, ms, state)
 

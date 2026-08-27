@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""check_pairing_table.py — v1.0
+"""check_pairing_table.py — v1.1
+v1.1  2026-08-27  r160: LEG TWO IS UNIVERSALLY A SWEEP (operator ruling of
+      2026-08-27, supersedes the 08-25 rows). R4.4/R4.6 now pin that a fork
+      tine is NOT admitted as leg two from any predecessor; R4.7/R4.12 keep the
+      sweep completion; R4.17 is retired — "a fork needs no rejection" was
+      about a fork as leg ONE.
 
 RULE 4: which trigger opened leg 1 constrains what may complete it.
 
@@ -72,10 +77,11 @@ def main():
     check("R4.3 TREND leg 1 is NOT completed by another trend spread",
           not allowed("trend_orb", "trend_orb")[0])
 
-    # ── SWEEP first: fork only ───────────────────────────────────────────
-    check("R4.4 SWEEP leg 1 is completed by a fork tine (either timeframe)",
-          allowed("sweep_reversal", "1h_fork")[0]
-          and allowed("sweep_reversal", "1d_fork")[0])
+    # ── SWEEP first: a sweep again (r160) ────────────────────────────────
+    check("R4.4 SWEEP leg 1 is completed by a SWEEP, never a fork tine (r160)",
+          allowed("sweep_reversal", "sweep_reversal", _LIVE)[0]
+          and not allowed("sweep_reversal", "1h_fork")[0]
+          and not allowed("sweep_reversal", "1d_fork")[0])
 
     # 🔴 THE PREMISE CONFLICT. A sweep asserts a level REJECTED; a trend CS
     # asserts a trend RUNNING. Both cannot be true about one tape.
@@ -83,9 +89,9 @@ def main():
     check("R4.5 a TREND CS may NEVER follow a sweep — premise conflict",
           not _ok and "premise" in _why.lower(), _why[:70])
 
-    # ── FORK first: opposite tine or sweep ───────────────────────────────
-    check("R4.6 FORK leg 1 is completed by another fork tine",
-          allowed("1h_fork", "1d_fork")[0] and allowed("1d_fork", "1h_fork")[0])
+    # ── FORK first: sweep only (r160) ────────────────────────────────────
+    check("R4.6 FORK leg 1 is NOT completed by another fork tine (r160)",
+          not allowed("1h_fork", "1d_fork")[0] and not allowed("1d_fork", "1h_fork")[0])
     check("R4.7 FORK leg 1 is completed by a sweep",
           allowed("1h_fork", "sweep_reversal", _LIVE)[0])
     check("R4.8 FORK leg 1 is NOT completed by a trend spread",
@@ -140,10 +146,10 @@ def main():
     check("R4.16 NO sweep state at all is refused, not admitted",
           not _pair("trend_orb", "sweep_reversal", None)[0])
 
-    # ⚠️ A FORK NEEDS NO REJECTION — operator: "fork does not need a rejection,
-    # it is assumed to be stable if it is present."
-    check("R4.17 a FORK leg 2 needs no rejection and no sweep state",
-          _pair("sweep_reversal", "1h_fork", None)[0])
+    # r160 — R4.17 retired: a fork is never leg two, so "a fork needs no
+    # rejection" has no leg-two case. Pinned the other way round.
+    check("R4.17 a FORK is refused as leg 2 even with no sweep state (r160)",
+          not _pair("sweep_reversal", "1h_fork", None)[0])
 
     print()
     if _fails:

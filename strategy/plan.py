@@ -1,5 +1,7 @@
 """
-strategy/plan.py  v1.1
+strategy/plan.py  v1.2
+v1.2  2026-08-27  r160: DISPATCH_ALIAS — SweepForLeg2 -> SweepCreditSpread; the
+      CondorLeg2 alias retires with the deleted level-selection.
 v1.1  2026-08-26  r147: DISPATCH_ALIAS — the second-leg window now has one
       caller (CondorLeg2nd -> the condor's leg-2 plan, name `CondorLeg2`);
       the three retired second-leg aliases are removed.
@@ -125,9 +127,9 @@ DISPATCH_ALIAS = {
     "CondorLeg": "IronCondorStrategy",
     "DailyForkPlan": "DailyForkCreditSpread",
     "DailyForkLeg": "DailyForkCreditSpread",
-    # the second-leg window (main_loop, position open) — r147: one caller,
-    # the condor's one-level plan, which writes under its own name
-    "CondorLeg2nd": "CondorLeg2",
+    # the second-leg window (main_loop, position open) — r160: the sweep is
+    # asked under the condor's authorization and writes under its own name
+    "SweepForLeg2": "SweepCreditSpread",
 }
 
 
@@ -577,6 +579,13 @@ class PlanTick:
         self.plan._report_fired()
         self.plan._ledger_open(self, signal)
         return signal
+
+    def already(self):
+        """The plan already wrote this tick's row (DORMANT / NO PLAN / DECLINE /
+        HOLD) and the strategy has nothing to add. Returns None so
+        `return prep.tick.already()` reads as what it is: the strategy
+        declining to act on a tick the plan has fully accounted for."""
+        return None
 
     def hold(self, reason: str, *, verdict: str = "HOLD"):
         """Management verdicts — HOLD / ROLL / CLOSE. Returns None."""

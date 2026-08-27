@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_wiring.py  v1.1  (2026-08-26)
+tests/check_plan_wiring.py  v1.2  (2026-08-27)
+v1.2  r160: W2 accepts `self.prepare(` as the plan entry (the sweep's
+      generate_signal delegates to its plan and executes what it prepared).
 v1.1  r147: W2 ignores returns inside nested helper functions (the
       butterfly's exact-strike lookup); it still flags every bare entry return.
 v1.0  r146
@@ -71,7 +73,10 @@ def _bare_returns(path):
             if not isinstance(fn, ast.FunctionDef) or fn.name not in ENTRY_FNS:
                 continue
             body_src = ast.get_source_segment(src, fn) or ""
-            if "planner.tick(" not in body_src and "t=None" not in body_src \
+            # r160: a strategy whose generate_signal delegates to its own
+            # prepare() (the plan) is wired through that call
+            if ("planner.tick(" not in body_src and "t=None" not in body_src
+                    and "self.prepare(" not in body_src) \
                     and fn.name not in ("_build_leg_signal", "_build_signal"):
                 # an ABC stub (`return None` only) is exempt
                 if len(fn.body) == 1 and isinstance(fn.body[0], ast.Return):

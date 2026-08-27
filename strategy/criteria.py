@@ -1,5 +1,10 @@
 """
-strategy/criteria.py  v1.0  (2026-08-25)
+strategy/criteria.py  v1.1
+v1.1  2026-08-27  r154 (RECORDED RETROACTIVELY in r159 — r154 added
+      `stop_survivable()` here with no title bump and no entry): a structure
+      whose stop distance is inside its own bid-ask spread is BROKEN, not bad,
+      and is refused before entry. Structural — never muted by relaxed.
+v1.0  2026-08-25
 
 EVERY STRICT AND RELAXED CRITERION, IN ONE FILE.
 

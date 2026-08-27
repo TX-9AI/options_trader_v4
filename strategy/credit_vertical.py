@@ -1,7 +1,12 @@
 """
-strategy/credit_vertical.py  v4.0
+strategy/credit_vertical.py  v4.1
 Credit vertical construction, liquidity and POP helpers.
 
+v4.1  2026-08-27  r157 (RECORDED RETROACTIVELY in r159 — r157 added
+      `search_wing()` here with no title bump and no entry). `search_wing`
+      prices every listed strike beyond the short on BID/ASK and returns the
+      highest-R wing; the caller compares it to `r_floor` — R is a
+      construction target, not a filter. Shared by all four credit strategies.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE

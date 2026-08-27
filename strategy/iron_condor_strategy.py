@@ -1,5 +1,41 @@
 """
-strategy/iron_condor_strategy.py  v4.6
+strategy/iron_condor_strategy.py  v4.8
+v4.8  2026-08-27  r160 — THE CONDOR SELECTS NOTHING; IT AUTHORIZES, THEN MANAGES.
+      Operator, 2026-08-27: *"If there is already an active vertical spread of
+      type (call/put) then only a complementary vertical (call/put) SWEEP
+      trade is authorized to fire. Everything else is gated off. The condor
+      doesn't select anything, but it starts managing once leg 2 is born.
+      And that management is per-tick on executing a roll if threatened, and
+      the inverted hedge butterfly if breached, in order of escalation and
+      closed entirely if uneconomical to save it."*
+      DELETED (r147/r158/r159 level-selection, 230 lines): `plan_second_leg`,
+      `_leg2_candidates`, `_leg2_load_finished`, `leg2_fired`, the armed
+      level, the finished-level set — all of it was the condor choosing a
+      level for the sweep. The sweep chooses its own level under its spec.
+      NEW `authorize(open_sides)` -> (side, why): exactly one credit vertical
+      open -> the complementary side, and ONLY a sweep; none or both -> "".
+      NEW `manage(...)`: the per-tick management row for a FORMED condor —
+      which rung it is on (1 ROLL / 2b TENT / 3 CLOSE per TRADES.md), what
+      the next rung would cost RIGHT NOW (roll credit, close cost, cumulative
+      vs tested width; hedge debit vs the -15% floor) and whether it clears.
+      Execution stays in condor_roll (check_and_execute_roll / _tent) — this
+      narrates the ladder, it does not pull it. 🔴 FOUND IN SOURCE, NAMED ON
+      EVERY SUCH TICK: rung 1 executes ONLY a risk-free roll and the tent
+      arms ONLY after a roll, so a formed condor with no risk-free roll
+      available is on NO RUNG while price walks through a short. The
+      operator's ladder says never "do nothing" on a tested structure; the
+      row now says "NO RUNG" so the gap is visible, not silent.
+v4.7  2026-08-27  r158 (RECORDED RETROACTIVELY in r159 — r158 changed this file
+      by 435 lines and neither bumped the title nor wrote this entry; the
+      header still read v4.6/r147, the drift class the operator's standing
+      rule forbids). What r158 did: deleted `decide()`, `check_leg_triggers()`
+      and `_build_leg_signal()` (366 lines); the condor is no longer
+      dispatched as an entry strategy in main.py; `plan_second_leg` returns a
+      `Permission` (side, level, source, plan_id, why — no contracts, strikes
+      or premium) and main.py hands it to the sweep, which constructs under
+      its own rules. Operator, 2026-08-27: *"the iron condor is not a
+      strategy. It is a management function"*, *"The condor does not
+      construct anything."*
 v4.6  2026-08-26  r147 — LEG TWO IS A ONE-LEVEL PLAN, AND IT NEEDS A REJECTION.
       Operator, 2026-08-26: *"the condor's formation is permissive/
       opportunistic, not required. If the complementary vertical spread
@@ -115,9 +151,7 @@ from config import (
 )
 
 from strategy.plan import Plan, _n
-from analysis.session_map import CEILING, FLOOR, build_session_map
-from analysis.level_test import (level_state, UNTESTED, BREACHED, REJECTED,
-                                 ACCEPTED)
+from analysis.session_map import CEILING, FLOOR
 
 logger = logging.getLogger(__name__)
 
@@ -173,20 +207,11 @@ class IronCondorStrategy(BaseOptionsStrategy):
                    "strike_clears_anchor", "guardrail", "fork_invalidated",
                    "trigger", "contract", "credit", "width", "risk", "r")
 
-    LEG2_CHECKS = ("open_side", "candidates", "level", "level_state", "pierce",
-                   "closes_beyond", "short_anchor", "contract", "wing", "credit",
-                   "width", "risk", "r")
-
     def __init__(self):
         self._plan: Optional[CondorPlan] = None
         self._plan_id: Optional[str] = None
         self._last_reset_date: Optional[str] = None
         self.planner = Plan(self.name, self.PLAN_CHECKS, self_ledgers=True)
-        # ── leg two (v4.6): ONE armed level, and the levels finished today ──
-        self.leg2_planner = Plan("CondorLeg2", self.LEG2_CHECKS, self_ledgers=True)
-        self._leg2: Optional[dict] = None        # the armed level
-        self._leg2_finished: set = set()         # (role, round(price,2)) accepted today
-        self._leg2_loaded_date: Optional[str] = None
 
     # ── ledger plumbing (unchanged from v4.2) ──────────────────────────────
 
@@ -305,186 +330,118 @@ class IronCondorStrategy(BaseOptionsStrategy):
 
 
 
-    # ═══ LEG TWO — the one-level plan (v4.6) ═══════════════════════════════
+    # ═══ AUTHORIZATION — one vertical open, only its complement may fire ═══
 
-    def _leg2_load_finished(self, ledger) -> None:
-        """Rebuild today's finished-level set from plan_ledger after a restart."""
-        today = datetime.now(ET).strftime("%Y-%m-%d")
-        if self._leg2_loaded_date == today:
-            return
-        self._leg2_loaded_date = today
-        self._leg2_finished = set()
+    @staticmethod
+    def authorize(open_sides) -> tuple:
+        """(side, why). Exactly ONE credit vertical open -> the COMPLEMENTARY
+        side is authorized, and only as a SWEEP (the caller passes it to the
+        sweep's plan as `required_side`). None open -> no authorization is
+        needed. Both open -> nothing more may fire. The condor selects no
+        level and no strike — ever."""
+        sides = set(open_sides or ())
+        if len(sides) == 1:
+            have = next(iter(sides))
+            need = "put" if have == "call" else "call"
+            return need, (f"{have} vertical open — only a complementary {need}-side "
+                          f"SWEEP is authorized; everything else is gated off")
+        if len(sides) >= 2:
+            return "", "both sides open — the condor is formed; nothing more may fire"
+        return "", ""
+
+    # ═══ MANAGEMENT — per tick, once leg two is born ═══════════════════════
+
+    MGMT_CHECKS = ("legs", "tested", "rolled", "breached", "roll_credit", "close_cost",
+                   "credit_after", "tested_width", "risk_free", "hedge_debit",
+                   "floor", "rung")
+
+    def manage(self, pos_mgr, chain, current_price: float, df_1m=None) -> Optional[str]:
+        """The management plan's row: which rung, what the next rung costs
+        right now, does it clear. Returns the rung name or None (no formed
+        condor). Executes NOTHING — condor_roll does, and is called by main
+        right after this, so the row is the account of the decision it will
+        make on the same numbers."""
+        from strategy.condor_roll import classify_tested, find_risk_free_roll, _tent_breached
+        from config import TENT_FLOOR_PCT
+        if not hasattr(self, "_mgmt_planner"):
+            self._mgmt_planner = Plan("CondorManagement", self.MGMT_CHECKS, self_ledgers=True)
+        t = self._mgmt_planner.tick(current_price)
+        legs = [r for r in pos_mgr.get_open_records() if r.get("is_condor_leg")]
+        t.check("legs", len(legs), len(legs) == 2)
+        if len(legs) < 2:
+            if len(legs) == 1:
+                t.hold(f"lone {legs[0].get('option_side', '?')} vertical — managed as a "
+                       f"standalone on its 15% stop; not a condor")
+                return "LONE"
+            t.hold("no credit verticals open — nothing to manage")
+            return None
+        if chain is None:
+            t.starved("chain")
+            return None
+        rolled = any(r.get("is_broken_wing") for r in legs)
+        t.check("rolled", 1.0 if rolled else 0.0, None)
+        tested, untested = classify_tested(legs, current_price)
+        t.check("tested", 1.0 if tested else 0.0, None)
+        banked = sum(float(l.get("credit_received", l.get("entry_premium", 0.0))) for l in legs)
+        head = (" + ".join(f"{l.get('option_side','?')} {l.get('short_strike',0):g}/"
+                           f"{l.get('long_strike',0):g}" for l in legs)
+                + f"  banked {banked:.2f}")
+
+        # ── rung 2b: the tent, only on an already-rolled structure ─────────
+        breach = None
         try:
-            store = getattr(ledger, "_store", None)
-            if store is None:
-                return
-            day0 = datetime.now(ET).replace(hour=0, minute=0, second=0,
-                                            microsecond=0).timestamp()
-            for px, direction, reason in store.conn.execute(
-                    "SELECT trigger_price, direction, terminal_reason FROM plan_ledger "
-                    "WHERE symbol=? AND strategy='CondorLeg2' AND created_ts>=? "
-                    "AND state='EXPIRED'", (INSTRUMENT, day0)):
-                if px is not None and (reason or "").startswith("accepted"):
-                    self._leg2_finished.add((direction or "", round(float(px), 2)))
-        except Exception as exc:                                # noqa: BLE001
-            logger.debug("CondorLeg2: finished-level reload skipped: %s", exc)
+            breach = _tent_breached(df_1m, legs) if df_1m is not None else None
+        except Exception:                                      # noqa: BLE001
+            breach = None
+        t.check("breached", 1.0 if breach else 0.0, None)
+        if rolled and breach:
+            floor = banked * TENT_FLOOR_PCT
+            t.check("floor", floor, None)
+            t.check("rung", 2.5, True)
+            t.hold(f"{head}: RUNG 2b TENT — 1m close beyond the "
+                   f"{breach.get('option_side', '?')} short {breach.get('short_strike', 0):g}"
+                   f" on a rolled structure; take the profitable side off, buy the "
+                   f"opposite-type long equidistant from the survivor; the hedge is "
+                   f"bought only if its debit keeps the structure above "
+                   f"-{TENT_FLOOR_PCT:.0%} of cumulative credit ({floor:.2f}), else CLOSE",
+                   verdict="ROLL")
+            return "TENT"
 
-    def _leg2_candidates(self, ctx: dict, role: str, allowed: set) -> list:
-        """Levels of `role` on the shared session map, nearest to price first,
-        geometry-valid, not finished, and of a source the pairing table
-        permits ('fork' -> tines, 'sweep' -> the mapper's named pools)."""
-        oh, ol = ctx.get("orb_high"), ctx.get("orb_low")
-        lm = ctx.get("liq_map")
+        if tested is None:
+            t.hold(f"{head}: formed, neither short tested — no rung, holding")
+            return "HOLD"
 
-        class _Shim:            # build_session_map reads `.levels` w/ kind/price/name
-            levels = [p for p in (getattr(lm, "pools", None) or [])
-                      if getattr(p, "is_named", False) and not getattr(p, "swept", False)]
-        ceilings, floors, _inv = build_session_map(oh, ol, ledger=_Shim(),
-                                                   ctm=ctx.get("condor_triggers"))
-        pool = ceilings if role == CEILING else floors
-        out = []
-        for lv in pool:
-            cls = "fork" if lv.source == "fork" else "sweep"
-            if cls not in allowed:
-                continue
-            if (role, round(lv.price, 2)) in self._leg2_finished:
-                continue
-            out.append(lv)
-        px = float(ctx.get("price") or 0.0)
-        out.sort(key=lambda lv: abs(lv.price - px))
-        return out
-
-    def plan_second_leg(self, ctx: dict, chain: OptionsChain, current_price: float,
-                        open_side: str, allowed_classes=("fork", "sweep")
-                        ) -> Optional[OptionsSignal]:
-        """The complementary vertical, ONE level at a time, on a confirmed
-        rejection. Returns a signal to hand to the pairing gate, or None.
-
-        ⚠️ CALLED ONLY WHILE EXACTLY ONE CREDIT SIDE IS OPEN. Leg one fires from
-        its own trigger and never consults this.
-        """
-        t = self.leg2_planner.tick(current_price)
-        need_role = FLOOR if open_side == "call" else CEILING       # complement
-        need_side = "put" if open_side == "call" else "call"
-        t.direction = need_side
-        t.check("open_side", 1.0 if open_side == "call" else -1.0, True)
-        led = self._ledger()
-        self._leg2_load_finished(led)
-        allowed = set(allowed_classes or ())
-
-        # ── the level: keep the armed one unless it is finished ──────────
-        if self._leg2 is not None and (
-                self._leg2["role"] != need_role
-                or (need_role, round(self._leg2["price"], 2)) in self._leg2_finished):
-            self._leg2 = None
-        if self._leg2 is None:
-            cands = self._leg2_candidates(ctx, need_role, allowed)
-            t.check("candidates", len(cands), bool(cands))
-            if not cands:
-                return t.hold(f"no {need_role} available on the map for a {need_side} "
-                              f"spread (finished today: {len(self._leg2_finished)}, "
-                              f"allowed classes: {', '.join(sorted(allowed)) or 'none'}) "
-                              f"— leg two is off the table")
-            lv = cands[0]
-            pid = None
-            try:
-                if led is not None:
-                    pid = led.open_plan("CondorLeg2", "ARMED", ctx, direction=need_role,
-                                        trigger_price=lv.price,
-                                        underlying_at_decision=current_price)
-            except Exception:                                   # noqa: BLE001
-                pid = None
-            self._leg2 = {"price": float(lv.price), "role": need_role, "name": lv.name,
-                          "source": lv.source, "tf": lv.tf,
-                          "armed_ts": datetime.now(ET).timestamp(), "plan_id": pid}
-            logger.info("CondorLeg2: ARMED on %s %s at %.2f (%s) — waiting for the "
-                        "tape to reject it", lv.name, need_role, lv.price, lv.source)
-        L = self._leg2
-        t.check("level", L["price"], True)
-        t.anchor(trigger=L["price"], invalidation=L["price"])
-
-        # ── the tape at the level ─────────────────────────────────────────
-        state, d = level_state(ctx.get("df_1m"), L["price"], L["role"], L["armed_ts"])
-        t.check("level_state", {UNTESTED: 0, BREACHED: 1, REJECTED: 2, ACCEPTED: 3}[state],
-                state == REJECTED)
-        t.check("pierce", d.get("pierce"), None)
-        t.check("closes_beyond", d.get("closes_beyond"), None)
-        head = f"{L['name']} ({L['role']}) at {L['price']:.2f}"
-        if state == ACCEPTED:
-            self._leg2_finished.add((L["role"], round(L["price"], 2)))
-            try:
-                if led is not None and L.get("plan_id"):
-                    led.transition(L["plan_id"], "EXPIRED",
-                                   terminal_reason=f"accepted: {d.get('why', '')}")
-            except Exception:                                   # noqa: BLE001
-                pass
-            logger.info("CondorLeg2: %s ACCEPTED — finished for the session; "
-                        "looking at the next level", head)
-            self._leg2 = None
-            return t.hold(f"{head} ACCEPTED — {d.get('why', '')}; level finished, "
-                          f"next level next tick")
-        if state == UNTESTED:
-            return t.hold(f"{head} untested since arming ({d.get('bars', 0)} bars) — "
-                          f"waiting for a test and a rejection")
-        if state == BREACHED:
-            return t.hold(f"{head} is BEING BREACHED — {d.get('why', '')}. No "
-                          f"complementary spread is sold on a level under test")
-
-        # ── REJECTED: price the leg for THIS level only ──────────────────
-        contracts = chain.calls if need_side == "call" else chain.puts
-        wing_pts = self._wing_width() * STRIKE_INCREMENT
-        try:
-            ks = sorted({float(c.strike) for c in contracts
-                         if float(getattr(c, "mark", 0) or 0) > 0})
-        except Exception:                                       # noqa: BLE001
-            ks = []
-        beyond = ([k for k in ks if k > L["price"]] if need_side == "call"
-                  else [k for k in reversed(ks) if k < L["price"]])
-        # ── ✅ PERMITTED. THE PLAN STOPS HERE. ───────────────────────────────
-        # 🔴 OPERATOR, 2026-08-27: *"The condor doesn't construct anything. The
-        # condor plan should just simply define whether a vertical spread is
-        # open and active and what's permitted afterwards."* And: *"nothing in
-        # the plan is executable. It's an information layer to feed the
-        # strategy and the strategy will execute."*
-        #
-        # ⚠️ WHAT WAS HERE, AND WHY IT IS GONE: 54 lines that picked the short
-        # strike, applied a fixed `wing_pts`, looked up both contracts, priced
-        # the credit on MARK, gated on `t.executable()` (MUTED under relaxed)
-        # and assembled an OptionsSignal. That is a vertical spread being
-        # rebuilt inside a management function — *"I don't need two strategies
-        # for every strategy"* — and it had already drifted from the real one:
-        # mark instead of bid/ask, a fixed wing instead of a search, no
-        # `stop_survivable`, and an R gate relaxed could waive.
-        #
-        # ⚠️ THE SWEEP OWNS CONSTRUCTION AND IS NOW STRICTER THAN THIS EVER WAS
-        # — R as a construction target that relaxed cannot mute (r156/r157), a
-        # SEARCHED wing rather than a fixed dollar width, `stop_survivable`
-        # (r154) and the risk-anchored stop (r155). Leg two inherits all of it
-        # by DELETION rather than by re-implementing four gates here.
-        #
-        # ⚠️ CONSEQUENCE, STATED: leg two will fire LESS. A rejected level whose
-        # chain offers no wing clearing the R floor produces no second leg and
-        # the condor stays a lone vertical. That is correct, and it compounds
-        # with relaxed already producing fewer trades.
-        return t.permit(
-            side=need_side,
-            level=L["price"],
-            source=L["source"],
-            plan_id=L.get("plan_id"),
-            why=f"{head} REJECTED — {d.get('why', '')}; a {need_side} "
-                f"complementary vertical is PERMITTED at {L['price']:g}. "
-                f"Construction belongs to the sweep.")
-
-
-    def leg2_fired(self) -> None:
-        """main.py: the leg-2 signal was executed. Close the armed level."""
-        try:
-            led = self._ledger()
-            if led is not None and self._leg2 and self._leg2.get("plan_id"):
-                led.transition(self._leg2["plan_id"], "FIRED", terminal_reason="leg2 executed")
-        except Exception:                                       # noqa: BLE001
-            pass
-        self._leg2 = None
+        # ── rung 1: roll the UNTESTED side toward price to risk-free ──────
+        plan = find_risk_free_roll(tested, untested, chain, current_price, banked)
+        if plan is None:
+            t.check("rung", 3.0, False)
+            t.hold(f"{head}: {tested['option_side']} short {tested.get('short_strike', 0):g} "
+                   f"TESTED and no roll is available — the untested vertical has no "
+                   f"mark, or no liquid strike between it and price pays a credit; "
+                   f"RUNG 3 (close and page) is the only rung left", verdict="CLOSE")
+            return "CLOSE"
+        t.check("roll_credit", plan.roll_credit, plan.roll_credit > 0)
+        t.check("close_cost", plan.close_cost, None)
+        t.check("credit_after", plan.total_credit_after, None)
+        t.check("tested_width", plan.tested_width, None)
+        t.check("risk_free", 1.0 if plan.risk_free else 0.0, plan.risk_free)
+        cost_line = (f"roll {untested['option_side']} to {plan.new_short_strike:g}/"
+                     f"{plan.new_long_strike:g}: +{plan.roll_credit:.2f} credit, "
+                     f"-{plan.close_cost:.2f} to close the old, cumulative "
+                     f"{plan.total_credit_after:.2f} vs tested width {plan.tested_width:.2f}")
+        if plan.risk_free:
+            t.check("rung", 1.0, True)
+            t.hold(f"{head}: {tested['option_side']} short TESTED — RUNG 1 ROLL clears: "
+                   f"{cost_line} — tested side becomes RISK-FREE", verdict="ROLL")
+            return "ROLL"
+        # ── no risk-free roll: the gap the ladder forbids ─────────────────
+        t.check("rung", 0.0, False)
+        t.hold(f"{head}: {tested['option_side']} short TESTED — RUNG 1 does NOT clear "
+               f"({cost_line}); best roll leaves the tested side {plan.tested_width - plan.total_credit_after:.2f} "
+               f"short of risk-free; the tent arms only AFTER a roll, so this structure "
+               f"is on NO RUNG — the ladder says never do nothing on a tested structure",
+               verdict="DECLINE")
+        return "NO_RUNG"
 
     # ── approach telemetry (unchanged) ─────────────────────────────────────
 

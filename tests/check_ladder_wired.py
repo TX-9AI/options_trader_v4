@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 tests/check_ladder_wired.py  v1.1
+v1.2  2026-08-27  r160: L10 re-pinned again — authorize() + the sweep; the
+      condor's one-level plan is deleted.
 v1.1  2026-08-26  r147: L10 re-pinned — the second-leg window routes through
       the condor's one-level plan and the three direct triggers are gone.
 
@@ -154,8 +156,8 @@ src_m = open(os.path.join(ROOT, "main.py")).read()
 lm = next(n for n in ast.walk(ast.parse(src_m))
           if isinstance(n, ast.FunctionDef) and n.name == "main_loop")
 lsrc = ast.unparse(lm)
-check("L10 second leg routes through the condor's one-level plan",
-      "CondorLeg2nd" in lsrc and "plan_second_leg(" in lsrc)
+check("L10 second leg: the condor AUTHORIZES a side and the sweep's own plan prepares it",
+      ".authorize(" in lsrc and "SweepForLeg2" in lsrc and "plan_second_leg(" not in lsrc)
 for tag in ("DailyFork2nd", "SweepCS2nd", "TrendCS2nd"):
     check(f"L10 second leg NO LONGER fires {tag} directly", tag not in lsrc)
 

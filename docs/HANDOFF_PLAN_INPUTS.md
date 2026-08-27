@@ -3,6 +3,13 @@
 **Written 2026-08-27 for [[fable]]. Author: Claude (Opus). Status: r158 landed
 the first half; this describes the end-state and what is left.**
 
+> **READ WITH PLAN_SPEC §10 (r160).** The goal here is right; the wording
+> "a plan-side gatherer that searches the feed for each named element" is
+> where attempt one came from. The plan gathers measurements and SELECTS
+> variables; it never decides that a setup exists — the strategy's declared
+> conditions do. r160 builds this for the sweep; the condor selects nothing
+> (it authorizes, then manages). §3 (the cascade) remains unbuilt.
+
 ---
 
 ## THE OPERATOR'S SPEC, IN HIS WORDS

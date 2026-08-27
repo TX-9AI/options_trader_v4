@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""check_structure_viable.py — v1.0
+"""check_structure_viable.py
+v1.1  2026-08-27  r160: V6 re-pinned — no R hurdle in the sweep; survivability before READY. — v1.0
 
 🔴 A STRUCTURE THAT CANNOT SURVIVE ITS OWN BID-ASK IS NOT A BAD TRADE.
 
@@ -78,10 +79,16 @@ def main():
                 encoding="utf-8").read()
     nc = "\n".join(l for l in ssrc.split("\n")
                    if not l.strip().startswith("#"))
+    # r160: the sweep's R is a construction target inside search_wing (r157),
+    # so there is no `t.executable()` hurdle to order against any more. The
+    # property that survives: survivability is checked BEFORE the plan marks
+    # the trade READY, and the muteable hurdle never returned.
     i_v = nc.find("stop_survivable(")
-    i_r = nc.find("t.executable()")
-    check("V6 the sweep checks survivability BEFORE the R hurdle",
-          i_v != -1 and i_r != -1 and i_v < i_r, f"viab@{i_v} r@{i_r}")
+    i_ready = nc.find("prep.ready = True")
+    check("V6 the sweep checks survivability BEFORE the trade is marked ready, and "
+          "never through the muteable R hurdle",
+          i_v != -1 and i_ready != -1 and i_v < i_ready and "t.executable()" not in nc,
+          f"viab@{i_v} ready@{i_ready}")
 
     check("V7 the sweep declares stop_vs_spread as a plan check",
           "stop_vs_spread" in ssrc)

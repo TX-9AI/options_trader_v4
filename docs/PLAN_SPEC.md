@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.5 · 2026-08-27 · r160 — the plan is anticipatory, the strategy confirmatory; the condor authorizes and manages. §10 supersedes §8 where they differ.**
 **v1.3 · 2026-08-26 · r147 — leg two and the butterfly, §9.**
 **v1.2 · 2026-08-26 · r146 — AS BUILT. See §8 before reading anything below.**
 **v1.0 · 2026-08-25 · FIRST PASS, EXPLICITLY UNFITTED.**
@@ -401,3 +402,85 @@ the increment, floor one increment, ceiling the pin distance; call fly below
 the pin, put fly above it; exact strikes or no trade; net debit off marks;
 R = (width − debit)/debit — strict vetoes below 1:1, relaxed records.
 Its signal is valid for the first time (three contracts, `is_butterfly`).
+
+---
+
+## 10. r160 — the plan is ANTICIPATORY, the strategy is CONFIRMATORY (supersedes §8 where they differ)
+
+Operator, 2026-08-27, read back and confirmed: the plan *"evaluates the
+current tick what would need to be true on the next tick for the active
+strategies to execute. That means strike selection, wing width, stop
+placement (for r-value), minimum r-value acceptable for entry."* The strategy
+*"execute[s] the transaction with the variables selected by the plan."*
+
+**The split.** On tick *t*, in the strategy's slot, the plan reads the feed,
+evaluates every condition the strategy DECLARES (`CONDITIONS`, name → what
+"true" means), selects every variable of the trade — level, side, short
+strike beyond it, wing searched to `R_FLOOR`, credit on bid/ask, stop and its
+survivability, R and its minimum — and writes the row. On *t+1* the strategy
+checks the declared conditions against the tick and, if all are true,
+executes THAT trade. The strategy holds no chain and picks no strike. Which
+layer decides? The declared conditions do; the plan reads them and reports.
+
+**The rows, per tick, per active strategy:** DORMANT (outside the slot, one
+row, no narration) · NO PLAN naming a missing input · DECLINE on a
+STRUCTURAL fault the trigger cannot cure (spent level, geometry, no wing
+clears R, no credit, stop inside the spread — never muted by relaxed) ·
+HOLD "PREPARED — sell 95P / buy 92.5P credit 1.30 stop 1.50 R 1.08 (min
+1.00). Waiting on: reclaimed" · TAKE with those exact variables.
+
+**Built in r160: the sweep** (`SweepCreditSpreadStrategy.prepare()` is the
+plan, `generate_signal()` the spec). The r146 informer shape — strategy
+selects, then asks the plan to price — is inverted for it. TCS, runaway,
+daily fork and butterfly still carry the r146 shape and are next, one at a
+time. ORB excluded by ruling.
+
+**The condor is a management plan, not a strategy** (operator, 2026-08-27):
+*"If there is already an active vertical spread of type (call/put) then only
+a complementary vertical (call/put) SWEEP trade is authorized to fire.
+Everything else is gated off. The condor doesn't select anything, but it
+starts managing once leg 2 is born … a roll if threatened, and the inverted
+hedge butterfly if breached, in order of escalation and closed entirely if
+uneconomical to save it."*
+- `authorize(open_sides)` → the complementary side, only as a sweep; the
+  sweep's own plan prepares its own level. `plan_second_leg` and all level
+  selection (r147/r158/r159) are deleted. Rule 4's table reads sweep
+  everywhere (the fork tine is fine for leg one; leg two is universally a
+  sweep — *"only a rejection at the site of the second vertical spread would
+  inspire enough confidence to sell credit there"*).
+- `manage()` writes the per-tick management row for a formed condor: which
+  rung (1 ROLL to risk-free / 2b TENT / 3 CLOSE — TRADES.md "Exits — a
+  management LADDER"), what the next rung costs right now, does it clear.
+  Execution stays in `condor_roll`. The tent's hedge is the OPPOSITE type of
+  the surviving vertical (call vertical → buy a put; put vertical → buy a
+  call), equidistant, boxing price in.
+- 🔴 **Found in source, named on every such tick:** rung 1 executes only a
+  risk-free roll and the tent arms only after a roll, so a formed condor
+  with no risk-free roll available is on NO RUNG while price walks through
+  a short. The row says "NO RUNG — the ladder says never do nothing on a
+  tested structure." Whether rung 2 (invert: roll the untested side
+  adjacent to the tested short, TRADES.md) should execute when risk-free is
+  unreachable is the operator's call; today it is documented, not built.
+
+**Audit of r148–r158 (r159, folded in):** the layering held at HEAD —
+`permit()` carried no contracts, the condor constructed nothing. Three
+defects fixed: the land gate had been red since r152 (the exorcism gate
+tripped on r152's own test); three files changed without a version bump or
+changelog entry (recorded retroactively); leg two was dead whenever the
+nearest complementary level was a tine — moot now that the condor selects
+no level. On `docs/HANDOFF_PLAN_INPUTS.md`'s "plan-side gatherer that
+searches the feed": correct in its goal, dangerous in its wording — the plan
+gathers measurements and selects variables; it never decides that a setup
+exists. Starvation by name is the part of that handoff that is built.
+
+**Tested on hypotheticals** (`tests/check_plan_prepares.py`, 16 scenarios):
+a sweep not yet reclaimed holds with the trade fully prepared; reclaimed
+fires with the plan's numbers; no wing clears R → declined even with the
+trigger true, relaxed included; no chain → starved; outside the slot →
+dormant; a call vertical open → the plan prepares the LOW sweep, not the
+fresher HIGH; a spent pool → declined. The condor: nothing open → no
+restriction; one open → its complement, sweep only; both → nothing. Formed:
+untested → hold; tested with a risk-free roll → ROLL with the numbers;
+tested without one → NO RUNG; rolled and breached → TENT, opposite type,
+floor stated. One hypothetical was wrong before the code was — a wing
+priced at 0.30 on a 2.5-wide spread gives R 0.79 and the plan refused it.

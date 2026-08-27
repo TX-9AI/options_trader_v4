@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""check_wing_search.py — v1.0
+"""check_wing_search.py
+v1.1  2026-08-27  r160: W18 re-pinned — plan_second_leg deleted; authorize()/manage() build nothing. — v1.0
 
 🔴 R IS A CONSTRUCTION TARGET, NOT A FILTER. THE WING IS SEARCHED.
 
@@ -188,12 +189,17 @@ def main():
     # ⚠️ AND IT MUST NOT ASSEMBLE A SIGNAL. A permission carries a side and a
     # level; an OptionsSignal carries contracts. Building one here is how the
     # duplication comes back.
-    fn3 = next((n for n in ast.walk(ictree)
-                if isinstance(n, ast.FunctionDef)
-                and n.name == "plan_second_leg"), None)
-    b3 = ast.unparse(fn3) if fn3 else ""
-    check("W18 plan_second_leg returns a PERMISSION, not a signal",
-          "t.permit(" in b3 and "OptionsSignal(" not in b3)
+    # r160 — plan_second_leg is DELETED (the condor selects nothing). What
+    # remains is authorize() (a side and a reason) and manage() (the ladder
+    # row); neither may build a signal.
+    _names = {n.name for n in ast.walk(ictree) if isinstance(n, ast.FunctionDef)}
+    _mg = next((n for n in ast.walk(ictree) if isinstance(n, ast.FunctionDef)
+                and n.name in ("authorize", "manage")), None)
+    _bodies = "".join(ast.unparse(n) for n in ast.walk(ictree)
+                      if isinstance(n, ast.FunctionDef) and n.name in ("authorize", "manage"))
+    check("W18 plan_second_leg is gone; authorize()/manage() exist and build no signal",
+          "plan_second_leg" not in _names and {"authorize", "manage"} <= _names
+          and "OptionsSignal(" not in _bodies)
 
     # ── W19 — the permission carries nothing executable ──────────────────
     from strategy.plan import Permission

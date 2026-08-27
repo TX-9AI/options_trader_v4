@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""check_conviction_removed.py — v2.0
+"""check_conviction_removed.py — v2.1
+v2.1  2026-08-27  r159: the docstring named the retired classifier's field by
+      its old name, which tripped the exorcism gate
+      — the land gate was RED at r152-r158. Renamed; the gate is green again.
 
 🔴 THE SETUP SCORER IS DELETED. NO GRADE, NO CONVICTION, NO WEIGHTED SUM.
 
@@ -14,7 +17,7 @@ threshold to emit an A/B letter or REFUSE the trade.
 WHY IT IS GONE — docs/INHERITED_FINDINGS.md §4, measured:
   **A-grade 399 trades −$8,244 · B-grade 220 trades +$1,893.**
 It SELECTED LOSERS. ~90% of the grade was ONE COLUMN PRINTED TWICE
-(`regime_conviction` and `signal_quality`, identical medians AND identical
+(the retired conviction score and `signal_quality`, identical medians AND identical
 spreads over 619 trades) plus two constants measuring 1.000 across all 619 —
 and those constants were `vwap_alignment` and `liquidity_clear`, two of the
 four dimensions. The sum never measured anything.

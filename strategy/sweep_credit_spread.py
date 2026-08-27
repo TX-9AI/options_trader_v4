@@ -1,5 +1,29 @@
 """
-strategy/sweep_credit_spread.py  v4.4
+strategy/sweep_credit_spread.py  v4.6
+v4.6  2026-08-27  r160 — THE PLAN PREPARES, THE STRATEGY EXECUTES WITH THE
+      PLAN'S VARIABLES. Operator, 2026-08-27, read back and confirmed: the
+      plan "evaluates the current tick what would need to be true on the
+      next tick for the active strategies to execute — strike selection,
+      wing width, stop placement, minimum R"; the strategy declares its
+      conditions and executes. `prepare()` is the plan: in the slot, every
+      tick, it picks the sweep this spec would trade (the freshest of the
+      AUTHORIZED side when the condor narrows it, else the map's most
+      recent), evaluates each declared CONDITION with its current reading,
+      SELECTS the short beyond the sweep, the wing to R_FLOOR (search_wing),
+      the bid/ask credit, the stop and its survivability, and writes the
+      row: DORMANT outside the slot · NO PLAN naming a missing input ·
+      DECLINE on a STRUCTURAL fault (spent, geometry, no wing clears R, no
+      credit, stop inside the spread) · HOLD "PREPARED — <trade>. Waiting
+      on: <conditions>" · and on all-true the strategy `generate_signal()`
+      executes THAT trade. The strategy no longer touches the chain.
+      `required_level` is gone — an authorization narrows the SIDE, it never
+      hands this strategy a level (operator: the condor selects nothing).
+v4.5  2026-08-27  r154-r158 (RECORDED RETROACTIVELY in r160 — 254 lines
+      changed with no title bump and no entry): the spent-level lock
+      (mark_spent/is_spent), stop_survivable before entry, the wing searched
+      to R_FLOOR via credit_vertical.search_wing (R no longer muted for credit
+      spreads), `_sweep_at_level` and the required_side/required_level
+      inputs from the condor's permission.
 v4.4  2026-08-26  r146 — THE PLAN IS WIRED. Six `_gate()` rungs and fifteen
       bare `return None`s (window, ATR, boundary side, chain, wing, credit …)
       all go through `self.planner` (strategy/plan.py) and write a DECLINE row
@@ -528,436 +552,318 @@ def _sweep_at_level(liq_map, level: float, side: str = ""):
     return best
 
 
-class SweepCreditSpreadStrategy:
-    """Sell the boundary a swept pool just became.
+class SweepPreparation:
+    """What the PLAN hands the STRATEGY on every tick of its slot.
 
-    ⚠️ THE ORDER OF THE GATES IS THE CHEAPEST-FIRST ORDER, and the first two are
-    the ones v3 got wrong in opposite directions: it vetoed on acceptance
-    measured DURING the rejection, and it aged the signal from the sweep rather
-    than the reclaim.
+    ⚠️ NOTHING HERE IS EXECUTABLE. It is the answer to "if the trigger fires on
+    the next tick, what is the trade" — the level, every declared condition
+    with its current reading, and every selected variable. The strategy
+    decides whether its conditions are met and, if so, executes THESE.
     """
+    __slots__ = ("tick", "sweep", "name", "pool", "side", "boundary", "conditions",
+                 "unmet", "structural", "starved", "short", "long", "credit",
+                 "width", "stop_prem", "stop_dist", "r", "r_min", "swept_px",
+                 "age", "rej", "ready")
 
+    def __init__(self, tick):
+        self.tick = tick
+        self.sweep = None
+        self.name, self.pool, self.side, self.boundary = "", 0.0, "", ""
+        self.conditions = {}      # name -> (current, required, met)
+        self.unmet = []           # trigger conditions not yet true
+        self.structural = []      # (name, why) — untradeable even if the trigger fires
+        self.starved = []         # inputs the plan could not find
+        self.short = self.long = None
+        self.credit = self.width = self.stop_prem = self.stop_dist = None
+        self.r, self.r_min = None, R_FLOOR
+        self.swept_px, self.age, self.rej = 0.0, 0, 0.0
+        self.ready = False
+
+    def cond(self, name, current, required, met):
+        self.conditions[name] = (current, required, bool(met))
+        if not met:
+            self.unmet.append(name)
+        self.tick.check(name, current if isinstance(current, (int, float)) else None, bool(met))
+
+    def trade_line(self) -> str:
+        if not self.ready:
+            return "no trade prepared"
+        return (f"sell {self.short.strike:g}{self.side[0].upper()} / buy "
+                f"{self.long.strike:g}{self.side[0].upper()}  credit {self.credit:.2f} "
+                f"(bid/ask)  stop {self.stop_prem:.2f}  R {self.r:.2f} "
+                f"(min {self.r_min:.2f})")
+
+
+class SweepCreditSpreadStrategy:
+    """THE SPEC. Declares its conditions, executes with the plan's variables.
+
+    🔴 THE SPLIT (operator, 2026-08-27, read back and confirmed): the plan is
+    ANTICIPATORY — on tick t it evaluates what would need to be true on tick
+    t+1 for this strategy to execute, and selects every variable of that
+    trade. The strategy is CONFIRMATORY — it checks its declared conditions
+    against the tick and, if all are true, executes the prepared trade. The
+    strategy holds no chain and picks no strike. Which layer decides? These
+    CONDITIONS do; the plan reads them and reports.
+    """
     name = "SweepCreditSpread"
 
-    PLAN_CHECKS = ("sweep", "named", "reclaimed",
-                   "invalidated", "age",
-                   "spent_level",
-                   "rejection", "pierce_depth", "boundary", "side_of_pool",
-                   "entry_window", "atr_pct", "geometry", "short_anchor",
-                   "contract", "wing", "credit", "width", "risk",
-                   "stop_vs_spread", "wing_r_best", "r")
+    # ── THE DECLARED CONDITIONS — what must be true for this spec to fire ──
+    # name -> what "true" means. The plan evaluates each against the feed and
+    # reports (current, required, met). Thresholds are this file's GATES.
+    CONDITIONS = {
+        "named":        "the swept level is a NAMED pool",
+        "reclaimed":    "a bar has CLOSED back inside the pool (a wick is a touch)",
+        "invalidated":  "price has NOT accepted through it after the reclaim",
+        "age":          f"reclaimed within MAX_AGE_BARS ({MAX_AGE_BARS}; relaxed x3)",
+        "rejection":    f"rejection >= {MIN_REJECTION_PCT*100:.3f}%",
+        "pierce_depth": f"pierce <= {MAX_REJECTION_PCT*100:.3f}% (relaxed x3)",
+        "side_of_pool": "price is on the profitable side of the pool",
+        "entry_window": f"{EARLIEST_ET}-{LATEST_ET} ET (relaxed extends)",
+        "atr_pct":      f"ATR <= {ATR_MAX_PCT:.2f}% or unmeasured",
+    }
+    # structural — untradeable even if every condition is true
+    STRUCTURAL = ("geometry", "spent_level", "short_anchor", "wing_r_best",
+                  "credit", "stop_vs_spread")
+    PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + (
+        "sweep", "contract", "wing", "width", "risk", "r")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
 
-    def generate_signal(self, *, liq_map, price_now: float, now_et: str,
-                        atr_pct: float = None, chain=None,
-                        orb_high: float = None, orb_low: float = None,
-                        required_side: str = "", required_level: float = 0.0,
-                        **_ignored) -> Optional[Signal]:
-        """`required_side` / `required_level` — r158, the condor's PERMISSION.
-
-        🔴 OPERATOR, 2026-08-27: *"the condor plan should just simply define
-        whether a vertical spread is open and active and what's permitted
-        afterwards"* and *"nothing in the plan is executable... the strategy
-        will execute."*
-
-        ⚠️ THESE NARROW, THEY NEVER WIDEN. When the condor permits a put-side
-        spread at a level, this strategy still applies EVERY one of its own
-        rules — the rejection, the age, the pierce depth, the geometry, the
-        searched wing, the R floor, `stop_survivable`, the spent-level lock. It
-        simply refuses anything that is not the permitted side and level.
-        A permission is a CONSTRAINT on what may be built, not a licence to
-        skip the rules; if it ever bypasses a gate, the condor has started
-        constructing again through the back door.
-        """
+    # ══════════════════════════════════════════════════════════════════════
+    # THE PLAN — reads the feed, evaluates the declared conditions, SELECTS
+    # every variable, narrates. Returns a SweepPreparation or None (dormant).
+    # ══════════════════════════════════════════════════════════════════════
+    def prepare(self, *, liq_map, price_now, now_et, atr_pct=None, chain=None,
+                orb_high=None, orb_low=None, required_side: str = "",
+                **_ignored) -> SweepPreparation:
         t = self.planner.tick(price_now)
-        sweep = getattr(liq_map, "recent_sweep", None)
+        prep = SweepPreparation(t)
 
-        # ── 🔴 r158 — A SUPPLIED LEVEL IS AN INPUT, NOT A CONSTRAINT ─────────
-        # Operator, 2026-08-27: *"the strategy should have a list of inputs to
-        # fire and the plan should be looking at the feed, providing those
-        # inputs. Strategy looking for inputs, plan gathering and providing
-        # those inputs."* And: *"the strategy is the bones of the execution
-        # layer, and it has to be fed inputs from the plan that is searching
-        # the data feed for the elements that the strategy requires."*
-        #
-        # ⚠️ THE FIRST VERSION OF THIS HAD THE ARROW BACKWARDS. It took the
-        # condor's level as a CONSTRAINT and REFUSED when the sweep's own
-        # `recent_sweep` disagreed — the strategy going to find its own input
-        # and then arguing with the plan about it. That is the plan policing
-        # the strategy, which is neither layer's job.
-        # ⚠️ NOW: when a level is SUPPLIED, that is the level this strategy
-        # evaluates. Every one of its own rules still applies to it — named,
-        # reclaimed, invalidated, age, rejection, pierce depth, geometry, the
-        # searched wing, the R floor, `stop_survivable`, the spent-level lock.
-        # An input is not a licence to skip a gate; it is the thing the gates
-        # are applied TO. With no level supplied, the strategy reads
-        # `recent_sweep` as before and nothing changes.
-        if required_level:
-            _supplied = _sweep_at_level(liq_map, float(required_level),
-                                        required_side)
-            if _supplied is None:
-                return t.starved("sweep_at_supplied_level")
-            sweep = _supplied
-        # ⚠️ COERCE BEFORE ANY COMPARISON. A NaN price passed `price_now >= pool`
-        # (False) and then `price_now <= pool` (also False), so BOTH side checks
-        # let it through and the strategy fired on nan, -1.0 and -inf.
+        # ── the slot: outside it the plan is DORMANT, one row, no narration ─
+        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET, relaxed_latest=LATEST_ET)
+        in_window = (not now_et) or (_early <= now_et <= _late)
+        if not in_window:
+            t.dormant("entry_window", f"{now_et} ET is outside the sweep slot "
+                                      f"{_early}-{_late}")
+            return prep                       # dormant: nothing prepared
+        prep.cond("entry_window", None, self.CONDITIONS["entry_window"], True)
+
+        # ── the level: the sweep this spec would trade ─────────────────────
+        # With an authorization (the condor: "only a complementary-side sweep
+        # may fire") the plan prepares the freshest sweep of THAT side; without
+        # one, the map's most recent sweep. The plan chooses which level to
+        # PREPARE; the strategy's conditions decide whether it FIRES.
+        sweep = None
+        if required_side:
+            want_kind = "low_sweep" if required_side == "put" else "high_sweep"
+            best = None
+            for sw in (getattr(liq_map, "sweeps", None) or []):
+                if str(getattr(sw, "kind", "") or "") != want_kind:
+                    continue
+                if best is None or (getattr(sw, "bars_ago", 999) < getattr(best, "bars_ago", 999)):
+                    best = sw
+            sweep = best
+            t.direction = required_side
+        else:
+            sweep = getattr(liq_map, "recent_sweep", None)
         price_now = safe_float(price_now)
         if not price_now or price_now <= 0 or price_now > 1e7:
-            return t.refuse("price", f"price unusable ({price_now})")
+            prep.starved.append("price_now")
+            t.starved("price_now")
+            return prep
         if not sweep:
-            return t.refuse("sweep", "no recent sweep on the liquidity map")
+            t.hold(f"no {required_side + ' ' if required_side else ''}sweep on the "
+                   f"liquidity map to prepare — waiting for a named pool to be swept")
+            return prep
+        prep.sweep = sweep
         t.check("sweep", 1.0, True)
 
-        # ── 1. it must be a NAMED pool ───────────────────────────────────────
-        # An unnamed swing high is not a liquidity pool. The name is what makes
-        # the level a place other participants are watching - PDH/PDL, overnight
-        # high/low, session extremes - and `level_grade` ranks them by type.
+        # ── the declared conditions, each with its current reading ─────────
         name = str(getattr(sweep, "swept_named_level", "") or "")
-        if not name:
-            return t.refuse("named", "swept level is unnamed — not a liquidity pool")
-        t.check("named", 1.0, True)
-
-        # ── 2. it must have RECLAIMED and NOT been accepted through ─────────
-        # ⚠️ BOTH CONDITIONS, AND THEY ARE NOT THE SAME. `reclaimed` says price
-        # closed back inside. `invalidated` says price has SINCE accepted beyond
-        # - the level failed after all. A reclaimed-then-invalidated sweep is a
-        # BREAKOUT, and selling a boundary that has already given way is the
-        # worst version of this trade.
-        if not getattr(sweep, "reclaimed", False):
-            return t.refuse("reclaimed", f"{name} swept but no bar has CLOSED "
-                                         f"back inside — a wick is a touch, not "
-                                         f"a decision")
-        t.check("reclaimed", 1.0, True)
-        if getattr(sweep, "invalidated", False):
-            logger.debug("[sweep_cs] no trade: %s reclaimed then INVALIDATED - "
-                         "price accepted through; that is a breakout", name)
-            return t.refuse("invalidated", f"{name} reclaimed then invalidated - "
-                                           f"price accepted through; that is a breakout")
-        t.check("invalidated", 0.0, True)
-
-        # ── 3. it must be YOUNG - measured from the RECLAIM ─────────────────
-        # SWP.10: `bars_ago` now counts from the reclaim bar, not the sweep bar.
-        # Under v3 it counted from the sweep, so the signal was charged for the
-        # 5-20 minutes of confirmation latency the pipeline itself imposed, and
-        # the median scored sweep was an HOUR old.
+        prep.name = name or "unnamed"
+        prep.cond("named", 1.0 if name else 0.0, self.CONDITIONS["named"], bool(name))
+        reclaimed = bool(getattr(sweep, "reclaimed", False))
+        prep.cond("reclaimed", 1.0 if reclaimed else 0.0, self.CONDITIONS["reclaimed"], reclaimed)
+        inval = bool(getattr(sweep, "invalidated", False))
+        prep.cond("invalidated", 1.0 if inval else 0.0, self.CONDITIONS["invalidated"], not inval)
         age = int(getattr(sweep, "bars_ago", 999) or 999)
         _max_age = relaxed.widen(MAX_AGE_BARS, 3.0, name="max_age_bars")
-        t.check("age", age, age <= _max_age)
-        if age > _max_age:
-            logger.debug("[sweep_cs] no trade: %s reclaimed %d bars ago "
-                         "(max %d)", name, age, MAX_AGE_BARS)
-            return t.refuse("age", f"{name} reclaimed {age} bars ago (max {_max_age:g})")
-
-        # ── 4. the rejection must be real ───────────────────────────────────
+        prep.age = age
+        prep.cond("age", age, f"<= {_max_age:g} bars", age <= _max_age)
         rej = float(getattr(sweep, "rejection_pct", 0.0) or 0.0)
-        t.check("rejection", rej, rej >= MIN_REJECTION_PCT)
-        if rej < MIN_REJECTION_PCT:
-            return t.refuse("rejection", f"{name} rejection {rej*100:.3f}% below "
-                                         f"the {MIN_REJECTION_PCT*100:.3f}% floor")
-        # ⚠️ AND NOT TOO DEEP. A deep pierce is a WEAK level, not a strong
-        # rejection - measured: >0.50% pierces survived on 19% against 33-34%
-        # for shallow ones, with 1.28% median adverse against 0.46%.
+        prep.rej = rej
+        prep.cond("rejection", rej, self.CONDITIONS["rejection"], rej >= MIN_REJECTION_PCT)
         _max_rej = relaxed.widen(MAX_REJECTION_PCT, 3.0, name="pierce_ceiling")
-        t.check("pierce_depth", rej, rej <= _max_rej)
-        if rej > _max_rej:
-            logger.debug("[sweep_cs] no trade: %s pierced %.3f%% - too deep, "
-                         "the level barely rejected (19%% survival measured)",
-                         name, rej * 100.0)
-            return t.refuse("pierce_depth",
-                            f"{name} pierced {rej*100:.3f}% - too deep; a deep "
-                            f"pierce is a WEAK level (19% survival measured)")
-
-        # ── 5. which boundary did the pool become? ──────────────────────────
+        prep.cond("pierce_depth", rej, f"<= {_max_rej*100:.3f}%", rej <= _max_rej)
         b = boundary_from_sweep(getattr(sweep, "kind", ""))
         if not b:
-            return t.refuse("boundary", f"sweep kind '{getattr(sweep, 'kind', '')}' "
-                                        f"names no boundary")
+            t.refuse("boundary", f"sweep kind '{getattr(sweep, 'kind', '')}' names no boundary")
+            prep.structural.append(("boundary", "unknown sweep kind"))
+            return prep
         boundary, side = b
+        prep.boundary, prep.side = boundary, side
         t.direction = side
         pool = float(getattr(sweep, "pool_price", 0.0) or 0.0)
         if pool <= 0:
-            return t.starved("pool_price")
-        # 🔴 SPENT-LEVEL LOCK — a pool that already stopped us out today is
-        # finished. Checked HERE, the moment the pool is known, so nothing
-        # downstream prices a spread against a dead level.
-        # ⚠️ `config.INSTRUMENT` — `liq_map` carries no symbol (checked, not
-        # assumed). One box, one instrument, so this is the box's own symbol.
-        try:
-            from config import INSTRUMENT as _sym
-        except Exception:                                      # noqa: BLE001
-            _sym = ""
-        _sp, _why = is_spent(_sym, side, pool)
-        if _sp:
-            t.check("boundary", pool, False)
-            return t.refuse("spent_level",
-                            f"{pool:.2f} is SPENT for today — {_why}. The level "
-                            f"gave way with real money on it; it does not "
-                            f"re-arm because price wandered back")
-        t.check("boundary", pool, True)
-        # The pool is the level the spread is sold against: the trigger the
-        # reclaim answered, and the invalidation (acceptance back through it).
+            prep.starved.append("pool_price")
+            t.starved("pool_price")
+            return prep
+        prep.pool = pool
         t.anchor(trigger=pool, invalidation=pool)
-
-        # ⚠️ PRICE MUST ALREADY BE ON THE PROFITABLE SIDE OF THE BOUNDARY. If it
-        # is not, the reclaim has not actually happened from this strategy's
-        # point of view and the spread would be opened already tested.
         _on_side = (price_now < pool) if boundary == "ceiling" else (price_now > pool)
-        t.check("side_of_pool", price_now - pool, _on_side)
-        if not _on_side:
-            return t.refuse("side_of_pool",
-                            f"price {price_now:.2f} is not on the profitable side "
-                            f"of the {boundary} {pool:.2f} — the spread would open "
-                            f"already tested")
-
-        # ── GEOMETRY: THE SHARED SESSION MAP (v4.4) ─────────────────────
-        # A ceiling below the opening range, or a floor above it, is
-        # INVALIDATED — never re-cast as the other side. Unmeasured (no ORB
-        # yet) records n/a and the spec proceeds; that is not a pass.
-        _geo = t.level(pool, boundary, name, orb_high, orb_low)
-        if _geo is False:
-            return t.refuse("geometry", t.last_why)
-
-        # ── 6. window and volatility ────────────────────────────────────────
-        # ⚠️ RELAXED WIDENS THE WINDOW AND THE DEPTH BAND - SELECTION gates,
-        # measured to favour the afternoon and a shallow pierce. It does NOT
-        # widen the ATR ceiling below: that is a FEASIBILITY veto and a boundary
-        # does not hold in tape that moved 0.5% on 92% of 90-bar windows.
-        # ⚠️ r98 — RELAXED MAY WIDEN THE EARLY SIDE, NEVER THE LATE ONE.
-        # Passing LATEST_ET as `relaxed_latest` makes the 14:00 close a HARD
-        # ceiling: `max(latest, relaxed_latest)` can no longer push it out. The
-        # early side stays relaxable because opening earlier only produces a
-        # worse-selected example of the same trade, which is what a debug
-        # session wants; opening LATER produces a trade the session has no time
-        # to judge, which is a different and unmeasurable thing.
-        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET,
-                                       relaxed_latest=LATEST_ET)
-        if now_et and not (_early <= now_et <= _late):
-            return t.refuse("entry_window", f"{now_et} ET is outside the sweep "
-                                            f"window {_early}-{_late}")
-        t.check("entry_window", None, True)
-        # ⚠️ SHORT-VOL CONDITION, inverted from the runaway trade. A credit
-        # spread needs the level to HOLD. From tests/magnitude_estimator.py:
-        # above 0.20% ATR the tape produced a 0.5% move on 92% of 90-bar
-        # windows - a boundary does not survive that.
-        # ⚠️ A NaN ATR does NOT satisfy `> MAX`, so the ceiling did not refuse.
-        # Unknown ATR is permitted (the gate is optional); NON-FINITE is not.
+        prep.cond("side_of_pool", price_now - pool, self.CONDITIONS["side_of_pool"], _on_side)
         _atr = safe_float(atr_pct)
-        if atr_pct is not None and _atr is None:
-            return t.refuse("atr_pct", f"ATR is non-finite ({atr_pct})")
-        t.check("atr_pct", _atr, None if _atr is None else _atr <= ATR_MAX_PCT)
-        if _atr is not None and _atr > ATR_MAX_PCT:
-            logger.debug("[sweep_cs] no trade: ATR %.3f%% too hot for a "
-                         "boundary to hold", atr_pct)
-            return t.refuse("atr_pct", f"ATR {_atr:.3f}% above {ATR_MAX_PCT:.2f}% — "
-                                       f"too hot for a boundary to hold (0.5% move "
-                                       f"on 92% of 90-bar windows)")
+        prep.cond("atr_pct", _atr, self.CONDITIONS["atr_pct"],
+                  _atr is None or _atr <= ATR_MAX_PCT)
 
+        # ── structural: untradeable regardless of the trigger ─────────────
+        _spent, _spent_why = is_spent(_symbol_of(), side, pool)
+        t.check("spent_level", 1.0 if _spent else 0.0, not _spent)
+        if _spent:
+            prep.structural.append(("spent_level", f"{name} {pool:.2f} is SPENT — {_spent_why}"))
+        _geo = t.level(pool, boundary, name or "pool", orb_high, orb_low)
+        if _geo is False:
+            prep.structural.append(("geometry", t.last_why))
+
+        # ── SELECTION — the trade, if the trigger fires next tick ──────────
+        if chain is None:
+            prep.starved.append("chain")
+        else:
+            _inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
+            prep.swept_px = float(getattr(sweep, "sweep_price", 0.0) or 0.0)
+            try:
+                _side_contracts = chain.puts if side == "put" else chain.calls
+            except Exception:                                  # noqa: BLE001
+                _side_contracts = None
+            _contracts = _side_contracts
+            if not _contracts:
+                prep.starved.append("chain")
+            else:
+                _ps = strike_beyond_sweep(prep.swept_px, pool, boundary == "ceiling",
+                                          contracts=_side_contracts, increment=_inc)
+                if _ps is None:
+                    prep.structural.append(("short_anchor",
+                        f"{name} swept to {prep.swept_px:.2f} and the {side} chain has no "
+                        f"strike beyond it — a chain problem, not a setup one"))
+                else:
+                    t.check("short_anchor", _ps, True)
+                    _short = cv.find_contract_at_strike(_contracts, _ps)
+                    if _short is None or not (getattr(_short, "mark", 0) or 0) > 0:
+                        prep.structural.append(("contract",
+                            f"no priced {side} contract at the pierced strike {_ps:.2f} — "
+                            f"the anchor is the trade"))
+                    else:
+                        t.check("contract", _short.strike, True)
+                        _best_r, _long, _credit, _bw = cv.search_wing(
+                            _contracts, _short, side, R_FLOOR)
+                        t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
+                        if _long is None:
+                            prep.structural.append(("wing",
+                                f"no priceable protective wing beyond {_short.strike:.2f}"))
+                        elif _best_r < R_FLOOR:
+                            prep.structural.append(("wing_r_best",
+                                f"no wing clears R {R_FLOOR:.2f} — best is {_best_r:.2f} "
+                                f"({_bw:.2f} wide, credit ${_credit:.2f}); "
+                                f"structure, not selection — relaxed does not waive it"))
+                        else:
+                            t.check("wing", _long.strike, True)
+                            t.credit_spread(_short.strike, _long.strike, _credit,
+                                            invalidation=pool, trigger=pool)
+                            if _credit <= 0:
+                                prep.structural.append(("credit",
+                                    f"{side} {_short.strike:.2f}/{_long.strike:.2f} pays no credit"))
+                            else:
+                                _stop_prem = _credit * (1.0 + MAX_LOSS_PCT)
+                                _stop_dist = _stop_prem - _credit
+                                _sv_ok, _sv_why = stop_survivable(
+                                    _stop_dist, getattr(_short, "bid", 0.0),
+                                    getattr(_short, "ask", 0.0))
+                                t.check("stop_vs_spread", round(_stop_dist, 4), _sv_ok, _sv_why)
+                                if not _sv_ok:
+                                    prep.structural.append(("stop_vs_spread", _sv_why))
+                                else:
+                                    prep.short, prep.long = _short, _long
+                                    prep.credit, prep.width = _credit, _bw
+                                    prep.stop_prem, prep.stop_dist = _stop_prem, _stop_dist
+                                    prep.r = t.r
+                                    prep.ready = True
+
+        # ── the narration: which of the three states is this tick ──────────
+        head = f"{prep.name} {boundary} {pool:.2f} ({side} spread)"
+        if prep.starved:
+            t.starved(*prep.starved)
+            return prep
+        if prep.structural:
+            gate, why = prep.structural[0]
+            t.refuse(gate, f"{head}: {why}")
+            return prep
+        if prep.unmet:
+            cur = "; ".join(f"{n}={_n(prep.conditions[n][0]) if isinstance(prep.conditions[n][0], (int, float)) else 'no'}"
+                            f" (need {prep.conditions[n][1]})" for n in prep.unmet)
+            t.hold(f"{head}: PREPARED — {prep.trade_line()}. Waiting on: {cur}")
+            return prep
+        t.note(f"{head}: all {len(self.CONDITIONS)} conditions true — {prep.trade_line()}")
+        return prep
+
+    # ══════════════════════════════════════════════════════════════════════
+    # THE STRATEGY — checks its conditions, executes the plan's variables.
+    # ══════════════════════════════════════════════════════════════════════
+    def generate_signal(self, *, liq_map, price_now: float, now_et: str,
+                        atr_pct: float = None, chain=None,
+                        orb_high: float = None, orb_low: float = None,
+                        required_side: str = "", **_ignored) -> Optional[Signal]:
+        """`required_side` is the condor's AUTHORIZATION (one vertical open ->
+        only the complementary-side sweep may fire). It narrows; it never
+        selects a level for this strategy."""
+        prep = self.prepare(liq_map=liq_map, price_now=price_now, now_et=now_et,
+                            atr_pct=atr_pct, chain=chain, orb_high=orb_high,
+                            orb_low=orb_low, required_side=required_side)
+        if not prep.ready or prep.unmet or prep.structural or prep.starved:
+            return prep.tick.already()       # the plan wrote this tick's row
+        if required_side and prep.side != required_side:
+            return prep.tick.refuse("authorized_side",
+                                    f"only a {required_side} sweep is authorized "
+                                    f"while the other vertical is open; this is "
+                                    f"a {prep.side}")
+
+        # ── EXECUTE the prepared trade — every variable is the plan's ───────
         sig = Signal(
             strategy_name=self.name,
             setup_type="sweep_credit_spread",
-            direction="short" if side == "call" else "long",
-            option_side=side,
-            underlying_entry=price_now,
+            direction="short" if prep.side == "call" else "long",
+            option_side=prep.side,
+            underlying_entry=float(price_now),
         )
-        # the swept pool IS the short strike anchor; strike selection resolves
-        # it against the live chain increment.
-        # ⚠️ THE SHORT STRIKE IS THE NEAREST STRIKE PIERCED, NOT THE POOL.
-        # Falls back to the pool when the sweep cleared no further strike -
-        # which IS the pool on a shallow pierce, by construction.
-        _inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
-        _swept_px = float(getattr(sweep, "sweep_price", 0.0) or 0.0)
-        # r107 — the FIRST STRIKE BEYOND the sweep extreme, read off the LIVE
-        # chain. `pierced_strike` is kept below for the studies that cite it,
-        # but it is no longer what selects the short.
-        try:
-            _side_contracts = chain.puts if side == "put" else chain.calls
-        except Exception:                                      # noqa: BLE001
-            _side_contracts = None
-        _ps = strike_beyond_sweep(_swept_px, pool, boundary == "ceiling",
-                                  contracts=_side_contracts, increment=_inc)
-        # 🔴 r100 — NO FALLBACK TO THE POOL. The pool is a PRICE LEVEL, not a
-        # strike: SPX's NY Low sat at 7639.01 on a 5-wide chain, so the anchor
-        # could never resolve and r97's exact-strike lookup reported "no priced
-        # put contract at the pierced strike 7639.01" on 230 consecutive ticks
-        # (2026-08-24) — a log line naming a strike that does not exist.
-        # ⚠️ AND `pierced_strike` ALREADY SAYS WHAT None MEANS: "the sweep
-        # cleared NO strike ... there is nothing to sell, and inventing a strike
-        # here would sell a level that was never tested." The fallback
-        # contradicted the function it called, one line later.
-        # ⚠️ THIS REMOVES TRADES, DELIBERATELY. A sweep that pierces no strike
-        # is now declined with its own reason instead of dying downstream on a
-        # confusing one. Counted, so the frequency is a fact rather than a guess.
-        if _ps is None:
-            # r107 — this is now a MISSING CHAIN, not a shallow sweep. There is
-            # always a strike beyond the extreme unless the chain does not
-            # reach it.
-            logger.warning("[sweep_cs] %s swept to %.2f and the %s chain has no "
-                           "strike beyond it - SKIP. This is a chain problem, "
-                           "not a setup problem.", name, _swept_px, side)
-            return t.refuse("short_anchor", f"{name} swept to {_swept_px:.2f} and "
-                                            f"the {side} chain has no strike beyond "
-                                            f"it — a chain problem, not a setup one")
-        sig.short_anchor = _ps
-        t.check("short_anchor", _ps, True)
-        if abs(_ps - _swept_px) > 1e-9:
-            logger.info("[sweep_cs] %s: sweep extreme %.2f cleared no strike; "
-                        "short is the first strike BEYOND it at %.2f "
-                        "(further from spot than anything price reached)",
-                        name, _swept_px, _ps)
-        sig.pierced_strike = _ps
-        sig.pool_price = pool
-        sig.boundary = boundary
-        sig.swept_level_name = name
-        sig.sweep_age_bars = age
-        sig.rejection_pct = rej
+        sig.short_anchor = prep.short.strike
+        sig.pierced_strike = prep.short.strike
+        sig.pool_price = prep.pool
+        sig.boundary = prep.boundary
+        sig.swept_level_name = prep.name
+        sig.sweep_age_bars = prep.age
+        sig.rejection_pct = prep.rej
         sig.atr_pct_at_entry = atr_pct
-        sig.max_loss_pct = MAX_LOSS_PCT      # 15%, tighter than the fleet 0.25
-
-        # ── 🔴 r97 — RESOLVE THE ANCHOR INTO A REAL SPREAD ───────────────────
-        # ⚠️ UNTIL NOW THIS STRATEGY COULD NOT PRODUCE A TRADEABLE SIGNAL AT
-        # ALL. It set `short_anchor` and returned. `grep short_anchor` across
-        # the tree found ONE writer and ZERO readers: nothing ever converted it
-        # into a strike, a premium or a contract. So `is_valid` fell to the
-        # default arm, needed `strike > 0 and entry_premium > 0`, and got 0.0
-        # for both — every fire died one step later at main.py's
-        # `Invalid signal from SweepCreditSpread`. Measured 2026-08-24: SPX 231
-        # times, GOOGL 90, CRM 1.
-        # ⚠️ AND IT CLAIMED THE DISPATCH SLOT ON THE WAY DOWN, because
-        # `signal = sc_sig` runs ~240 lines before validation and everything
-        # after it is gated on `if signal is None`. So each of those 231 SPX
-        # ticks also cost the butterfly and all four credit-vertical triggers.
-        # The slot half is fixed in main.py; this half builds the trade.
-        #
-        # Built with `credit_vertical`'s shared helpers — the module that exists
-        # precisely so credit-spread math is owned by neither strategy — and in
-        # `trend_credit_spread`'s idiom: short at the anchor, protective wing at
-        # a fixed width, credit from short.bid - long.ask (never marks, which
-        # would book a credit no fill can achieve).
-        _contracts = None
-        try:
-            _contracts = chain.puts if side == "put" else chain.calls
-        except Exception:                                      # noqa: BLE001
-            _contracts = None
-        if not _contracts:
-            logger.info("[sweep_cs] no %s contracts on the chain - SKIP", side)
-            return t.starved("chain")
-
-        _short = cv.find_contract_at_strike(_contracts, sig.short_anchor)
-        if _short is None or not (getattr(_short, "mark", 0) or 0) > 0:
-            logger.info("[sweep_cs] no priced %s contract at the pierced strike "
-                        "%.2f - SKIP (the anchor is the trade; a different "
-                        "strike is a different trade)", side, sig.short_anchor)
-            return t.refuse("contract", f"no priced {side} contract at the pierced "
-                                        f"strike {sig.short_anchor:.2f} — the anchor "
-                                        f"is the trade")
-        t.check("contract", _short.strike, True)
-
-        _long_strike = (_short.strike - WING_WIDTH if side == "put"
-                        else _short.strike + WING_WIDTH)
-        # ── 🔴 r156 — THE WING IS SEARCHED, NOT ASSUMED. R IS THE TARGET. ────
-        # Operator, 2026-08-27: *"strike selection must net r of 1 or better"*
-        # and *"the integrity of the trade mechanics comes first."*
-        #
-        # ⚠️ WHAT THIS REPLACES: a single wing at `WING_WIDTH = 5.0`, a FIXED
-        # DOLLAR AMOUNT — one strike increment on SPX and SIX on CVX. That is
-        # how a 6-wide spread collecting $0.58 (R 0.13) looked normal to the
-        # code. R was then checked AFTER the fact and, under relaxed, muted.
-        #
-        # ⚠️ R IS NOW A CONSTRUCTION TARGET, NOT A FILTER. The short strike is
-        # STRUCTURAL — it comes from the level and never moves. The wing is the
-        # only free variable, and the tradeoff is monotonic: narrower wing ->
-        # less credit, less risk, HIGHER R. So there is a computable answer to
-        # "the narrowest wing that clears the floor", or a definite "none does".
-        #
-        # ⚠️ AND IT IS NOT MUTED BY RELAXED. Operator: *"make the r-value a
-        # requirement outright... and relax something else to loosen the
-        # entry."* Relaxed continues to widen the EVIDENCE dials it always did
-        # (sweep_max_age_bars, sweep_pierce_ceiling, level_hold_min); it no
-        # longer waives the economics. `R_FLOOR` is read directly here rather
-        # than through `r_hurdle()`, which returns None under relaxed.
-        #
-        # ⚠️ WIDEST-FIRST, TAKE THE BEST R. Every listed strike beyond the short
-        # is a candidate; each is priced on bid/ask and scored. The chosen wing
-        # is the one with the highest R that clears the floor — not merely the
-        # first that does — because a wider wing sometimes pays enough more
-        # credit to beat a narrow one on ratio.
-        # ⚠️ r157 — the search now lives in `credit_vertical.search_wing` so all
-        # four credit strategies share ONE implementation. Four copies of this
-        # logic would drift, and the drift would be silent.
-        _best_r, _long, _credit, _bw = cv.search_wing(
-            _contracts, _short, side, R_FLOOR)
-        if _long is None:
-            return t.refuse("wing", f"no priceable protective wing beyond "
-                                    f"{_short.strike:.2f} (undefined risk is "
-                                    f"never sold)")
-        t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
-        if _best_r < R_FLOOR:
-            return t.refuse("wing_r_best",
-                            f"no wing clears R {R_FLOOR:.2f} — best is "
-                            f"{_best_r:.2f} at {_long.strike:.2f} "
-                            f"({_bw:.2f} wide, credit ${_credit:.2f}). The "
-                            f"short strike cannot pay for its own risk; this "
-                            f"is structure, not selection, so relaxed does not "
-                            f"waive it")
-        t.check("wing", _long.strike, True)
-        # ── THE WHAT-IF, priced off the spread THIS spec chose ───────────
-        t.credit_spread(_short.strike, _long.strike, _credit,
-                        invalidation=pool, trigger=pool)
-        if _credit <= 0:
-            logger.info("[sweep_cs] %s %.2f/%.2f pays no credit (bid %.2f vs "
-                        "wing ask %.2f) - SKIP", side, _short.strike,
-                        _long.strike, getattr(_short, "bid", 0.0) or 0.0,
-                        getattr(_long, "ask", 0.0) or 0.0)
-            return t.refuse("credit", f"{side} {_short.strike:.2f}/{_long.strike:.2f} "
-                                      f"pays no credit (bid {getattr(_short, 'bid', 0.0) or 0.0:.2f} "
-                                      f"vs wing ask {getattr(_long, 'ask', 0.0) or 0.0:.2f})")
-        # ── THE R HURDLE — strict refuses, relaxed records ───────────────
-        # ── 🔴 STRUCTURAL VIABILITY — BEFORE THE R HURDLE, AND NOT MUTED ─────
-        # Operator, 2026-08-27: *"It's allowed to enter bad trades, but if
-        # structurally it can't even survive for a minute we need to address
-        # the structure."*
-        # ⚠️ MEASURED ON THE LOOP THAT PROMPTED IT: CVX credit $0.58, stop
-        # $0.67 — a NINE CENT stop on a contract quoted in nickels. Seven
-        # entries in seven minutes, each dead inside a minute, about -$170. The
-        # trades were not stopped out by PRICE; they were stopped out by their
-        # own bid-ask, which is a construction fault, not a bad bet.
-        # ⚠️ PLACED BEFORE `executable()` DELIBERATELY. R is economics and is
-        # MUTED under relaxed — that is what relaxed is for. Survivability is
-        # construction, like requiring a protective wing before selling
-        # undefined risk, and construction is never mode-dependent.
-        _stop_prem = _credit * (1.0 + MAX_LOSS_PCT)
-        _stop_dist = _stop_prem - _credit
-        _sv_ok, _sv_why = stop_survivable(
-            _stop_dist, getattr(_short, "bid", 0.0), getattr(_short, "ask", 0.0))
-        t.check("stop_vs_spread", round(_stop_dist, 4), _sv_ok, _sv_why)
-        if not _sv_ok:
-            logger.info("[sweep_cs] STRUCTURE NOT SURVIVABLE: %s", _sv_why)
-            return t.refuse("stop_vs_spread", _sv_why)
-
-        _ok, _why = t.executable()
-        if not _ok:
-            logger.info("[sweep_cs] R %s refused: %s", _n(t.r), _why)
-            return t.refuse("r", _why)
-        t.note(_why)
-
+        sig.max_loss_pct = MAX_LOSS_PCT
         sig.is_credit_vertical = True
-        sig.net_credit = _credit
-        if side == "call":
-            sig.short_call_contract, sig.long_call_contract = _short, _long
+        sig.net_credit = prep.credit
+        if prep.side == "call":
+            sig.short_call_contract, sig.long_call_contract = prep.short, prep.long
         else:
-            sig.short_put_contract, sig.long_put_contract = _short, _long
-        # The default `is_valid` arm and the sizer both read these.
-        sig.strike = _short.strike
-        sig.expiry = getattr(_short, "expiry", "")
-        sig.entry_premium = _credit
-        sig.contract = _short
-
+            sig.short_put_contract, sig.long_put_contract = prep.short, prep.long
+        sig.strike = prep.short.strike
+        sig.expiry = getattr(prep.short, "expiry", "")
+        sig.entry_premium = prep.credit
+        sig.contract = prep.short
+        sig.stop_premium = prep.stop_prem
         relaxed.tag(sig)
-        logger.info("[sweep_cs] FIRE  %s swept -> %s  short %.2f / long %.2f  "
-                    "credit %.2f  (pool %.2f, pierced to %.2f)  %s credit "
-                    "spread  age %d bars  rejection %.3f%%",
-                    name, boundary, _short.strike, _long.strike, _credit,
-                    pool, _swept_px, side.upper(), age, rej * 100.0)
-        return t.take(sig)
+        logger.info("[sweep_cs] FIRE  %s swept -> %s  %s  age %d bars  rejection %.3f%%",
+                    prep.name, prep.boundary, prep.trade_line(), prep.age, prep.rej * 100.0)
+        return prep.tick.take(sig)
+
+
+def _symbol_of() -> str:
+    try:
+        from config import INSTRUMENT
+        return str(INSTRUMENT)
+    except Exception:                                          # noqa: BLE001
+        return ""
