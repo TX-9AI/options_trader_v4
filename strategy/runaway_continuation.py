@@ -190,7 +190,19 @@ def runaway_confirmed(orb, price_now: float, prev_close: float,
     still on the right side, rejects the wick-and-fail without waiting for a
     confirmation bar that costs 60 seconds of a move already in progress.
     """
-    tp50 = getattr(orb, "tp50", None) or getattr(orb, "underlying_tp50", None)
+    # 🔴 `target_50pct` — THE ONLY NAME THAT EXISTS (r149). The strategy asked
+    # for `tp50` and `underlying_tp50`; NEITHER is a field on the ORB dataclass
+    # (orb_engine.py:311 declares `target_50pct`, set at 1043/1064). Both
+    # getattr calls returned None, so this function's `if not tp50` guard
+    # refused EVERY runaway — the plan row read "no 1m close beyond the 50% TP
+    # n/a", and `n/a` was the tell: the level was never read, not never crossed.
+    # ⚠️ MEASURED: 2026-08-27, eight boxes sat on INVALIDATED/runaway through
+    # the open (AMZN CRM CVX GOOGL META NFLX PLTR TSLA) and every one declined
+    # here. r148 unblocked the direction lookup two lines up and this refused
+    # them at the very next gate — the SAME defect twice in one function.
+    tp50 = (getattr(orb, "target_50pct", None)
+            or getattr(orb, "tp50", None)
+            or getattr(orb, "underlying_tp50", None))
     if not tp50 or not prev_close or not price_now:
         return False
     if direction == "long":
@@ -298,7 +310,9 @@ class RunawayContinuationStrategy:
         t.check("orb_direction", 1.0 if direction == "long" else -1.0, True)
 
         # ── 4. the runaway itself ────────────────────────────────────────────
-        tp50 = getattr(orb, "tp50", None) or getattr(orb, "underlying_tp50", None)
+        tp50 = (getattr(orb, "target_50pct", None)      # r149 — the real field
+                    or getattr(orb, "tp50", None)
+                    or getattr(orb, "underlying_tp50", None))
         boundary = (getattr(orb, "orb_high", None) if direction == "long"
                     else getattr(orb, "orb_low", None))
         t.anchor(trigger=tp50, invalidation=boundary)

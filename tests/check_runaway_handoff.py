@@ -117,6 +117,35 @@ def main():
     check("RW9 the refusal message names the invalidation reason",
           "invalidated: {_inval_reason}" in src or "_inval_reason}" in src)
 
+    # ── 🔴 RW10-RW12 — THE 50% TP FIELD, THE SECOND HALF OF THE SAME BUG ──
+    # r148 unblocked the direction lookup; the very next gate refused all eight
+    # boxes anyway because `tp50`/`underlying_tp50` DO NOT EXIST on the ORB
+    # dataclass — the field is `target_50pct` (orb_engine.py:311, set 1043/1064).
+    # The plan row read "no 1m close beyond the 50% TP n/a" and the `n/a` was
+    # the tell: the level was never READ, not never crossed.
+    from strategy.runaway_continuation import runaway_confirmed
+
+    class _O:
+        def __init__(self, tp):
+            self.target_50pct = tp
+
+    # NFLX 2026-08-27: broke the ORB low 80.06, width 1.09 -> tp50 79.515
+    check("RW10 a short runaway past the 50% TP confirms",
+          runaway_confirmed(_O(79.515), 79.32, 79.40, "short") is True)
+    check("RW11 price short of the TP does NOT confirm",
+          runaway_confirmed(_O(79.515), 79.55, 79.60, "short") is False)
+    # ⚠️ FAIL CLOSED when the field is absent — never assume a level.
+    class _Bare:
+        pass
+    check("RW12 an ORB with no TP field refuses, never guesses",
+          runaway_confirmed(_Bare(), 79.32, 79.40, "short") is False)
+
+    src2 = open(os.path.join(_root, "strategy", "runaway_continuation.py"),
+                encoding="utf-8").read()
+    _n_sites = src2.count('getattr(orb, "target_50pct"')
+    check("RW13 the strategy reads target_50pct at BOTH sites",
+          _n_sites == 2, f"{_n_sites} sites (want 2)")
+
     print()
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))
