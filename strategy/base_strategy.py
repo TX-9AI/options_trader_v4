@@ -121,7 +121,10 @@ class OptionsSignal:
     # ── Quality ─────────────────────────────────────────────────────
     confluence_factors: List[str] = field(default_factory=list)
     conviction:     float = 0.0
-    setup_grade:    str   = "B"
+    # ⚠️ r152 — the A/B grade is REMOVED (setup_scorer deleted). The field
+    # survives because the DB schema and every dashboard read it; UNGRADED is a
+    # marker that no selector ran, not a verdict.
+    setup_grade:    str   = "UNGRADED"
 
     # ── Context ──────────────────────────────────────────────────────
     adx_at_signal:  float = 0.0    # v-obs: ADX at entry, for tape-context analysis

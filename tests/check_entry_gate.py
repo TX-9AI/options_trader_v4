@@ -69,6 +69,8 @@ sig = OptionsSignal(strategy_name="ORBStrategy", setup_type="orb_long",
                     option_side="call", strike=81.0, entry_premium=0.85,
                     underlying_entry=80.0,
                     contract=OptionContract(symbol="X", strike=81.0, mark=0.85))
+# ⚠️ r152 — `_Score` is retained only so the file's other references resolve;
+# `enter()` no longer takes a score at all (the setup scorer is deleted).
 class _Score: grade, score = "B", 80.0
 class _Sizing: allowed, contracts, total_cost = True, 1, 85.0
 
@@ -76,10 +78,10 @@ _real = tu.now_et
 try:
     tu.now_et = lambda: at(9, 34)
     check("E2a 09:34 — enter() refuses and books nothing",
-          eng.enter(sig, _Score(), _Sizing()) is None)
+          eng.enter(sig, _Sizing()) is None)
     tu.now_et = lambda: at(9, 35)
     try:
-        eng.enter(sig, _Score(), _Sizing())
+        eng.enter(sig, _Sizing())
         check("E2b 09:35 — enter() proceeds past the gate", False,
               "it returned without touching the logger — gate may be stuck shut")
     except AssertionError:
@@ -169,7 +171,7 @@ try:
     eng2 = ee.EntryEngine(paper_trading=True)
     eng2._trade_logger = _Boom()
     check("E9 16:53 — enter() still refuses (choke point, not the gate)",
-          eng2.enter(sig, _Score(), _Sizing()) is None)
+          eng2.enter(sig, _Sizing()) is None)
 finally:
     tu.now_et = _real3
 

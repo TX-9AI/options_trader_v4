@@ -105,7 +105,9 @@ from execution.order_confirm import confirm_order_fill
 from execution.limit_ladder import limit_at_mark, paper_fill_price
 
 from strategy.base_strategy import OptionsSignal
-from risk.setup_scorer import SetupScore
+# ⚠️ r152 — the setup scorer is REMOVED. `score` is accepted as None so the
+# call shape is unchanged for any caller not yet updated; the trade record
+# keeps its setup_grade/setup_score columns and writes the constants below.
 from risk.risk_manager import SizingResult
 from database.trade_logger import TradeRecord, make_record, get_trade_logger
 from data.tasty_client import get_session, get_account, TastyClientError
@@ -138,8 +140,8 @@ class EntryEngine:
 
     def enter(self,
               signal:  OptionsSignal,
-              score:   SetupScore,
-              sizing:  SizingResult) -> Optional[TradeRecord]:
+              sizing:  SizingResult,
+              score=None) -> Optional[TradeRecord]:
         """
         Place entry order and record the trade.
         Returns TradeRecord on success, None on failure.
@@ -174,7 +176,7 @@ class EntryEngine:
                 f"{signal.center_contract.strike}/"
                 f"{signal.upper_contract.strike} "
                 f"net_debit=${signal.net_debit:.2f} "
-                f"grade={score.grade}"
+                ""
             )
             fill_premium, order_id, filled_qty = self._place_butterfly(
                 signal, sizing.contracts)
@@ -184,7 +186,7 @@ class EntryEngine:
                 f"{signal.option_side.upper()} {signal.strike} "
                 f"{sizing.contracts} contract(s) "
                 f"mark=${signal.entry_premium:.2f} "
-                f"grade={score.grade}"
+                ""
             )
             fill_premium, order_id, filled_qty = self._place_single_leg(
                 signal, sizing.contracts)
@@ -204,8 +206,11 @@ class EntryEngine:
             symbol            = INSTRUMENT,
             strategy          = signal.strategy_name,
             setup_type        = signal.setup_type,
-            setup_grade       = score.grade,
-            setup_score       = score.score,
+            # ⚠️ r152 — columns retained (the DB schema and every dashboard
+            # read them); the SELECTOR that filled them is gone. UNGRADED is a
+            # marker, not a verdict.
+            setup_grade       = "UNGRADED",
+            setup_score       = None,
             direction         = signal.direction,
             option_side       = signal.option_side if not signal.is_butterfly else signal.butterfly_direction,
             is_butterfly      = signal.is_butterfly,

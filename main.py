@@ -929,7 +929,6 @@ from analysis.condor_trigger_map import build as _build_condor_trigger_map
 from strategy.trend_credit_spread import TrendCreditSpread
 
 from risk.risk_manager import init_risk_manager, get_risk_manager
-from risk.setup_scorer import get_setup_scorer
 from risk.session_guard import get_session_guard
 
 from execution.entry_engine import get_entry_engine
@@ -2040,7 +2039,8 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
                             else "SweepCreditSpread" if _is_sweep
                             else "IronCondorStrategy"),
         setup_type       = signal.setup_type,
-        setup_grade      = "B",
+        # ⚠️ r152 — the grade is gone; UNGRADED is a marker, not a verdict.
+        setup_grade      = "UNGRADED",
         setup_score      = delta_score,          # street-sign: |short-strike delta|
         direction        = "neutral",
         option_side      = signal.option_side,
@@ -2808,7 +2808,6 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     """Try to generate and execute a trade signal."""
     session  = get_session_guard()
     risk_mgr = get_risk_manager()
-    scorer   = get_setup_scorer()
     entry_eng = get_entry_engine(state.paper_trading)
 
     # ── Session gate ──────────────────────────────────────────────────────────
@@ -3406,29 +3405,35 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 pass
         return
 
-    # ── Score and size ─────────────────────────────────────────────────────────
-    score  = scorer.score(
-        signal    = signal,
-        ms    = ms,
-        vol_state = ctx["vol"],
-        structure = ctx["structure"],
-        liq_map   = ctx["liq_map"],
-        macro     = macro
-    )
-
-    if score is None:
-        # Setup scored below the B threshold — there is no C grade.
-        # This is not a trade, regardless of available capital.
-        logger.info(f"STRATEGY: NO TRADE — {signal.strategy_name} setup below B threshold")
-        return
-
+    # ── 🔴 THE SETUP SCORER IS GONE (r152) ────────────────────────────────────
+    # Operator, 2026-08-27: *"What fucking SUM are we still using??? That is
+    # TRASH CODE. It's held over dumpster fodder from otv3 which was a complete
+    # failure."*
+    # ⚠️ WHAT IT WAS: four dimensions × weights, summed to a `total`, compared
+    # against a threshold to emit an A/B letter or REFUSE the trade.
+    # ⚠️ WHY IT IS GONE, MEASURED — docs/INHERITED_FINDINGS.md §4: **A-grade 399
+    # trades −$8,244 · B-grade 220 trades +$1,893.** It SELECTED LOSERS. ~90% of
+    # it was one column printed twice, plus two constants measuring 1.000 across
+    # all 619 trades. `vwap_alignment` and `liquidity_clear` were among the
+    # constants — they never varied, so the sum never measured anything.
+    # ⚠️ AND ITS TWO NAMED GATES WERE BOTH DEFAULT-OFF (`MIN_RRR_ACTIVE=0`,
+    # `VWAP_FILTER_ACTIVE=0`), so by 2026-08-27 the entire file contributed
+    # NOTHING to a trade except the refusal that stopped the fleet at zero
+    # trades through the highest-volume half hour of the day.
+    # ⚠️ THE VETOES THAT REMAIN ARE THE OPERATOR'S, AND THEY LIVE IN THE
+    # STRATEGIES: the R hurdle (muted under relaxed), session-map geometry,
+    # entry windows, level invalidation, distance-to-pin. A setup either meets
+    # its own spec or it does not — there is no second opinion summed from
+    # weights nobody chose.
     sizing = risk_mgr.compute_size(
         premium           = signal.entry_premium,
         # r121 — the sizer needs the STOP to size on risk. Passed from the
         # signal the strategy already computed; when it is absent or the flag
         # is off, the sizer falls back to premium and nothing changes.
         stop_premium      = float(getattr(signal, "stop_premium", 0.0) or 0.0),
-        grade             = score.grade,
+        # ⚠️ r152 — no grade exists. Size is flat by ruling; the sizer's
+        # GRADE_SIZE_MULTIPLIER lookup falls back to 1.0 on any unknown key.
+        grade             = "UNGRADED",
         is_butterfly      = signal.is_butterfly,
         net_debit         = signal.net_debit if signal.is_butterfly else 0.0,
         butterfly_half_size = macro.butterfly_half_size if signal.is_butterfly else False
@@ -3441,8 +3446,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 _sigj.journal("disposition", outcome="sizing_rejected",
                               reason=str(sizing.reject_reason),
                               signal=_sigj.signal_ctx(signal),
-                              score={"grade": score.grade,
-                                     "total": score.score})
+                              score=None)   # r152 — scorer removed
             except Exception:
                 pass
         return
@@ -3452,7 +3456,8 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     signal.total_cost = sizing.total_cost
 
     # ── Enter trade ───────────────────────────────────────────────────────────
-    record = entry_eng.enter(signal=signal, score=score, sizing=sizing)
+    # ⚠️ r152 — no score argument; the scorer is gone.
+    record = entry_eng.enter(signal=signal, sizing=sizing)
     if record:
         # v5.1 — capture BEFORE anything else touches the row, but AFTER the
         # fill: the picture we want is the one that produced this entry.
@@ -3463,7 +3468,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         get_alert_manager().send_entry_alert(record)
         logger.info(
             f"✅ Entry: {signal.setup_type} "
-            f"grade={score.grade} "
+
             f"contracts={sizing.contracts} "
             f"total=${sizing.total_cost:.2f}"
         )
@@ -3505,8 +3510,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 _sigj.journal("disposition", outcome="fired",
                               signal=_sigj.signal_ctx(signal),
                               l1=_l1_ctx,
-                              score={"grade": score.grade,
-                                     "total": score.score},
+                              score=None,   # r152 — scorer removed
                               fill={"contracts": sizing.contracts,
                                     "total_cost": round(sizing.total_cost, 2)},
                               orb=_orb_ctx)
