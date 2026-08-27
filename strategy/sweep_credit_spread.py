@@ -127,6 +127,7 @@ import config
 from strategy import relaxed
 from strategy import credit_vertical as cv     # r97 — shared spread math
 from strategy.base_strategy import OptionsSignal as Signal
+from strategy.criteria import stop_survivable
 from strategy.plan import Plan, _n
 from utils.math_utils import safe_float
 
@@ -418,6 +419,76 @@ def boundary_from_sweep(kind: str) -> Optional[tuple]:
     return None
 
 
+# ═══ SPENT LEVELS — A POOL THAT STOPPED US OUT IS FINISHED ════════════════
+# 🔴 OPERATOR, 2026-08-27, watching CVX re-enter the SAME 198/192 pool four
+# times in five minutes for -$104: *"The stop isn't too tight, the level that we
+# just attempted a sweep on is finished."*
+#
+# ⚠️ MEASURED: entries at 11:43, 11:46, 11:47, 11:48 — all sell=198 buy=192,
+# all stopped within a minute, all on the same pool. Nothing in the strategy
+# remembered the previous attempt, so the level re-qualified every time price
+# wandered back to the right side of it.
+#
+# ⚠️ THE ONLY INVALIDATION THAT EXISTED WAS PRICE-BASED. `LiquiditySweep
+# .invalidated` (LIQ.3) is recomputed EVERY TICK from closes beyond the pool —
+# it answers "has price accepted through this level", which is a fact about the
+# TAPE. It cannot answer "did we already try this and lose", which is a fact
+# about US. Both are needed and only one existed.
+#
+# ⚠️ THIS IS THE STRATEGY'S OWN DOCTRINE, FINALLY ENFORCED. Its docstring
+# already says *"selling a boundary that has already given way is the worst
+# version of this"* — a stop-out IS the boundary giving way, measured with real
+# money rather than inferred from closes.
+#
+# KEYED BY (symbol, side, rounded pool) so the two sides of one price are
+# separate levels, and cleared daily — a level that failed this morning is not
+# thereby dead tomorrow.
+_SPENT: dict = {}
+_SPENT_DAY: str = ""
+
+
+def _spent_key(symbol: str, side: str, pool: float) -> tuple:
+    # ⚠️ ROUNDED TO THE CENT. The pool is recomputed per tick and drifts in the
+    # last decimal; an exact-float key would never match itself and the lock
+    # would silently never fire — the same class of dead gate as a name that
+    # does not resolve.
+    return (symbol or "", side or "", round(float(pool or 0.0), 2))
+
+
+def mark_spent(symbol: str, side: str, pool: float, why: str = "") -> None:
+    """Record that a trade on this level closed at a loss. Called from the
+    exit path, not from here — the strategy cannot see its own outcome."""
+    global _SPENT_DAY
+    from datetime import datetime
+    try:
+        from config import ET
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+    except Exception:                                          # noqa: BLE001
+        today = datetime.now().strftime("%Y-%m-%d")
+    if today != _SPENT_DAY:
+        _SPENT.clear()
+        _SPENT_DAY = today
+    k = _spent_key(symbol, side, pool)
+    if k not in _SPENT:
+        _SPENT[k] = why or "a trade on this level was stopped out"
+        logger.info("[sweep_cs] LEVEL SPENT %s %s %.2f — %s",
+                    symbol, side, pool or 0.0, _SPENT[k])
+
+
+def is_spent(symbol: str, side: str, pool: float):
+    """(spent, why). Day-scoped: cleared on the first call of a new day."""
+    from datetime import datetime
+    try:
+        from config import ET
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+    except Exception:                                          # noqa: BLE001
+        today = datetime.now().strftime("%Y-%m-%d")
+    if today != _SPENT_DAY:
+        return False, ""
+    k = _spent_key(symbol, side, pool)
+    return (k in _SPENT), _SPENT.get(k, "")
+
+
 class SweepCreditSpreadStrategy:
     """Sell the boundary a swept pool just became.
 
@@ -430,9 +501,11 @@ class SweepCreditSpreadStrategy:
     name = "SweepCreditSpread"
 
     PLAN_CHECKS = ("sweep", "named", "reclaimed", "invalidated", "age",
+                   "spent_level",
                    "rejection", "pierce_depth", "boundary", "side_of_pool",
                    "entry_window", "atr_pct", "geometry", "short_anchor",
-                   "contract", "wing", "credit", "width", "risk", "r")
+                   "contract", "wing", "credit", "width", "risk",
+                   "stop_vs_spread", "r")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
@@ -522,6 +595,22 @@ class SweepCreditSpreadStrategy:
         pool = float(getattr(sweep, "pool_price", 0.0) or 0.0)
         if pool <= 0:
             return t.starved("pool_price")
+        # 🔴 SPENT-LEVEL LOCK — a pool that already stopped us out today is
+        # finished. Checked HERE, the moment the pool is known, so nothing
+        # downstream prices a spread against a dead level.
+        # ⚠️ `config.INSTRUMENT` — `liq_map` carries no symbol (checked, not
+        # assumed). One box, one instrument, so this is the box's own symbol.
+        try:
+            from config import INSTRUMENT as _sym
+        except Exception:                                      # noqa: BLE001
+            _sym = ""
+        _sp, _why = is_spent(_sym, side, pool)
+        if _sp:
+            t.check("boundary", pool, False)
+            return t.refuse("spent_level",
+                            f"{pool:.2f} is SPENT for today — {_why}. The level "
+                            f"gave way with real money on it; it does not "
+                            f"re-arm because price wandered back")
         t.check("boundary", pool, True)
         # The pool is the level the spread is sold against: the trigger the
         # reclaim answered, and the invalidation (acceptance back through it).
@@ -706,6 +795,28 @@ class SweepCreditSpreadStrategy:
                                       f"pays no credit (bid {getattr(_short, 'bid', 0.0) or 0.0:.2f} "
                                       f"vs wing ask {getattr(_long, 'ask', 0.0) or 0.0:.2f})")
         # ── THE R HURDLE — strict refuses, relaxed records ───────────────
+        # ── 🔴 STRUCTURAL VIABILITY — BEFORE THE R HURDLE, AND NOT MUTED ─────
+        # Operator, 2026-08-27: *"It's allowed to enter bad trades, but if
+        # structurally it can't even survive for a minute we need to address
+        # the structure."*
+        # ⚠️ MEASURED ON THE LOOP THAT PROMPTED IT: CVX credit $0.58, stop
+        # $0.67 — a NINE CENT stop on a contract quoted in nickels. Seven
+        # entries in seven minutes, each dead inside a minute, about -$170. The
+        # trades were not stopped out by PRICE; they were stopped out by their
+        # own bid-ask, which is a construction fault, not a bad bet.
+        # ⚠️ PLACED BEFORE `executable()` DELIBERATELY. R is economics and is
+        # MUTED under relaxed — that is what relaxed is for. Survivability is
+        # construction, like requiring a protective wing before selling
+        # undefined risk, and construction is never mode-dependent.
+        _stop_prem = _credit * (1.0 + MAX_LOSS_PCT)
+        _stop_dist = _stop_prem - _credit
+        _sv_ok, _sv_why = stop_survivable(
+            _stop_dist, getattr(_short, "bid", 0.0), getattr(_short, "ask", 0.0))
+        t.check("stop_vs_spread", round(_stop_dist, 4), _sv_ok, _sv_why)
+        if not _sv_ok:
+            logger.info("[sweep_cs] STRUCTURE NOT SURVIVABLE: %s", _sv_why)
+            return t.refuse("stop_vs_spread", _sv_why)
+
         _ok, _why = t.executable()
         if not _ok:
             logger.info("[sweep_cs] R %s refused: %s", _n(t.r), _why)

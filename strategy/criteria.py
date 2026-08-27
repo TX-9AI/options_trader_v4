@@ -217,6 +217,74 @@ def get(name: str, default=None):
     return pair[1] if relaxed_active() else pair[0]
 
 
+# ═══ STRUCTURAL VIABILITY — CAN THIS TRADE PHYSICALLY SURVIVE? ════════════
+# 🔴 OPERATOR, 2026-08-27, after CVX re-entered the same 198/192 spread SEVEN
+# times in seven minutes, each stopped within a minute, for about -$170:
+# *"It's allowed to enter bad trades, but if structurally it can't even survive
+# for a minute we need to address the structure."*
+#
+# ⚠️ THIS IS NOT THE R HURDLE AND IS NOT MUTED BY RELAXED. R asks whether a
+# trade PAYS ENOUGH — an economics question, and relaxed exists to collect the
+# population R would have refused. THIS asks whether the trade can EXIST: it is
+# construction, like a wing that must be present before undefined risk is sold.
+# A structure whose stop sits inside its own bid-ask is not a bad trade being
+# collected; it is a trade that was closed before it opened, and it teaches the
+# sample nothing except how fast the loop can spin.
+#
+# 🔴 THE MEASUREMENT THAT NAMES IT, from the CVX alerts themselves:
+#   credit $0.58 · stop $0.67 (15%) -> THE STOP IS NINE CENTS AWAY.
+# On a contract quoted in nickels, one quote update moves the mark further than
+# the entire stop distance. The trade was not stopped out by PRICE; it was
+# stopped out by its own SPREAD. That is why every attempt died inside a minute
+# and why the R value alone would not have explained it.
+#
+# ⚠️ UNIVERSAL BY CONSTRUCTION — no per-symbol constant. The test compares two
+# numbers that both come from the same option chain, so a $9 stock and a $7,000
+# index are judged on the same footing. This is deliberate: `WING_WIDTH = 5.0`
+# is a FIXED DOLLAR amount, which is one strike increment on SPX and SIX on
+# CVX, and that asymmetry is what made a 6-wide spread collecting $0.58 look
+# normal to the code.
+STOP_VS_SPREAD_MIN = float(os.environ.get("OT_STOP_VS_SPREAD_MIN", "2.0"))
+
+
+def stop_survivable(stop_distance, bid, ask) -> Tuple[bool, str]:
+    """(ok, why) — is the stop further from entry than the quote's own noise?
+
+    ⚠️ ⟨PRIOR⟩ 2.0x. The stop must clear TWICE the bid-ask spread. One times is
+    the boundary where a single quote update reaches it; two gives a tick of
+    room. Stated, not fitted — the plan table records the ratio on every
+    structure so it can be argued with from data rather than from this comment.
+
+    ⚠️ UNMEASURABLE IS NOT PASSING. A missing quote returns False and says so:
+    the whole failure class this week has been a gate that silently never
+    applied, and a viability check that cannot see the spread is exactly that.
+    """
+    try:
+        sd = float(stop_distance or 0.0)
+        b = float(bid or 0.0)
+        a = float(ask or 0.0)
+    except (TypeError, ValueError):
+        return False, "stop or quote unreadable — not a survivable structure"
+    if sd <= 0:
+        return False, "stop distance is zero or negative — no room to survive"
+    if a <= 0 or b < 0 or a < b:
+        return False, (f"no usable quote (bid {b:.2f} / ask {a:.2f}) — "
+                       f"survivability cannot be measured, so it is not assumed")
+    spread = a - b
+    if spread <= 0:
+        # A locked market: nothing to clear, so the stop is survivable on this
+        # test. Say so rather than passing silently.
+        return True, f"stop ${sd:.2f} vs a locked quote (no spread)"
+    ratio = sd / spread
+    if ratio < STOP_VS_SPREAD_MIN:
+        return False, (f"stop is ${sd:.2f} but the bid-ask is ${spread:.2f} — "
+                       f"{ratio:.2f}x (need {STOP_VS_SPREAD_MIN:.1f}x). The "
+                       f"structure is stopped out by its own quote noise, not "
+                       f"by price; it cannot survive a minute")
+    return True, (f"stop ${sd:.2f} clears the ${spread:.2f} spread "
+                  f"{ratio:.2f}x")
+
+
 def assert_not_structural() -> None:
     """Refuse to start if a structural price ever enters the table."""
     bad = [k for k in CRITERIA if k in STRUCTURAL]

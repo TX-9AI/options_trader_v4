@@ -2041,6 +2041,12 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         setup_type       = signal.setup_type,
         # ⚠️ r152 — the grade is gone; UNGRADED is a marker, not a verdict.
         setup_grade      = "UNGRADED",
+        # 🔴 r154 — CARRY THE LEVEL ONTO THE TRADE. `log_exit` needs it to tell
+        # the sweep strategy WHICH pool just failed; without it the level
+        # re-arms forever (CVX 2026-08-27: four entries, same 198/192 pool,
+        # five minutes, -$104). The signal has carried `pool_price` all along
+        # and it was never persisted.
+        pool_price       = float(getattr(signal, "pool_price", 0.0) or 0.0),
         setup_score      = delta_score,          # street-sign: |short-strike delta|
         direction        = "neutral",
         option_side      = signal.option_side,

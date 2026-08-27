@@ -228,6 +228,12 @@ class TradeLogger:
         strategy          TEXT,
         setup_type        TEXT,
         setup_grade       TEXT,
+        -- 🔴 r154 — THE LEVEL THIS TRADE WAS SOLD AGAINST. Without it, the exit
+        -- path cannot tell the sweep strategy WHICH pool just failed, and the
+        -- level re-arms forever. CVX 2026-08-27: four entries on the same
+        -- 198/192 pool in five minutes, -$104, because nothing connected the
+        -- stop-out back to the boundary.
+        pool_price        REAL,
         setup_score       REAL,
         direction         TEXT,
         option_side       TEXT,
@@ -625,6 +631,32 @@ class TradeLogger:
             f"Trade closed: {trade_id[:8]} "
             f"exit=${exit_price:.2f} pnl=${pnl_usd:+.2f}"
         )
+
+        # ── 🔴 r154 — A LOSING SWEEP SPENDS ITS LEVEL FOR THE DAY ────────────
+        # Operator, 2026-08-27: *"The stop isn't too tight, the level that we
+        # just attempted a sweep on is finished."*
+        # ⚠️ HOOKED HERE because `log_exit` is the ONE choke point every close
+        # passes through. Putting it in the exit engine would miss the paths
+        # that close elsewhere, and a lock with a hole in it is worse than none
+        # — it would fire sometimes and be trusted always.
+        # ⚠️ LOSSES ONLY. A level that PAID is not discredited by paying.
+        try:
+            if float(pnl_usd or 0.0) < 0:
+                _strat = self._get_field(trade_id, "strategy") or ""
+                if "Sweep" in _strat:
+                    _pool = self._get_field(trade_id, "pool_price")
+                    _side = self._get_field(trade_id, "option_side") or ""
+                    _sym  = self._get_field(trade_id, "symbol") or ""
+                    if _pool:
+                        from strategy.sweep_credit_spread import mark_spent
+                        mark_spent(_sym, _side, float(_pool),
+                                   f"stopped out {exit_reason} "
+                                   f"pnl=${float(pnl_usd):+.2f}")
+        except Exception as exc:                               # noqa: BLE001
+            # ⚠️ NEVER RAISE INTO THE CLOSE PATH — but say so. A silent failure
+            # here means the level re-arms and nobody knows why.
+            logger.warning("[sweep_cs] could not mark the level spent for %s: "
+                           "%s", trade_id[:8], exc)
 
     def update_trail_stop(self, trade_id: str, new_trail: float):
         """v3.1 — persist the ratcheted trail SEPARATELY from stop_premium.
