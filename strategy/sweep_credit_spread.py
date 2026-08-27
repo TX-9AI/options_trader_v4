@@ -799,38 +799,17 @@ class SweepCreditSpreadStrategy:
         # is the one with the highest R that clears the floor — not merely the
         # first that does — because a wider wing sometimes pays enough more
         # credit to beat a narrow one on ratio.
-        _cands = []
-        for _c in (_contracts or []):
-            try:
-                _k = float(getattr(_c, "strike", 0) or 0)
-            except (TypeError, ValueError):
-                continue
-            if _k <= 0 or _k == _short.strike:
-                continue
-            # the wing sits BEYOND the short: below it for a put, above for a call
-            if side == "put" and _k >= _short.strike:
-                continue
-            if side == "call" and _k <= _short.strike:
-                continue
-            _w = abs(_short.strike - _k)
-            _cr = max(0.0, (getattr(_short, "bid", 0.0) or 0.0)
-                      - (getattr(_c, "ask", 0.0) or 0.0))
-            _rk = _w - _cr
-            if _cr <= 0 or _rk <= 0:
-                continue
-            _cands.append((round(_cr / _rk, 4), _c, _cr, _w))
-        if not _cands:
+        # ⚠️ r157 — the search now lives in `credit_vertical.search_wing` so all
+        # four credit strategies share ONE implementation. Four copies of this
+        # logic would drift, and the drift would be silent.
+        _best_r, _long, _credit, _bw = cv.search_wing(
+            _contracts, _short, side, R_FLOOR)
+        if _long is None:
             return t.refuse("wing", f"no priceable protective wing beyond "
                                     f"{_short.strike:.2f} (undefined risk is "
                                     f"never sold)")
-        _cands.sort(key=lambda x: -x[0])
-        _best_r, _long, _credit, _bw = _cands[0]
         t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
         if _best_r < R_FLOOR:
-            # ⚠️ NO WING CLEARS THE FLOOR ⇒ NO TRADE, IN EITHER MODE. An OTM
-            # credit spread reaches R 1.0 only when the credit is at least half
-            # the width; if the widest and narrowest wings both fall short, the
-            # short strike is simply too far out to pay for its own risk today.
             return t.refuse("wing_r_best",
                             f"no wing clears R {R_FLOOR:.2f} — best is "
                             f"{_best_r:.2f} at {_long.strike:.2f} "

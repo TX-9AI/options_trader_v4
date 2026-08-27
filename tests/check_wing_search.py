@@ -77,8 +77,17 @@ def main():
     check("W1 the wing is not a single fixed-width lookup",
           "_long = cv.find_contract_at_strike(_contracts, _long_strike)"
           not in code)
+    # ⚠️ r157 — the search lives in `credit_vertical.search_wing`, ONE
+    # implementation shared by all four credit strategies. Four copies would
+    # drift, and the drift would be silent.
+    cvsrc = "\n".join(
+        l for l in open(os.path.join(_root, "strategy", "credit_vertical.py"),
+                        encoding="utf-8").read().split("\n")
+        if not l.strip().startswith("#"))
     check("W2 every strike beyond the short is a candidate",
-          "_cands" in code and "_cands.sort" in code)
+          "def search_wing" in cvsrc and "r > best[0]" in cvsrc)
+    check("W2b the sweep calls the SHARED searcher",
+          "cv.search_wing(" in code)
 
     # ── 🔴 W3 — R IS READ DIRECTLY, NOT THROUGH THE MUTED HURDLE ─────────
     # `r_hurdle()` returns None under relaxed. If the search consulted it, the
@@ -124,6 +133,32 @@ def main():
         check(f"W8 {k} is still a relaxable evidence dial",
               k in CRITERIA and CRITERIA[k][0] != CRITERIA[k][1],
               f"{CRITERIA.get(k)}")
+
+    # ── 🔴 W9 — ALL FOUR CREDIT STRATEGIES, NOT JUST THE SWEEP ───────────
+    # r156 shipped the sweep alone; the other three kept fixed dollar wings
+    # (TCS_WING_WIDTH_*, CONDOR_WING_WIDTH_*) split only two ways — SPX vs QQQ
+    # — so every other symbol took the QQQ number regardless of its price or
+    # strike ladder.
+    for rel in ("strategy/sweep_credit_spread.py",
+                "strategy/trend_credit_spread.py",
+                "strategy/iron_condor_strategy.py",
+                "strategy/daily_fork_credit_spread.py"):
+        c = "\n".join(l for l in open(os.path.join(_root, rel),
+                                      encoding="utf-8").read().split("\n")
+                      if not l.strip().startswith("#"))
+        name = os.path.basename(rel)
+        check(f"W9 {name} searches the wing",
+              "cv.search_wing(" in c or "search_wing(" in c)
+        check(f"W10 {name} reads R_FLOOR, never the muted hurdle",
+              "R_FLOOR" in c and "r_hurdle" not in c)
+        # ⚠️ THE FIXED WIDTH MUST NOT DRIVE THE EXECUTED SPREAD. The condor and
+        # the fork still call `_wing_width()` when DECLARING a plan (the chain
+        # may not be loaded then), but the executing path searches and
+        # overrides it. What must never come back is a long strike being
+        # LOOKED UP at a fixed offset and traded.
+        check(f"W11 {name} does not look up a wing at a fixed offset",
+              "find_contract_at_strike(contracts, long_strike)" not in c
+              and "_find_contract_at_strike(contracts, long_strike)" not in c)
 
     print()
     if _fails:

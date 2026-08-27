@@ -92,6 +92,8 @@ from typing import Optional, List
 from zoneinfo import ZoneInfo
 
 from strategy import credit_vertical as cv
+# r157 — the R floor is read DIRECTLY; r_hurdle() returns None under relaxed.
+from strategy.criteria import R_FLOOR
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
 from analysis.market_state import MarketState
 from analysis.volatility_engine import VolatilityState
@@ -167,6 +169,7 @@ class IronCondorStrategy(BaseOptionsStrategy):
     """
 
     PLAN_CHECKS = ("entry_window", "fork", "vix", "expected_move", "geometry",
+                   "wing", "wing_r_best",
                    "strike_clears_anchor", "guardrail", "fork_invalidated",
                    "trigger", "contract", "credit", "width", "risk", "r")
 
@@ -439,6 +442,12 @@ class IronCondorStrategy(BaseOptionsStrategy):
                                          f"the {guardrail:.1f}-pt guardrail "
                                          f"({CONDOR_EXPECTED_MOVE_GUARDRAIL_MULT}x EM)")
 
+        # ⚠️ r157 — THIS WING IS A PLACEHOLDER, NOT THE TRADE. The long strikes
+        # recorded on the plan below are the OLD fixed-dollar geometry; the
+        # executing path now SEARCHES the wing to an R floor and overrides
+        # them. Kept so the plan still describes a complete structure at
+        # declaration time, when the chain may not be loaded — but nothing
+        # downstream trades off them.
         wing = self._wing_width()
         plan = CondorPlan(
             vix_at_plan            = float(getattr(macro, "vix", 0.0) or 0.0),
@@ -581,19 +590,38 @@ class IronCondorStrategy(BaseOptionsStrategy):
             long_strike  = plan.long_put_strike
 
         short_contract = self._find_contract_at_strike(contracts, short_strike)
-        long_contract  = self._find_contract_at_strike(contracts, long_strike)
-
-        if short_contract is None or long_contract is None:
-            logger.warning("Condor: could not find %s spread contracts %g/%g",
-                           side, short_strike, long_strike)
-            return t.refuse("contract", f"could not find {side} spread contracts "
-                                        f"{short_strike:g}/{long_strike:g}")
+        if short_contract is None:
+            logger.warning("Condor: could not find %s short contract %g",
+                           side, short_strike)
+            return t.refuse("contract", f"could not find {side} short contract "
+                                        f"{short_strike:g}")
         t.check("contract", short_strike, True)
 
-        net_credit = short_contract.mark - long_contract.mark
+        # ── 🔴 r157 — THE WING IS SEARCHED TO AN R FLOOR ─────────────────────
+        # `plan.long_*_strike` came from CONDOR_WING_WIDTH_SPX/QQQ — a FIXED
+        # DOLLAR width split two ways, so every symbol but SPX took the QQQ
+        # number regardless of its price or strike ladder. R was checked after
+        # the fact and MUTED under relaxed.
+        # ⚠️ THE SHORT STRIKE IS STRUCTURAL and does not move; the wing is the
+        # free variable, and narrower means less credit, less risk, HIGHER R.
+        # ⚠️ `R_FLOOR` DIRECTLY, never `r_hurdle()` (None under relaxed).
+        _best_r, long_contract, net_credit, _bw = cv.search_wing(
+            contracts, short_contract, side, R_FLOOR)
+        if long_contract is None:
+            return t.refuse("wing", f"no priceable {side} wing beyond "
+                                    f"{short_strike:g} (undefined risk is "
+                                    f"never sold)")
+        long_strike = long_contract.strike
         # ── THE WHAT-IF, off the spread this plan chose ───────────────────
         t.credit_spread(short_strike, long_strike, net_credit,
                         invalidation=short_strike)
+        t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
+        if _best_r < R_FLOOR:
+            return t.refuse("wing_r_best",
+                            f"no {side} wing clears R {R_FLOOR:.2f} — best is "
+                            f"{_best_r:.2f} at {long_strike:g} ({_bw:g} wide, "
+                            f"credit ${net_credit:.2f}); structure, not "
+                            f"selection, so relaxed does not waive it")
         if net_credit <= 0:
             logger.info("Condor: %s credit <= 0 (%.2f) — skip", side, net_credit)
             return t.refuse("credit", f"{side} credit {net_credit:.2f} <= 0")

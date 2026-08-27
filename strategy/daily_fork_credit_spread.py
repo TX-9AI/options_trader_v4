@@ -61,6 +61,8 @@ from typing import Optional, List
 from zoneinfo import ZoneInfo
 
 from strategy import credit_vertical as cv
+# r157 — the R floor is read DIRECTLY; r_hurdle() returns None under relaxed.
+from strategy.criteria import R_FLOOR
 from strategy.base_strategy import BaseOptionsStrategy, OptionsSignal
 from strategy.plan import Plan, _n
 from analysis.session_map import CEILING, FLOOR
@@ -127,6 +129,7 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
     """
 
     PLAN_CHECKS = ("entry_window", "fork", "vix", "expected_move", "geometry",
+                   "wing", "wing_r_best",
                    "strike_clears_anchor", "guardrail", "trigger", "contract",
                    "credit", "width", "risk", "r")
 
@@ -280,6 +283,12 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
             return t.refuse("guardrail", f"strike distance {_reach:.2f} exceeds "
                                          f"the {guardrail:.1f}-pt guardrail")
 
+        # ⚠️ r157 — THIS WING IS A PLACEHOLDER, NOT THE TRADE. The long strikes
+        # recorded on the plan below are the OLD fixed-dollar geometry; the
+        # executing path now SEARCHES the wing to an R floor and overrides
+        # them. Kept so the plan still describes a complete structure at
+        # declaration time, when the chain may not be loaded — but nothing
+        # downstream trades off them.
         wing = self._wing_width()
         plan = DailyForkPlan(
             vix_at_plan            = float(getattr(macro, "vix", 0.0) or 0.0),
@@ -394,17 +403,38 @@ class DailyForkCreditSpread(BaseOptionsStrategy):
         long_strike  = plan.long_call_strike  if side == "call" else plan.long_put_strike
 
         short_c = self._find_contract_at_strike(contracts, short_strike)
-        long_c  = self._find_contract_at_strike(contracts, long_strike)
-        if short_c is None or long_c is None:
-            logger.warning("DailyFork: could not find %s contracts %g/%g",
-                           side, short_strike, long_strike)
-            return t.refuse("contract", f"could not find {side} contracts "
-                                        f"{short_strike:g}/{long_strike:g}")
+        if short_c is None:
+            logger.warning("DailyFork: could not find %s short %g", side,
+                           short_strike)
+            return t.refuse("contract", f"could not find {side} short "
+                                        f"{short_strike:g}")
         t.check("contract", short_strike, True)
 
-        net_credit = short_c.mark - long_c.mark
+        # ── 🔴 r157 — THE WING IS SEARCHED TO AN R FLOOR ─────────────────────
+        # The plan's `long_*_strike` came from `_wing_width()`, a FIXED DOLLAR
+        # width split only two ways (SPX vs QQQ) — so every other symbol took
+        # the QQQ number regardless of its price or strike ladder. R was then
+        # checked after the fact and MUTED under relaxed.
+        # ⚠️ THE SHORT STRIKE IS STRUCTURAL — it is the fork tine and does not
+        # move. The wing is the free variable; narrower means less credit, less
+        # risk and HIGHER R, so the best wing is computable.
+        # ⚠️ `R_FLOOR` DIRECTLY, never `r_hurdle()` (None under relaxed).
+        _best_r, long_c, net_credit, _bw = cv.search_wing(
+            contracts, short_c, side, R_FLOOR)
+        if long_c is None:
+            return t.refuse("wing", f"no priceable {side} wing beyond "
+                                    f"{short_strike:g} (undefined risk is "
+                                    f"never sold)")
+        long_strike = long_c.strike
         t.credit_spread(short_strike, long_strike, net_credit,
                         invalidation=short_strike)
+        t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
+        if _best_r < R_FLOOR:
+            return t.refuse("wing_r_best",
+                            f"no {side} wing clears R {R_FLOOR:.2f} — best is "
+                            f"{_best_r:.2f} at {long_strike:g} ({_bw:g} wide, "
+                            f"credit ${net_credit:.2f}); structure, not "
+                            f"selection, so relaxed does not waive it")
         if net_credit <= 0:
             logger.info("DailyFork: %s credit=%.2f — skip", side, net_credit)
             return t.refuse("credit", f"{side} credit {net_credit:.2f} <= 0")

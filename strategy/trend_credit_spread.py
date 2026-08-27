@@ -138,6 +138,8 @@ from config import (
 # shared math now lives in a module OWNED BY NEITHER, so neither strategy can
 # retune the other by accident — and TC.6 no longer needs the condor to exist.
 from strategy import credit_vertical as cv
+# r157 — the R floor is read DIRECTLY; r_hurdle() returns None under relaxed.
+from strategy.criteria import R_FLOOR
 from strategy.plan import Plan, _n
 
 logger = logging.getLogger(__name__)
@@ -166,6 +168,7 @@ class TrendCreditSpread:
     name = "TrendCreditSpread"
 
     PLAN_CHECKS = ("active", "entry_window", "condor_active", "trend_vote",
+                   "wing_r_best",
                    "adx", "bound", "outside_range", "strike_inside_range",
                    "contract", "pop", "wing", "credit", "width", "risk",
                    "ev", "nickel_floor", "r")
@@ -427,18 +430,32 @@ class TrendCreditSpread:
                 "bottom" if side == "call" else "top",
                 short.strike, _lo, _hi, len(_inside))
 
-            width = self._wing_width()
-            long_strike = (short.strike - width if side == "put"
-                           else short.strike + width)
-            long_c = cv.find_contract_at_strike(contracts, long_strike)
-            if long_c is None or long_c.strike == short.strike:
-                logger.info("[tcs] no protective wing at %.2f — SKIP "
-                            "(undefined risk is never sold)", long_strike)
-                return t.refuse("wing", f"no protective wing at {long_strike:.2f} "
-                                        f"(undefined risk is never sold)")
+            # ── 🔴 r157 — THE WING IS SEARCHED TO AN R FLOOR ─────────────
+            # `_wing_width()` returned TCS_WING_WIDTH_SPX or _QQQ — a FIXED
+            # DOLLAR width split two ways, so every symbol but SPX took the QQQ
+            # number regardless of its price or strike ladder. R was then
+            # checked after the fact and MUTED under relaxed.
+            # ⚠️ THE SHORT STRIKE IS STRUCTURAL — it is the first-inside strike
+            # off the trend boundary and does not move. The wing is the only
+            # free variable; narrower means less credit, less risk, HIGHER R.
+            # ⚠️ `R_FLOOR` DIRECTLY, never `r_hurdle()` (None under relaxed).
+            _best_r, long_c, credit, _bw = cv.search_wing(
+                contracts, short, side, R_FLOOR)
+            if long_c is None:
+                logger.info("[tcs] no priceable wing beyond %.2f — SKIP "
+                            "(undefined risk is never sold)", short.strike)
+                return t.refuse("wing", f"no priceable wing beyond "
+                                        f"{short.strike:.2f} (undefined risk "
+                                        f"is never sold)")
             t.check("wing", long_c.strike, True)
-
-            credit = max(0.0, (short.bid or 0.0) - (long_c.ask or 0.0))
+            t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
+            if _best_r < R_FLOOR:
+                return t.refuse("wing_r_best",
+                                f"no wing clears R {R_FLOOR:.2f} — best is "
+                                f"{_best_r:.2f} at {long_c.strike:.2f} "
+                                f"({_bw:g} wide, credit ${credit:.2f}); "
+                                f"structure, not selection, so relaxed does "
+                                f"not waive it")
             # ── THE WHAT-IF, priced off the spread THIS spec chose ────────
             t.credit_spread(short.strike, long_c.strike, credit,
                             invalidation=bound, trigger=bound)
@@ -450,6 +467,14 @@ class TrendCreditSpread:
                 return t.refuse("pop", f"POP unresolvable (sigma {sigma:.4f}, "
                                        f"bars {bars:.1f}) — a missing input is "
                                        f"not a safe trade")
+            # ⚠️ r157 — `width` IS NOW THE SEARCHED SPREAD'S WIDTH, not the old
+            # fixed `_wing_width()`. The EV test below divides credit by it, so
+            # it must describe the spread ACTUALLY chosen; leaving the old
+            # binding would have measured a spread that is not being traded.
+            # (Caught by check_singletons S2: five references to a name I had
+            # deleted — that would have crash-looped the box on the first
+            # trend spread rather than failing at import.)
+            width = _bw
             req = TCS_LOSS_GIVEN_BREACH * (1.0 - pop) / pop
             t.check("ev", credit / width - req, credit / width > req)
             if credit / width <= req:

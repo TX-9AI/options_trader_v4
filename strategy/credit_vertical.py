@@ -235,3 +235,74 @@ def leg_order_from_slope(slope: float, flat_eps: float):
     if slope is None or abs(slope) < flat_eps:
         return None
     return ("put", "call") if slope > 0 else ("call", "put")
+
+
+# ═══ THE WING SEARCH — R IS A CONSTRUCTION TARGET, NOT A FILTER ═══════════
+# 🔴 OPERATOR, 2026-08-27: *"strike selection must net r of 1 or better"*,
+# *"make the r-value a requirement outright... and relax something else to
+# loosen the entry"*, *"the integrity of the trade mechanics comes first."*
+#
+# ⚠️ WHAT THIS REPLACES, IN FOUR STRATEGIES: a wing at a FIXED DOLLAR WIDTH
+# (`WING_WIDTH = 5.0`, `TCS_WING_WIDTH_*`, `CONDOR_WING_WIDTH_*`), with R
+# checked AFTER the fact and MUTED under relaxed. Five dollars is ONE strike
+# increment on SPX and SIX on CVX — which is how a 6-wide spread collecting
+# $0.58 (R 0.13) looked normal to the code and was entered SEVENTEEN times in
+# twelve minutes on 2026-08-27.
+# ⚠️ AND THE SPX/QQQ SPLIT MEANT EVERY OTHER SYMBOL TOOK THE QQQ DEFAULT — a
+# two-way branch standing in for fifteen instruments with different prices and
+# different strike ladders.
+#
+# THE SHORT STRIKE IS STRUCTURAL: it comes from the level, the fork tine or the
+# trend boundary, and never moves. The WING is the only free variable, and the
+# tradeoff is monotonic — narrower wing, less credit, less risk, HIGHER R — so
+# "the wing that best clears the floor" is computable and "no wing does" is a
+# definite answer rather than a guess.
+#
+# ⚠️ BEST R, NOT FIRST TO PASS. A wider wing sometimes pays enough extra credit
+# to beat a narrower one on ratio; taking the first candidate that clears would
+# leave that on the table.
+# ⚠️ AND `R_FLOOR` IS READ DIRECTLY, NEVER THROUGH `r_hurdle()`, which returns
+# None under relaxed. Relaxed widens EVIDENCE (sweep age, pierce depth, level
+# hold rate); it does not waive economics. Routing this through the hurdle
+# would restore the exact hole that produced the loop.
+def search_wing(contracts, short_contract, side: str, r_floor: float):
+    """(best_r, long_contract, credit, width) or (best_r, None, 0, 0).
+
+    Prices every listed strike beyond the short on BID/ASK — never mark, because
+    the credit has to be one the market would actually pay — and returns the
+    highest-R candidate. The caller decides what to do when `best_r < r_floor`;
+    this reports, it does not refuse.
+    """
+    try:
+        k_short = float(getattr(short_contract, "strike", 0) or 0)
+        bid = float(getattr(short_contract, "bid", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0, None, 0.0, 0.0
+    if k_short <= 0 or bid <= 0:
+        return 0.0, None, 0.0, 0.0
+
+    best = None
+    for c in (contracts or []):
+        try:
+            k = float(getattr(c, "strike", 0) or 0)
+            ask = float(getattr(c, "ask", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if k <= 0 or k == k_short:
+            continue
+        # the wing sits BEYOND the short: below for a put, above for a call
+        if side == "put" and k >= k_short:
+            continue
+        if side == "call" and k <= k_short:
+            continue
+        width = abs(k_short - k)
+        credit = max(0.0, bid - ask)
+        risk = width - credit
+        if credit <= 0 or risk <= 0:
+            continue
+        r = credit / risk
+        if best is None or r > best[0]:
+            best = (round(r, 4), c, round(credit, 4), width)
+    if best is None:
+        return 0.0, None, 0.0, 0.0
+    return best
