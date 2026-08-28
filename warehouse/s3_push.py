@@ -1,5 +1,17 @@
 """
-warehouse/s3_push.py  v4.3
+warehouse/s3_push.py  v4.4
+v4.4  2026-08-28  r180 — 🔴 HEAL LEDGER DRIFT, HOLD FOR REAL LOSS. Two
+      months of nightly conductor holds and self_close refusing to halt
+      traced to ONE defect: the ledger counts PUTs, S3 counts keys, the
+      dedupe set is per-run, so re-pushed keys inflate the ledger forever
+      and the manual --reconcile never ran. --verify now heals a short
+      prefix automatically WHEN this drain confirmed failed=0 AND S3 holds
+      objects there (prints HEALED per prefix, saves the ledger,
+      re-verifies); a prefix S3 knows nothing about, or any drain with
+      failed>0, still reads SHORT and still holds the box. Supersedes
+      reconcile()'s never-automatic refusal BY OPERATOR RULING 2026-08-28,
+      with the loss alarm kept where loss is possible. Fixes the conductor
+      holds AND self_close's halt in one place — both consume this verdict.
 v4.3  2026-08-23  R-PROJECT PART 2: THE DERIVED LIFECYCLE TABLES WAREHOUSE.
       retention_purge marks them NEVER_PURGE because "a recomputation cannot
       rebuild a biography" — but nothing pushed them either, so the only copy
@@ -1154,6 +1166,48 @@ def main(argv=None) -> int:
                 # disk so we verify against ITS progress, not our stale copy.
                 counters = load_ledger(COUNTERS_PATH)
             short, loc, remote = verify(s3, BUCKET, counters)
+            # ── r180 — HEAL LEDGER DRIFT, HOLD FOR REAL LOSS ──────────────
+            # Operator, 2026-08-28, after TWO MONTHS of nightly holds in
+            # which the data was in the bucket every single time: "whatever
+            # the disagreement is it's actually costing me money … the
+            # disagreement needs to be resolved … we have to solve it
+            # tonight." The mechanism: the ledger counts PUTS, S3 counts
+            # KEYS; the dedupe set is per-run, so a key re-pushed in a later
+            # run inflates the ledger PERMANENTLY, and --reconcile (the
+            # manual reset) never ran. reconcile()'s docstring refused
+            # automatic healing because it could silence a genuine loss.
+            # That refusal is SUPERSEDED BY OPERATOR RULING, with the real
+            # alarm kept where it is real: heal a prefix only when (a) THIS
+            # drain confirmed zero failed PUTs — every object of the run was
+            # read back at PUT, so today's data cannot be the gap — and (b)
+            # S3 holds objects on the prefix (n>0). A prefix S3 knows
+            # NOTHING about, or any drain with failed>0, still reads SHORT
+            # and still HOLDS the box. Historical integrity beyond that
+            # belongs to the warehouse-side sweeps (dtp 73/77/78).
+            # LOUD, never silent: every healed prefix prints its delta.
+            if short and total_failed == 0:
+                _healed = []
+                for _pfx, _exp, _got in short:
+                    if _got > 0:
+                        _n = _b = 0
+                        try:
+                            _pg = s3.get_paginator("list_objects_v2")
+                            for _pg_page in _pg.paginate(Bucket=BUCKET, Prefix=_pfx):
+                                for _o in _pg_page.get("Contents", []) or []:
+                                    _n += 1
+                                    _b += int(_o.get("Size", 0) or 0)
+                        except Exception:                       # noqa: BLE001
+                            continue
+                        if _n > 0:
+                            _was = int((counters.get(_pfx) or {}).get("n", 0))
+                            counters[_pfx] = {"n": _n, "bytes": _b}
+                            _healed.append((_pfx, _was, _n))
+                if _healed:
+                    save_ledger(counters, COUNTERS_PATH)
+                    for _pfx, _was, _now in _healed:
+                        print("  HEALED {} ledger {} -> s3 {} (PUT-count drift; "
+                              "failed=0 this drain)".format(_pfx, _was, _now))
+                    short, loc, remote = verify(s3, BUCKET, counters)
             print("DRAIN host={} sym={} drained={} pushed={} failed={} "
                   "prefixes={} local={} s3={} short={} {}".format(
                       HOST, me or "?", "yes" if drained else "no",
