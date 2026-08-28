@@ -1,5 +1,16 @@
 """
-main.py  v4.22
+main.py  v4.23
+v4.23 2026-08-28  r173 — 🔴 HOTFIX: THE FLEET-WIDE ZERO-TRADE MORNING.
+      _execute_entry_signal read `signal.stop_premium` with getattr+float;
+      that name is a METHOD on OptionsSignal, shadowed by strategies that
+      assign the attribute — the r168 runaway leaves the method exposed, so
+      the first runaway fire of the day crashed the sizing line, the loop
+      catch-all ate the tick, NO strategy could enter on that box, and at 30
+      loop errors the service exited and systemd restarted it (the 09:53 /
+      10:01 / 10:09 STARTED spam). New _sig_num() resolves attribute or
+      method, never raises; the method yields the correct 20% floor. Pinned
+      by tests/check_signal_numeric_tail.py, which runs every strategy's
+      signal shape through the resolver AND asserts the sizing call uses it.
 v4.22 2026-08-27  r167: the narration pass receives the open records so it can
       skip the ones decide() already wrote for. Nothing else changes here —
       the decision seam lives in position_manager v4.6.
@@ -3446,6 +3457,20 @@ def _attempt_butterfly(ctx, ms, state, *, additive: bool) -> None:
         logger.warning("Butterfly attempt failed: %s", exc)
 
 
+def _sig_num(signal, name: str) -> float:
+    """A numeric field off a signal, whether the strategy assigned it as an
+    ATTRIBUTE (shadowing the class method) or left the class METHOD exposed.
+    Never raises — the execution tail must not die on a bookkeeping read
+    (r173; see the sizing call below for the outage this caused)."""
+    try:
+        v = getattr(signal, name, 0.0)
+        if callable(v):
+            v = v()
+        return float(v or 0.0)
+    except Exception:                                           # noqa: BLE001
+        return 0.0
+
+
 def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool = False):
     """r161 — the execution tail of attempt_new_entry, factored so the
     butterfly can fire from main_loop while another position is open.
@@ -3490,7 +3515,18 @@ def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool 
         # r121 — the sizer needs the STOP to size on risk. Passed from the
         # signal the strategy already computed; when it is absent or the flag
         # is off, the sizer falls back to premium and nothing changes.
-        stop_premium      = float(getattr(signal, "stop_premium", 0.0) or 0.0),
+        # 🔴 r173 — `stop_premium` on OptionsSignal is a METHOD (entry x
+        # (1 - stop_loss_pct)); strategies that assign it as an instance
+        # attribute shadow the method and float() worked, but a debit signal
+        # that leaves the method exposed (the r168 runaway, which sets only
+        # stop_loss_pct) made this line raise
+        #   float() argument must be ... not 'method'
+        # into the loop catch-all: EVERY tick died, no strategy on the box
+        # could enter, and at 30 loop errors the service exited and systemd
+        # restarted it — 2026-08-28's fleet-wide zero-trade morning and the
+        # Telegram restart spam were THIS LINE. _sig_num resolves both
+        # shapes and the method gives the correct 20% floor.
+        stop_premium      = _sig_num(signal, "stop_premium"),
         # ⚠️ r152 — no grade exists. Size is flat by ruling; the sizer's
         # GRADE_SIZE_MULTIPLIER lookup falls back to 1.0 on any unknown key.
         grade             = "UNGRADED",
