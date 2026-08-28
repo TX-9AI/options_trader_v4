@@ -1,5 +1,10 @@
 """
-data/options_chain.py  v4.1
+data/options_chain.py  v4.2
+v4.2  2026-08-29  r177: OptionsChain.atm_iv — the field main's butterfly
+      dispatch had been reading NEVER EXISTED (getattr default masked it);
+      EM starved fleet-wide and GEXPinButterfly could never fire. Median of
+      the 3 nearest-to-spot streamed ivs per side, decimal; 0.0 when the
+      feed has no ivs, so the no-fallback starvation stays loud.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -165,6 +170,42 @@ class OptionsChain:
     iv_rank:        float = 0.0
     calls:          List[OptionContract] = field(default_factory=list)
     puts:           List[OptionContract] = field(default_factory=list)
+
+    @property
+    def atm_iv(self) -> float:
+        """ATM implied vol as a DECIMAL, assembled from the streamed per-
+        contract ivs the chain already carries.
+
+        🔴 r177 — THE FIELD MAIN HAD BEEN READING DID NOT EXIST. main's
+        butterfly dispatch did `getattr(chain, "atm_iv", 0.0)`; no such
+        attribute was ever set, the default masked the absence, expected_move
+        starved on every box on every tick, and GEXPinButterfly was
+        STRUCTURALLY UNABLE TO FIRE from the inversion (r160) until this —
+        while pinning and concentration were passing on ~10 boxes. The exact
+        silent-default class SPEC.1 hunts, hidden from check_attr_fidelity by
+        the getattr default.
+
+        Median of the ivs of the 3 nearest-to-spot contracts per side that
+        carry iv > 0 — robust to one bad quote, no smoothing, no model. If
+        the feed has not populated ivs yet this returns 0.0 and the butterfly
+        keeps starving LOUDLY (its no-fallback rule is design, not defect):
+        we fixed the supply, not the standard.
+        """
+        try:
+            spot = float(self.spot_price or 0.0)
+            if spot <= 0:
+                return 0.0
+            ivs = []
+            for side in (self.calls, self.puts):
+                near = sorted((c for c in (side or []) if float(getattr(c, "iv", 0) or 0) > 0),
+                              key=lambda c: abs(float(c.strike) - spot))[:3]
+                ivs.extend(float(c.iv) for c in near)
+            if not ivs:
+                return 0.0
+            ivs.sort()
+            return ivs[len(ivs) // 2]
+        except Exception:                                       # noqa: BLE001
+            return 0.0
 
 
 class OptionsChainFetcher:

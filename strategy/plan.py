@@ -1,5 +1,9 @@
 """
-strategy/plan.py  v1.4
+strategy/plan.py  v1.5
+v1.5  2026-08-29  r177: tick_id (begin_tick's monotonic counter) persisted on
+      plan_tick and plan_check — the vector<->plan join becomes BY KEY, not by
+      timestamp coincidence, before the first fit. In-place ALTER migration;
+      pre-r177 rows read 0, which no join should match.
 v1.4  2026-08-27  r165: ensure_tables() guards with a flag on the store, not
       id(store) in a set — recycled ids let a fresh store skip CREATE TABLE
       and every row write failed "no such table" (seen in a test that opens a
@@ -250,6 +254,7 @@ def ensure_tables(store) -> bool:
                 dist_to_trigger REAL,            -- LIVE
                 r_now           REAL,            -- LIVE, comparable ACROSS plans
                 direction    TEXT NOT NULL DEFAULT '',
+                tick_id      INTEGER DEFAULT 0,   -- r177: the join key
                 PRIMARY KEY (ts_epoch, symbol, strategy, direction)
             );""")
         store.conn.execute("""
@@ -260,6 +265,7 @@ def ensure_tables(store) -> bool:
                 check_name TEXT NOT NULL,
                 value     REAL,
                 verdict   TEXT,                  -- PASS / FAIL / n/a
+                tick_id   INTEGER DEFAULT 0,     -- r177: the join key
                 direction TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (ts_epoch, symbol, strategy, direction, check_name)
             );""")
@@ -270,6 +276,14 @@ def ensure_tables(store) -> bool:
             "CREATE INDEX IF NOT EXISTS ix_plan_check "
             "ON plan_check(symbol, strategy, check_name, ts_epoch)")
         store.commit()
+        # r177 — MIGRATE IN PLACE: stores created before the tick_id column
+        # gain it here; existing rows read 0, which no join should match.
+        for _tbl in ("plan_tick", "plan_check"):
+            try:
+                store.conn.execute(f"ALTER TABLE {_tbl} ADD COLUMN tick_id INTEGER DEFAULT 0")
+                store.commit()
+            except Exception:                                   # noqa: BLE001
+                pass                                            # already present
         try:
             store._plan_tables_ready = True
         except Exception:                                       # noqa: BLE001
@@ -299,9 +313,10 @@ def write_row(store, symbol: str, ts: float, strategy: str, verdict: str,
         store.conn.execute(
             "INSERT OR REPLACE INTO plan_tick (ts_epoch, symbol, strategy,"
             " verdict, reason, trigger_price, invalidation, underlying,"
-            " dist_to_trigger, r_now, direction) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " dist_to_trigger, r_now, direction, tick_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (ts, symbol, strategy, verdict, reason, trigger, invalidation,
-             underlying, dist, r, direction or ""))
+             underlying, dist, r, direction or "", _TICK["n"]))
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("plan_tick write FAILED for %s: %s: %s",
                        strategy, type(exc).__name__, exc)
@@ -318,9 +333,9 @@ def write_row(store, symbol: str, ts: float, strategy: str, verdict: str,
         try:
             store.conn.execute(
                 "INSERT OR REPLACE INTO plan_check (ts_epoch, symbol,"
-                " strategy, check_name, value, verdict, direction)"
-                " VALUES (?,?,?,?,?,?,?)",
-                (ts, symbol, strategy, name, v, verdict_c, direction or ""))
+                " strategy, check_name, value, verdict, direction, tick_id)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (ts, symbol, strategy, name, v, verdict_c, direction or "", _TICK["n"]))
         except Exception as exc:                                # noqa: BLE001
             logger.debug("plan_check write failed %s/%s: %s", strategy, name, exc)
     try:

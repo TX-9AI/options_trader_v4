@@ -1,5 +1,8 @@
 """
-derived/notes.py  v4.1
+derived/notes.py  v4.2
+v4.2  2026-08-29  r177: tick_id (strategy/plan's begin_tick counter) persisted
+      on strategy_note — the vector<->plan_check join is BY KEY before the
+      first fit. In-place ALTER for existing stores; pre-r177 rows read 0.
 v4.1  2026-08-27  r166: a TCS branch in `_specific` (vote, ADX, ORB width over
       EM, tape) — the trend strategy had no vector and fell to the generic
       one; and `outcome="manage"` rows written by strategy/management.py for
@@ -60,6 +63,16 @@ def _f(v) -> Optional[float]:
     return None if f != f else f
 
 
+def _tick_id() -> int:
+    """The plan clock's monotonic counter — the r177 join key. Soft import:
+    a notes writer running without the plan module records 0, never raises."""
+    try:
+        from strategy.plan import tick_now
+        return int(tick_now()[0])
+    except Exception:                                           # noqa: BLE001
+        return 0
+
+
 class NoteWriter:
     """Writes one row per strategy evaluation. Never raises, never decides."""
 
@@ -69,6 +82,16 @@ class NoteWriter:
         self._made = False
 
     def _ensure(self):
+        # r177 — pre-existing stores gain the join key in place.
+        try:
+            self._store.conn.execute(
+                "ALTER TABLE strategy_note ADD COLUMN tick_id INTEGER DEFAULT 0")
+            self._store.commit()
+        except Exception:                                       # noqa: BLE001
+            pass
+        return self._ensure_ddl()
+
+    def _ensure_ddl(self):
         if self._made or self._store is None:
             return
         try:
@@ -80,6 +103,7 @@ class NoteWriter:
                     fired    INTEGER NOT NULL,
                     trade_id TEXT,
                     outcome  TEXT,
+                    tick_id  INTEGER DEFAULT 0,
                     price    REAL,
                     payload  TEXT NOT NULL,
                     PRIMARY KEY (ts_epoch, symbol, strategy));""")
@@ -209,11 +233,11 @@ class NoteWriter:
             payload["specific"] = self._specific(strategy, ctx)
             self._store.conn.execute(
                 "INSERT OR IGNORE INTO strategy_note (ts_epoch, symbol,"
-                " strategy, fired, trade_id, outcome, price, payload)"
-                " VALUES (?,?,?,?,?,?,?,?)",
+                " strategy, fired, trade_id, outcome, price, payload, tick_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
                 (time.time(), self.symbol, strategy, 1 if fired else 0,
                  trade_id or None, outcome or None, _f(ctx.get("price")),
-                 json.dumps(payload, default=str)))
+                 json.dumps(payload, default=str), _tick_id()))
             return 1
         except Exception as exc:                                # noqa: BLE001
             logger.debug("[notes] %s: %s", strategy, exc)

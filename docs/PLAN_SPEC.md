@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.18 · 2026-08-29 · r177 — the butterfly's starved atm_iv; the tick_id join key (§23).**
 **v1.17 · 2026-08-29 · r176 — the cutoff does not relax; the drift reads the vote's clock (§22).**
 **v1.16 · 2026-08-28 · r175 — TCS prices its premise: pop_drift (§21).**
 **v1.15 · 2026-08-28 · r174 — the teenie lesson: floor-clears-spread; one runaway per break (§20).**
@@ -865,3 +866,33 @@ Next gate to watch after this lands: `wing_r_best` / `wing` — CRM passed pop
 594 times and died there; it eases as pop rises (the EV hurdle divides by
 pop), and if TSLA-at-ADX-64 still can't find a wing after a session of r176
 data, that dial gets the same evidence-first treatment.
+
+---
+
+## 23. r177 — the butterfly's starved input, and the fit's join key
+
+Operator, 2026-08-29: *"No GEX butterfly trades were initiated either …
+ensure nothing is blocking those … and if nothing is blocking, decide if
+the criteria is even possible to satisfy or if it's just too strict."*
+
+- **Something was blocking, and it was total.** main's butterfly dispatch
+  read `getattr(chain, "atm_iv", 0.0)` — **OptionsChain never had that
+  field.** The default masked the absence (invisible to
+  check_attr_fidelity), expected_move starved on every box on every tick,
+  and the butterfly was structurally unable to fire from the inversion
+  (r160) until now — while pinning and concentration were passing on ~10
+  boxes. `OptionsChain.atm_iv` (v4.2) now assembles the scalar from the
+  streamed per-contract ivs the chain already carried: median of the 3
+  nearest-to-spot per side, decimal. When the feed has no ivs it reads 0.0
+  and the no-fallback starvation stays loud — the supply was fixed, not the
+  standard.
+- **Satisfiability, from Thursday's own panel against real EMs:** AMD pin
+  480 / spot ~475 ≈ 68% of EM; AMZN ≈ 71%; CVX ≈ 90% — inside the 30–100%
+  band. Several boxes would have been armed. The bar is high but not
+  eclipse-rare; it was the dead input.
+- **tick_id** (plan v1.5, notes v4.2): begin_tick's monotonic counter
+  persisted on plan_tick, plan_check and strategy_note; in-place ALTER for
+  existing stores; pre-r177 rows read 0. The vector↔plan join is by key
+  before the first fit.
+
+check_tick_join.py, born red at 7f60245: A1–A3b, J1–J2.
