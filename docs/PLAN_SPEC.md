@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.15 · 2026-08-28 · r174 — the teenie lesson: floor-clears-spread; one runaway per break (§20).**
 **v1.14 · 2026-08-28 · r170 — the readers (§19).**
 **v1.13 · 2026-08-27 · r169 — the butterfly rides to the close (§18); the exit map, complete.**
 **v1.12 · 2026-08-27 · r168 — the runaway's 20% floor; the structure stop is ORB's (§17).**
@@ -770,3 +771,32 @@ plans. Trade log & all time performance should stay."*
   always show the same thing.
 - Order of landing matters: otv4 r170 to the boxes first, then the dtp
   menu — the item is transport for a flag the boxes must understand.
+
+---
+
+## 20. r174 — the teenie lesson: two structural gates on the runaway
+
+2026-08-28, first live session of the gamma pick, relaxed collection: every
+runaway fill was ~$1,000 of far-band teenies (AMZN 270C ×63 @ $0.17, GOOGL
+352.5C ×77 @ $0.14), each dead in minutes at −20 %/−35 %, some twice on the
+same break. Three mechanisms stacked: a 20 % floor on a $0.15 option is
+three cents — inside its own bid/ask, so the stop was the next mark wobble
+and it gapped; gain-per-dollar rises with distance, so the leverage score
+crowned exactly those contracts at the band's far edge, and R against a
+pennies denominator looked spectacular to the sizer; and a stopped runaway
+re-armed on the same still-true conditions. Operator: *"Yes to both, even on
+relaxed."*
+
+- **The floor must clear the spread** (`gamma_leverage_pick`): a contract
+  qualifies only if `RUNAWAY_MAX_LOSS_PCT × premium` exceeds its own
+  bid/ask spread; no candidate clears → structural DECLINE naming the count
+  rejected. No new knob — the spread is the tape's own number. This is what
+  keeps the leverage score off the teenies and lands the pick on
+  real-premium strikes.
+- **One runaway per break**: a floor stop-out finishes that (direction,
+  boundary) for the session — `finish_break()` called from trade_logger's
+  losing-exit hook, refused structurally in `prepare()`. A NEW break at a
+  new boundary is a new trade. In-process registry; a restart clears it,
+  recorded as acceptable.
+
+Hypotheticals R9–R13. Both gates are structural: relaxed waives neither.

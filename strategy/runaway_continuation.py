@@ -1,5 +1,22 @@
 """
-strategy/runaway_continuation.py  v4.5
+strategy/runaway_continuation.py  v4.6
+v4.6  2026-08-28  r174 — TWO STRUCTURAL GATES, BOTH FROM THE MORNING'S TAPE
+      (operator: "Yes to both, even on relaxed"):
+      (1) THE FLOOR MUST CLEAR THE SPREAD. 20% of a $0.15 teenie is three
+      cents — inside its own bid/ask, so the "stop" was a coin flip that
+      gapped to -27%/-35%, and gain-per-dollar crowned exactly those
+      contracts at the band's far edge (AMZN 270C x63 @ $0.17, GOOGL 352.5C
+      x77 @ $0.14, every one dead in minutes). gamma_leverage_pick now
+      REFUSES any contract whose floor (RUNAWAY_MAX_LOSS_PCT x premium) does
+      not exceed its own bid/ask spread; no candidate clears -> structural
+      DECLINE naming it. No new knob — the spread is the tape's own number.
+      (2) ONE RUNAWAY PER BREAK. A floor stop-out FINISHES that ORB break
+      for the session (same doctrine as a credit level finishing on a
+      stop): trade_logger's losing-exit hook calls finish_break(); prepare
+      refuses a finished (direction, boundary). A NEW break at a new
+      boundary is a new trade. In-process registry; a service restart
+      clears it, which is acceptable and recorded here. Both gates are
+      STRUCTURAL — relaxed does not waive either.
 v4.5  2026-08-27  r168 — THE RUNAWAY HAS NO UNDERLYING STOP. Operator,
       2026-08-27: *"the orb structure stop only applies to the orb. The
       runaway stop is the orb boundary — but I think that's a terrible stop
@@ -250,7 +267,26 @@ def runaway_confirmed(orb, price_now: float, prev_close: float,
     return prev_close < tp50 and price_now < tp50
 
 
-def gamma_leverage_pick(contracts, direction: str, spot: float, run: float):
+# ── ONE RUNAWAY PER BREAK (r174) ────────────────────────────────────────
+# Keyed (direction, boundary rounded to cents). Populated by trade_logger's
+# losing-exit hook; read by prepare(). Per-process: a restart clears it.
+FINISHED_BREAKS: set = set()
+
+
+def _break_key(direction: str, boundary) -> tuple:
+    try:
+        return (str(direction), round(float(boundary), 2))
+    except (TypeError, ValueError):
+        return (str(direction), None)
+
+
+def finish_break(direction: str, boundary) -> None:
+    """A floor stop-out finishes this break for the session."""
+    FINISHED_BREAKS.add(_break_key(direction, boundary))
+
+
+def gamma_leverage_pick(contracts, direction: str, spot: float, run: float,
+                        floor_pct: float = 0.20):
     """THE STRIKE GAMMA PAYS MOST OVER THE MOVE'S OWN INTENSITY.
 
     Operator, 2026-08-27: *"Make gamma do the heavy lifting. Try to get just
@@ -278,10 +314,12 @@ def gamma_leverage_pick(contracts, direction: str, spot: float, run: float):
     if run <= 0:
         return None, 0.0, 0
     cands = []
+    spread_rejected = 0
     for c in contracts or []:
         try:
             k = float(c.strike)
             prem = float(getattr(c, "ask", 0) or 0) or float(getattr(c, "mark", 0) or 0)
+            bid = float(getattr(c, "bid", 0) or 0)
             d = abs(float(getattr(c, "delta", 0) or 0))
             g = float(getattr(c, "gamma", 0) or 0)
         except (TypeError, ValueError, AttributeError):
@@ -289,15 +327,21 @@ def gamma_leverage_pick(contracts, direction: str, spot: float, run: float):
         otm = (k > spot) if direction == "long" else (k < spot)
         if not otm or prem <= 0.05 or d <= 0:
             continue
+        # r174 — THE FLOOR MUST CLEAR THE SPREAD. A stop narrower than the
+        # bid/ask is not a stop; it is the next mark wobble, and it gaps.
+        # This is what removes the teenies the leverage score would crown.
+        if bid <= 0 or (floor_pct * prem) <= (prem - bid):
+            spread_rejected += 1
+            continue
         dist = abs(k - spot)
         gain = d * run + 0.5 * g * run * run
         cands.append((gain / prem, -dist, dist, c))
     if not cands:
-        return None, 0.0, 0
+        return None, 0.0, 0, spread_rejected
     inside = [x for x in cands if x[2] <= run]
     pool = inside if inside else [min(cands, key=lambda x: x[2])]
     best = max(pool, key=lambda x: (x[0], x[1]))
-    return best[3], best[0], len(cands)
+    return best[3], best[0], len(cands), spread_rejected
 
 
 class _RunawayPreparation:
@@ -362,8 +406,8 @@ class RunawayContinuationStrategy:
     }
     STRUCTURAL = ("contract", "stop_distance", "r")
     PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + (
-        "price", "run", "leverage", "considered", "debit", "stop_premium",
-        "target_distance")
+        "price", "run", "leverage", "considered", "spread_rejected",
+        "break_finished", "debit", "stop_premium", "target_distance")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
@@ -426,6 +470,12 @@ class RunawayContinuationStrategy:
         prep.tp50, prep.boundary = float(tp50), float(boundary)
         # trigger = the 50% TP; NO price invalidation — the floor is premium
         t.anchor(trigger=prep.tp50)
+        # r174 — ONE RUNAWAY PER BREAK: a floor stop-out finished this one.
+        if _break_key(direction, prep.boundary) in FINISHED_BREAKS:
+            prep.structural.append(("break_finished",
+                f"this {direction} break at {prep.boundary:.2f} already stopped out at its "
+                f"floor — one runaway per break; a NEW break is a new trade"))
+            t.check("break_finished", prep.boundary, False)
         confirmed = runaway_confirmed(orb, price_now, prev_close, direction)
         prep.cond("runaway_confirmed", 1.0 if confirmed else 0.0,
                   f"1m close beyond the 50% TP {prep.tp50:.2f} and still beyond now "
@@ -443,12 +493,15 @@ class RunawayContinuationStrategy:
             prep.starved.append("chain")
         else:
             contracts = chain.calls if side == "call" else chain.puts
-            c, lev, n = gamma_leverage_pick(contracts, direction, price_now, run)
+            c, lev, n, spread_rej = gamma_leverage_pick(
+                contracts, direction, price_now, run, floor_pct=self.MAX_LOSS_PCT)
             t.check("considered", n, n > 0)
+            t.check("spread_rejected", spread_rej, None)
             if c is None:
                 prep.structural.append(("contract",
-                    f"no liquid OTM {side} on the chain to lever a {run:.2f} run "
-                    f"(mark > 0.05, delta > 0)"))
+                    f"no {side} whose {self.MAX_LOSS_PCT:.0%} floor clears its own bid/ask "
+                    f"spread ({spread_rej} rejected for spread; a stop inside the spread is "
+                    f"not a stop) on a {run:.2f} run"))
             else:
                 prem = float(getattr(c, "ask", 0) or getattr(c, "mark", 0) or 0)
                 t.check("contract", c.strike, True)

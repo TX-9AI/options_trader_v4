@@ -615,6 +615,47 @@ def main():
     r55 = _row(st, "RunawayContinuation", 55.0)
     check("R7 ATR 0.03% (unreachable tape) -> HOLD prepared, waiting on atr_pct — recorded, not silent",
           sig is None and r55 and r55[0] == "HOLD" and "atr_pct" in r55[1], str(r55))
+    # ── r174 — the two structural gates from 2026-08-28's tape ───────────
+    import strategy.runaway_continuation as rwmod
+    # the teenie: floor 20% of 0.17 = 3.4c, spread ask-bid = 4c -> refused
+    teenie = _G(107, 0.15, 0.09, 0.022); teenie.ask, teenie.bid = 0.17, 0.13
+    P.begin_tick(57.0)
+    sig = RW.generate_signal(orb=_ORB(hi=100.0, tp=100.8), atr_pct=0.14, price_now=105.9,
+                             prev_close=105.6, now_et="10:15",
+                             chain=_Chain([], [teenie]))
+    r57 = _row(st, "RunawayContinuation", 57.0)
+    check("R9 (r174) the only candidate is a teenie whose 20% floor sits INSIDE its own "
+          "bid/ask -> structural DECLINE naming the spread, even on relaxed",
+          sig is None and r57 and r57[0] == "DECLINE" and "clears its own bid/ask" in r57[1]
+          and "1 rejected for spread" in r57[1], str(r57))
+    # same chain plus a real-premium strike: the pick lands there, not the teenie
+    real = _G(102, 0.95, 0.46, 0.050)          # floor 19c >> ~4c spread
+    P.begin_tick(58.0)
+    sig = RW.generate_signal(orb=_ORB(), atr_pct=0.14, price_now=101.9, prev_close=101.6,
+                             now_et="10:15", chain=_Chain([], [real, teenie]))
+    check("R10 (r174) with a real-premium strike on the chain the pick lands there — the "
+          "spread gate is what keeps the leverage score off the teenies",
+          sig is not None and sig.strike == 102.0, str(sig and sig.strike))
+    # one runaway per break: a floor stop-out finishes (long, 101.0)
+    rwmod.finish_break("long", 101.0)
+    P.begin_tick(59.0)
+    sig = RW.generate_signal(orb=_ORB(), atr_pct=0.14, price_now=101.9, prev_close=101.6,
+                             now_et="10:15", chain=_Chain([], [real]))
+    r59 = _row(st, "RunawayContinuation", 59.0)
+    check("R11 (r174) this break already stopped out at its floor -> structural DECLINE: "
+          "one runaway per break", sig is None and r59 and r59[0] == "DECLINE"
+          and "already stopped out" in r59[1], str(r59))
+    P.begin_tick(59.5)
+    sig = RW.generate_signal(orb=_ORB(hi=103.0, tp=103.8), atr_pct=0.14, price_now=104.9,
+                             prev_close=104.6, now_et="10:15",
+                             chain=_Chain([], [_G(106, 0.95, 0.46, 0.050)]))
+    check("R12 (r174) a NEW break at a new boundary is a new trade",
+          sig is not None, str(sig and sig.strike))
+    rwmod.FINISHED_BREAKS.clear()
+    src_tl = open(os.path.join(_root, "database", "trade_logger.py"), encoding="utf-8").read()
+    check("R13 (r174) the losing-exit hook finishes the break (source pin)",
+          "finish_break(_dir, _bnd)" in src_tl and '"Runaway" in _strat' in src_tl)
+
     os.environ["OT_RELAXED_ENTRY"] = "0"      # relaxed extends the cutoff to 14:00
     P.begin_tick(56.0)
     sig = RW.generate_signal(orb=_ORB(), atr_pct=0.14, price_now=101.9, prev_close=101.6,

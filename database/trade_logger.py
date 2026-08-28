@@ -1,5 +1,8 @@
 """
-database/trade_logger.py  v4.6
+database/trade_logger.py  v4.7
+v4.7  2026-08-28  r174: a losing runaway exit calls finish_break() — one
+      runaway per ORB break per session; the break key is (direction, the
+      broken boundary from the record's orb_range fields).
 v4.6  2026-08-27  r167: the spent-level lock on a losing exit covers EVERY
       lone credit vertical (operator: "a lone credit spread stops out at a
       15% floor & the level that it sold at is marked finished"); TCS keys
@@ -654,6 +657,21 @@ class TradeLogger:
                 # level it sold at FINISHED for the session — "do not sell
                 # another one at that level". Any credit vertical, not only the
                 # sweep: TCS's level is the ORB bound it sold against.
+                # r174 — a runaway floor stop-out FINISHES its break for the
+                # session (operator: one runaway per break, even on relaxed).
+                if "Runaway" in _strat:
+                    try:
+                        _dir = self._get_field(trade_id, "direction") or ""
+                        _bnd = (self._get_field(trade_id, "orb_range_high")
+                                if _dir == "long"
+                                else self._get_field(trade_id, "orb_range_low"))
+                        if _bnd:
+                            from strategy.runaway_continuation import finish_break
+                            finish_break(_dir, _bnd)
+                            logger.info(f"[spent] runaway break FINISHED "
+                                        f"{_dir} @ {float(_bnd):.2f} — one per break")
+                    except Exception:                           # noqa: BLE001
+                        pass
                 _is_cv = bool(self._get_field(trade_id, "is_credit_vertical")) \
                     or "Sweep" in _strat or "TrendCredit" in _strat
                 if _is_cv:
