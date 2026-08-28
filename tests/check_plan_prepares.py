@@ -297,6 +297,14 @@ def main():
     bf.EARLIEST_ET, bf.LATEST_ET = "09:30", "16:00"
     B = GEXPinButterflyStrategy()
     B.planner.symbol = "TST"
+    # PIN THE CLOCK: expected_move() reads wall time for the remaining-session
+    # scaling, so an unpinned test drifts with the hour it is run at (it broke
+    # at 06:17 ET with EM 9.2 where a 12:30 run gives 2.1). Production behavior
+    # unchanged; the hypothetical states its time of day like its prices.
+    _em_real = bf.expected_move
+    from utils.time_utils import ET as _ET_pin
+    _fixed_now = bf.datetime(2026, 8, 27, 12, 30, tzinfo=_ET_pin)
+    bf.expected_move = lambda u, iv, now=None: _em_real(u, iv, now=_fixed_now)
 
     class _GEX:
         def __init__(self, env="PINNING", pin=101.0, conc=0.60):
@@ -308,7 +316,8 @@ def main():
     calls_fat = [_C(k, m - 0.01, m + 0.01) for k, m in
                  ((99, 2.00), (100, 1.50), (101, 0.55), (102, 0.28), (103, 0.14))]
     # debit 1.50 - 1.10 + 0.28 = 0.68 on width 1 -> R 0.47
-    bcommon = dict(price_now=100.0, now_et="12:30", atm_iv=1.20)
+    # atm_iv 0.43 -> EM ~2.0 at the pinned 12:30 clock
+    bcommon = dict(price_now=100.0, now_et="12:30", atm_iv=0.43)
 
     os.environ["OT_RELAXED_ENTRY"] = "0"
     P.begin_tick(20.0)

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_butterfly_legs.py  v2.0  (2026-08-27, r160)
+tests/check_butterfly_legs.py  v2.1  (2026-08-28, r170)
+v2.1  r170: clock pinned at 12:30 and atm_iv 0.43 (see check_plan_prepares
+      v1.6) — the B pins were time-of-day dependent.
+v2.0  (2026-08-27, r160)
 v2.0  r160: RENAMED from check_leg2_levels.py. The L1-L13 leg-two pins are
       gone with the code they pinned — the condor no longer selects a level;
       tests/check_plan_prepares.py holds the leg-two hypotheticals now. Only
@@ -95,11 +98,16 @@ def main():
     # spot 100, pin 101, ATM IV 1.20 at 12:30 -> EM ~1.5, pin ~0.67 EM away
     calls = [_C(k, m) for k, m in ((99, 1.60), (100, 1.00), (101, 0.55), (102, 0.28), (103, 0.14))]
     chain_b = _Chain(calls, [])
+    # PIN THE CLOCK (see check_plan_prepares): expected_move reads wall time.
+    _em_real = bf.expected_move
+    from utils.time_utils import ET as _ET
+    _fixed_now = bf.datetime(2026, 8, 27, 12, 30, tzinfo=_ET)
+    bf.expected_move = lambda u, iv, now=None: _em_real(u, iv, now=_fixed_now)
     b = GEXPinButterflyStrategy()
     b.planner.symbol = "TST"
     os.environ["OT_RELAXED_ENTRY"] = "1"
     P.begin_tick(20.0)
-    sig = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=1.20,
+    sig = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=0.43,
                             chain=chain_b)
     rowb = st.conn.execute("SELECT verdict, reason, r_now FROM plan_tick WHERE "
                            "strategy='GEXPinButterfly' AND ts_epoch=20.0").fetchone()
@@ -114,14 +122,14 @@ def main():
     os.environ["OT_RELAXED_ENTRY"] = "0"
     calls_fat = [_C(k, m) for k, m in ((99, 2.00), (100, 1.50), (101, 0.55), (102, 0.28), (103, 0.14))]
     P.begin_tick(21.0)
-    sig2 = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=1.20,
+    sig2 = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=0.43,
                              chain=_Chain(calls_fat, []))
     row2 = st.conn.execute("SELECT verdict, reason FROM plan_tick WHERE "
                            "strategy='GEXPinButterfly' AND ts_epoch=21.0").fetchone()
     check("B3 STRICT vetoes a fly below 1:1 (R recorded on the DECLINE row)",
           sig2 is None and row2 and row2[0] == "DECLINE" and "r:" in (row2[1] or ""), str(row2))
     P.begin_tick(22.0)
-    sig3 = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=1.20,
+    sig3 = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=0.43,
                              chain=_Chain([c for c in calls if c.strike != 101.0], []))
     row3 = st.conn.execute("SELECT verdict, reason FROM plan_tick WHERE "
                            "strategy='GEXPinButterfly' AND ts_epoch=22.0").fetchone()

@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.14 · 2026-08-28 · r170 — the readers (§19).**
 **v1.13 · 2026-08-27 · r169 — the butterfly rides to the close (§18); the exit map, complete.**
 **v1.12 · 2026-08-27 · r168 — the runaway's 20% floor; the structure stop is ORB's (§17).**
 **v1.11 · 2026-08-27 · r167 — managed exits: the plan decides (§16).**
@@ -746,3 +747,26 @@ ORB — 25% floor, impulsive-origin structure stop, trail +50%, tightening past
 Sweep / TCS / lone condor leg — hold to the close, 15% floor, a close through
 the level, the nickel; a stop-out finishes the level · Formed condor — the
 ladder · Butterfly — 25% floor, 15:45 flatten. Nothing else closes a trade.
+
+---
+
+## 19. r170 — the readers
+
+Operator, 2026-08-28: *"I need a reader outfitted in devtools and have
+query.py snapshot active trade decisions 'enter on' and 'exit on' for active
+plans. Trade log & all time performance should stay."*
+
+- **On the box** (`query.py` v4.2): a DECISIONS panel at the top of the
+  derived half — ENTER ON: the newest `plan_tick` row per strategy (the
+  PREPARED trade and what it waits on, the structural fault, the missing
+  input, or the slot); EXIT ON: the newest `<Strategy>/manage` row per open
+  position. Rows older than five minutes are flagged STALE by the box
+  itself. `python query.py --decisions` renders only the snapshot; the full
+  dashboard — trade log, all-time performance, market — is the unchanged
+  default.
+- **On control** (day_trader_pro devtools v1.56): SENSORS item **DECISIONS
+  NOW** runs the box's own `--decisions` across the chosen scope. The
+  formatter lives on the box, so the fleet reader and a shell on any box
+  always show the same thing.
+- Order of landing matters: otv4 r170 to the boxes first, then the dtp
+  menu — the item is transport for a flag the boxes must understand.

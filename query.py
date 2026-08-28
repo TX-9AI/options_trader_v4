@@ -1,5 +1,15 @@
 """
-query.py  v4.1
+query.py  v4.2
+v4.2  2026-08-27  r170 — THE DECISIONS PANEL. Operator: *"have query.py
+      snapshot active trade decisions 'enter on' and 'exit on' for active
+      plans. Trade log & all time performance should stay."* New
+      show_decisions(): the newest plan_tick row per strategy (ENTER ON —
+      the PREPARED trade and what it waits on, or the structural fault) and
+      the newest <Strategy>/manage row per open position (EXIT ON — "if this
+      or this, out"), each stamped and flagged ⚠️ STALE past 5 minutes.
+      `--decisions` renders only the snapshot for the fleet reader in
+      day_trader_pro devtools; the full dashboard (trade log, all-time,
+      market) is the unchanged default.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -684,6 +694,66 @@ def show_gates(dc):
     print()
 
 
+def show_decisions(dc):
+    """THE SNAPSHOT — what every plan would do on the next tick, right now.
+
+    ENTER ON: for each strategy, the newest plan_tick row. HOLD carries the
+    PREPARED trade and the conditions it is waiting on; DECLINE the structural
+    fault; NO PLAN the missing input; DORMANT the slot. EXIT ON: for each
+    open position, the newest <Strategy>/manage row — "if this or this, out."
+    r170, operator: "query.py snapshot active trade decisions 'enter on' and
+    'exit on' for active plans."
+    """
+    sep("═")
+    print("  DECISIONS  (the next tick, as the plans see it now)")
+    sep("═")
+    rows = _q(dc, "SELECT strategy, verdict, reason, ts_epoch FROM plan_tick p"
+                  " WHERE strategy NOT LIKE '%/manage'"
+                  " AND ts_epoch = (SELECT MAX(ts_epoch) FROM plan_tick"
+                  "                 WHERE strategy = p.strategy)"
+                  " ORDER BY strategy")
+    if rows is None:
+        print("  (plan_tick not present on this box)")
+        print(); return
+    print("  ── ENTER ON ──")
+    if not rows:
+        print("    no plan rows yet today")
+    stale_cut = now_et().timestamp() - 300
+    for strat, verdict, reason, ts in rows:
+        t = datetime.fromtimestamp(ts, ET).strftime("%H:%M:%S")
+        stale = "  ⚠️ STALE" if ts < stale_cut else ""
+        print(f"    {strat:<22s} {verdict:<8s} {t}{stale}")
+        for line in _wrap(reason or "", 88):
+            print(f"      {line}")
+    mrows = _q(dc, "SELECT strategy, verdict, reason, ts_epoch FROM plan_tick p"
+                   " WHERE strategy LIKE '%/manage'"
+                   " AND ts_epoch = (SELECT MAX(ts_epoch) FROM plan_tick"
+                   "                 WHERE strategy = p.strategy)"
+                   " ORDER BY strategy")
+    print("  ── EXIT ON ──")
+    if not mrows:
+        print("    no open positions under management")
+    for strat, verdict, reason, ts in (mrows or []):
+        t = datetime.fromtimestamp(ts, ET).strftime("%H:%M:%S")
+        stale = "  ⚠️ STALE" if ts < stale_cut else ""
+        print(f"    {strat:<28s} {verdict:<6s} {t}{stale}")
+        for line in _wrap(reason or "", 88):
+            print(f"      {line}")
+    print()
+
+
+def _wrap(text: str, width: int):
+    words, out, cur = text.split(), [], ""
+    for w in words:
+        if len(cur) + len(w) + 1 > width:
+            out.append(cur); cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    if cur:
+        out.append(cur)
+    return out[:6] + ([f"… ({len(out) - 6} more lines)"] if len(out) > 6 else [])
+
+
 def show_plans(dc):
     """Intent — including the plans that never became trades.
 
@@ -768,6 +838,21 @@ def show_market(dc):
 
 
 def main():
+    # r170 — `--decisions` renders ONLY the snapshot (header + enter-on /
+    # exit-on). This is the fleet reader's entry point: devtools calls
+    # `python query.py --decisions` on every box, so there is exactly one
+    # formatter. The full dashboard (trade log, all-time performance, market)
+    # stays the default and is unchanged.
+    if "--decisions" in sys.argv:
+        print()
+        show_header()
+        dc = _derived()
+        if dc is None:
+            print("  derived store not found on this box.")
+            return
+        show_decisions(dc)
+        dc.close()
+        return
     conn = connect()
     print()
     show_header()
@@ -792,6 +877,7 @@ def main():
         print("  (expected at ~/options-trader/data/derived_store.db)")
         sep("═")
     else:
+        show_decisions(dc)
         show_character(dc)
         show_gates(dc)
         show_plans(dc)
