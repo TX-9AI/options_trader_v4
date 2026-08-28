@@ -1,5 +1,8 @@
 """
-analysis/volatility_engine.py  v4.2
+analysis/volatility_engine.py  v4.3
+v4.3  2026-08-28  r175: VolatilityState carries df_5m (the frame its ATR
+      was read from) so TCS can measure the session's realized drift from the
+      same series — pop_drift's mu input.
 v4.2  2026-08-24  r96 THE ATR UNIT MISMATCH THAT COST EVERY ORB TRADE.
       `atr_normalized` is atr/price - a FRACTION - and its own comment called it
       "ATR as % of price". Every strategy threshold is in PERCENT
@@ -65,6 +68,7 @@ class VolatilityState:
 
     # ATR metrics
     atr_current:        float = 0.0    # Current ATR in USD
+    df_5m:              object = None  # r175: the frame the ATR was read from
     # 🔴 r96 — atr_normalized IS A FRACTION, NOT A PERCENT, AND THE OLD COMMENT
     # HERE SAID OTHERWISE. That one wrong word cost the fleet every ORB trade it
     # ever confirmed: the producer writes atr/price (0.004 on NFLX), while EVERY
@@ -137,6 +141,9 @@ class VolatilityEngine:
             return state
 
         state.atr_current    = float(atr_s.iloc[-1])
+        # r175 — the frame rides along so pop_drift's caller can measure the
+        # session's realized drift from the SAME series the ATR reads.
+        state.df_5m          = df_5m
         state.atr_avg_20     = float(atr_s.iloc[-20:].mean()) if len(atr_s) >= 20 else state.atr_current
         state.atr_normalized = state.atr_current / current_price if current_price else 0
         # r96 — DERIVED, never separately computed, so the two can never disagree.

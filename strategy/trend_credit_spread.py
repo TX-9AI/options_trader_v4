@@ -145,6 +145,7 @@ from config import (
     TCS_MIN_POP, TCS_MAX_QUOTE_WIDTH, TCS_POP_BAR_MIN, TCS_NICKEL_REF,
     TCS_WING_WIDTH_SPX, TCS_WING_WIDTH_QQQ,
     TREND_CREDIT_ACTIVE, TCS_START_ET, TCS_MIN_CREDIT_NICKEL_MULT,
+    TCS_DRIFT_HORIZON_BARS,
     TCS_LOSS_GIVEN_BREACH, CONT_BREAKOUT_MIN_ADX,
     TCS_ENTRY_END_ET, INSTRUMENT, HARD_CLOSE_ET,
 )
@@ -295,6 +296,22 @@ class TrendCreditSpread:
             sigma = float(getattr(vol_state, "atr_current", 0.0) or 0.0)
             bars = cv.bars_left(now, TCS_POP_BAR_MIN, HARD_CLOSE_ET)
             prep.bars = bars
+            # ── r175 — THE SESSION'S MEASURED DRIFT (operator: "A trend day
+            # we should be killing it & on chop we stay out"). Realized
+            # per-5m-bar drift since the RTH open, taken from the same df_5m
+            # the ATR reads. SIGNED toward the short strike's safety inside
+            # pop_drift: a put spread below a rising tape gains; below a
+            # falling tape it loses MORE than driftless. Chop -> mu ~ 0 ->
+            # exactly the old model.
+            drift_bar = 0.0
+            try:
+                _df5 = getattr(vol_state, "df_5m", None)
+                if _df5 is not None and len(_df5) >= 2:
+                    _o = float(_df5["open"].iloc[0])
+                    drift_bar = (float(current_price) - _o) / float(len(_df5))
+            except Exception:                                  # noqa: BLE001
+                drift_bar = 0.0
+            t.check("drift_bar", round(drift_bar, 4), None)
             contracts = chain.puts if side == "put" else chain.calls
             _lo, _hi = (orb_low, orb_high)
             _inside = sorted({float(c.strike) for c in contracts
@@ -312,7 +329,11 @@ class TrendCreditSpread:
                     prep.structural.append(("contract", f"first-inside strike {target:.2f} has no contract"))
                 else:
                     t.check("contract", short.strike, True)
-                    pop = cv.pop(abs(short.strike - current_price), sigma, bars)
+                    # drift AWAY from a sold-under strike is +mu on a rising
+                    # tape (put side) and on a falling tape for the call side
+                    _mu_safe = drift_bar if side == "put" else -drift_bar
+                    pop = cv.pop_drift(abs(short.strike - current_price), sigma,
+                                       bars, _mu_safe, TCS_DRIFT_HORIZON_BARS)
                     t.check("pop", pop, pop >= TCS_MIN_POP)
                     if pop <= 0.0:
                         prep.structural.append(("pop",

@@ -1,5 +1,10 @@
 """
-strategy/credit_vertical.py  v4.1
+strategy/credit_vertical.py  v4.2
+v4.2  2026-08-28  r175: pop_drift() — POP with the session's measured drift,
+      signed toward safety, horizon-bounded (operator: "You have to get it
+      firing in ESPECIALLY this type of day … A trend day we should be
+      killing it & on chop we stay out"). TCS only; pop() unchanged for the
+      mean-reversion trades, whose premise is not a drift.
 Credit vertical construction, liquidity and POP helpers.
 
 v4.1  2026-08-27  r157 (RECORDED RETROACTIVELY in r159 — r157 added
@@ -140,6 +145,41 @@ def pop(distance: float, sigma_per_bar: float, bars_left: float) -> float:
         return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
     except Exception as exc:                                   # noqa: BLE001
         _cv_warn("pop", exc)
+        return 0.0
+
+
+def pop_drift(distance: float, sigma_per_bar: float, bars_left: float,
+              drift_per_bar: float, horizon_bars: float) -> float:
+    """P(terminal close on the SAFE side) WITH the session's measured drift.
+
+    r175, operator on TCS's fleet-wide POP drought during the 2026-08-28
+    trend day: *"You have to get it firing in ESPECIALLY this type of day …
+    A trend day we should be killing it & on chop we stay out."* The
+    driftless pop() priced TCS's own premise at zero — the strategy believed
+    the trend at the door (vote + ADX) and disbelieved it at the till.
+
+        z = (d + mu * min(n, horizon)) / (sigma * sqrt(n))
+
+    · mu is MEASURED from the session's own tape (realized per-bar drift),
+      never a forecast someone typed. SIGNED toward safety: drift away from
+      the short strike raises z; drift TOWARD it lowers z — so a reversal
+      day reads WORSE than driftless, which is "on chop we stay out" with
+      teeth.
+    · min(n, horizon): the measured trend is trusted for a bounded horizon,
+      not extrapolated to the bell. horizon is a stated baseline prior
+      (TCS_DRIFT_HORIZON_BARS), not a fit.
+    · mu = 0 reduces exactly to pop() — chop changes nothing.
+    Degenerate inputs return 0.0: a missing ATR must never read safe.
+    """
+    try:
+        d, sig, n = float(distance), float(sigma_per_bar), float(bars_left)
+        mu, h = float(drift_per_bar), float(horizon_bars)
+        if d <= 0 or sig <= 0 or n <= 0:
+            return 0.0
+        z = (d + mu * min(n, max(h, 0.0))) / (sig * math.sqrt(n))
+        return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    except Exception as exc:                                   # noqa: BLE001
+        _cv_warn("pop_drift", exc)
         return 0.0
 
 

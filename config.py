@@ -1,5 +1,8 @@
 """
-config.py  v4.8
+config.py  v4.9
+v4.9  2026-08-28  r175: TCS_DRIFT_HORIZON_BARS (24 x 5m) — the bounded horizon
+      pop_drift may credit the session's measured drift over; baseline prior,
+      stated, env-tunable.
 v4.8  2026-08-27  r169: BUTTERFLY_TP_PCT and BUTTERFLY_MAX_HOLD_MIN retired from
       the decision path — the butterfly rides to the 15:45 flatten or the 25%
       floor.
@@ -385,6 +388,12 @@ INSTRUMENT          = os.environ.get("OT_INSTRUMENT", "QQQ")
 # de-coupling, not a re-tune, and `tests/test_tcs_decoupling.py` asserts the
 # equality so a future divergence is a DECISION rather than a drift.
 TCS_MIN_POP                 = float(os.environ.get("OT_TCS_MIN_POP", "0.70"))
+# r175 — SELECTION, a stated baseline prior (not a fit): how many bars of the
+# session's MEASURED drift the POP model may credit. 24 x 5m = two hours of
+# the trend it can already see; beyond that is extrapolation. Operator ruling
+# 2026-08-28: TCS must fire on trend days and stay out on chop; the drift is
+# signed, so a reversal reads WORSE than driftless.
+TCS_DRIFT_HORIZON_BARS      = float(os.environ.get("OT_TCS_DRIFT_HORIZON_BARS", "24"))
 TCS_MAX_QUOTE_WIDTH         = float(os.environ.get("OT_TCS_MAX_QUOTE_WIDTH", "0.25"))
 TCS_POP_BAR_MIN             = float(os.environ.get("OT_TCS_POP_BAR_MIN", "5"))
 TCS_NICKEL_REF              = float(os.environ.get("OT_TCS_NICKEL_REF", "0.05"))

@@ -404,7 +404,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/credit_vertical.py`
 - **calls:** (none)
-- **called by:** `strategy/iron_condor_strategy.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`
+- **called by:** `strategy/iron_condor_strategy.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_plan_prepares.py`
 
 ### `strategy/criteria.py`
 - **calls:** `strategy/__init__.py`, `strategy/relaxed.py`
@@ -623,7 +623,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_plan_prepares.py`
-- **calls:** `analysis/liquidity_mapper.py`, `execution/position_manager.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `utils/time_utils.py`
+- **calls:** `analysis/liquidity_mapper.py`, `execution/position_manager.py`, `strategy/__init__.py`, `strategy/credit_vertical.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `utils/time_utils.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_plan_signal.py`

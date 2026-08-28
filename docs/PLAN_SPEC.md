@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.16 · 2026-08-28 · r175 — TCS prices its premise: pop_drift (§21).**
 **v1.15 · 2026-08-28 · r174 — the teenie lesson: floor-clears-spread; one runaway per break (§20).**
 **v1.14 · 2026-08-28 · r170 — the readers (§19).**
 **v1.13 · 2026-08-27 · r169 — the butterfly rides to the close (§18); the exit map, complete.**
@@ -800,3 +801,33 @@ relaxed."*
   recorded as acceptable.
 
 Hypotheticals R9–R13. Both gates are structural: relaxed waives neither.
+
+---
+
+## 21. r175 — TCS prices its own premise: POP with the session's measured drift
+
+2026-08-28, the strongest trend day of the week: TCS declined ~193 ticks per
+box fleet-wide on one gate — `pop < 0.70` at ADX 21–53. The driftless model
+(deliberate: "a drift term would be a forecast") priced an ADX-50 uptrend as
+a random walk, so a with-trend spread near the bound read 0.55–0.65 forever.
+The strategy believed the trend at the door and disbelieved it at the till.
+Operator: *"You have to get it firing in ESPECIALLY this type of day … A
+trend day we should be killing it & on chop we stay out. Fix it to behave
+like that."*
+
+- `pop_drift(d, σ, n, μ, h)` = Φ((d + μ·min(n, h)) / (σ√n)) — `credit_vertical`
+  v4.2. μ is MEASURED: the session's realized per-5m-bar drift since the RTH
+  open, from the same df_5m the ATR reads (VolatilityState carries the frame,
+  v4.3). SIGNED toward safety: a put spread under a rising tape gains; under
+  a falling tape it reads WORSE than driftless — chop stays out with teeth.
+  μ=0 or h=0 reduce exactly to the old model. h = TCS_DRIFT_HORIZON_BARS
+  (24 × 5m = two hours) — a stated baseline prior, not a fit.
+- On today's MU shape (3.2 under spot, σ 2.7, 45 bars): driftless 0.57
+  refused; with the measured 0.59/bar drift, 0.83 — fires. Chop (μ 0.02):
+  0.58 — stays out. Reversal (μ −0.40): 0.36 — harder out.
+- TCS only. The sweep's and condor's `pop()` stays driftless — their premise
+  is reversion, not drift.
+
+Hypotheticals T1–T7 (r175 block). The floor stays 0.70 — the operator's
+70–80 % band; what changed is that the number being floored now includes the
+premise the entry already required.

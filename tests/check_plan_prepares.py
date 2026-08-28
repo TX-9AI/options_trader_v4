@@ -663,6 +663,40 @@ def main():
     r56 = _row(st, "RunawayContinuation", 56.0)
     check("R8 past the 11:30 cutoff (strict) -> DORMANT", sig is None and r56 and r56[0] == "DORMANT", str(r56))
 
+    # ── r175 — TCS POP WITH THE SESSION'S MEASURED DRIFT ─────────────────
+    # Operator: "You have to get it firing in ESPECIALLY this type of day …
+    # A trend day we should be killing it & on chop we stay out."
+    import strategy.credit_vertical as cvm
+    # today's MU shape at 12:15: strike 3.2 under spot, 5m ATR 2.7, 45 bars to
+    # the 15:45 flatten. Driftless read 0.57 and refused the trend all session.
+    _p0 = cvm.pop(3.2, 2.7, 45)
+    check("T1 (r175) driftless on the MU shape reads ~0.57 — the refusal that held TCS out",
+          abs(_p0 - 0.57) < 0.02, f"{_p0:.3f}")
+    # the session's measured drift: MU opened ~909, printed ~943 at bar 58 ->
+    # ~0.59/5m bar. Two-hour horizon (24 bars).
+    _p1 = cvm.pop_drift(3.2, 2.7, 45, 0.59, 24)
+    check("T2 (r175) the SAME shape with the session's measured drift fires: POP > 0.80",
+          _p1 > 0.80, f"{_p1:.3f}")
+    _p2 = cvm.pop_drift(3.2, 2.7, 45, 0.02, 24)
+    check("T3 (r175) chop (mu ~ 0) reduces to the driftless read — stays out",
+          abs(_p2 - _p0) < 0.03, f"{_p2:.3f} vs {_p0:.3f}")
+    _p3 = cvm.pop_drift(3.2, 2.7, 45, -0.40, 24)
+    check("T4 (r175) drift TOWARD the short strike reads WORSE than driftless — a "
+          "reversal day is harder, not easier", _p3 < _p0 - 0.10, f"{_p3:.3f}")
+    check("T5 (r175) degenerate inputs still read 0.0 — a missing ATR is never safe",
+          cvm.pop_drift(3.2, 0.0, 45, 0.59, 24) == 0.0
+          and cvm.pop_drift(0.0, 2.7, 45, 0.59, 24) == 0.0)
+    _p4 = cvm.pop_drift(3.2, 2.7, 45, 0.59, 0)
+    check("T6 (r175) horizon 0 credits no drift at all — the prior is the only lever",
+          abs(_p4 - _p0) < 1e-9, f"{_p4:.3f}")
+    src_t = open(os.path.join(_root, "strategy", "trend_credit_spread.py"), encoding="utf-8").read()
+    check("T7 (r175) TCS measures mu from vol_state's OWN df_5m and signs it by side "
+          "(put: +drift, call: -drift)",
+          "state.df_5m" in open(os.path.join(_root, "analysis", "volatility_engine.py"),
+                                encoding="utf-8").read()
+          and 'drift_bar if side == "put" else -drift_bar' in src_t
+          and "cv.pop_drift(" in src_t and "TCS_DRIFT_HORIZON_BARS" in src_t)
+
     print()
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))
