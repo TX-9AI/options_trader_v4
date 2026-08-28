@@ -1,5 +1,9 @@
 """
-execution/exit_engine.py  v4.7
+execution/exit_engine.py  v4.8
+v4.8  2026-08-27  r169: the butterfly's TARGET (20% of max profit) and MAX
+      HOLD (150 min) are retired — operator: "1545 flatten or 25% loss,
+      whichever comes first." Its exits are exactly two now, like the
+      credits: the 25% floor and the 15:45 hard close.
 v4.7  2026-08-27  r167: BOS EXIT RETIRED from the decision path (operator:
       "overall a loser"; measured 34% / 217 / -$7,085). The only live site was
       step 4 of _evaluate_sweep, the default route for every non-ORB debit.
@@ -1463,32 +1467,22 @@ class ExitEngine:
         # the context. Do NOT resurrect it on a label. Operator's direction:
         # if the idea returns it returns under a different name.
 
-        # 3. MAX HOLD
-        if entry_time:
-            try:
-                from datetime import timezone
-                entry_dt = datetime.fromisoformat(entry_time)
-                if entry_dt.tzinfo is None:
-                    entry_dt = entry_dt.replace(tzinfo=timezone.utc)
-                mins_held = minutes_since(entry_dt)
-                if mins_held >= BUTTERFLY_MAX_HOLD_MIN:
-                    decision.should_exit = True
-                    decision.exit_reason = f"butterfly_max_hold({mins_held:.0f}min)"
-                    return decision
-            except Exception:
-                pass
-
+        # 3. MAX HOLD — RETIRED (r169). Operator, 2026-08-27, on the butterfly:
+        #    "I want both adjusted for best case. 1545 flatten or 25% loss.
+        #    Whichever comes first." A pin play pays as the wings die into the
+        #    close; a 150-minute clock sold the thesis before it finished.
         # 3. HARD STOP
         if current_premium <= stop_prem:
             decision.should_exit = True
             decision.exit_reason = f"stop_hit pnl={pnl_pct:.1%}"
             return decision
 
-        # 4. TARGET HIT
-        if current_premium >= target:
-            decision.should_exit = True
-            decision.exit_reason = f"target_hit pnl={pnl_pct:.1%}"
-            return decision
+        # 4. TARGET — RETIRED (r169), same ruling. A perfectly pinned fly is
+        #    worth the full width at the apex at the close; the 20%-of-max
+        #    target (0.34 on a 1.00-wide fly bought for 0.18) left four
+        #    fifths of that on the table. The fly rides to the 15:45 flatten
+        #    or the 25% floor, whichever comes first. `target` stays on the
+        #    record for the plan's row; nothing acts on it.
 
         return decision
 

@@ -1,5 +1,7 @@
 """
-strategy/management.py  v2.1
+strategy/management.py  v2.2
+v2.2  2026-08-27  r169: the butterfly declares exactly two exits — the 25%
+      floor and the 15:45 flatten; the target no longer fires for it.
 v2.1  2026-08-27  r168: the runaway declares NO structure stop — its floor is
       the 20% premium loss on the record; the breach check cannot fire for it
       because the signal carries no underlying_stop.
@@ -107,8 +109,10 @@ EXIT_CONDITIONS: Dict[str, Dict[str, str]] = {
         "premium_stop":   "spread value >= credit x (1 + 25%) while a lone vertical",
     },
     "GEXPinButterfly": {
-        "stop":           "fly value <= entry x (1 - stop_loss_pct)",
-        "target":         "fly value >= the profit take",
+        # r169 — operator: "1545 flatten or 25% loss. Whichever comes first."
+        # No target, no max hold: a pin pays into the close.
+        "stop":           "fly value <= entry x (1 - 25%)",
+        "flatten":        "the 15:45 hard close",
     },
 }
 
@@ -248,7 +252,10 @@ class ManagementPlan:
                             ("breach" if strategy == "TrendCreditSpread" else "acceptance"))
                     intent = Intent("CLOSE", f"{name}: 1m close {last_close:.2f} through "
                                              f"{ustop:.2f} pnl={pnl:.1%}", name, pnl_pct=pnl)
-            if intent is None and prem is not None and target and not credit and prem >= target:
+            # the target: a debit exit for the RUNAWAY only — the butterfly rides
+            # to the close (r169)
+            if (intent is None and prem is not None and target and not credit
+                    and strategy != "GEXPinButterfly" and prem >= target):
                 intent = Intent("CLOSE", f"target_hit pnl={pnl:.1%}", "target", pnl_pct=pnl)
             if intent is None and credit and prem is not None and prem <= NICKEL:
                 intent = Intent("CLOSE", f"nickel_close pnl={pnl:.1%}", "nickel", pnl_pct=pnl)
@@ -308,8 +315,10 @@ class ManagementPlan:
             outs.append(f"1m close {thru} {ustop:.2f} -> out (breach)")
         if trail:
             outs.append(f"premium <= {trail:.2f} -> out (trail)")
-        if target and not credit:
+        if target and not credit and str(record.get("strategy", "")) != "GEXPinButterfly":
             outs.append(f"premium >= {target:.2f} -> out (target)")
+        if str(record.get("strategy", "")) == "GEXPinButterfly":
+            outs.append("15:45 -> flatten (rides to the close)")
         if credit:
             outs.append("value <= nickel -> out")
         return "; ".join(outs) if outs else "no exit condition readable"

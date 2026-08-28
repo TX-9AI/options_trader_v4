@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_management_plan.py  v1.2  (2026-08-27)
+tests/check_management_plan.py  v1.3  (2026-08-27)
+v1.3  r169: the butterfly rides to the 15:45 flatten or the 25% floor — D12
+      re-pinned (above the old target -> HOLD), D12a the floor, D12c the
+      engine acts on neither target nor max hold; M5 re-pinned.
 v1.2  r168: the runaway's record carries no underlying stop and a 20% floor;
       D1 is the 20% floor; D2 is the pullback THROUGH the ORB boundary that
       must HOLD; D2b/D16 pin the split between ORB's structure stop and the
@@ -134,9 +137,9 @@ def main():
     P.begin_tick(5.0)
     MP.decide(fly, 0.22, df_1m=None, current_price=100.6, ctx=ctx, exit_engine=None)
     r5 = _row(st, "GEXPinButterfly/manage", 5.0)
-    check("M5 butterfly -> floor and target from the record",
-          r5 and "premium <= 0.14 -> out (floor)" in r5[1] and "premium >= 0.60 -> out (target)" in r5[1],
-          str(r5))
+    check("M5 butterfly -> the floor and the 15:45 flatten, no target (r169)",
+          r5 and "premium <= 0.14 -> out (floor)" in r5[1] and "15:45 -> flatten" in r5[1]
+          and "target" not in r5[1], str(r5))
 
     P.begin_tick(6.0)
     n6 = MP.tick(ctx, [{"trade_id": "ad1", "strategy": "ADOPTED", "entry_premium": 1.0}], 100.0)
@@ -287,7 +290,20 @@ def main():
           "stop_premium": 0.135, "target_premium": 0.60}
     P.begin_tick(20.0)
     it = MP.decide(bf, 0.62, df_1m=_df([100.9, 101.0]), exit_engine=eng)
-    check("D12 the butterfly at 0.62 >= target 0.60 -> CLOSE target_hit", it and it.condition == "target")
+    rd12 = _row(st, "GEXPinButterfly/manage", 20.0)
+    check("D12 (r169) the butterfly at 0.62 above its old target 0.60 -> HOLD: it rides to the 15:45 "
+          "flatten or the 25% floor, whichever first",
+          it and it.action == "HOLD" and rd12 and "15:45 -> flatten" in rd12[1] and "target" not in rd12[1],
+          f"{it and it.action} {rd12}")
+    P.begin_tick(20.5)
+    it = MP.decide(dict(bf, current_premium=0.13), 0.13, df_1m=_df([100.9, 101.0]), exit_engine=eng)
+    check("D12a the butterfly at 0.13 <= the 25% floor 0.135 -> CLOSE stop_25%",
+          it and it.action == "CLOSE" and it.condition == "stop" and "25%" in it.reason, str(it and it.reason))
+    bfb = next(n for n in ast.walk(ast.parse(esrc if 'esrc' in dir() else open(os.path.join(_root, "execution", "exit_engine.py"), encoding="utf-8").read()))
+               if isinstance(n, ast.FunctionDef) and n.name == "_evaluate_butterfly")
+    bfs = "\n".join(l for l in ast.unparse(bfb).split("\n") if not l.strip().startswith("#"))
+    check("D12c the engine's butterfly path acts on neither a target nor a max hold any more",
+          "target_hit" not in bfs and "butterfly_max_hold" not in bfs and "stop_hit" in bfs)
     tlsrc = open(os.path.join(_root, "database", "trade_logger.py"), encoding="utf-8").read()
     check("D12b a losing exit on ANY lone credit vertical marks its level spent (TCS keys on the bound)",
           "_is_cv" in tlsrc and 'self._get_field(trade_id, "underlying_stop")' in tlsrc)

@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.13 · 2026-08-27 · r169 — the butterfly rides to the close (§18); the exit map, complete.**
 **v1.12 · 2026-08-27 · r168 — the runaway's 20% floor; the structure stop is ORB's (§17).**
 **v1.11 · 2026-08-27 · r167 — managed exits: the plan decides (§16).**
 **v1.10 · 2026-08-27 · r166 — the management plan (§15).**
@@ -724,3 +725,24 @@ runaway's invalidation — retired.
 Hypotheticals: D1 the 20% floor cuts; **D2 a 1m close back through the ORB
 boundary with the premium above the floor HOLDS** — the test that would have
 caught the earlier mistake; D2b/D16 pin the split; R2b the signal's shape.
+
+---
+
+## 18. r169 — the butterfly rides to the close
+
+Operator, 2026-08-27: *"I want both adjusted for best case. 1545 flatten or
+25% loss. Whichever comes first."* The 20%-of-max-profit target and the
+150-minute max hold were v3 inheritances chosen for no premise of this
+trade: a 1.00-wide fly bought for 0.18 is worth 1.00 at the apex at the
+close and the target closed it at 0.34. Both are retired from the decision
+path (exit_engine v4.8; the constants stay informational). The butterfly's
+exits are exactly two, like the credits: the 25% floor and the 15:45 hard
+close. The management row reads *"premium <= 0.14 → out (floor); 15:45 →
+flatten (rides to the close)."* Hypotheticals D12/D12a/D12c, M5.
+
+**The exit map, complete (r168 + r169):**
+ORB — 25% floor, impulsive-origin structure stop, trail +50%, tightening past
+100% · Runaway — 20% floor, trail +50%, tightening past 100%, no price stop ·
+Sweep / TCS / lone condor leg — hold to the close, 15% floor, a close through
+the level, the nickel; a stop-out finishes the level · Formed condor — the
+ladder · Butterfly — 25% floor, 15:45 flatten. Nothing else closes a trade.

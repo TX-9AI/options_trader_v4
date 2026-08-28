@@ -1,5 +1,8 @@
 """
-config.py  v4.7
+config.py  v4.8
+v4.8  2026-08-27  r169: BUTTERFLY_TP_PCT and BUTTERFLY_MAX_HOLD_MIN retired from
+      the decision path — the butterfly rides to the 15:45 flatten or the 25%
+      floor.
 v4.7  2026-08-27  r168: RUNAWAY_MAX_LOSS_PCT 0.20 — the runaway's floor is a
       20% premium loss (decay or adverse move), no underlying stop; the ORB
       structure stop is ORB's alone; credit spreads keep 15%.
@@ -964,8 +967,11 @@ SWEEP_BOS_LOOKBACK          = 5      # 1m candles used as the BOS structure refe
 
 # ─── BUTTERFLY STRATEGY ───────────────────────────────────────────────────────
 
-BUTTERFLY_TP_PCT            = 0.20   # 20% of max profit
-BUTTERFLY_MAX_HOLD_MIN      = 150
+# r169 — RETIRED FROM THE DECISION PATH (exit_engine v4.8). Operator: "1545
+# flatten or 25% loss. Whichever comes first." Kept so target_premium() still
+# prices the record's informational target; nothing acts on them.
+BUTTERFLY_TP_PCT            = 0.20   # informational only (r169)
+BUTTERFLY_MAX_HOLD_MIN      = 150    # not read by any exit (r169)
 
 # Fixed wing widths by instrument
 BUTTERFLY_WING_SPX          = 25     # 25-point wings on SPX
