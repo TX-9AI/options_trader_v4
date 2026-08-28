@@ -1170,7 +1170,25 @@ def main(argv=None) -> int:
             # The heuristic does not decide anything; it tells the reader which
             # question to ask first.
             _gaps = [e - g for _p, e, g in short if g >= 0]
-            if _gaps and max(_gaps) <= 2 and len(short) >= 3:
+            # 🔴 r171 — THE PREFIX-COUNT REQUIREMENT IS DROPPED. It was
+            # `len(short) >= 3`, so a box short on ONE or TWO prefixes never
+            # earned the drift verdict even when the gap was 1 — the conductor
+            # HELD it and it ran all night.
+            # ⚠️ MEASURED, from eod_conductor.log on 2026-08-27: **14 of 15
+            # boxes held on short=1..3, every night**, and the operator
+            # confirmed on the held boxes each time that nothing was actually
+            # missing. That is a full night of EC2 per box, indefinitely, for a
+            # fencepost. The conductor's own comment already says "holding a
+            # box for drift is worse than the bug."
+            # ⚠️ THE GAP SIZE IS THE SIGNAL, NOT THE PREFIX COUNT. Duplicate
+            # PUTs inflate a counter by a SMALL amount wherever they land;
+            # genuine loss scatters and is larger. A 1-object gap on one prefix
+            # is the same fencepost as a 1-object gap on ten.
+            # ⚠️ THE OTHER HALF MUST NOT REGRESS: a gap of 3+ on ANY prefix
+            # still reads as possible loss and STILL HOLDS THE BOX. A stopped
+            # box's local store is the only copy left, and a stopped box cannot
+            # be asked anything.
+            if _gaps and max(_gaps) <= 2:
                 print("  ⚠️ SMALL, CONSISTENT SHORTFALL ON {} PREFIXES (max {}). "
                       "That is the signature of COUNTER DRIFT, not data loss — "
                       "duplicate PUTs inflate the ledger permanently. VERIFY "
