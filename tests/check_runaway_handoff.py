@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""check_runaway_handoff.py — v1.0
+"""check_runaway_handoff.py
+v1.1  2026-08-27  r165: runs the real prepare() instead of exec-ing a source slice. — v1.0
 
 🔴 AN ORB INVALIDATED *BY RUNAWAY* IS RunawayContinuation'S TRIGGER, NOT A
 DISQUALIFIER.
@@ -51,21 +52,28 @@ class _ORB:
 
 
 def _direction_for(orb):
-    """Run the strategy's REAL direction block against an ORB shape.
+    """Run the strategy's REAL direction logic against an ORB shape.
 
-    ⚠️ Extracted from the source rather than reimplemented — a copy of the
-    logic here would be the very mistake this repo spent 2026-08-26 undoing.
+    r165: the direction block now lives inside `prepare()` (the plan), so the
+    plan itself is run with an in-memory store and the resolved direction is
+    read off the preparation — still the real code, never a copy.
     """
-    import logging
-    src = open(os.path.join(_root, "strategy", "runaway_continuation.py"),
-               encoding="utf-8").read()
-    i = src.index("        state = str(getattr(orb,")
-    j = src.index("        t.direction = direction", i)
-    block = textwrap.dedent(
-        src[i:j].replace("            return t.refuse(", "            raise _Refuse("))
-    ns = {"orb": orb, "logger": logging.getLogger("t"), "_Refuse": _Refuse}
-    exec(block, ns)
-    return ns["direction"], ns["side"]
+    import sqlite3
+    from strategy import plan as P
+    from strategy.runaway_continuation import RunawayContinuationStrategy
+
+    class _S:
+        def __init__(self): self.conn = sqlite3.connect(":memory:")
+        def commit(self): self.conn.commit()
+    P.bind_store(_S())
+    P.begin_tick(1.0)
+    orb.orb_high, orb.orb_low, orb.target_50pct = 101.0, 100.0, 101.5
+    prep = RunawayContinuationStrategy().prepare(
+        orb=orb, atr_pct=0.14, price_now=101.9, prev_close=101.6, now_et="10:15",
+        chain=None)
+    if not prep.direction:
+        raise _Refuse("no direction")
+    return prep.direction, prep.side
 
 
 def main():

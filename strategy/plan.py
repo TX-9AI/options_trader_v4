@@ -1,5 +1,9 @@
 """
-strategy/plan.py  v1.3
+strategy/plan.py  v1.4
+v1.4  2026-08-27  r165: ensure_tables() guards with a flag on the store, not
+      id(store) in a set — recycled ids let a fresh store skip CREATE TABLE
+      and every row write failed "no such table" (seen in a test that opens a
+      store per call; the same class could bite a store re-opened in-process).
 v1.3  2026-08-27  r163: the DailyFork aliases retire with the strategy.
 v1.2  2026-08-27  r160: DISPATCH_ALIAS — SweepForLeg2 -> SweepCreditSpread; the
       CondorLeg2 alias retires with the deleted level-selection.
@@ -220,7 +224,6 @@ def _symbol() -> str:
         return ""
 
 
-_TABLES_MADE = set()
 
 
 def ensure_tables(store) -> bool:
@@ -228,8 +231,10 @@ def ensure_tables(store) -> bool:
     a missing table is a mystery (r133)."""
     if store is None:
         return False
-    key = id(store)
-    if key in _TABLES_MADE:
+    # v1.4 — the guard is a flag ON THE STORE, not `id(store)` in a set: ids
+    # are recycled after garbage collection, so a fresh store could inherit a
+    # dead one's "already made" and write into tables that do not exist.
+    if getattr(store, "_plan_tables_ready", False):
         return True
     try:
         store.conn.execute("""
@@ -265,7 +270,10 @@ def ensure_tables(store) -> bool:
             "CREATE INDEX IF NOT EXISTS ix_plan_check "
             "ON plan_check(symbol, strategy, check_name, ts_epoch)")
         store.commit()
-        _TABLES_MADE.add(key)
+        try:
+            store._plan_tables_ready = True
+        except Exception:                                       # noqa: BLE001
+            pass
         return True
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("plan tables could not be created: %s", exc)

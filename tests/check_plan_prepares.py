@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.3  (2026-08-27)
+tests/check_plan_prepares.py  v1.4  (2026-08-27)
+v1.4  r165: R1-R8 — the runaway: contract prepared before the TP confirms;
+      the buy on confirmation; the gamma-leverage pick is the best strike
+      REACHABLE within the run (102 on a 0.90 run, 103 on a 1.90 run); the
+      invalidated-on-runaway handoff; unbroken ORB holds; unreachable ATR
+      holds naming it; past the cutoff is dormant.
 v1.3  r164: C1-C6 — TCS: a weak ADX holds with the put spread prepared; a
       strong vote fires the plan's 350/347.5; price back inside the range
       holds; a NEUTRAL vote has no side to prepare; no wing clears R declines;
@@ -521,6 +526,84 @@ def main():
                              **{**tcommon, "now_et": tcs.ET.localize(_dt(2026, 8, 27, 9, 50))})
     r45 = _row(st, "TrendCreditSpread", 45.0)
     check("C6 09:50 -> DORMANT", sig is None and r45 and r45[0] == "DORMANT", str(r45))
+
+    # ── THE RUNAWAY (r165) — gamma does the heavy lifting ────────────────
+    import strategy.runaway_continuation as rw
+    RW = rw.RunawayContinuationStrategy(); RW.planner.symbol = "TST"
+
+    class _ORB:
+        def __init__(self, state="OPEN_LONG", hi=101.0, lo=100.0, tp=101.5, inval="", bd=""):
+            self.state, self.orb_high, self.orb_low, self.target_50pct = state, hi, lo, tp
+            self.invalidation_reason, self.break_direction = inval, bd
+
+    class _G:
+        def __init__(self, k, prem, delta, gamma):
+            self.strike, self.mark, self.ask, self.bid = float(k), prem, prem + 0.02, prem - 0.02
+            self.delta, self.gamma, self.theta = delta, gamma, -0.04
+            self.expiry, self.open_interest, self.symbol = "x", 100, f"C{k}"
+
+    # spot 101.9 after a 0.90 run from the ORB high 101.0. A realistic OTM
+    # ladder: premium and delta fall with distance, gamma peaks near the money.
+    calls_rw = [_G(102, 0.95, 0.46, 0.050), _G(103, 0.48, 0.30, 0.058), _G(104, 0.20, 0.17, 0.040),
+                _G(105, 0.08, 0.09, 0.022), _G(106, 0.03, 0.04, 0.010)]
+
+    def _lev(c, run=0.9):
+        return (abs(c.delta) * run + 0.5 * c.gamma * run * run) / c.ask
+    _by_lev = sorted(calls_rw, key=lambda c: -_lev(c))
+    os.environ["OT_RELAXED_ENTRY"] = "1"      # R muteable here; the pick is the point
+    P.begin_tick(50.0)
+    sig = RW.generate_signal(orb=_ORB(), atr_pct=0.14, price_now=101.9, prev_close=101.4,
+                             now_et="10:15", chain=_Chain([], calls_rw))
+    r50 = _row(st, "RunawayContinuation", 50.0)
+    check("R1 broke and ran, TP not yet closed beyond -> HOLD with the contract PREPARED, "
+          "waiting on runaway_confirmed",
+          sig is None and r50 and r50[0] == "HOLD" and "PREPARED" in r50[1]
+          and "runaway_confirmed" in r50[1] and "leverage" in r50[1], str(r50))
+    P.begin_tick(51.0)
+    sig = RW.generate_signal(orb=_ORB(), atr_pct=0.14, price_now=101.9, prev_close=101.6,
+                             now_et="10:15", chain=_Chain([], calls_rw))
+    r51 = _row(st, "RunawayContinuation", 51.0)
+    check("R2 close beyond the 50% TP and holding -> BUYS the plan's contract, valid",
+          sig is not None and sig.is_valid and sig.option_side == "call"
+          and getattr(sig, "disarms_retest", False) and r51 and r51[0] == "TAKE", str(r51))
+    # Raw leverage-per-dollar always crowns the cheapest far-OTM ticket (here
+    # the 105/106). "Just enough OTM" is the reachability band — strikes
+    # within the run — and inside it the 102 wins. The band is the discipline.
+    check("R3 the pick is the highest gamma-leverage strike REACHABLE within the 0.90 run "
+          "(the 102); the raw ranking's winner sits beyond the run and is not taken",
+          sig is not None and sig.strike == 102.0 and abs(sig.run_at_entry - 0.9) < 1e-9
+          and _by_lev[0].strike > 101.9 + 0.9,
+          f"picked {sig and sig.strike}; raw ranking {[c.strike for c in _by_lev][:3]}")
+    P.begin_tick(52.0)
+    sig = RW.generate_signal(orb=_ORB(hi=100.0, tp=100.8), atr_pct=0.14, price_now=101.9,
+                             prev_close=101.6, now_et="10:15", chain=_Chain([], calls_rw))
+    check("R4 a bigger run (1.90) reaches further and gamma picks the 103 — 'just enough OTM' "
+          "scales with the intensity of the move",
+          sig is not None and sig.strike == 103.0, str(sig and sig.strike))
+    P.begin_tick(53.0)
+    sig = RW.generate_signal(orb=_ORB(state="INVALIDATED", inval="runaway", bd="long"),
+                             atr_pct=0.14, price_now=101.9, prev_close=101.6, now_et="10:15",
+                             chain=_Chain([], calls_rw))
+    check("R5 the engine has invalidated on 'runaway' — direction taken from break_direction, "
+          "the handoff fires", sig is not None and sig.direction == "long")
+    P.begin_tick(54.0)
+    sig = RW.generate_signal(orb=_ORB(state="WATCHING"), atr_pct=0.14, price_now=100.5,
+                             prev_close=100.4, now_et="10:15", chain=_Chain([], calls_rw))
+    r54 = _row(st, "RunawayContinuation", 54.0)
+    check("R6 ORB not broken -> HOLD, nothing to prepare until it breaks",
+          sig is None and r54 and r54[0] == "HOLD" and "nothing to prepare" in r54[1], str(r54))
+    P.begin_tick(55.0)
+    sig = RW.generate_signal(orb=_ORB(), atr_pct=0.03, price_now=101.9, prev_close=101.6,
+                             now_et="10:15", chain=_Chain([], calls_rw))
+    r55 = _row(st, "RunawayContinuation", 55.0)
+    check("R7 ATR 0.03% (unreachable tape) -> HOLD prepared, waiting on atr_pct — recorded, not silent",
+          sig is None and r55 and r55[0] == "HOLD" and "atr_pct" in r55[1], str(r55))
+    os.environ["OT_RELAXED_ENTRY"] = "0"      # relaxed extends the cutoff to 14:00
+    P.begin_tick(56.0)
+    sig = RW.generate_signal(orb=_ORB(), atr_pct=0.14, price_now=101.9, prev_close=101.6,
+                             now_et="11:45", chain=_Chain([], calls_rw))
+    r56 = _row(st, "RunawayContinuation", 56.0)
+    check("R8 past the 11:30 cutoff (strict) -> DORMANT", sig is None and r56 and r56[0] == "DORMANT", str(r56))
 
     print()
     if _fails:

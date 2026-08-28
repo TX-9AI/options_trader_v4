@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.9 · 2026-08-27 · r165 — the runaway: gamma leverage over the run (§14). The inversion is complete.**
 **v1.8 · 2026-08-27 · r164 — TCS in the §10 shape (§13).**
 **v1.7 · 2026-08-27 · r163 — a tine is a moving liquidity level; a touch is its event (§12).**
 **v1.6 · 2026-08-27 · r161 — the butterfly earns its entry (§11).**
@@ -574,3 +575,40 @@ says so. When a structural fault and an unmet condition coincide, the
 structural fault is reported first (a trade the plan could not build
 outranks a trigger that has not fired); the condition is still recorded.
 Hypotheticals C1–C6.
+
+---
+
+## 14. r165 — the runaway: the plan holds the contract, gamma does the lifting
+
+Operator, 2026-08-27: *"the symbol did not even entertain coming back for a
+retest, it just broke out & ran. We want in on the move, but it needs to be
+over quickly … purchase and wait for our trailing stop"* and *"Make gamma do
+the heavy lifting. Try to get just enough OTM to really leverage gamma based
+on the intensity of the move."* Stops are deliberately not in this cut.
+
+- `prepare()` is the plan: dormant past the cutoff; each declared condition
+  with its reading (ATR reachable, ORB broken with a direction — including
+  the handoff after the engine invalidates on "runaway" — a 1m close beyond
+  the 50% TP still holding); the CONTRACT selected before the confirmation,
+  so the fire is a purchase.
+- **Selection is gamma leverage over the move's own run.** The distance
+  price has already travelled from the ORB boundary is the intensity, taken
+  as the expected continuation (mirrored, no fitted multiple). For every
+  liquid OTM contract on the move's side: gain = δ·run + ½γ·run², scored per
+  dollar of premium. Raw leverage-per-dollar always crowns the cheapest
+  far-OTM ticket; "just enough OTM" is the **reachability band** — the
+  highest leverage among strikes within the run, else the first OTM. On a
+  0.90 run the plan picks the 102; on a 1.90 run the 103. The ATR delta band
+  (DELTA_NEAR/DEEP) no longer selects; ATR keeps its one job, the
+  reachability floor.
+- The R hurdle stays muteable for this debit (strict vetoes, relaxed
+  records) — there is no wing to search to a floor.
+- Hypotheticals R1–R8. One was wrong before the code was: the test assumed
+  the raw leverage ranking would crown the 103; it crowns the 105, which is
+  exactly why the band exists.
+- Also fixed on the way: `ensure_tables` guarded on `id(store)`, and recycled
+  ids let a fresh store skip CREATE TABLE (plan.py v1.4).
+
+**The inversion is complete for every strategy except ORB (excluded by
+ruling).** Sweep, butterfly, TCS, runaway all prepare then execute; the
+condor authorizes and manages; the tines ride the mapper.
