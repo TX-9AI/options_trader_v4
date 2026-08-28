@@ -1,5 +1,13 @@
 """
-main.py  v4.25
+main.py  v4.26
+v4.26  2026-08-28  r181 — ORB RISK-NORMALIZED SIZING, PURE GEOMETRY.
+      contracts = max(1, floor(orb_width / stop_distance)); the stop is the
+      impulsive candle's low/high (signal.underlying_stop). Worst entry
+      (stop ~ width) = 1 lot by construction; a 0.61 stop on a 6.35 range =
+      10 lots. Structure-stop dollars equal on every ORB trade. No notional
+      cap for ORB by ruling; the 25% floor stays as the gap backstop at
+      leveraged size — operator accepted that tail explicitly. Degenerate
+      geometry sizes 1, loudly. ORB only; engine and strategy untouched.
 v4.25  2026-08-28  r179 — 🔴 ONE PER SESSION, DB-BACKED. Operator: "Only
       one runway debit trade aloud per session on a box. Only one GEX Pin
       butterfly allowed per session on a box. Simple." _one_per_session_used
@@ -3603,6 +3611,38 @@ def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool 
 
     # Populate contract count in signal
     signal.contracts  = sizing.contracts
+    # ── r181 — ORB SIZES ON ACTUAL RISK: PURE GEOMETRY (operator ruling,
+    # 2026-08-28): "adjust the position size based on 'actual' risk … using
+    # the impulsive candle as our sizing criteria … normalize it to 1
+    # contract minimum under the worst possible entry" — and, on the tail:
+    # "I'm actually good, even with the worst case taking the 25% floor on a
+    # leveraged position with a tight stop." So: contracts = floor(range
+    # width / stop distance), stop = the impulsive candle's LOW (long) /
+    # HIGH (short), already on the signal as underlying_stop. The notional
+    # cap does NOT bind ORB; the 25% floor stays underneath as the gap
+    # backstop at whatever size results. Every ORB trade risks the same
+    # dollars AT THE STRUCTURE STOP by construction (contracts x distance is
+    # ~constant). Degenerate geometry (distance <= 0 or > width) sizes 1,
+    # loudly — never a leveraged position on garbage.
+    if getattr(signal, "strategy_name", "") == "ORBStrategy":
+        try:
+            _w = abs(float(getattr(signal, "orb_range_high", 0) or 0)
+                     - float(getattr(signal, "orb_range_low", 0) or 0))
+            _d = abs(float(getattr(signal, "underlying_entry", 0) or 0)
+                     - float(getattr(signal, "underlying_stop", 0) or 0))
+            if _w > 0 and 0 < _d <= _w * 1.0001:
+                _geo = max(1, int(_w // _d))
+                logger.info("[orb-size] r181 geometry: width %.2f / stop %.2f "
+                            "-> %d contract(s) (was %s)",
+                            _w, _d, _geo, sizing.contracts)
+                signal.contracts = _geo
+            else:
+                logger.warning("[orb-size] r181 degenerate geometry width=%.4f "
+                               "dist=%.4f -> 1 contract", _w, _d)
+                signal.contracts = 1
+        except Exception as _gs_err:                            # noqa: BLE001
+            logger.warning("[orb-size] r181 sizing fell back to 1: %s", _gs_err)
+            signal.contracts = 1
     signal.total_cost = sizing.total_cost
 
     # ── Enter trade ───────────────────────────────────────────────────────────

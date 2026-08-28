@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.21 · 2026-08-28 · r181 — ORB risk-normalized sizing, pure geometry (§26).**
 **v1.20 · 2026-08-28 · r179 — 🔴 one per session, DB-backed (§25).**
 **v1.19 · 2026-08-29 · r178 — 🔴 one butterfly per pin per session (§24).**
 **v1.18 · 2026-08-29 · r177 — the butterfly's starved atm_iv; the tick_id join key (§23).**
@@ -940,3 +941,29 @@ not. The pin/break registries stay underneath as belt-and-suspenders.
 check_one_per_session.py, born red at d29a9fc: S1–S5b (session boundary in
 ET over UTC storage; closed trades spend the shot; the restart test; fail-
 closed; the three guards and their order).
+
+---
+
+## 26. r181 — ORB sizes on actual risk: pure geometry off the impulsive candle
+
+Operator, 2026-08-28: *"adjust the position size based on 'actual' risk …
+using the impulsive candle as our sizing criteria … normalize it to 1
+contract minimum under the worst possible entry"* — and on the tail: *"I'm
+actually good, even with the worst case taking the 25% floor on a leveraged
+position with a tight stop."*
+
+`contracts = max(1, floor(orb_width / stop_distance))` at the sizer seam in
+`_execute_entry_signal`, ORB only. The stop is the impulsive candle's LOW
+(long) / HIGH (short) — `signal.underlying_stop`, which the engine already
+carries. Worst entry (stop ≈ width) = 1 lot by construction; the operator's
+example: 6.35 range, 0.61 stop → 10 lots, 6.05 stop → 1 lot; the structure
+stop costs ~the same dollars at every geometry (~−$275 on the example, both
+extremes). **No notional cap for ORB by ruling**; the 25% premium floor
+stays underneath as the gap backstop at whatever size results. Degenerate
+geometry (distance ≤ 0 or > width) sizes 1, loudly. Engine and strategy
+untouched — ORB keeps its no-plan exemption; this is one gated override
+after `compute_size`.
+
+check_orb_geometry_size.py, born red at 14869dc: G1a/G1b the operator's two
+extremes, G2 worst-entry 1-lot, G3 degenerate guard, G4/G5 the seam (one
+sizing assign, one override, after compute_size, ORB-gated).
