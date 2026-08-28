@@ -1,5 +1,9 @@
 """
-strategy/iron_condor_strategy.py  v4.8
+strategy/iron_condor_strategy.py  v4.9
+v4.9  2026-08-27  r166: manage() takes ctx and writes the condor's r66 vector
+      (VRP, channel over EM, fork) to strategy_note with outcome "manage" —
+      that vector had stopped being recorded when r158 took the condor out of
+      _safe_strategy.
 v4.8  2026-08-27  r160 — THE CONDOR SELECTS NOTHING; IT AUTHORIZES, THEN MANAGES.
       Operator, 2026-08-27: *"If there is already an active vertical spread of
       type (call/put) then only a complementary vertical (call/put) SWEEP
@@ -355,7 +359,8 @@ class IronCondorStrategy(BaseOptionsStrategy):
                    "credit_after", "tested_width", "risk_free", "hedge_debit",
                    "floor", "rung")
 
-    def manage(self, pos_mgr, chain, current_price: float, df_1m=None) -> Optional[str]:
+    def manage(self, pos_mgr, chain, current_price: float, df_1m=None,
+               ctx: Optional[dict] = None) -> Optional[str]:
         """The management plan's row: which rung, what the next rung costs
         right now, does it clear. Returns the rung name or None (no formed
         condor). Executes NOTHING — condor_roll does, and is called by main
@@ -368,6 +373,16 @@ class IronCondorStrategy(BaseOptionsStrategy):
         t = self._mgmt_planner.tick(current_price)
         legs = [r for r in pos_mgr.get_open_records() if r.get("is_condor_leg")]
         t.check("legs", len(legs), len(legs) == 2)
+        # r166 — the condor's r66 vector (VRP, channel over EM, fork) lives
+        # again: written here every tick a leg is open, phase "manage".
+        if ctx is not None and legs:
+            try:
+                for e in (ctx.get("derived_engines") or []):
+                    if getattr(e, "name", "") == "notes":
+                        e.writer.write(self.name, ctx, fired=False, outcome="manage")
+                        break
+            except Exception:                                   # noqa: BLE001
+                pass
         if len(legs) < 2:
             if len(legs) == 1:
                 t.hold(f"lone {legs[0].get('option_side', '?')} vertical — managed as a "

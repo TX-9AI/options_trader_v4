@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.10 · 2026-08-27 · r166 — the management plan (§15).**
 **v1.9 · 2026-08-27 · r165 — the runaway: gamma leverage over the run (§14). The inversion is complete.**
 **v1.8 · 2026-08-27 · r164 — TCS in the §10 shape (§13).**
 **v1.7 · 2026-08-27 · r163 — a tine is a moving liquidity level; a touch is its event (§12).**
@@ -612,3 +613,44 @@ on the intensity of the move."* Stops are deliberately not in this cut.
 **The inversion is complete for every strategy except ORB (excluded by
 ruling).** Sweep, butterfly, TCS, runaway all prepare then execute; the
 condor authorizes and manages; the tines ride the mapper.
+
+---
+
+## 15. r166 — the management plan: one watcher per open position
+
+Operator, 2026-08-27, on where stops live: *"The plan seems like the right
+place for them … I like the thought of it watching & thinking if it does
+'this' or 'this' we're out!"* And: *"if there is a way to incorporate those
+vectors back into the management (and stop functions) I think that is the
+logical next step."*
+
+The same split as entries, per open record:
+- **The strategy declares its exit conditions** as data
+  (`strategy/management.py` `EXIT_CONDITIONS`) — the runaway's hard stop,
+  structure stop, trail and target; the sweep's premium stop, acceptance
+  through the pool and nickel; TCS's breach-or-nickel; the condor's ladder;
+  the butterfly's stop and target.
+- **The management plan watches.** After `manage_open_position` has priced
+  and decided, it reads each condition's current value off the record and
+  the exit engine's own state (premium now, stop premium, trail stop, target,
+  underlying stop, MFE/MAE, ticks held) and writes one row under
+  `<Strategy>/manage`: *"RunawayContinuation call 1.00 → now 1.30 (+30%),
+  MFE 1.34, 12 ticks: premium <= 0.75 → out (hard_stop); 1m close < 101.00
+  → out (structure_stop); trail not armed yet; premium >= 2.00 → out
+  (target)."* Credit spreads read with credit semantics (value falling is
+  profit; the stop reads ≥). It holds no threshold of its own — M9 refuses a
+  literal compared to a premium.
+- **The r66 vector is recorded for the open position** every tick
+  (`strategy_note`, outcome "manage", trade_id attached) — aggression at the
+  level, tape, VRP, charm — so a stop can later be fitted against what the
+  tape was doing while the position lived, not only at entry. Two gaps
+  closed: TCS now has a vector (vote, ADX, ORB width over EM, tape); the
+  condor's vector, silent since r158, is written from its `manage()`.
+- **The exit engine executes, unchanged.** Nothing in this cut moves a stop.
+  When the stop conversation happens, this row is where it lands: the plan
+  will *compute* the trail instead of reading it, and the exit engine will
+  act on the plan's number.
+
+Hypotheticals M1–M11. One caught a defect before it shipped: a SHORT runaway
+is hurt by a close *above* its stop, and the first draft's direction logic
+would have narrated "<".

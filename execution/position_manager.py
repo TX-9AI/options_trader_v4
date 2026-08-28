@@ -1,5 +1,8 @@
 """
-execution/position_manager.py  v4.4
+execution/position_manager.py  v4.5
+v4.5  2026-08-27  r166: the fetched premium is stamped on the record
+      (`current_premium`) so the management plan reads the same number the
+      exit engine just decided on.
 v4.4  2026-08-27  r161: add_open_position() — append without replacing, for
       the butterfly firing alongside an open vertical.
 v4.3  2026-08-24  r99 — flatten_all HOLDS credit verticals until
@@ -333,6 +336,8 @@ class PositionManager:
             return True
 
         self._trade_logger.update_current_premium(trade_id, current_premium)
+        # r166 — the management plan reads the record, not the DB
+        record["current_premium"] = current_premium
 
         exit_eng = get_exit_engine(self.paper_trading)
         decision = exit_eng.evaluate(record, current_premium, df_1m=df_1m, df_5m=df_5m,

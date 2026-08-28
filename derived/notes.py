@@ -1,5 +1,12 @@
 """
-derived/notes.py  v4.0
+derived/notes.py  v4.1
+v4.1  2026-08-27  r166: a TCS branch in `_specific` (vote, ADX, ORB width over
+      EM, tape) — the trend strategy had no vector and fell to the generic
+      one; and `outcome="manage"` rows written by strategy/management.py for
+      every OPEN position each tick, so exits can be fitted against the
+      vector while the position lived. The condor's VRP/channel-over-EM
+      vector is written from its manage() again (it stopped when r158 took
+      the condor out of _safe_strategy).
 Owns `strategy_note`. What each engine SAW, every time it looked.
 
 v4.0  2026-08-25  Operator: the derived data should "start by informing, but
@@ -169,6 +176,19 @@ class NoteWriter:
                 abs(pin - px) / em if (pin and px and em) else None)
             out["pin_concentration"] = _f(ctx.get("pin_concentration"))
 
+        elif "trend" in s:
+            # r166 — TCS had no vector (fell to the generic one). What its
+            # premise depends on: the vote's strength and whether the range it
+            # sells against is wide relative to the expected move.
+            tr = ctx.get("trend")
+            out["trend_dir"] = str(getattr(tr, "overall_direction", "") or "")
+            out["adx"] = _f(getattr(tr, "primary_adx", None))
+            oh, ol = _f(ctx.get("orb_high")), _f(ctx.get("orb_low"))
+            em = _f(ctx.get("expected_move"))
+            out["orb_width"] = (oh - ol) if (oh and ol) else None
+            out["orb_width_over_em"] = ((oh - ol) / em) if (oh and ol and em) else None
+            if conn is not None:
+                out["tape"] = aggression(conn, self.symbol)
         elif "orb" in s:
             # ⚠️ RECORD ONLY. 96% win / +$30,696 / worst -$16, and the spec is
             # explicit that it worked BECAUSE it consulted nothing. Nothing in

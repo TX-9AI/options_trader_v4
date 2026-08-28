@@ -1,5 +1,13 @@
 """
-main.py  v4.20
+main.py  v4.21
+v4.21 2026-08-27  r166 — THE MANAGEMENT PLAN IS WIRED. After
+      manage_open_position (the exit engine has priced and decided),
+      strategy/management.py writes one row per open record — the strategy's
+      declared exit conditions with their current readings, "if this or this
+      -> out" — and records the r66 derived vector for the open position
+      (strategy_note, outcome "manage"). The condor's manage() receives ctx
+      and writes its own vector again. Nothing executes here; the exit engine
+      is unchanged.
 v4.20 2026-08-27  r163 — THE TINES ARE MOVING LIQUIDITY LEVELS; THE DAILY FORK
       STRATEGY IS RETIRED. Operator, 2026-08-27: a tine is *"basically a
       moving level that sweep is allowed to use, but with a touch, not a
@@ -4072,7 +4080,7 @@ def main_loop(state: BotState):
                 # the two calls below act on the same numbers.
                 try:
                     _iron_condor_strategy.manage(pos_mgr, ctx.get("chain"),
-                                                 ctx["price"], ctx.get("df_1m"))
+                                                 ctx["price"], ctx.get("df_1m"), ctx=ctx)
                 except Exception as _mg_err:                    # noqa: BLE001
                     logger.warning(f"Condor management row failed: {_mg_err}")
                 try:
@@ -4114,6 +4122,15 @@ def main_loop(state: BotState):
                     vol_state=ctx.get("vol"),
                     trend=ctx.get("trend"),   # continuation exhaustion exit
                 )
+                # r166 — THE MANAGEMENT PLAN: after the exit engine has priced
+                # and decided, one row per open record saying what would take
+                # it out on the NEXT tick, plus the r66 vector for the open
+                # position. Narrates only; the exit engine executes.
+                try:
+                    from strategy.management import get_management_plan
+                    get_management_plan().tick(ctx, pos_mgr.get_open_records(), ctx["price"])
+                except Exception as _mp_err:                    # noqa: BLE001
+                    logger.debug("management plan row skipped: %s", _mp_err)
                 # ── A2.2 — the orphan announces itself HERE, once ─────────
                 # This branch is the only code that runs while a condor leg is
                 # open, so it is the only place the "plan did not survive the

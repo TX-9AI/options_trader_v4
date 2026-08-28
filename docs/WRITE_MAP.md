@@ -14,8 +14,8 @@ Regenerated in the land gate; a stale map fails `--check`.
 | table | created by | written by | read by |
 |---|---|---|---|
 | `gate_disposition` | `analysis/gate_report.py` | `analysis/gate_report.py` (insert) | `query.py`, `tests/check_audit_20260823.py` |
-| `plan_check` | `strategy/plan.py` | `strategy/plan.py` (insert) | `tests/check_chain_ordering.py`, `tests/check_plan_prepares.py`, `tests/check_plan_wiring.py` |
-| `plan_tick` | `strategy/plan.py` | `strategy/plan.py` (insert) | `main.py`, `tests/check_butterfly_legs.py`, `tests/check_chain_ordering.py`, `tests/check_plan_prepares.py`, `tests/check_plan_signal.py`, `tests/check_plan_wiring.py` |
+| `plan_check` | `strategy/plan.py` | `strategy/plan.py` (insert) | `tests/check_chain_ordering.py`, `tests/check_management_plan.py`, `tests/check_plan_prepares.py`, `tests/check_plan_wiring.py` |
+| `plan_tick` | `strategy/plan.py` | `strategy/plan.py` (insert) | `main.py`, `tests/check_butterfly_legs.py`, `tests/check_chain_ordering.py`, `tests/check_management_plan.py`, `tests/check_plan_prepares.py`, `tests/check_plan_signal.py`, `tests/check_plan_wiring.py` |
 
 ## derived_store.db
 
@@ -29,7 +29,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `indicator_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | `derived/levels.py`, `query.py` |
 | `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `query.py`, `tests/check_audit_20260823.py`, `tests/check_butterfly_legs.py`, `tests/check_missed_inert.py`, `tests/edge_scan.py` |
-| `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | — |
+| `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | `tests/check_management_plan.py` |
 | `surface_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | `main.py`, `query.py` |
 
 ## feed_store.db
@@ -59,6 +59,6 @@ Regenerated in the land gate; a stale map fails `--check`.
 ## Flags
 
 - **No writer** (0): none
-- **No external reader** (8): `character_axis_sample`, `exit_counterfactual`, `indicator_series`, `last_trade`, `session_summary`, `strategy_note`, `theo_series`, `underlying_series`
+- **No external reader** (7): `character_axis_sample`, `exit_counterfactual`, `indicator_series`, `last_trade`, `session_summary`, `theo_series`, `underlying_series`
 
 ⚠️ *No external reader* is not automatically a defect — a table written today for a study run in a month is exactly the point of the derived layer. It IS a defect when nobody ever intends to read it, and this list is where that question gets asked.
