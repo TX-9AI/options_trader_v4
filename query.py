@@ -1,5 +1,18 @@
 """
-query.py  v4.2
+query.py  v4.3
+v4.3  2026-08-28  r172 — THE DECISIONS PANEL SHOWS TODAY'S SESSION, OR
+      NOTHING. Operator: "Make the decision section only display today's
+      decision, blank before 0930" and "If the box was up for maintenance the
+      night before or even before the session open, don't display those
+      decisions." It showed the newest plan_tick row per strategy WHATEVER ITS
+      AGE — read at 09:16 ET it printed twelve rows from the previous evening,
+      each flagged STALE, in a panel titled "the next tick, as the plans see it
+      now." The cut is the OPEN (09:30 ET), not midnight, so a maintenance wake
+      is excluded too; both the ENTER and EXIT halves are bounded. Asked in ET
+      via ZoneInfo("US/Eastern"), which follows DST — a bare date.today() on a
+      UTC box rolls the day at 20:00 ET. Pinned by tests/check_decisions_today.py
+      (D2 mutation-proven).
+
 v4.2  2026-08-27  r170 — THE DECISIONS PANEL. Operator: *"have query.py
       snapshot active trade decisions 'enter on' and 'exit on' for active
       plans. Trade log & all time performance should stay."* New
@@ -707,11 +720,47 @@ def show_decisions(dc):
     sep("═")
     print("  DECISIONS  (the next tick, as the plans see it now)")
     sep("═")
+    # ── 🔴 TODAY ONLY, AND BLANK BEFORE 09:30 (r172) ─────────────────────
+    # Operator, 2026-08-28: *"Make the decision section only display today's
+    # decision, blank before 0930."*
+    # ⚠️ WHAT IT SHOWED BEFORE: the newest row per strategy, WHATEVER ITS AGE.
+    # At 09:16 that meant twelve rows from YESTERDAY EVENING, every one flagged
+    # STALE — a panel titled "the next tick, as the plans see it now" showing
+    # last night's ticks. Truthful and useless: the ⚠️ made noise the reader
+    # has to filter rather than information they can act on.
+    # ⚠️ 09:30 IS THE OPEN, NOT AN ARBITRARY HOUR. Before the bell no plan has
+    # evaluated anything today, so the honest answer is EMPTY — not stale rows
+    # dressed up with a warning.
+    # ⚠️ ET, NOT THE BOX CLOCK. The boxes run UTC; "today" and "09:30" are
+    # EXCHANGE facts and must be asked in Eastern. `now_et()` and
+    # `_session_start_epoch()` below both do; a bare `date.today()` here would
+    # roll the day at 20:00 ET, which is the operator's own long-standing
+    # symptom ("any time I run a report for today after the session ends it
+    # fails").
+    _now = now_et()
+    _open = _now.replace(hour=9, minute=30, second=0, microsecond=0)
+    if _now < _open:
+        print("  ── ENTER ON ──")
+        print(f"    nothing yet — the session opens at 09:30 ET "
+              f"(now {_now.strftime('%H:%M')})")
+        print("  ── EXIT ON ──")
+        print("    no open positions under management")
+        print()
+        return
+    # ⚠️ THE CUT IS THE OPEN, NOT MIDNIGHT (operator, 2026-08-28: *"If the box
+    # was up for maintenance the night before or even before the session open,
+    # don't display those decisions"*). A 06:00 ET maintenance wake writes real
+    # plan rows against a market that is not trading; showing them in a panel
+    # about "the next tick" is the same lie as showing last night's, just
+    # harder to spot because the date matches.
+    _today0 = _open.timestamp()
     rows = _q(dc, "SELECT strategy, verdict, reason, ts_epoch FROM plan_tick p"
                   " WHERE strategy NOT LIKE '%/manage'"
+                  " AND ts_epoch >= ?"
                   " AND ts_epoch = (SELECT MAX(ts_epoch) FROM plan_tick"
-                  "                 WHERE strategy = p.strategy)"
-                  " ORDER BY strategy")
+                  "                 WHERE strategy = p.strategy"
+                  "                   AND ts_epoch >= ?)"
+                  " ORDER BY strategy", (_today0, _today0))
     if rows is None:
         print("  (plan_tick not present on this box)")
         print(); return
@@ -725,11 +774,15 @@ def show_decisions(dc):
         print(f"    {strat:<22s} {verdict:<8s} {t}{stale}")
         for line in _wrap(reason or "", 88):
             print(f"      {line}")
+    # ⚠️ THE SAME CUT ON THE MANAGE SIDE. A watcher row from yesterday is not
+    # "an open position under management" today.
     mrows = _q(dc, "SELECT strategy, verdict, reason, ts_epoch FROM plan_tick p"
                    " WHERE strategy LIKE '%/manage'"
+                   " AND ts_epoch >= ?"
                    " AND ts_epoch = (SELECT MAX(ts_epoch) FROM plan_tick"
-                   "                 WHERE strategy = p.strategy)"
-                   " ORDER BY strategy")
+                   "                 WHERE strategy = p.strategy"
+                   "                   AND ts_epoch >= ?)"
+                   " ORDER BY strategy", (_today0, _today0))
     print("  ── EXIT ON ──")
     if not mrows:
         print("    no open positions under management")
