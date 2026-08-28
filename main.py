@@ -1,5 +1,8 @@
 """
-main.py  v4.21
+main.py  v4.22
+v4.22 2026-08-27  r167: the narration pass receives the open records so it can
+      skip the ones decide() already wrote for. Nothing else changes here —
+      the decision seam lives in position_manager v4.6.
 v4.21 2026-08-27  r166 — THE MANAGEMENT PLAN IS WIRED. After
       manage_open_position (the exit engine has priced and decided),
       strategy/management.py writes one row per open record — the strategy's
@@ -4128,7 +4131,8 @@ def main_loop(state: BotState):
                 # position. Narrates only; the exit engine executes.
                 try:
                     from strategy.management import get_management_plan
-                    get_management_plan().tick(ctx, pos_mgr.get_open_records(), ctx["price"])
+                    ctx["_open_records"] = pos_mgr.get_open_records()
+                    get_management_plan().tick(ctx, ctx["_open_records"], ctx["price"])
                 except Exception as _mp_err:                    # noqa: BLE001
                     logger.debug("management plan row skipped: %s", _mp_err)
                 # ── A2.2 — the orphan announces itself HERE, once ─────────

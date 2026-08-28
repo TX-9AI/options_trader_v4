@@ -1,5 +1,7 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.12 · 2026-08-27 · r168 — the runaway's 20% floor; the structure stop is ORB's (§17).**
+**v1.11 · 2026-08-27 · r167 — managed exits: the plan decides (§16).**
 **v1.10 · 2026-08-27 · r166 — the management plan (§15).**
 **v1.9 · 2026-08-27 · r165 — the runaway: gamma leverage over the run (§14). The inversion is complete.**
 **v1.8 · 2026-08-27 · r164 — TCS in the §10 shape (§13).**
@@ -654,3 +656,71 @@ The same split as entries, per open record:
 Hypotheticals M1–M11. One caught a defect before it shipped: a SHORT runaway
 is hurt by a close *above* its stop, and the first draft's direction logic
 would have narrated "<".
+
+---
+
+## 16. r167 — managed exits: the plan decides, the engine calculates and executes
+
+Operator, 2026-08-27: *"I'm ready for the managed exits build, if on the next
+tick is this, cut it loose, or roll, or whatever the management is."* With
+the rulings: *"Everything tied to the orb stays. Even the trailing stop armed
+at 50% and the tightening after 100% on the peak. The other variables for the
+other strategies were all good except for the BOS"*; *"We still have the 15%
+floor & the 'breach' stops"*; *"the condor doesn't start managing until both
+legs are in the table. Prior to that a lone credit spread stops out at a 15%
+floor & the level that it sold at is marked 'finished'."*
+
+- **`ManagementPlan.decide()`** returns the intent for the next tick —
+  CLOSE / TRAIL / HOLD — for the records it covers: the runaway, the
+  butterfly, and a sweep or TCS vertical while it stands alone. Order, and it
+  matters: (1) the declared spec conditions read off the record — the 15%
+  floor / hard stop, the breach stops (a 1m close through the ORB boundary,
+  the bound, the pool), the target, the nickel — never outranked; (2) the
+  engine's calculators — the 50% trail, the tightening after 100% on the
+  peak, theta bleed, velocity stall — reached through `evaluate()` and
+  adopted as the plan's own. Every intent is a row before it is an act.
+- **`position_manager` asks the plan first** and executes the intent through
+  the same `_execute_exit` and trail persistence as before. Records the plan
+  does not cover — ORB, ADOPTED, tents, a formed condor — go to the engine
+  exactly as before. **ORB is untouched end to end.**
+- **BOS is retired** from the decision path (measured 34% / 217 / −$7,085).
+  Nothing else the engine did is lost.
+- **A lone credit vertical that stops out finishes its level** for the
+  session — the spent lock now covers every credit vertical (TCS keys on the
+  ORB bound it sold against).
+- Hypotheticals D1–D15: floor → CUT with the calculator never consulted; a
+  close through the boundary → structure stop; the engine's trail adopted;
+  theta bleed adopted; the 15% floor on a lone sweep; acceptance through the
+  pool; the nickel; TCS at +38% against with no premium floor holds, and the
+  breach closes it; two legs → not the plan's; ORB/ADOPTED/tent → never the
+  plan's; the butterfly's target; BOS gone; the seam order; ORB's path intact.
+
+---
+
+## 17. r168 — the runaway's stop is a 20% premium floor; the structure stop is ORB's alone
+
+Operator, 2026-08-27: *"the orb structure stop only applies to the orb. The
+runaway stop is the orb boundary — but I think that's a terrible stop
+location. I would prefer (since it's a debit), a decay or adverse movement
+amounting to a 20% loss — I know that is an odd choice, but I still want the
+15% on credit spreads. The runaway needs room to breathe. A few pullbacks in
+an uptrend are ok."*
+
+Read back from `orb_engine.py` / `exit_engine.py` for the record: the ORB's
+**impulsive candle** opens inside the opening range and closes outside it —
+definitional, no tolerances; its **structure stop** anchors to that candle's
+wick (low for a long, high for a short) and fires only on a 1m close beyond
+it; closing back inside the range is not an invalidation. **That rule is
+ORB's and only ORB's.**
+
+The runaway (`RUNAWAY_MAX_LOSS_PCT` 0.20): no `underlying_stop` on the
+signal, so neither the plan's breach check nor the engine's structure stop
+can fire on price; `stop_loss_pct` 0.20 becomes the record's immutable
+floor; the trail at +50% and the tightening past 100% still apply through
+the calculator. The plan's R prices the risk as 20% of premium against the
+modelled gain over the run. r146–r167 had carried the ORB boundary as the
+runaway's invalidation — retired.
+
+Hypotheticals: D1 the 20% floor cuts; **D2 a 1m close back through the ORB
+boundary with the premium above the floor HOLDS** — the test that would have
+caught the earlier mistake; D2b/D16 pin the split; R2b the signal's shape.

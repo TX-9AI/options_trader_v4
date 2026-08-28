@@ -1,5 +1,9 @@
 """
-database/trade_logger.py  v4.5
+database/trade_logger.py  v4.6
+v4.6  2026-08-27  r167: the spent-level lock on a losing exit covers EVERY
+      lone credit vertical (operator: "a lone credit spread stops out at a
+      15% floor & the level that it sold at is marked finished"); TCS keys
+      on the ORB bound it sold against (underlying_stop) when it has no pool.
 v4.5  2026-08-27  r163: the spent-level lock for a stopped-out trade on a
       MOVING level (a fork tine) is keyed by the level's NAME, not its
       drifting price — the sweep plan reads the same key.
@@ -646,8 +650,15 @@ class TradeLogger:
         try:
             if float(pnl_usd or 0.0) < 0:
                 _strat = self._get_field(trade_id, "strategy") or ""
-                if "Sweep" in _strat:
-                    _pool = self._get_field(trade_id, "pool_price")
+                # r167 — operator: a lone credit spread that stops out marks the
+                # level it sold at FINISHED for the session — "do not sell
+                # another one at that level". Any credit vertical, not only the
+                # sweep: TCS's level is the ORB bound it sold against.
+                _is_cv = bool(self._get_field(trade_id, "is_credit_vertical")) \
+                    or "Sweep" in _strat or "TrendCredit" in _strat
+                if _is_cv:
+                    _pool = self._get_field(trade_id, "pool_price") \
+                        or self._get_field(trade_id, "underlying_stop")
                     _side = self._get_field(trade_id, "option_side") or ""
                     _sym  = self._get_field(trade_id, "symbol") or ""
                     # r163 — a MOVING level (a fork tine) is keyed by NAME, since

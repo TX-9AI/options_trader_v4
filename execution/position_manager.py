@@ -1,5 +1,10 @@
 """
-execution/position_manager.py  v4.5
+execution/position_manager.py  v4.6
+v4.6  2026-08-27  r167: manage_open_position asks strategy/management.py's
+      decide() first; for a covered record its intent (CLOSE / TRAIL / HOLD)
+      is executed through the same _execute_exit and trail persistence as
+      before. Uncovered records (ORB, ADOPTED, tents, formed condors) go to
+      exit_engine.evaluate() exactly as before.
 v4.5  2026-08-27  r166: the fetched premium is stamped on the record
       (`current_premium`) so the management plan reads the same number the
       exit engine just decided on.
@@ -340,8 +345,31 @@ class PositionManager:
         record["current_premium"] = current_premium
 
         exit_eng = get_exit_engine(self.paper_trading)
-        decision = exit_eng.evaluate(record, current_premium, df_1m=df_1m, df_5m=df_5m,
-                                     vol_state=vol_state, trend=trend)
+        # ── r167 — THE MANAGEMENT PLAN DECIDES FIRST for the records it covers
+        # (runaway, butterfly, a lone sweep/TCS vertical). It asserts the
+        # declared spec conditions itself (15% floor / hard stop, the breach
+        # stops, target, nickel) and reaches the engine's calculators (50%
+        # trail, tightening after 100%, theta bleed, velocity stall) through
+        # evaluate(); its intent is executed below by the SAME _execute_exit.
+        # ORB, ADOPTED, tents and formed condors: the engine decides as ever.
+        decision = None
+        try:
+            from strategy.management import get_management_plan
+            _intent = get_management_plan().decide(
+                record, current_premium, df_1m=df_1m, open_records=self._open_records,
+                current_price=record.get("current_price"),
+                ctx={"df_5m": df_5m, "vol": vol_state, "trend": trend,
+                     "derived_engines": getattr(self, "_derived_engines", None) or []},
+                exit_engine=exit_eng)
+            if _intent is not None:
+                decision = _intent.to_exit_decision()
+        except Exception as _mp_err:                            # noqa: BLE001
+            logger.warning(f"management plan decide() failed for {trade_id[:8]}: "
+                           f"{_mp_err} — the exit engine decides")
+            decision = None
+        if decision is None:
+            decision = exit_eng.evaluate(record, current_premium, df_1m=df_1m, df_5m=df_5m,
+                                         vol_state=vol_state, trend=trend)
 
         if decision.new_trail_stop is not None:
             # v3.1: trail persists in its OWN column. stop_premium is the

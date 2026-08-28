@@ -1,5 +1,18 @@
 """
-strategy/runaway_continuation.py  v4.4
+strategy/runaway_continuation.py  v4.5
+v4.5  2026-08-27  r168 — THE RUNAWAY HAS NO UNDERLYING STOP. Operator,
+      2026-08-27: *"the orb structure stop only applies to the orb. The
+      runaway stop is the orb boundary — but I think that's a terrible stop
+      location. I would prefer (since it's a debit), a decay or adverse
+      movement amounting to a 20% loss … The runaway needs room to breathe.
+      A few pullbacks in an uptrend are ok."* The floor is a 20% PREMIUM
+      loss (RUNAWAY_MAX_LOSS_PCT, via signal.stop_loss_pct -> the record's
+      immutable stop_premium); `underlying_stop` is NOT set, so neither the
+      management plan's breach check nor the engine's structure stop can
+      fire on price. r146-r167 had carried the ORB boundary as the
+      invalidation — the rule the operator just retired. The plan's R now
+      prices the RISK as that 20% of premium against the modelled gain over
+      the run; the ORB boundary remains the origin the run is measured from.
 v4.4  2026-08-27  r165 — THE PLAN PREPARES, GAMMA DOES THE HEAVY LIFTING, THE
       STRATEGY BUYS. Operator, 2026-08-27: *"the symbol did not even
       entertain coming back for a retest, it just broke out & ran. We want in
@@ -318,7 +331,8 @@ class _RunawayPreparation:
                 f"δ {abs(float(getattr(c, 'delta', 0) or 0)):.2f} γ "
                 f"{float(getattr(c, 'gamma', 0) or 0):.3f}  over a {self.run:.2f} run "
                 f"-> {self.leverage:.2f}x leverage ({self.considered} strikes considered)  "
-                f"stop {self.boundary:.2f} (ORB)  R {_n(self.r)}")
+                f"floor {self.premium * (1 - RunawayContinuationStrategy.MAX_LOSS_PCT):.2f} "
+                f"(-{RunawayContinuationStrategy.MAX_LOSS_PCT:.0%} premium, no price stop)  R {_n(self.r)}")
 
 
 class RunawayContinuationStrategy:
@@ -338,6 +352,8 @@ class RunawayContinuationStrategy:
     """
     name = "RunawayContinuation"
 
+    MAX_LOSS_PCT = float(getattr(config, "RUNAWAY_MAX_LOSS_PCT", 0.20))
+
     CONDITIONS = {
         "entry_window":      f"before the debit cutoff {CUTOFF_ET} ET (relaxed to 14:00)",
         "atr_pct":           f"ATR >= {ATR_FLOOR_PCT:.2f}% — a move this tape can pay",
@@ -346,7 +362,7 @@ class RunawayContinuationStrategy:
     }
     STRUCTURAL = ("contract", "stop_distance", "r")
     PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + (
-        "price", "run", "leverage", "considered", "debit", "delta",
+        "price", "run", "leverage", "considered", "debit", "stop_premium",
         "target_distance")
 
     def __init__(self):
@@ -408,7 +424,8 @@ class RunawayContinuationStrategy:
             t.starved(*miss)
             return prep
         prep.tp50, prep.boundary = float(tp50), float(boundary)
-        t.anchor(trigger=prep.tp50, invalidation=prep.boundary)
+        # trigger = the 50% TP; NO price invalidation — the floor is premium
+        t.anchor(trigger=prep.tp50)
         confirmed = runaway_confirmed(orb, price_now, prev_close, direction)
         prep.cond("runaway_confirmed", 1.0 if confirmed else 0.0,
                   f"1m close beyond the 50% TP {prep.tp50:.2f} and still beyond now "
@@ -436,8 +453,18 @@ class RunawayContinuationStrategy:
                 prem = float(getattr(c, "ask", 0) or getattr(c, "mark", 0) or 0)
                 t.check("contract", c.strike, True)
                 t.check("leverage", lev, lev > 0)
-                t.debit_directional(prem, getattr(c, "delta", 0.0), getattr(c, "gamma", 0.0),
-                                    run, run, invalidation=prep.boundary, trigger=prep.tp50)
+                # R = modelled gain over the run / the 20% premium floor. The
+                # stop is on PREMIUM, so the risk is exactly that fraction.
+                d_ = abs(float(getattr(c, "delta", 0) or 0)); g_ = float(getattr(c, "gamma", 0) or 0)
+                gain = d_ * run + 0.5 * g_ * run * run
+                risk = prem * self.MAX_LOSS_PCT
+                t.debit = prem
+                t.reward, t.risk = round(gain, 4), round(risk, 4)
+                t.r = round(gain / risk, 4) if risk > 0 else None
+                t.check("debit", prem, True)
+                t.check("stop_premium", round(prem * (1 - self.MAX_LOSS_PCT), 4), None)
+                t.check("target_distance", run, run > 0)
+                t.check("r", t.r, None)
                 ok, why = t.executable()          # strict vetoes R; relaxed records
                 if not ok:
                     prep.structural.append(("r", why))
@@ -482,9 +509,10 @@ class RunawayContinuationStrategy:
             direction=prep.direction,
             option_side=prep.side,
             underlying_entry=price_now,
-            underlying_stop=prep.boundary,
+            # NO underlying_stop (r168): the floor is the 20% premium loss
             underlying_target=(price_now + prep.run if prep.direction == "long"
                                else price_now - prep.run),
+            stop_loss_pct=self.MAX_LOSS_PCT,
             orb_range_high=getattr(orb, "orb_high", 0.0),
             orb_range_low=getattr(orb, "orb_low", 0.0),
             strike=c.strike,

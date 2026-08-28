@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_wiring.py  v1.2  (2026-08-27)
+tests/check_plan_wiring.py  v1.3  (2026-08-27)
+v1.3  r168: W9b re-pinned — the runaway carries no price invalidation.
 v1.2  r160: W2 accepts `self.prepare(` as the plan entry (the sweep's
       generate_signal delegates to its plan and executes what it prepared).
 v1.1  r147: W2 ignores returns inside nested helper functions (the
@@ -258,8 +259,10 @@ def main():
                             prev_close=101.55, now_et="10:15", chain=_Chain())
     row7 = st.conn.execute("SELECT verdict, r_now, invalidation FROM plan_tick WHERE "
                            "strategy='RunawayContinuation' AND ts_epoch=1007.0").fetchone()
-    check("W9b runaway with a chain writes a row with R and the ORB boundary as invalidation",
-          row7 is not None and row7[1] is not None and row7[2] == 101.0, str(row7))
+    # r168: the runaway has NO price invalidation — its floor is a 20% premium
+    # loss — so the row carries R and a NULL invalidation.
+    check("W9b runaway with a chain writes a row with R and NO price invalidation (r168)",
+          row7 is not None and row7[1] is not None and row7[2] is None, str(row7))
     check("W9c the signal (if fired) is VALID — strike, premium, contract resolved",
           r1 is None or r1.is_valid,
           "strict refused on R" if r1 is None else f"strike={r1.strike} prem={r1.entry_premium}")

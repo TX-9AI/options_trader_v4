@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 tests/check_plan_prepares.py  v1.4  (2026-08-27)
+v1.5  r168: R2b — the runaway carries no underlying stop; a 20% premium floor.
 v1.4  r165: R1-R8 — the runaway: contract prepared before the TP confirms;
       the buy on confirmation; the gamma-leverage pick is the best strike
       REACHABLE within the run (102 on a 0.90 run, 103 on a 1.90 run); the
@@ -566,6 +567,13 @@ def main():
     check("R2 close beyond the 50% TP and holding -> BUYS the plan's contract, valid",
           sig is not None and sig.is_valid and sig.option_side == "call"
           and getattr(sig, "disarms_retest", False) and r51 and r51[0] == "TAKE", str(r51))
+    check("R2b (r168) the runaway carries NO underlying stop and a 20% premium floor — "
+          "the ORB boundary is not its stop",
+          sig is not None and not getattr(sig, "underlying_stop", 0)
+          and abs(sig.stop_loss_pct - 0.20) < 1e-9
+          and abs(sig.stop_premium() - sig.entry_premium * 0.80) < 1e-9
+          and "no price stop" in (r51[1] or ""),
+          f"underlying_stop={getattr(sig, 'underlying_stop', None)} floor={sig and sig.stop_premium():.2f}")
     # Raw leverage-per-dollar always crowns the cheapest far-OTM ticket (here
     # the 105/106). "Just enough OTM" is the reachability band — strikes
     # within the run — and inside it the 102 wins. The band is the discipline.

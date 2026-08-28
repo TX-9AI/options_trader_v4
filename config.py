@@ -1,5 +1,8 @@
 """
-config.py  v4.6
+config.py  v4.7
+v4.7  2026-08-27  r168: RUNAWAY_MAX_LOSS_PCT 0.20 — the runaway's floor is a
+      20% premium loss (decay or adverse move), no underlying stop; the ORB
+      structure stop is ORB's alone; credit spreads keep 15%.
 v4.6  2026-08-26  r147: GEX_BUTTERFLY_ENABLED (default ON, OT_GEX_BUTTERFLY=0
       parks it) and GEX_BFLY_WING_EM_FRAC ⟨PRIOR⟩ 0.25 — the pin butterfly is
       unparked by operator instruction; wing width as a fraction of the
@@ -564,6 +567,11 @@ DAILY_LOSS_LIMIT_USD = float(os.environ.get("OT_DAILY_LOSS_LIMIT", str(RISK_PER_
 # One floored $1000 position now costs ~$250 (was ~$400) — revisit
 # OT_DAILY_LOSS_LIMIT with that in mind.
 MAX_LOSS_PCT        = float(os.environ.get("OT_MAX_LOSS_PCT", "0.25"))
+# r168 — THE RUNAWAY'S FLOOR. Operator, 2026-08-27: the ORB boundary is "a
+# terrible stop location … I would prefer (since it's a debit), a decay or
+# adverse movement amounting to a 20% loss … The runaway needs room to breathe.
+# A few pullbacks in an uptrend are ok." No underlying stop on the runaway.
+RUNAWAY_MAX_LOSS_PCT = float(os.environ.get("OT_RUNAWAY_MAX_LOSS_PCT", "0.20"))
 
 # ── 🔴 r121 — SIZE ON RISK-TO-STOP, NOT ON PREMIUM ───────────────────────────
 # Operator, 2026-08-25, reading CVX's card: "it's not 'risking' the correct

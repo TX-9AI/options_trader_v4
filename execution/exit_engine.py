@@ -1,5 +1,13 @@
 """
-execution/exit_engine.py  v4.6
+execution/exit_engine.py  v4.7
+v4.7  2026-08-27  r167: BOS EXIT RETIRED from the decision path (operator:
+      "overall a loser"; measured 34% / 217 / -$7,085). The only live site was
+      step 4 of _evaluate_sweep, the default route for every non-ORB debit.
+      Everything else — the 50% trail, the post-target tightening off the
+      peak, theta bleed, velocity stall — STAYS, and for the non-ORB
+      strategies is now reached through strategy/management.py's decide(),
+      which owns the decision and writes the row; this engine remains the
+      calculator and the executor. ORB is untouched end to end.
 v4.6  2026-08-24  r105 THE EXIT LADDER, per TRADES.md §6. Structural and
       profit-side closes WALK (25% in from best, one increment toward mark,
       ratcheted, never worse than mark); the 15% FLOOR goes straight to MARK and
@@ -1381,14 +1389,12 @@ class ExitEngine:
                 decision.new_trail_stop = trail_stop
             return decision
 
-        # 4. BOS EXIT \u2014 only once premium is positive (don\'t BOS out of a
-        #    healthy retest that hasn\'t moved yet)
-        if df_1m is not None and pnl_pct > 0:
-            tracker = self._get_bos_tracker(trade_id, direction, entry_prem)
-            if tracker.update(df_1m):
-                decision.should_exit = True
-                decision.exit_reason = f"bos_exit pnl={pnl_pct:.1%}"
-                return decision
+        # 4. BOS EXIT \u2014 RETIRED (r167). Operator, 2026-08-27: *"The other
+        #    variables for the other strategies were all good except for the
+        #    BOS. I believe that one was overall a loser."* Measured: 34% /
+        #    217 trades / -$7,085 with the largest single loss in the v3 book
+        #    (TRADES.md). The tracker class stays for the counterfactual
+        #    recorder; nothing here may close a trade on it.
 
         # 4b. THETA BLEED \u2014 profitable but time is about to eat the gain
         if self._theta_bleed(record, current_premium, pnl_pct):
