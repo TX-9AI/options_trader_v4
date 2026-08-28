@@ -1,5 +1,13 @@
 """
-strategy/gex_pin_butterfly.py  v4.4
+strategy/gex_pin_butterfly.py  v4.5
+v4.5  2026-08-29  r178 — 🔴 ONE BUTTERFLY PER PIN PER SESSION. The hour
+      r177 unblocked the starved atm_iv, the strategy fired the SAME UNH
+      397.5 fly five times in ninety seconds: the additive exemption (r161)
+      let it stack ITSELF and it had no self-lock — it had never once fired
+      to need one. PLAYED_PINS registry: a fire marks the pin played (from
+      the dispatch, on the signal's pin); prepare() declines a played pin
+      STRUCTURALLY (relaxed does not waive it), checked before the
+      conditions. A NEW pin is a new trade. In-process; a restart clears it.
 v4.4  2026-08-27  r161 — THE PLAN PREPARES, THE STRATEGY EXECUTES; EXEMPT FROM
       THE SINGLE-POSITION RULE. Operator, 2026-08-27: *"I want it to be able
       to fire regardless if any other open trades are found. Reason: it has
@@ -307,7 +315,7 @@ class GEXPinButterflyStrategy:
         "expected_move":     "an expected move from the chain's ATM IV (no fallback)",
         "pin_em_fraction":   f"pin at {EM_MIN_FRAC:.0%}-{EM_MAX_FRAC:.0%} of the expected move (relaxed x1.3)",
     }
-    STRUCTURAL = ("legs", "debit", "r")
+    STRUCTURAL = ("legs", "debit", "r", "pin_played")
     PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + ("gex", "wing_width", "width", "debit_pct_width")
 
     def __init__(self):
@@ -316,6 +324,24 @@ class GEXPinButterflyStrategy:
     # ══════════════════════════════════════════════════════════════════════
     # THE PLAN — evaluates the declared conditions, SELECTS the three legs.
     # ══════════════════════════════════════════════════════════════════════
+    # ── ONE BUTTERFLY PER PIN PER SESSION (r178) ──────────────────────────
+    # 2026-08-28 15:00-15:01: r177 unblocked the starved atm_iv, every
+    # condition was genuinely true on UNH's pin, and the strategy fired the
+    # SAME 397.5 fly five times in ninety seconds — the additive exemption
+    # (r161) let it stack ITSELF, and it had no self-lock because it had
+    # never once fired to need one. Same failure class as the runaway
+    # re-arm; same doctrine as the fix: a fired pin is PLAYED for the
+    # session. A NEW pin (GEX migrates the magnet) is a new trade.
+    # In-process registry; a restart clears it, recorded as acceptable.
+    PLAYED_PINS: set = set()
+
+    @classmethod
+    def mark_pin_played(cls, pin) -> None:
+        try:
+            cls.PLAYED_PINS.add(round(float(pin), 2))
+        except (TypeError, ValueError):
+            pass
+
     def prepare(self, *, gex, price_now, now_et, atm_iv=None, chain=None,
                 **_ignored) -> ButterflyPreparation:
         t = self.planner.tick(price_now)
@@ -343,6 +369,15 @@ class GEXPinButterflyStrategy:
         conc = float(getattr(gex, "pin_concentration", 0.0) or 0.0)
         pin = float(getattr(gex, "pin_strike", 0.0) or 0.0)
         prep.pin, prep.conc = pin, conc
+        # r178 — a played pin is a structural DECLINE; relaxed does not waive
+        # it, and it is checked BEFORE the conditions so the row names it
+        # first (a stacked structure corrupts the sample worse than a missed
+        # one). The magnet moving to a new strike is a new trade.
+        if pin and round(pin, 2) in self.PLAYED_PINS:
+            prep.structural.append(("pin_played",
+                f"pin {pin:g} already has a butterfly this session — one "
+                f"structure per pin; a NEW pin is a new trade"))
+            t.check("pin_played", pin, False)
         pinning = env == "PINNING" and pin > 0
         prep.cond("pinning", pin or None, f"PINNING (now {env or 'unknown'})", pinning)
         _conc_min = relaxed.widen(PIN_CONC_MIN, 0.6, floor=0.10, name="pin_conc_min")
@@ -460,6 +495,9 @@ class GEXPinButterflyStrategy:
             net_debit=round(prep.debit, 4),
             max_profit=round(prep.width - prep.debit, 4),
             strike=float(prep.center.strike),
+            # r178: the pin rides the signal so the fire can mark it PLAYED
+            # by the same key prepare() checks
+
             expiry=getattr(prep.center, "expiry", ""),
             entry_premium=round(prep.debit, 4),
             contract=prep.center,
@@ -470,6 +508,7 @@ class GEXPinButterflyStrategy:
         sig.expected_move = round(prep.em, 4)
         sig.pin_em_fraction = round(prep.frac, 4)
         sig.pin_distance = round(abs(prep.pin - float(price_now)), 4)
+        sig.pin_strike = prep.pin          # r178: the mark's key == the plan's key
         relaxed.tag(sig)
         logger.info("[gex_bfly] FIRE  %s  pin conc %.2f  spot %.2f",
                     prep.trade_line(), prep.conc, float(price_now))

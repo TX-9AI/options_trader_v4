@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.19 · 2026-08-29 · r178 — 🔴 one butterfly per pin per session (§24).**
 **v1.18 · 2026-08-29 · r177 — the butterfly's starved atm_iv; the tick_id join key (§23).**
 **v1.17 · 2026-08-29 · r176 — the cutoff does not relax; the drift reads the vote's clock (§22).**
 **v1.16 · 2026-08-28 · r175 — TCS prices its premise: pop_drift (§21).**
@@ -896,3 +897,24 @@ the criteria is even possible to satisfy or if it's just too strict."*
   before the first fit.
 
 check_tick_join.py, born red at 7f60245: A1–A3b, J1–J2.
+
+---
+
+## 24. r178 — 🔴 hotfix: one butterfly per pin per session
+
+2026-08-28 15:00–15:01: the hour r177 unblocked the starved atm_iv, every
+condition was genuinely true on UNH's pin and the strategy fired the SAME
+397.5 fly five times in ninety seconds. The additive exemption (r161) let
+it stack ITSELF, and it had no self-lock — it had never once fired to need
+one. Same failure class as the runaway re-arm; same doctrine as that fix.
+
+- `PLAYED_PINS` registry on the strategy: the dispatch marks the pin AFTER
+  `_execute_entry_signal` (a refused fire does not burn the pin), keyed by
+  the `pin_strike` the signal now carries — the same key `prepare()`
+  checks. A played pin is a **structural DECLINE**, checked before the
+  conditions; relaxed does not waive it. A NEW pin (the magnet migrates) is
+  a new trade. In-process; a restart clears it, recorded as acceptable.
+- Hypotheticals B10–B13 — the **tick after the TAKE**, which is now a
+  standard question for every strategy: identical conditions next tick →
+  DECLINE `pin_played`; the migrated pin prepares; the fire site marks
+  after execution.

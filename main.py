@@ -1,5 +1,8 @@
 """
-main.py  v4.23
+main.py  v4.24
+v4.24  2026-08-29  r178: a butterfly fire marks its pin PLAYED (one
+      butterfly per pin per session — the 08-28 15:00 stack). Marked after
+      _execute_entry_signal so a refused fire does not burn the pin.
 v4.23 2026-08-28  r173 — 🔴 HOTFIX: THE FLEET-WIDE ZERO-TRADE MORNING.
       _execute_entry_signal read `signal.stop_premium` with getattr+float;
       that name is a METHOD on OptionsSignal, shadowed by strategies that
@@ -3453,6 +3456,16 @@ def _attempt_butterfly(ctx, ms, state, *, additive: bool) -> None:
                                     atm_iv=_atm_iv, chain=chain), ctx)
         if bf_sig is not None:
             _execute_entry_signal(bf_sig, ctx, ms, state, None, additive=additive)
+            # r178 — the fired pin is PLAYED for the session (one butterfly
+            # per pin; the 2026-08-28 15:00 five-in-ninety-seconds stack).
+            # Marked AFTER execution so a refused/zero-sized fire does not
+            # burn the pin.
+            try:
+                from strategy.gex_pin_butterfly import GEXPinButterflyStrategy as _BF
+                _BF.mark_pin_played(getattr(bf_sig, "pin_strike", None)
+                                    or getattr(bf_sig, "strike", None))
+            except Exception as _pp_err:                        # noqa: BLE001
+                logger.warning("pin-played mark failed: %s", _pp_err)
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("Butterfly attempt failed: %s", exc)
 

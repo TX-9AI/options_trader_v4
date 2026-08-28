@@ -732,6 +732,34 @@ def main():
           "NEGATIVE (~-0.5/bar), read over the horizon window, not since the open",
           c44 is not None and c44[0] is not None and -0.6 < c44[0] < -0.35, str(c44))
 
+    # ── r178 — THE TICK AFTER THE TAKE (the 08-28 15:00 stack) ───────────
+    import strategy.gex_pin_butterfly as bfmod
+    bfmod.GEXPinButterflyStrategy.PLAYED_PINS.clear()
+    P.begin_tick(60.0)
+    sigB = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_good), **bcommon)
+    check("B10 (r178) the pin fires once — the baseline TAKE",
+          sigB is not None and getattr(sigB, "pin_strike", None) == 101.0,
+          f"pin={sigB and getattr(sigB, 'pin_strike', None)}")
+    bfmod.GEXPinButterflyStrategy.mark_pin_played(sigB.pin_strike)
+    P.begin_tick(61.0)
+    sigB2 = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_good), **bcommon)
+    r61b = _row(st, "GEXPinButterfly", 61.0)
+    check("B11 (r178) the NEXT TICK with identical conditions -> structural DECLINE "
+          "pin_played; no second fly on the same magnet, relaxed does not waive it",
+          sigB2 is None and r61b and r61b[0] == "DECLINE" and "already has a butterfly" in r61b[1],
+          str(r61b))
+    P.begin_tick(62.0)
+    sigB3 = B.generate_signal(gex=_GEX(pin=102.0), chain=_Chain([], calls_good), **bcommon)
+    check("B12 (r178) the magnet migrates to a NEW pin -> a new trade is allowed to prepare",
+          (sigB3 is not None) or (_row(st, "GEXPinButterfly", 62.0)
+                                  and _row(st, "GEXPinButterfly", 62.0)[0] in ("HOLD", "TAKE")),
+          str(_row(st, "GEXPinButterfly", 62.0)))
+    msrc2 = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
+    check("B13 (r178) the fire site marks the pin played AFTER execution",
+          "mark_pin_played" in msrc2
+          and msrc2.index("_execute_entry_signal(bf_sig") < msrc2.index("mark_pin_played"))
+    bfmod.GEXPinButterflyStrategy.PLAYED_PINS.clear()
+
     print()
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))
