@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.2  (2026-08-27)
+tests/check_plan_prepares.py  v1.3  (2026-08-27)
+v1.3  r164: C1-C6 — TCS: a weak ADX holds with the put spread prepared; a
+      strong vote fires the plan's 350/347.5; price back inside the range
+      holds; a NEUTRAL vote has no side to prepare; no wing clears R declines;
+      09:50 is dormant.
 v1.2  r163: T1-T7 — the tine as a MOVING level: a touch is found against the
       rail where it WAS (slope x time), not where it is now; a falling rail
       the high never reached is no touch; acceptance invalidates; the sweep's
@@ -447,6 +451,76 @@ def main():
     check("T7 a stopped-out tine stays SPENT by name although its price has moved",
           sig7 is None and rt7 and rt7[0] == "DECLINE" and "spent_level" in rt7[1], str(rt7))
     sw._SPENT.clear()
+
+    # ── TCS (r164) — the plan prepares off the ORB bound; the vote fires it ──
+    import strategy.trend_credit_spread as tcs
+    tcs.TREND_CREDIT_ACTIVE = True
+    TC = tcs.TrendCreditSpread(); TC.planner.symbol = "TST"
+    from datetime import datetime as _dt
+    _noon = tcs.ET.localize(_dt(2026, 8, 27, 12, 0))
+
+    class _Trend:
+        def __init__(self, d, adx=30.0): self.overall_direction, self.primary_adx = d, adx
+
+    class _Vol:
+        atr_current = 0.8
+
+    # opening range 349.20-351.88; a BULLISH vote sells a PUT spread off the
+    # ORB high with the short at the first strike INSIDE the range from the top
+    # (350) — a fat 350 put vs a cheap 347.5 wing clears R.
+    puts_tcs = [_C(k, m - 0.02, m + 0.02) for k, m in
+                ((352.5, 4.20), (350, 1.60), (347.5, 0.30), (345, 0.10), (342.5, 0.04))]
+    tcommon = dict(ms=None, vol_state=_Vol(), macro=None, orb_high=351.88, orb_low=349.20,
+                   now_et=_noon)
+    P.begin_tick(40.0)
+    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=354.0,
+                             trend=_Trend("BULLISH", adx=18.0), **tcommon)
+    r40 = _row(st, "TrendCreditSpread", 40.0)
+    check("C1 BULLISH but ADX 18 < floor -> HOLD with the put spread PREPARED, waiting on adx",
+          sig is None and r40 and r40[0] == "HOLD" and "PREPARED" in r40[1]
+          and "sell 350P" in r40[1] and "adx=18" in r40[1], str(r40))
+    P.begin_tick(41.0)
+    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=354.0,
+                             trend=_Trend("BULLISH", adx=30.0), **tcommon)
+    r41 = _row(st, "TrendCreditSpread", 41.0)
+    check("C2 BULLISH, ADX 30, price above the range -> fires the plan's 350/347.5 put spread",
+          sig is not None and sig.is_valid and sig.option_side == "put"
+          and sig.short_put_contract.strike == 350.0 and sig.long_put_contract.strike == 347.5
+          and sig.is_trend_credit and r41 and r41[0] == "TAKE", f"{r41}")
+    P.begin_tick(42.0)
+    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=350.9,
+                             trend=_Trend("BULLISH", adx=30.0), **tcommon)
+    r42 = _row(st, "TrendCreditSpread", 42.0)
+    c42 = st.conn.execute("SELECT value, verdict FROM plan_check WHERE strategy='TrendCreditSpread' "
+                          "AND ts_epoch=42.0 AND check_name='outside_range'").fetchone()
+    # price 0.9 above the short also sinks POP below its floor, and the plan
+    # reports the STRUCTURAL fault first (a trade it could not build outranks
+    # a trigger that has not fired) — but the condition is still evaluated
+    # and recorded as FAIL on the same tick.
+    check("C3 price back INSIDE the range -> no fire; outside_range recorded FAIL; the "
+          "structural POP fault is reported first",
+          sig is None and r42 and r42[0] == "DECLINE" and "pop" in r42[1]
+          and c42 and c42[1] == "FAIL" and c42[0] < 0, f"{r42} outside_range={c42}")
+    P.begin_tick(43.0)
+    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=354.0,
+                             trend=_Trend("NEUTRAL", adx=30.0), **tcommon)
+    r43 = _row(st, "TrendCreditSpread", 43.0)
+    check("C4 NEUTRAL vote -> HOLD, no side to prepare, waiting on a directional vote",
+          sig is None and r43 and r43[0] == "HOLD" and "no side to prepare" in r43[1], str(r43))
+    puts_poor = [_C(k, m - 0.02, m + 0.02) for k, m in
+                 ((352.5, 4.20), (350, 0.60), (347.5, 0.30), (345, 0.20), (342.5, 0.12))]
+    P.begin_tick(44.0)
+    sig = TC.generate_signal(chain=_Chain(puts_poor), current_price=354.0,
+                             trend=_Trend("BULLISH", adx=30.0), **tcommon)
+    r44 = _row(st, "TrendCreditSpread", 44.0)
+    check("C5 vote true but no wing clears R -> DECLINE wing_r_best (structural)",
+          sig is None and r44 and r44[0] == "DECLINE" and "wing_r_best" in r44[1], str(r44))
+    P.begin_tick(45.0)
+    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=354.0,
+                             trend=_Trend("BULLISH", adx=30.0),
+                             **{**tcommon, "now_et": tcs.ET.localize(_dt(2026, 8, 27, 9, 50))})
+    r45 = _row(st, "TrendCreditSpread", 45.0)
+    check("C6 09:50 -> DORMANT", sig is None and r45 and r45[0] == "DORMANT", str(r45))
 
     print()
     if _fails:

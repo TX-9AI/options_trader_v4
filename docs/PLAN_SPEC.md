@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.8 · 2026-08-27 · r164 — TCS in the §10 shape (§13).**
 **v1.7 · 2026-08-27 · r163 — a tine is a moving liquidity level; a touch is its event (§12).**
 **v1.6 · 2026-08-27 · r161 — the butterfly earns its entry (§11).**
 **v1.5 · 2026-08-27 · r160 — the plan is anticipatory, the strategy confirmatory; the condor authorizes and manages. §10 supersedes §8 where they differ.**
@@ -555,3 +556,21 @@ touch not identical to sweep which requires rejection."*
   stopped-out tine stays spent by name after its price has moved. Two
   hypotheticals were wrong before the code was — both pricing a wing that
   could not clear R≥1 — and the plan refused them.
+
+---
+
+## 13. r164 — TCS in the §10 shape
+
+`TrendCreditSpread.prepare()` is the plan: dormant outside TCS_START_ET–
+TCS_ENTRY_END_ET; each declared condition with its reading (active, window,
+no condor plan, directional vote, ADX floor, price still outside the range
+on the trend side); the spread SELECTED — short at the first strike inside
+the opening range from the trend side, wing searched to `R_FLOOR`, bid/ask
+credit, POP, EV margin, nickel floor; exit stays BREACH-or-nickel (no premium
+stop, so `stop_survivable` does not apply). `generate_signal()` executes it.
+The muteable R hurdle is gone from TCS — `wing_r_best` refuses structurally.
+When the vote is not directional there is no side to prepare, and the row
+says so. When a structural fault and an unmet condition coincide, the
+structural fault is reported first (a trade the plan could not build
+outranks a trigger that has not fired); the condition is still recorded.
+Hypotheticals C1–C6.

@@ -444,7 +444,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/trend_credit_spread.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`, `strategy/plan.py`
-- **called by:** `main.py`, `tests/check_entry_windows.py`
+- **called by:** `main.py`, `tests/check_entry_windows.py`, `tests/check_plan_prepares.py`
 
 ### `stress_theta_bleed.py`
 - **calls:** `config.py`, `execution/exit_engine.py`
@@ -607,7 +607,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_plan_prepares.py`
-- **calls:** `analysis/liquidity_mapper.py`, `execution/position_manager.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/sweep_credit_spread.py`
+- **calls:** `analysis/liquidity_mapper.py`, `execution/position_manager.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_plan_signal.py`

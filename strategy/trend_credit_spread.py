@@ -1,5 +1,20 @@
 """
-strategy/trend_credit_spread.py  v4.3
+strategy/trend_credit_spread.py  v4.5
+v4.5  2026-08-27  r164 — THE PLAN PREPARES, THE STRATEGY EXECUTES WITH THE
+      PLAN'S VARIABLES (the sweep's v4.6 shape). `prepare()` is the plan: in
+      the slot, every tick, it evaluates each declared CONDITION with its
+      reading (active, window, no condor plan, directional vote, ADX, price
+      still outside the range), SELECTS the short at the first strike inside
+      the opening range, the wing searched to R_FLOOR, the bid/ask credit,
+      POP, EV and the nickel floor, and writes DORMANT / NO PLAN / DECLINE
+      (structural) / HOLD "PREPARED — <trade>. Waiting on: <conditions>" /
+      TAKE. `generate_signal()` executes the prepared spread and touches no
+      chain. The muteable `t.executable()` R hurdle is gone — R is a
+      construction target inside search_wing (r157) and wing_r_best refuses
+      structurally; calling both let relaxed re-decide a structural fact.
+v4.4  2026-08-27  r153/r157 (RECORDED RETROACTIVELY in r164 — changed with no
+      title bump and no entry): out-of-window ticks go DORMANT (r153); the
+      wing is searched to R_FLOOR via credit_vertical.search_wing (r157).
 v4.3  2026-08-26  r146 — THE PLAN IS WIRED. This strategy had ZERO `_gate()`
       call sites and fourteen `return None`s, each with a good log line that
       never left the log. Every one now goes through `self.planner`
@@ -161,17 +176,42 @@ GATES = {}
 ET = pytz.timezone("US/Eastern")
 
 
+class _TCSPreparation:
+    """What the plan hands the strategy each tick of the slot — never executable."""
+    __slots__ = ("tick", "side", "direction", "bound", "short", "long", "credit",
+                 "width", "pop", "r", "bars", "conditions", "unmet", "structural",
+                 "starved", "ready")
+
+    def __init__(self, tick):
+        self.tick = tick
+        self.side = self.direction = ""
+        self.bound = None
+        self.short = self.long = None
+        self.credit = self.width = self.pop = self.r = None
+        self.bars = 0.0
+        self.conditions, self.unmet, self.structural, self.starved = {}, [], [], []
+        self.ready = False
+
+    def cond(self, name, current, required, met):
+        self.conditions[name] = (current, required, bool(met))
+        if not met:
+            self.unmet.append(name)
+        self.tick.check(name, current if isinstance(current, (int, float)) else None, bool(met))
+
+    def trade_line(self):
+        if not self.ready:
+            return "no trade prepared"
+        return (f"sell {self.short.strike:g}{self.side[0].upper()} / buy "
+                f"{self.long.strike:g}{self.side[0].upper()}  credit {self.credit:.2f} "
+                f"(bid/ask)  width {self.width:g}  POP {self.pop:.2f}  R {self.r:.2f} "
+                f"(min {R_FLOOR:.2f})  exit BREACH of {self.bound:.2f} or nickel")
+
+
 class TrendCreditSpread:
     """Sell a defined-risk vertical beyond the session extreme — the floor of
     the current move. Afternoon only; owns the slot outright once ORB stops."""
 
     name = "TrendCreditSpread"
-
-    PLAN_CHECKS = ("active", "entry_window", "condor_active", "trend_vote",
-                   "wing_r_best",
-                   "adx", "bound", "outside_range", "strike_inside_range",
-                   "contract", "pop", "wing", "credit", "width", "risk",
-                   "ev", "nickel_floor", "r")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
@@ -181,6 +221,170 @@ class TrendCreditSpread:
         return (TCS_WING_WIDTH_SPX if INSTRUMENT in ("SPX", "SPXW")
                 else TCS_WING_WIDTH_QQQ)
 
+    # ── THE DECLARED CONDITIONS — what must be true for this spec to fire ──
+    CONDITIONS = {
+        "active":        "TREND_CREDIT_ACTIVE is on",
+        "entry_window":  "inside TCS_START_ET-TCS_ENTRY_END_ET",
+        "condor_active": "no condor plan holds this symbol",
+        "trend_vote":    "the trend engine's overall_direction is BULLISH or BEARISH",
+        "adx":           f"primary ADX >= {CONT_BREAKOUT_MIN_ADX:.1f}",
+        "outside_range": "price is still OUTSIDE the opening range on the trend side",
+    }
+    STRUCTURAL = ("strike_inside_range", "contract", "pop", "wing", "wing_r_best",
+                  "ev", "nickel_floor")
+    PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + ("bound", "credit", "width",
+                                                    "risk", "r")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # THE PLAN — evaluates the declared conditions, SELECTS the spread.
+    # ══════════════════════════════════════════════════════════════════════
+    def prepare(self, ms, vol_state, chain, macro, current_price: float, trend=None,
+                orb_high=None, orb_low=None, session_high=None, session_low=None,
+                condor_active: bool = False, now_et=None):
+        t = self.planner.tick(current_price)
+        prep = _TCSPreparation(t)
+        try:
+            now = now_et or datetime.now(ET)
+            if (now.hour, now.minute) >= TCS_ENTRY_END_ET:
+                t.dormant("entry_window", f"past TCS_ENTRY_END_ET "
+                                          f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}"
+                                          f" — dormant until tomorrow")
+                return prep
+            if (now.hour, now.minute) < TCS_START_ET:
+                t.dormant("entry_window", f"before TCS_START_ET "
+                                          f"{TCS_START_ET[0]:02d}:{TCS_START_ET[1]:02d}"
+                                          f" — dormant, not looking at the chart")
+                return prep
+            prep.cond("entry_window", None, self.CONDITIONS["entry_window"], True)
+            prep.cond("active", 1.0 if TREND_CREDIT_ACTIVE else 0.0,
+                      self.CONDITIONS["active"], TREND_CREDIT_ACTIVE)
+            prep.cond("condor_active", 1.0 if condor_active else 0.0,
+                      self.CONDITIONS["condor_active"], not condor_active)
+            _dir = str(getattr(trend, "overall_direction", "NEUTRAL") or "NEUTRAL").upper()
+            _adx = float(getattr(trend, "primary_adx", 0.0) or 0.0)
+            directional = _dir in ("BULLISH", "BEARISH")
+            prep.cond("trend_vote", (1.0 if _dir == "BULLISH" else -1.0) if directional else 0.0,
+                      f"BULLISH or BEARISH (now {_dir})", directional)
+            prep.cond("adx", _adx, self.CONDITIONS["adx"], _adx >= CONT_BREAKOUT_MIN_ADX)
+            if not directional:
+                # no side to prepare: the vote decides which bound is the level
+                t.hold(f"trend vote {_dir}, ADX {_adx:.1f}: no side to prepare — "
+                       f"waiting on a directional vote")
+                return prep
+            if _dir == "BULLISH":
+                side, bound, direction = "put", orb_high, "long"
+            else:
+                side, bound, direction = "call", orb_low, "short"
+            prep.side, prep.direction, prep.bound = side, direction, bound
+            t.direction = direction
+            if not bound or bound <= 0:
+                prep.starved.append("bound")
+                t.starved("bound")
+                return prep
+            t.anchor(trigger=bound, invalidation=bound)
+            t.check("bound", bound, True)
+            _outside = (current_price > bound if side == "put" else current_price < bound)
+            prep.cond("outside_range", current_price - bound, self.CONDITIONS["outside_range"],
+                      _outside)
+
+            # ── SELECTION — the spread, if the conditions hold next tick ──
+            if chain is None:
+                prep.starved.append("chain")
+                t.starved("chain")
+                return prep
+            sigma = float(getattr(vol_state, "atr_current", 0.0) or 0.0)
+            bars = cv.bars_left(now, TCS_POP_BAR_MIN, HARD_CLOSE_ET)
+            prep.bars = bars
+            contracts = chain.puts if side == "put" else chain.calls
+            _lo, _hi = (orb_low, orb_high)
+            _inside = sorted({float(c.strike) for c in contracts
+                              if _lo is not None and _hi is not None
+                              and _lo <= float(c.strike) <= _hi})
+            if not _inside:
+                prep.structural.append(("strike_inside_range",
+                    f"no strike inside the opening range {_n(_lo)}–{_n(_hi)} "
+                    f"(increments too wide)"))
+            else:
+                target = _inside[0] if side == "call" else _inside[-1]
+                t.check("strike_inside_range", target, True)
+                short = cv.find_contract_at_strike(contracts, target)
+                if short is None:
+                    prep.structural.append(("contract", f"first-inside strike {target:.2f} has no contract"))
+                else:
+                    t.check("contract", short.strike, True)
+                    pop = cv.pop(abs(short.strike - current_price), sigma, bars)
+                    t.check("pop", pop, pop >= TCS_MIN_POP)
+                    if pop <= 0.0:
+                        prep.structural.append(("pop",
+                            f"POP unresolvable (sigma {sigma:.4f}, bars {bars:.1f}) — a "
+                            f"missing input is not a safe trade"))
+                    elif pop < TCS_MIN_POP:
+                        prep.structural.append(("pop",
+                            f"POP {pop:.2f} < {TCS_MIN_POP:.2f} at {bars:.1f} bars for "
+                            f"strike {short.strike:.2f}"))
+                    else:
+                        _best_r, long_c, credit, _bw = cv.search_wing(contracts, short, side, R_FLOOR)
+                        if long_c is None:
+                            prep.structural.append(("wing",
+                                f"no priceable wing beyond {short.strike:.2f} (undefined risk "
+                                f"is never sold)"))
+                        else:
+                            t.check("wing", long_c.strike, True)
+                            t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
+                            if _best_r < R_FLOOR:
+                                prep.structural.append(("wing_r_best",
+                                    f"no wing clears R {R_FLOOR:.2f} — best is {_best_r:.2f} at "
+                                    f"{long_c.strike:.2f} ({_bw:g} wide, credit ${credit:.2f}); "
+                                    f"structure, not selection — relaxed does not waive it"))
+                            else:
+                                t.credit_spread(short.strike, long_c.strike, credit,
+                                                invalidation=bound, trigger=bound)
+                                width = _bw
+                                req = TCS_LOSS_GIVEN_BREACH * (1.0 - pop) / pop
+                                t.check("ev", credit / width - req, credit / width > req)
+                                floor_n = TCS_MIN_CREDIT_NICKEL_MULT * TCS_NICKEL_REF
+                                t.check("nickel_floor", credit - floor_n, credit >= floor_n)
+                                if credit / width <= req:
+                                    prep.structural.append(("ev",
+                                        f"negative EV — credit {credit:.2f} = "
+                                        f"{100.0 * credit / width:.1f}% of width {width:.0f}, "
+                                        f"needs > {100.0 * req:.1f}% at POP {pop:.2f}"))
+                                elif credit < floor_n:
+                                    prep.structural.append(("nickel_floor",
+                                        f"credit {credit:.2f} below {TCS_MIN_CREDIT_NICKEL_MULT:.1f}x "
+                                        f"nickel ({floor_n:.2f}) — no room to profit"))
+                                else:
+                                    prep.short, prep.long, prep.credit = short, long_c, credit
+                                    prep.width, prep.pop, prep.r = width, pop, t.r
+                                    prep.ready = True
+
+            head = (f"{'BULLISH' if side == 'put' else 'BEARISH'} vote ADX {_adx:.1f}, "
+                    f"{side} spread off the ORB {'high' if side == 'put' else 'low'} "
+                    f"{bound:.2f}")
+            if prep.starved:
+                t.starved(*prep.starved)
+                return prep
+            if prep.structural:
+                gate, why = prep.structural[0]
+                t.refuse(gate, f"{head}: {why}")
+                return prep
+            if prep.unmet:
+                cur = "; ".join(f"{n}={_n(prep.conditions[n][0]) if isinstance(prep.conditions[n][0], (int, float)) else 'no'}"
+                                f" (need {prep.conditions[n][1]})" for n in prep.unmet)
+                t.hold(f"{head}: PREPARED — {prep.trade_line()}. Waiting on: {cur}")
+                return prep
+            t.note(f"{head}: all {len(self.CONDITIONS)} conditions true — {prep.trade_line()}")
+            return prep
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning("[tcs] prepare failed: %s", exc)
+            if not t.closed:
+                t.refuse("raised", f"{type(exc).__name__}: {exc}", verdict="NO PLAN")
+            prep.starved.append("raised")
+            return prep
+
+    # ══════════════════════════════════════════════════════════════════════
+    # THE STRATEGY — conditions true -> execute the plan's spread.
+    # ══════════════════════════════════════════════════════════════════════
     def generate_signal(self, ms, vol_state, chain, macro,
                         current_price: float, trend=None,
                         orb_high: Optional[float] = None,
@@ -195,323 +399,16 @@ class TrendCreditSpread:
         `invalidation_reason == "runaway"`; both are gone. After 11:00 ORB has
         stopped and owns nothing, so there is no slot to arbitrate and no
         morning level worth anchoring to.
-
-        GATES, in order, EACH ONE LOGGED — a gate that can silence a strategy
-        for a whole session without leaving a line is how 2026-08-14's afternoon
-        was spent guessing:
-          1. active flag
-          2. inside the 11:00 -> TCS_ENTRY_END_ET window (provisional value)
-          3. no active condor plan (it holds the slot; a third credit spread on
-             one underlying is unmanaged risk)
-          5. a directional trend vote clearing CONT_BREAKOUT_MIN_ADX
-          6. a session extreme on the floor side
-          7. a strike clearing floor / min-distance / not-exceeded / quote-width
-             / POP
-          8. a protective wing
-          9. positive EV, and a credit with room to exist
         """
-        t = self.planner.tick(current_price)
-        try:
-            if not TREND_CREDIT_ACTIVE:
-                return t.refuse("active", "TREND_CREDIT_ACTIVE is off")
-            now = now_et or datetime.now(ET)
-            _hm = f"{now.hour:02d}:{now.minute:02d}"
-            # 🔴 DORMANT, NOT REFUSED, AND THE REASON CARRIES NO CLOCK (r153).
-            # Operator: *"I don't want the 11:30-onwards credit strategies even
-            # looking at the chart before their window starts."*
-            # ⚠️ THE REASON MUST BE TIME-INVARIANT OR THE DEDUPE IS USELESS —
-            # "09:40 ET is before..." and "09:41 ET is before..." are different
-            # strings and would write a row every minute, which is exactly the
-            # ~900 rows of clock transcript this replaces. The WINDOW is the
-            # fact; the current time is not.
-            if (now.hour, now.minute) >= TCS_ENTRY_END_ET:
-                return t.dormant("entry_window",
-                                 f"past TCS_ENTRY_END_ET "
-                                 f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}"
-                                 f" — dormant until tomorrow")
-            if (now.hour, now.minute) < TCS_START_ET:
-                return t.dormant("entry_window",
-                                 f"before TCS_START_ET "
-                                 f"{TCS_START_ET[0]:02d}:{TCS_START_ET[1]:02d}"
-                                 f" — dormant, not looking at the chart")
-            t.check("entry_window", None, True)
-            # ── NO COOLDOWN. REMOVED 2026-08-14 ──────────────────────────────
-            # It was added as an emergency brake when TC.6 rapid-fired the fleet,
-            # and at that moment it was the wrong instrument for the right
-            # worry: the loop existed because a $0.06 credit sat one cent from a
-            # $0.05 nickel close and one cent from a mis-set stop. Those are
-            # fixed at the source — the exit no longer falls through to a
-            # premium stop, the nickel close is gone entirely, and the joint EV
-            # test refuses a credit that thin.
-            # The trade is now gated on: the 11:00-14:00 window, a directional
-            # trend vote clearing ADX, an ORB bound that exists, PRICE OUTSIDE
-            # the range, no active condor, a strike clearing not-exceeded /
-            # quote-width / POP, a protective wing, positive EV, and a credit
-            # with room. Operator: "It's gated enough. The cooldown is
-            # excessive." A timer stacked on top of nine substantive gates
-            # suppresses valid re-entries without preventing a single bad one.
-            if condor_active:
-                logger.info("[tcs] deferring — a condor plan holds this symbol")
-                return t.refuse("condor_active", "a condor plan holds this symbol")
-
-            # ── DIRECTION FROM THE LIVE TREND VOTE ───────────────────────────
-            # The same source CNT.1's breakout branch uses. Nothing from the
-            # morning: the runaway that freed ORB's slot may have been a
-            # DIFFERENT MOVE, or the opposite one, and selling against a level
-            # set by a move that already ended is how v1.x could pass its gate
-            # and still be incoherent.
-            _dir = str(getattr(trend, "overall_direction", "NEUTRAL") or "NEUTRAL").upper()
-            _adx = float(getattr(trend, "primary_adx", 0.0) or 0.0)
-            if _dir not in ("BULLISH", "BEARISH"):
-                logger.info("[tcs] no directional trend vote (%s) — SKIP", _dir)
-                return t.refuse("trend_vote", f"trend vote is {_dir}, not directional")
-            t.check("trend_vote", 1.0 if _dir == "BULLISH" else -1.0, True)
-            t.check("adx", _adx, _adx >= CONT_BREAKOUT_MIN_ADX)
-            if _adx < CONT_BREAKOUT_MIN_ADX:
-                logger.info("[tcs] ADX %.1f below %.1f — SKIP",
-                            _adx, CONT_BREAKOUT_MIN_ADX)
-                return t.refuse("adx", f"ADX {_adx:.1f} below {CONT_BREAKOUT_MIN_ADX:.1f}")
-
-            # ── THE FLOOR OF THE MOVE = THE SESSION EXTREME ──────────────────
-            # Bull trend -> sell PUTS beneath the session LOW.
-            # Bear trend -> sell CALLS above the session HIGH.
-            # It updates as the move does, exists on every box every day, and
-            # survives a restart — unlike the ORB range, which is a 09:30-09:35
-            # structure held only in memory.
-            # ── THE BOUND (operator's spec, 2026-08-14) ──────────────────────
-            # "Trend participation is a credit spread at the floor of a move,
-            #  bounded by the ORB HIGH mark for a long & invalidated by a
-            #  breach. Or, at the ORB LOW mark for a short & also invalidated by
-            #  a breach of that level."
-            # A runaway LONG broke UP through the ORB high, so that level is the
-            # FLOOR of the move and the credit trade is a PUT spread beneath it.
-            # Mirrored for a short at the ORB low.
-            # ⚠️ THE LEVEL, NOT THE ENGINE. `orb_high`/`orb_low` arrive
-            # RECOMPUTED FROM THE TAPE (main._opening_range) — no runaway flag,
-            # no `invalidation_reason`, no slot arbitration, and nothing that a
-            # restart can erase. The ORB ENGINE owns 09:35-11:00; after 11:00 it
-            # owns nothing, but the opening range is still a price on a chart.
-            # The SESSION extreme is retained as the not-exceeded filter: a
-            # strike price has already traded through today is one the market
-            # has proven it can reach.
-            # ⚠️ NO NOT-EXCEEDED FILTER. DIS-INHERITED 2026-08-14, and this one
-            # was not merely redundant — IT MADE THE BOUND DECORATIVE.
-            # The arithmetic is unavoidable: `session_low` <= `orb_low` <
-            # `orb_high` (the opening range is PART of the session), so
-            # requiring a put strike to clear BOTH the bound AND the session low
-            # collapses to the session low **every single time**. The strike was
-            # always placed below the ORB LOW and never at the operator's level.
-            # Mirrored exactly for calls. So the ENTRY placed the strike
-            # somewhere the EXIT never referenced — the CNT.1 failure shape one
-            # layer up.
-            # AND IT COST THE PREMIUM. Operator: *"wouldn't the orb bounds be
-            # 'richer' than the furthest away it's been?"* Yes — the bound sits
-            # CLOSER to spot, so it is the richer level; the extreme is further,
-            # thinner, and always won.
-            # POP IS THE BETTER INSTRUMENT ANYWAY. "Price traded through here
-            # today" is backward-looking and ignores time remaining and current
-            # volatility. POP asks the same question — can price REACH this
-            # strike — in sigma*sqrt(T) terms FROM NOW. A level touched at 09:45
-            # may be unreachable at 13:00 with 2.75h left, and POP knows that
-            # while the extreme does not. Safety is carried by POP >= 0.70 and
-            # the joint EV test, not by a cruder proxy that binds harder.
-            # `session_high`/`session_low` are still accepted for telemetry and
-            # for a future study; they no longer gate.
-            if _dir == "BULLISH":
-                side, bound = "put", orb_high
-                direction = "long"
-            else:
-                side, bound = "call", orb_low
-                direction = "short"
-            t.direction = direction
-            if not bound or bound <= 0:
-                logger.warning("[tcs] no opening-range %s — the bound is the "
-                               "anchor, SKIP rather than trade without one",
-                               "high" if side == "put" else "low")
-                return t.starved("bound")
-            # The bound IS the trigger the exit references and the
-            # invalidation (a close back through it). Frozen by this file.
-            t.anchor(trigger=bound, invalidation=bound)
-            t.check("bound", bound, True)
-
-            # ── NO EM FLOOR. DIS-INHERITED FROM THE CONDOR ───────────────────
-            # The condor needs an EM-derived minimum distance because it sells
-            # around a PIN with no structural level to lean on. **TC.6 HAS a
-            # structural level — the ORB bound.**
-            # `_select_beyond_rail` requires a strike to clear BOTH the rail and
-            # the min-distance, so WHICHEVER IS FURTHER OUT WINS. If 0.80 x EM
-            # sat beyond the ORB high it would push the strike past the level the
-            # operator specified and the bound would stop being the bound — a
-            # FITTED PERCENTAGE silently overriding a STRUCTURAL LEVEL, which is
-            # backwards. Neutralised with a sentinel that can never bind rather
-            # than deleted from the shared selector, because that selector is
-            # also the condor's and the condor still needs it.
-
-            # ── PRICE MUST BE OUTSIDE THE RANGE AT ENTRY ─────────────────────
-            # The exit calls a close back through the bound INVALIDATION. If
-            # price is already inside the range when we enter, the trade is BORN
-            # IN THE STATE ITS OWN EXIT CALLS DEAD — the same entry/exit
-            # disagreement that made every breakout continuation a one-tick
-            # artefact for a week (CNT.1, fixed 2026-08-14).
-            _outside = (current_price > bound if side == "put"
-                        else current_price < bound)
-            t.check("outside_range", current_price - bound, _outside)
-            if not _outside:
-                logger.info("[tcs] price %.2f is back INSIDE the range (bound "
-                            "%.2f) — the move that set the level has failed, "
-                            "SKIP", current_price, bound)
-                return t.refuse("outside_range",
-                                f"price {current_price:.2f} is back inside the "
-                                f"range (bound {bound:.2f}) — the move that set "
-                                f"the level has failed")
-
-            sigma = float(getattr(vol_state, "atr_current", 0.0) or 0.0)
-            bars = cv.bars_left(now, TCS_POP_BAR_MIN, HARD_CLOSE_ET)
-
-            contracts = chain.puts if side == "put" else chain.calls
-
-            # ── FIRST STRIKE INSIDE THE RANGE (v1.5) ─────────────────────────
-            # The operator names the strike; liquidity does not get to choose it.
-            #   CCS (call): the FIRST strike inside the range from the BOTTOM —
-            #               the lowest strike at/above orb_low. It is the CEILING.
-            #   PCS (put) : the FIRST strike inside the range from the TOP —
-            #               the highest strike at/below orb_high. It is the FLOOR.
-            # The strike must lie INSIDE the opening range, bounded on BOTH
-            # sides. `select_beyond_rail` only ever bounded ONE side (strike >=
-            # rail for a call), so with rail = orb_low every strike from the
-            # first-inside upward qualified and the most-liquid pick drifted
-            # OUTSIDE the range. Observed UNH 2026-08-18: range 395.80–398.69,
-            # it sold 400 — above orb_high entirely. Not a safety problem (the
-            # exit is the ORB bound, not the strike) but a PREMIUM one: 397.50
-            # was the specified strike and collects materially more for the same
-            # structure and the same exit trigger.
-            _lo, _hi = (orb_low, orb_high)
-            _inside = sorted(
-                {float(c.strike) for c in contracts
-                 if _lo is not None and _hi is not None
-                 and _lo <= float(c.strike) <= _hi})
-            if not _inside:
-                logger.info(
-                    "[tcs] no strike falls INSIDE the opening range "
-                    "%.2f–%.2f (increments too wide) — SKIP",
-                    _lo or 0.0, _hi or 0.0)
-                return t.refuse("strike_inside_range",
-                                f"no strike inside the opening range "
-                                f"{_n(_lo)}–{_n(_hi)} (increments too wide)")
-            target = _inside[0] if side == "call" else _inside[-1]
-            t.check("strike_inside_range", target, True)
-            short = cv.find_contract_at_strike(contracts, target)
-            if short is None:
-                logger.info("[tcs] first-inside strike %.2f has no contract — SKIP",
-                            target)
-                return t.refuse("contract", f"first-inside strike {target:.2f} has no contract")
-            t.check("contract", short.strike, True)
-
-            # POP still gates. QUOTE-WIDTH DELIBERATELY DOES NOT (operator,
-            # 2026-08-18): "sell the illiquid one if you can get mark or better."
-            # Width was answering the wrong question — execution posts at the
-            # mark and never crosses the spread, so a wide quote costs nothing.
-            # Either it fills at our price or it does not fill, and an unfilled
-            # entry simply re-qualifies on the next tick (main.py returns without
-            # recording a position). Do NOT re-add max_width_pct here as a
-            # "missing safety check"; it silently substituted a DIFFERENT strike
-            # than the one specified, which is how 400 got sold on 2026-08-18.
-            _pop_chk = cv.pop(abs(short.strike - current_price), sigma, bars)
-            t.check("pop", _pop_chk, _pop_chk >= TCS_MIN_POP)
-            if _pop_chk < TCS_MIN_POP:
-                logger.info(
-                    "[tcs] first-inside %s strike %.2f POP %.2f < %.2f at %.1f "
-                    "bars — SKIP", side, short.strike, _pop_chk, TCS_MIN_POP, bars)
-                return t.refuse("pop", f"POP {_pop_chk:.2f} < {TCS_MIN_POP:.2f} at "
-                                       f"{bars:.1f} bars for strike {short.strike:.2f}")
-            logger.info(
-                "[tcs] strike = first inside range from the %s: %.2f "
-                "(range %.2f–%.2f, %d strike(s) inside)",
-                "bottom" if side == "call" else "top",
-                short.strike, _lo, _hi, len(_inside))
-
-            # ── 🔴 r157 — THE WING IS SEARCHED TO AN R FLOOR ─────────────
-            # `_wing_width()` returned TCS_WING_WIDTH_SPX or _QQQ — a FIXED
-            # DOLLAR width split two ways, so every symbol but SPX took the QQQ
-            # number regardless of its price or strike ladder. R was then
-            # checked after the fact and MUTED under relaxed.
-            # ⚠️ THE SHORT STRIKE IS STRUCTURAL — it is the first-inside strike
-            # off the trend boundary and does not move. The wing is the only
-            # free variable; narrower means less credit, less risk, HIGHER R.
-            # ⚠️ `R_FLOOR` DIRECTLY, never `r_hurdle()` (None under relaxed).
-            _best_r, long_c, credit, _bw = cv.search_wing(
-                contracts, short, side, R_FLOOR)
-            if long_c is None:
-                logger.info("[tcs] no priceable wing beyond %.2f — SKIP "
-                            "(undefined risk is never sold)", short.strike)
-                return t.refuse("wing", f"no priceable wing beyond "
-                                        f"{short.strike:.2f} (undefined risk "
-                                        f"is never sold)")
-            t.check("wing", long_c.strike, True)
-            t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
-            if _best_r < R_FLOOR:
-                return t.refuse("wing_r_best",
-                                f"no wing clears R {R_FLOOR:.2f} — best is "
-                                f"{_best_r:.2f} at {long_c.strike:.2f} "
-                                f"({_bw:g} wide, credit ${credit:.2f}); "
-                                f"structure, not selection, so relaxed does "
-                                f"not waive it")
-            # ── THE WHAT-IF, priced off the spread THIS spec chose ────────
-            t.credit_spread(short.strike, long_c.strike, credit,
-                            invalidation=bound, trigger=bound)
-            pop = cv.pop(abs(short.strike - current_price), sigma, bars)
-            if pop <= 0.0:
-                logger.info("[tcs] POP unresolvable (sigma %.4f, bars %.1f) — "
-                            "SKIP. A missing input is not a safe trade.",
-                            sigma, bars)
-                return t.refuse("pop", f"POP unresolvable (sigma {sigma:.4f}, "
-                                       f"bars {bars:.1f}) — a missing input is "
-                                       f"not a safe trade")
-            # ⚠️ r157 — `width` IS NOW THE SEARCHED SPREAD'S WIDTH, not the old
-            # fixed `_wing_width()`. The EV test below divides credit by it, so
-            # it must describe the spread ACTUALLY chosen; leaving the old
-            # binding would have measured a spread that is not being traded.
-            # (Caught by check_singletons S2: five references to a name I had
-            # deleted — that would have crash-looped the box on the first
-            # trend spread rather than failing at import.)
-            width = _bw
-            req = TCS_LOSS_GIVEN_BREACH * (1.0 - pop) / pop
-            t.check("ev", credit / width - req, credit / width > req)
-            if credit / width <= req:
-                logger.info(
-                    "[tcs] NEGATIVE EV — credit %.2f = %.1f%% of width %.0f, "
-                    "needs > %.1f%% at POP %.2f — SKIP",
-                    credit, 100.0 * credit / width, width, 100.0 * req, pop)
-                return t.refuse("ev", f"negative EV — credit {credit:.2f} = "
-                                      f"{100.0 * credit / width:.1f}% of width "
-                                      f"{width:.0f}, needs > {100.0 * req:.1f}% at "
-                                      f"POP {pop:.2f}")
-            floor_n = TCS_MIN_CREDIT_NICKEL_MULT * TCS_NICKEL_REF
-            t.check("nickel_floor", credit - floor_n, credit >= floor_n)
-            if credit < floor_n:
-                logger.info("[tcs] credit %.2f below %.1fx nickel (%.2f) — "
-                            "no room to profit, SKIP",
-                            credit, TCS_MIN_CREDIT_NICKEL_MULT, floor_n)
-                return t.refuse("nickel_floor",
-                                f"credit {credit:.2f} below "
-                                f"{TCS_MIN_CREDIT_NICKEL_MULT:.1f}x nickel "
-                                f"({floor_n:.2f}) — no room to profit")
-
-            # ── THE R HURDLE — strict refuses, relaxed records ────────────
-            ok, why = t.executable()
-            if not ok:
-                logger.info("[tcs] R %s refused: %s", _n(t.r), why)
-                return t.refuse("r", why)
-            t.note(why)
-
-            return t.take(self._build_signal(side, short, long_c, direction,
-                                             bound, current_price, ms, bars))
-        except Exception as exc:                               # noqa: BLE001
-            logger.warning("[tcs] generate_signal failed: %s", exc)
-            if not t.closed:
-                t.refuse("raised", f"{type(exc).__name__}: {exc}",
-                         verdict="NO PLAN")
-            return None
+        prep = self.prepare(ms, vol_state, chain, macro, current_price, trend=trend,
+                            orb_high=orb_high, orb_low=orb_low, session_high=session_high,
+                            session_low=session_low, condor_active=condor_active,
+                            now_et=now_et)
+        if not prep.ready or prep.unmet or prep.structural or prep.starved:
+            return prep.tick.already()
+        return prep.tick.take(self._build_signal(prep.side, prep.short, prep.long,
+                                                 prep.direction, prep.bound,
+                                                 current_price, ms, prep.bars))
 
     def _build_signal(self, side, short, long_c, direction, boundary,
                       current_price, ms, bars):
