@@ -1,5 +1,10 @@
 """
-strategy/trend_credit_spread.py  v4.5
+strategy/trend_credit_spread.py  v4.6
+v4.6  2026-08-29  r176: mu measured over the last TCS_DRIFT_HORIZON_BARS
+      (the same two hours pop_drift projects over), not since the open —
+      since-open zeroed on V-shapes/late trends while the vote read ADX 50+
+      (MU 2026-08-29: drift +0.18 against a BEARISH vote). The vote and the
+      drift now read the same clock.
 v4.5  2026-08-27  r164 — THE PLAN PREPARES, THE STRATEGY EXECUTES WITH THE
       PLAN'S VARIABLES (the sweep's v4.6 shape). `prepare()` is the plan: in
       the slot, every tick, it evaluates each declared CONDITION with its
@@ -305,10 +310,17 @@ class TrendCreditSpread:
             # exactly the old model.
             drift_bar = 0.0
             try:
+                # r176 — measure mu over the LAST horizon bars, not since the
+                # open. Since-open zeroed out on V-shapes and late trends: MU
+                # 2026-08-29 read drift +0.18 while the vote saw BEARISH ADX
+                # 52 — the vote and the drift must read the same clock.
+                # Symmetric with the projection: two hours back, credited two
+                # hours forward.
                 _df5 = getattr(vol_state, "df_5m", None)
                 if _df5 is not None and len(_df5) >= 2:
-                    _o = float(_df5["open"].iloc[0])
-                    drift_bar = (float(current_price) - _o) / float(len(_df5))
+                    _nb = int(min(len(_df5) - 1, TCS_DRIFT_HORIZON_BARS))
+                    _ref = float(_df5["close"].iloc[-1 - _nb])
+                    drift_bar = (float(current_price) - _ref) / float(_nb)
             except Exception:                                  # noqa: BLE001
                 drift_bar = 0.0
             t.check("drift_bar", round(drift_bar, 4), None)

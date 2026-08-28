@@ -1,5 +1,9 @@
 """
-strategy/runaway_continuation.py  v4.6
+strategy/runaway_continuation.py  v4.7
+v4.7  2026-08-29  r176: the 11:30 debit cutoff no longer relaxes to 14:00
+      (operator: "Debit entries are finished at 1130, period … We are
+      burning theta"). Also removes the afternoon slot starvation the
+      extension caused — after 11:30 the dispatch slot is the credit book's.
 v4.6  2026-08-28  r174 — TWO STRUCTURAL GATES, BOTH FROM THE MORNING'S TAPE
       (operator: "Yes to both, even on relaxed"):
       (1) THE FLOOR MUST CLEAR THE SPREAD. 20% of a $0.15 teenie is three
@@ -399,7 +403,9 @@ class RunawayContinuationStrategy:
     MAX_LOSS_PCT = float(getattr(config, "RUNAWAY_MAX_LOSS_PCT", 0.20))
 
     CONDITIONS = {
-        "entry_window":      f"before the debit cutoff {CUTOFF_ET} ET (relaxed to 14:00)",
+        "entry_window":      f"before the debit cutoff {CUTOFF_ET} ET — no relaxed "
+                             f"extension (operator 2026-08-29: debit entries are "
+                             f"finished at 11:30, period; we are burning theta)",
         "atr_pct":           f"ATR >= {ATR_FLOOR_PCT:.2f}% — a move this tape can pay",
         "orb_direction":     "the ORB has BROKEN with a direction",
         "runaway_confirmed": "a 1m close beyond the 50% TP, still beyond it at this tick",
@@ -419,7 +425,13 @@ class RunawayContinuationStrategy:
                 **_ignored) -> _RunawayPreparation:
         t = self.planner.tick(price_now)
         prep = _RunawayPreparation(t)
-        _cut = relaxed.window("00:00", CUTOFF_ET, "00:00", "14:00")[1]
+        # r176 — the cutoff does NOT relax. Operator, 2026-08-29: "Debit
+        # entries are finished at 1130, period. Do not extend it for relaxed.
+        # We are burning theta." The 14:00 extension also let the runaway's
+        # evaluation claim the dispatch slot all afternoon on trend boxes,
+        # starving the credit book (2026-08-28/29 fleet data). After 11:30
+        # the box belongs to the credit strategies and the butterfly.
+        _cut = CUTOFF_ET
         if now_et and now_et >= _cut:
             t.dormant("entry_window", f"past the debit cutoff {_cut} — dormant until tomorrow")
             return prep

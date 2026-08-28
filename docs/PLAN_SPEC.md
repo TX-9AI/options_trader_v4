@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.17 · 2026-08-29 · r176 — the cutoff does not relax; the drift reads the vote's clock (§22).**
 **v1.16 · 2026-08-28 · r175 — TCS prices its premise: pop_drift (§21).**
 **v1.15 · 2026-08-28 · r174 — the teenie lesson: floor-clears-spread; one runaway per break (§20).**
 **v1.14 · 2026-08-28 · r170 — the readers (§19).**
@@ -831,3 +832,36 @@ like that."*
 Hypotheticals T1–T7 (r175 block). The floor stays 0.70 — the operator's
 70–80 % band; what changed is that the number being floored now includes the
 premise the entry already required.
+
+---
+
+## 22. r176 — the debit cutoff does not relax; the drift reads the vote's clock
+
+Operator, 2026-08-29: *"Debit entries are finished at 1130, period. Do not
+extend it for relaxed. We are burning theta."* And: *"Runaway and orb are
+done at 1130. Credit takes over once any open orb or runaways conclude &
+close out."*
+
+- **Runaway v4.7 / criteria**: the relaxed 14:00 extension is deleted; the
+  cutoff is `CUTOFF_ET` under every posture. This also ends the afternoon
+  slot starvation the extension caused — the runaway's evaluation had been
+  claiming the dispatch slot until 14:00 on trend boxes (AMZN 695 NOT-ASKED
+  rows in one afternoon), so after 11:30 the box now belongs to the credit
+  book and the butterfly. ORB was already hard-cut (engine expiry 11:00,
+  structure-keyed afternoon-debit gate 11:30, no relaxed path). An open
+  debit position still rides its trail and still holds the slot until it
+  closes — that is the ruling's second sentence, and it is the existing
+  single-position behaviour.
+- **TCS v4.9 (drift window)**: μ is measured over the LAST
+  `TCS_DRIFT_HORIZON_BARS` (two hours), not since the open. Since-open
+  zeroed on V-shapes and late trends — MU read drift +0.18 while the vote
+  saw BEARISH ADX 52. The vote and the drift now read the same clock,
+  symmetric with the projection horizon.
+- Hypotheticals R14/R14b (the cutoff holds under relaxed; the extension is
+  gone from source) and T8 (a net-flat V-shape reads −0.48/bar over the
+  window instead of the flat zero).
+
+Next gate to watch after this lands: `wing_r_best` / `wing` — CRM passed pop
+594 times and died there; it eases as pop rises (the EV hurdle divides by
+pop), and if TSLA-at-ADX-64 still can't find a wing after a session of r176
+data, that dial gets the same evidence-first treatment.

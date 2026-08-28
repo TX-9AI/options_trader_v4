@@ -479,6 +479,7 @@ def main():
 
     class _Vol:
         atr_current = 0.8
+        df_5m = None
 
     # opening range 349.20-351.88; a BULLISH vote sells a PUT spread off the
     # ORB high with the short at the first strike INSIDE the range from the top
@@ -656,12 +657,27 @@ def main():
     check("R13 (r174) the losing-exit hook finishes the break (source pin)",
           "finish_break(_dir, _bnd)" in src_tl and '"Runaway" in _strat' in src_tl)
 
-    os.environ["OT_RELAXED_ENTRY"] = "0"      # relaxed extends the cutoff to 14:00
+    os.environ["OT_RELAXED_ENTRY"] = "0"
     P.begin_tick(56.0)
     sig = RW.generate_signal(orb=_ORB(), atr_pct=0.14, price_now=101.9, prev_close=101.6,
                              now_et="11:45", chain=_Chain([], calls_rw))
     r56 = _row(st, "RunawayContinuation", 56.0)
     check("R8 past the 11:30 cutoff (strict) -> DORMANT", sig is None and r56 and r56[0] == "DORMANT", str(r56))
+    # ── r176 — THE DEBIT CUTOFF DOES NOT RELAX (operator, 2026-08-29:
+    # "Debit entries are finished at 1130, period … We are burning theta").
+    # Dormant rows DEDUPE, so the pin is behavioural: relaxed at 11:45
+    # produces no signal and no new TAKE/HOLD row.
+    os.environ["OT_RELAXED_ENTRY"] = "1"
+    P.begin_tick(56.5)
+    sig = RW.generate_signal(orb=_ORB(), atr_pct=0.14, price_now=101.9, prev_close=101.6,
+                             now_et="11:45", chain=_Chain([], [_G(102, 0.95, 0.46, 0.050)]))
+    r565 = _row(st, "RunawayContinuation", 56.5)
+    check("R14 (r176) 11:45 UNDER RELAXED -> still dormant: no signal, no TAKE/HOLD row",
+          sig is None and (r565 is None or r565[0] == "DORMANT"), str(r565))
+    src_rw = open(os.path.join(_root, "strategy", "runaway_continuation.py"), encoding="utf-8").read()
+    check("R14b (r176) the relaxed 14:00 extension is gone from the source",
+          'relaxed.window("00:00", CUTOFF_ET' not in src_rw and "_cut = CUTOFF_ET" in src_rw)
+    os.environ["OT_RELAXED_ENTRY"] = "0"
 
     # ── r175 — TCS POP WITH THE SESSION'S MEASURED DRIFT ─────────────────
     # Operator: "You have to get it firing in ESPECIALLY this type of day …
@@ -696,6 +712,25 @@ def main():
                                 encoding="utf-8").read()
           and 'drift_bar if side == "put" else -drift_bar' in src_t
           and "cv.pop_drift(" in src_t and "TCS_DRIFT_HORIZON_BARS" in src_t)
+
+    # T8 (r176) — mu reads the vote's clock: a V-shape session. Since the
+    # open the tape is net FLAT (open 354 -> 354) but the last two hours fell
+    # hard; a BULLISH-side put spread must see NEGATIVE drift (worse than
+    # driftless), not the flat since-open zero.
+    import pandas as pd_t8
+    _vshape = [354 + 0.5 * i for i in range(24)] + [365.5 - 0.5 * i for i in range(24)]
+    _vfix = _Vol(); _vfix.df_5m = pd_t8.DataFrame({
+        "open": _vshape, "close": _vshape,
+        "high": [c + 0.1 for c in _vshape], "low": [c - 0.1 for c in _vshape]})
+    P.begin_tick(44.0)
+    TC.prepare(chain=_Chain(puts_tcs), current_price=354.0,
+               trend=_Trend("BULLISH", adx=30.0), ms=None, vol_state=_vfix, macro=None,
+               orb_high=351.88, orb_low=349.20, now_et=_noon)
+    c44 = st.conn.execute("SELECT value FROM plan_check WHERE strategy='TrendCreditSpread' "
+                          "AND ts_epoch=44.0 AND check_name='drift_bar'").fetchone()
+    check("T8 (r176) V-shape: net-flat since open but falling for two hours -> drift_bar "
+          "NEGATIVE (~-0.5/bar), read over the horizon window, not since the open",
+          c44 is not None and c44[0] is not None and -0.6 < c44[0] < -0.35, str(c44))
 
     print()
     if _fails:

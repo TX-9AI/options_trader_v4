@@ -1,5 +1,7 @@
 """
-strategy/criteria.py  v1.1
+strategy/criteria.py  v1.2
+v1.2  2026-08-29  r176: runaway_cutoff_et relaxed value = strict 11:30 — the
+      debit cutoff does not extend under relaxed (operator ruling).
 v1.1  2026-08-27  r154 (RECORDED RETROACTIVELY in r159 — r154 added
       `stop_survivable()` here with no title bump and no entry): a structure
       whose stop distance is inside its own bid-ask spread is BROKEN, not bad,
@@ -195,7 +197,9 @@ GATES = {
 CRITERIA = {
     "sweep_max_age_bars":     (8,              24),      # SELECTION
     "sweep_pierce_ceiling":   (0.25,           0.75),    # SELECTION
-    "runaway_cutoff_et":      ("11:30",        "14:00"), # SELECTION
+    # r176 — operator 2026-08-29: "Debit entries are finished at 1130,
+    # period. Do not extend it for relaxed. We are burning theta."
+    "runaway_cutoff_et":      ("11:30",        "11:30"), # SELECTION — does not relax
     "butterfly_reach_max":    (1.00,           1.50),    # SELECTION
     "level_hold_min":         (0.75,           0.50),    # SELECTION
 }
