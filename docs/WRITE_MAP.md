@@ -54,7 +54,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | table | created by | written by | read by |
 |---|---|---|---|
 | `circuit_breaker_events` | `database/trade_logger.py` | `database/trade_logger.py` (insert) | `query.py` |
-| `trades` | `database/trade_logger.py`, `tests/check_condor_stop_suppression.py` | `database/trade_logger.py` (insert/update), `tests/check_condor_pairing.py` (insert), `tests/check_orb_geometry.py` (insert) | `derived/counterfactual.py`, `eod_summary.py`, `notifications/alert_manager.py`, `query.py`, `status.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py`, `warehouse/s3_push.py` |
+| `trades` | `database/trade_logger.py`, `tests/check_condor_stop_suppression.py` | `database/trade_logger.py` (insert/update), `tests/check_condor_pairing.py` (insert), `tests/check_one_per_session.py` (insert), `tests/check_orb_geometry.py` (insert) | `derived/counterfactual.py`, `eod_summary.py`, `main.py`, `notifications/alert_manager.py`, `query.py`, `status.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py`, `warehouse/s3_push.py` |
 
 ## Flags
 

@@ -1,5 +1,14 @@
 """
-main.py  v4.24
+main.py  v4.25
+v4.25  2026-08-28  r179 — 🔴 ONE PER SESSION, DB-BACKED. Operator: "Only
+      one runway debit trade aloud per session on a box. Only one GEX Pin
+      butterfly allowed per session on a box. Simple." _one_per_session_used
+      reads trades.db (count_today), so RESTARTS CANNOT RE-ARM IT — the
+      in-process pin/break registries cleared on every systemd bounce, 08-28
+      had five, and that is how the butterfly stacked through two hotfixes.
+      Guarded at all three sites: the runaway's dispatch, the in-dispatch
+      butterfly path, and _attempt_butterfly's entry. Skips are plan rows;
+      fails closed (an unreadable DB counts as traded).
 v4.24  2026-08-29  r178: a butterfly fire marks its pin PLAYED (one
       butterfly per pin per session — the 08-28 15:00 stack). Marked after
       _execute_entry_signal so a refused fire does not burn the pin.
@@ -3133,7 +3142,13 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         _atr_pct = 0.0
 
     # ── Priority 2: RUNAWAY CONTINUATION ────────────────────────────────────
-    if signal is not None:
+    # r179 — ONE PER SESSION ON THIS BOX (operator, 2026-08-28: "Only one
+    # runway debit trade aloud per session on a box … Simple"). DB-backed,
+    # survives restarts, fails closed.
+    if signal is None and _one_per_session_used("RunawayContinuation"):
+        _plan_skip("RunawayContinuation",
+                   "one per session on this box — already traded today")
+    elif signal is not None:
         _plan_skip("RunawayContinuation", f"slot claimed by {signal.strategy_name}")
     elif not _is_runaway:
         _plan_skip("RunawayContinuation",
@@ -3233,7 +3248,12 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # starts accumulating (2026-08-19).
     if signal is not None:
         _plan_skip("GEXPinButterfly", f"slot claimed by {signal.strategy_name}")
-    if signal is None:
+    # r179 — ONE PER SESSION ON THIS BOX: this in-dispatch butterfly path
+    # does not route through _attempt_butterfly, so it carries its own guard.
+    if signal is None and _one_per_session_used("GEXPinButterfly"):
+        _plan_skip("GEXPinButterfly",
+                   "one per session on this box — already traded today")
+    elif signal is None:
         _atm_iv = None
         try:
             _atm_iv = float(getattr(chain, "atm_iv", 0.0) or 0.0) or None
@@ -3435,6 +3455,14 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
 
 
 def _attempt_butterfly(ctx, ms, state, *, additive: bool) -> None:
+    # r179 — ONE PER SESSION ON THIS BOX (operator: "Only one GEX Pin
+    # butterfly allowed per session on a box"). Checked BEFORE the strategy
+    # is asked, at the one entry point every butterfly attempt routes
+    # through. DB-backed, survives restarts, fails closed.
+    if _one_per_session_used("GEXPinButterfly"):
+        _plan_skip("GEXPinButterfly",
+                   "one per session on this box — already traded today")
+        return
     """r161 — ask the butterfly's plan (dormant outside its slot) and, on a
     fire, execute it. Called from main_loop's position-open branch with
     additive=True; attempt_new_entry keeps its own in-chain call for the
@@ -3468,6 +3496,19 @@ def _attempt_butterfly(ctx, ms, state, *, additive: bool) -> None:
                 logger.warning("pin-played mark failed: %s", _pp_err)
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("Butterfly attempt failed: %s", exc)
+
+
+def _one_per_session_used(strategy: str) -> bool:
+    """r179 — the durable session cap. True when this strategy has already
+    entered a trade this ET session on this box (open OR closed), read from
+    trades.db so five restarts cannot re-arm it. Fails closed."""
+    try:
+        from database.trade_logger import get_trade_logger
+        return get_trade_logger().count_today(strategy) >= 1
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning("one-per-session check failed CLOSED for %s: %s",
+                       strategy, exc)
+        return True
 
 
 def _sig_num(signal, name: str) -> float:

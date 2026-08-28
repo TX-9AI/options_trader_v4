@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.20 · 2026-08-28 · r179 — 🔴 one per session, DB-backed (§25).**
 **v1.19 · 2026-08-29 · r178 — 🔴 one butterfly per pin per session (§24).**
 **v1.18 · 2026-08-29 · r177 — the butterfly's starved atm_iv; the tick_id join key (§23).**
 **v1.17 · 2026-08-29 · r176 — the cutoff does not relax; the drift reads the vote's clock (§22).**
@@ -918,3 +919,24 @@ one. Same failure class as the runaway re-arm; same doctrine as that fix.
   standard question for every strategy: identical conditions next tick →
   DECLINE `pin_played`; the migrated pin prepares; the fire site marks
   after execution.
+
+---
+
+## 25. r179 — 🔴 one runaway, one butterfly, per session, per box — DB-backed
+
+Operator, 2026-08-28, after the butterfly stacked through two hotfixes and
+five restarts: *"Only one runway debit trade aloud per session on a box.
+Only one GEX Pin butterfly allowed per session on a box. Simple."*
+
+Why the earlier locks failed: r174's break registry and r178's pin registry
+were in-process, and every systemd bounce cleared them — 08-28 had five.
+This cap reads **trades.db**: `count_today(strategy)` counts entries this
+ET session, open or closed; a restart reads the same number. Guarded at all
+three dispatch sites BEFORE the strategy is asked, each skip a plan row:
+`one per session on this box — already traded today`. **Fails closed** — an
+unreadable DB counts as traded; a missed entry is recoverable, a stack is
+not. The pin/break registries stay underneath as belt-and-suspenders.
+
+check_one_per_session.py, born red at d29a9fc: S1–S5b (session boundary in
+ET over UTC storage; closed trades spend the shot; the restart test; fail-
+closed; the three guards and their order).

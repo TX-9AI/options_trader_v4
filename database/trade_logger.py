@@ -1,5 +1,9 @@
 """
-database/trade_logger.py  v4.7
+database/trade_logger.py  v4.8
+v4.8  2026-08-28  r179: count_today(strategy) — the DB-backed one-per-
+      session count (survives restarts, which the in-process registries did
+      not; five bounces on 08-28 re-armed the butterfly through two
+      hotfixes). Fails CLOSED: an unreadable DB counts as 1.
 v4.7  2026-08-28  r174: a losing runaway exit calls finish_break() — one
       runaway per ORB break per session; the break key is (direction, the
       broken boundary from the record's orb_range fields).
@@ -564,6 +568,33 @@ class TradeLogger:
                 return set(TradeRecord.__annotations__) if hasattr(
                     TradeRecord, "__annotations__") else set()
         return self._cols_cache
+
+    def count_today(self, strategy: str) -> int:
+        """How many trades this STRATEGY has entered THIS ET SESSION — open or
+        closed. r179, operator 2026-08-28 after the butterfly stacked through
+        two hotfixes and every restart: *"Only one runway debit trade aloud
+        per session on a box. Only one GEX Pin butterfly allowed per session
+        on a box. Simple."* DB-backed so it SURVIVES RESTARTS — the in-process
+        registries (r174 breaks, r178 pins) cleared on every systemd bounce,
+        and 08-28 had five of them. entry_time is stored UTC; the session
+        boundary is the ET date, so the window is [ET-midnight in UTC, now].
+        ⚠️ FAILS CLOSED: an unreadable DB counts as 1 — cannot-prove-zero
+        does not trade (a missed entry is recoverable; a stack is not).
+        """
+        try:
+            from utils.time_utils import ET
+            from datetime import datetime, timezone
+            _et_mid = datetime.now(ET).replace(hour=0, minute=0, second=0,
+                                               microsecond=0)
+            _cut = _et_mid.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM trades WHERE strategy=? AND "
+                    "entry_time >= ?", (strategy, _cut)).fetchone()
+            return int(row[0] if row else 0)
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning(f"count_today({strategy}) failed CLOSED: {exc}")
+            return 1
 
     def log_entry(self, record: TradeRecord):
         """Insert a new open trade into the database."""

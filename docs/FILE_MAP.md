@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-196 Python modules across 13 local packages.
+197 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -50,9 +50,9 @@ Change these with the most care; a break here reaches everything downstream.
 | `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
 | `derived/base.py` | 13 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
 | `strategy/base_strategy.py` | 12 | check_entry_gate.py, check_orb_geometry.py, check_signal_kwargs.py, check_sweep_spread.py |
+| `database/trade_logger.py` | 11 | check_condor_pairing.py, check_condor_stop_suppression.py, check_one_per_session.py, check_orb_resume.py |
 | `execution/exit_engine.py` | 11 | check_condor_spec.py, check_condor_stop_suppression.py, check_exit_executes.py, check_ladder_wired.py |
 | `strategy/runaway_continuation.py` | 11 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
-| `database/trade_logger.py` | 10 | check_condor_pairing.py, check_condor_stop_suppression.py, check_orb_resume.py, condor_roll.py |
 | `strategy/sweep_credit_spread.py` | 10 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
 | `data/options_chain.py` | 9 | base_strategy.py, check_entry_gate.py, check_sweep_spread.py, check_tick_join.py |
 
@@ -224,7 +224,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `database/trade_logger.py`
 - **calls:** `config.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `utils/time_utils.py`
-- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_condor_pairing.py`, `tests/check_condor_stop_suppression.py`, `tests/check_orb_resume.py`
+- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_condor_pairing.py`, `tests/check_condor_stop_suppression.py`, `tests/check_one_per_session.py`, `tests/check_orb_resume.py`
 
 ### `debug_status.py`
 - **calls:** `config.py`
@@ -604,6 +604,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_observe_always.py`
 - **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_one_per_session.py`
+- **calls:** `database/trade_logger.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_orb_geometry.py`
