@@ -1,8 +1,40 @@
 #!/usr/bin/env python3
 """
-tests/scrub_headers.py — v4.0 — 2026-08-19
+tests/scrub_headers.py — v4.1
 
 RESET EVERY PORTED FILE'S HEADER TO 4.0. TOUCH NOTHING ELSE.
+
+v4.1  2026-08-29  r182 — THIS FILE HAD NOT PARSED SINCE r65, AND THE BUMPER
+      THAT BROKE IT WROTE ITS CHANGELOG INTO A COMMENT. r65's header pass
+      matched the `v4.3` inside the ILLUSTRATIVE EXAMPLE in _autodescribe()
+      — a comment line that exists precisely to show what a
+      "path vX.Y date TITLE" header looks like — mistook it for this
+      file's own version line, spliced a four-line changelog block into the
+      middle of it, and left the tail (`  2026-08-15  AUDIT A2: ...`)
+      stranded at column 2. The real header at the top of this file was
+      never touched and still read v4.0, so the entry described a version
+      the file did not claim, in a place Python could not parse. The
+      example line is restored verbatim from dfe5910; the body is unchanged.
+  🔴 WHY IT SURVIVED SIX DAYS: `gen_file_map.py --check` reported it
+      (`UNPARSEABLE: 1`) and returned rc=1 on every run since 2026-08-22 —
+      but the land gate globs `tests/check_*.py`, and this generator is
+      neither globbed nor rc-checked there. The detector was working; the
+      gate was not reading it. Same shape as WA 21: a check that existed
+      and proved nothing because nothing executed its verdict.
+  ⚠️ THE FAILURE CLASS FOR ANY FUTURE HEADER TOOL: a version-bumping
+      script cannot tell a file's OWN header from a header QUOTED as an
+      example, and this repo's docs are full of quoted headers by design.
+      Anchor on POSITION (the module docstring) or on an explicit marker,
+      never on a `vX.Y` pattern found anywhere in the file. WA 24 already
+      requires a scripted edit to assert its anchor matched; it must also
+      assert it matched the RIGHT one, and re-parse the file afterwards.
+      ⚠️ AND BUILD THE STRING BEFORE OPENING THE FILE. Writing this very
+      entry, an encoding error fired between `open(p,'w')` and the write:
+      the truncate had already happened, so the file went to ZERO BYTES
+      and the traceback read like a failed edit rather than a destroyed
+      one. Recovered with `git checkout`. Encode first, write second.
+
+v4.0  2026-08-19
 
     python3 tests/scrub_headers.py --src <otv3> --dst <otv4> --list <manifest>
 
@@ -239,11 +271,7 @@ def _autodescribe(header, rel):
         # ⚠️ A CHANGELOG TITLE IS NOT A MODULE DESCRIPTION. In OTV3's commonest
         # header the path, the version, the date and the last change's TITLE all
         # share one line:
-        #   analysis/liquidity_mapper.py  v4.4
-v4.4  2026-08-25  r65 EXORCISM: every mention of the retired classification
-      system removed - identifiers, comments, docstrings, schema. The word
-      does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
-  2026-08-15  AUDIT A2: THE INPUT...
+        #   analysis/liquidity_mapper.py  v4.3  2026-08-15  AUDIT A2: THE INPUT...
         # A naive extract yields "AUDIT A2: THE INPUT COULD NOT" as the
         # description — **a header that describes the last bug fix instead of
         # what the module does is worse than no header at all.** If the line
