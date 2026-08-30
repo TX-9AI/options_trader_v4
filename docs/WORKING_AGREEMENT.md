@@ -1,5 +1,7 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
+**`WORKING_AGREEMENT.md` v4.1 · 2026-08-29 — 37 sections. See the CHANGELOG at the foot.**
+
 This file is operating discipline for the assistant across threads. None of it is
 about the trading system's *logic* (that's OBSERVATIONS.md / ROADMAP.md) — it's
 about **how work gets done here without repeating mistakes that have each cost
@@ -436,9 +438,36 @@ at all. Two days of work sat on that gap.
 - Priorities were ranked for two days **without `ROADMAP.md`**, the document that
   defines the critical path.
 
-All of it was reverted. **`docs/README.md` routes by question — read it first,
-then read the rest before writing anything.** The half hour costs less than one
-duplicate module.
+All of it was reverted. The half hour costs less than one duplicate module.
+
+⚠️ **THE ROUTING DOCUMENT THIS SECTION USED TO NAME DOES NOT EXIST HERE.** Until
+2026-08-29 the line above read *"`docs/README.md` routes by question — read it
+first"*. That file was an OTV3 document and **was never ported to v4**, so the
+one rule whose whole job is to stop docs going unread has been pointing at a
+missing file since the split. Nobody noticed, which is the section's own thesis
+proving itself.
+
+**READ IN THIS ORDER instead, and all four of these exist:**
+
+1. **`README.md`** (repo root) — what this repo is, what it refuses to be, and
+   why. It carries the reading order too.
+2. **`docs/WORKING_AGREEMENT.md`** — this file. How work gets done.
+3. **`docs/BACKLOG.md`** — what is open, what was ruled, what is closed and by
+   which revision. **This is the only place open work survives a thread.**
+4. **`docs/GENESIS.md`** — one line per revision, and *why*, which the diff
+   cannot tell you.
+
+Then, by question: `PLAN_SPEC.md` and `TRADES.md` for what the strategies do,
+`FILE_MAP.md` and `WRITE_MAP.md` (both **generated**, both gated) for what calls
+what and who owns which table, `INHERITED_FINDINGS.md` for the measurements v4
+was founded on.
+
+⚠️ **AND THE RULE THE MISSING FILE CARRIED IS STILL IN FORCE: DO NOT CREATE A
+NEW DOC.** Two documents claiming one job is the failure §35 records (a
+`SHIPPING_LOG.md` rode in a tarball and was tracked for seven revisions while
+GENESIS did the same work), and §33's map exists because a hand-kept duplicate
+drifted. Add to the file that owns the subject. If nothing owns it, that is the
+argument to make out loud before writing, not after.
 
 ---
 
@@ -802,3 +831,22 @@ Pinned by `tests/check_orb_restart.py` (C2b the ruling, C9/C9b the boundary,
 C10 subsequent triggers, C11 the time gate) and `tests/check_missed_inert.py`
 (M3 nothing in the entry path reads the ledger). Both mutation-proven in both
 directions.
+
+---
+
+## CHANGELOG
+
+v4.1  2026-08-29  r186 — backlog DOC.5. §25 has pointed at `docs/README.md`
+      since the v3—v4 split and that file was never ported — the one rule
+      whose job is to stop documents going unread was itself routing to a
+      missing document, in a section written because two days of work were lost
+      to unread docs. Replaced with an explicit four-document reading order,
+      every one of which exists, plus the by-question index. The rule the
+      missing file carried — do not create a new doc — is restated in place,
+      with §33 and §35 as the evidence.
+      A version line was added at the top: this file had none in either place,
+      so neither the two-places rule nor `check_land_discipline.py` could see
+      it (backlog DOC.9).
+
+v4.0  2026-08-19  Carried over at the OTV4 split. §26 through §37 were added
+      between 2026-08-19 and 2026-08-24 and are v4-era, not inherited.
