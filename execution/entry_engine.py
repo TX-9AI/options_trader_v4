@@ -1,5 +1,26 @@
 """
-execution/entry_engine.py  v4.4
+execution/entry_engine.py  v4.5
+v4.5  2026-08-30  r195 — ORB LEAVES THE LADDER AND POSTS A STANDING OFFER.
+      Backlog ORB.2. One DAY limit at the mark for the geometry count, posted
+      ONCE on the tick the setup fires, never re-priced. Every other strategy
+      keeps the r104 walk untouched.
+      🔑 WHY ONLY ORB. The ladder exists because of FRC.1 — gross edge
+      +$2.70/trade against $126/trade of round-trip friction, so half the
+      half-spread is worth ~$31/trade. Right for the credit spreads, the
+      butterfly and the runaway. Wrong for ORB, because the walk buys that $31
+      by SPENDING TICKS and a missed retest window costs the whole setup.
+      Operator, verbatim: "I don't want to blow an entry trying to save $25 by
+      dicking around over pennies." The edge is in being IN the break.
+      🔴 THIS IS NOT "LET THE ORDER SIT" RESTORED. Before r195 an ORB entry
+      posted ONE RUNG PER TICK on a ~5s per-rung deadline, was cancelled, and
+      re-signalled next tick against a fresh quote — an active walk. The v3.8
+      note below still describes the PRE-LADDER behaviour r104 superseded; it
+      is history, not current, and reading it as current made me under-size
+      this change once already.
+      ⚠️ NO RECORD IS BORN HERE. A resting offer returns filled_qty=0 and
+      enter() records NOTHING — the anti-orphan invariant is untouched. The
+      position is created later by the supervisor from the BROKER's positions,
+      the only thing the operator allows to declare an open trade.
 v4.4  2026-08-24  r104 THE LADDER IS WIRED FOR ENTRIES. entry_ladder.py has
       been complete and UNCALLED since 2026-08-20 while every live fill posted a
       single limit at mark — by FRC.1 that is ~$31/trade given away against a
@@ -192,6 +213,13 @@ class EntryEngine:
                 signal, sizing.contracts)
 
         if fill_premium is None or filled_qty <= 0:
+            if order_id and _is_standing_offer(signal):
+                # ⚠️ NOT A FAILURE, AND IT MUST NOT LOG LIKE ONE. The offer is
+                # live at the broker and supervised; "entry order failed" here
+                # would train the reader to ignore the line that means it.
+                logger.info("[%s] ORB offer WORKING (order %s) — no record "
+                            "until the broker confirms a fill", mode, order_id)
+                return None
             logger.error("Entry order failed — no confirmed fill, no position recorded")
             return None
         if filled_qty < sizing.contracts:
@@ -202,16 +230,13 @@ class EntryEngine:
         total_cost = fill_premium * filled_qty * CONTRACT_MULTIPLIER
 
         record = make_record(
+            **self._record_kwargs(signal),
             trade_id          = str(uuid.uuid4()),
-            symbol            = INSTRUMENT,
-            strategy          = signal.strategy_name,
-            setup_type        = signal.setup_type,
             # ⚠️ r152 — columns retained (the DB schema and every dashboard
             # read them); the SELECTOR that filled them is gone. UNGRADED is a
             # marker, not a verdict.
             setup_grade       = "UNGRADED",
             setup_score       = None,
-            direction         = signal.direction,
             option_side       = signal.option_side if not signal.is_butterfly else signal.butterfly_direction,
             is_butterfly      = signal.is_butterfly,
             strike            = signal.strike if not signal.is_butterfly else signal.center_contract.strike,
@@ -223,15 +248,10 @@ class EntryEngine:
             stop_premium      = signal.stop_premium(),
             trail_activation  = signal.trail_activation_premium(),
             target_premium    = signal.target_premium(),
-            underlying_entry  = signal.underlying_entry,
-            underlying_stop   = signal.underlying_stop,
-            underlying_target = signal.underlying_target,
-            vix_at_entry      = signal.vix_at_signal,
             adx_at_entry      = getattr(signal, 'adx_at_signal', 0.0),
             flat_angle_deg    = getattr(signal, 'flat_angle_deg', 0.0),
             swept_level_name  = getattr(signal, 'swept_level_name', ''),
             level_strength    = getattr(signal, 'level_strength', 0.0),
-            is_fed_day        = signal.is_fed_day,
             order_id          = order_id,
             paper_trade       = 1 if self.paper_trading else 0,
             # ⚠️ AUDIT F4 (2026-08-20): relaxed.tag() sets this on the SIGNAL
@@ -422,6 +442,8 @@ class EntryEngine:
         mark. filled_qty==0 means record NOTHING."""
         if self.paper_trading:
             return self._paper_fill_single(signal, contracts)
+        if _is_standing_offer(signal):
+            return self._place_standing_offer(signal, contracts)
 
         try:
             session  = get_session()
@@ -488,6 +510,115 @@ class EntryEngine:
 
         except Exception as e:
             logger.error(f"Single-leg order failed: {e}")
+            return None, "", 0
+
+    def _record_kwargs(self, signal) -> dict:
+        """The record fields that come from the SIGNAL, not from the fill.
+
+        🔑 ONE LINEAGE. `enter()` builds a record the moment a fill confirms;
+        the standing-offer path builds one when the SUPERVISOR discovers a fill
+        minutes later, with no signal object left in memory. Both must produce
+        the same row for the same setup, so both call this. A second
+        construction site is WORKING_AGREEMENT 7's exact failure — two versions
+        that look correct in isolation and drift on the field nobody compares.
+        """
+        return dict(
+            symbol            = INSTRUMENT,
+            strategy          = signal.strategy_name,
+            setup_type        = signal.setup_type,
+            direction         = signal.direction,
+            underlying_entry  = signal.underlying_entry,
+            underlying_stop   = signal.underlying_stop,
+            underlying_target = signal.underlying_target,
+            vix_at_entry      = signal.vix_at_signal,
+            is_fed_day        = signal.is_fed_day,
+        )
+
+    def _place_standing_offer(self, signal: OptionsSignal,
+                              contracts: int) -> Tuple[Optional[float], str, int]:
+        """ORB only: ONE limit at the mark, posted once, left to rest.
+
+        Returns (None, order_id, 0) on success — deliberately. A working offer
+        is NOT a fill, and `enter()` must record nothing. The supervisor turns
+        broker-confirmed fills into the position.
+
+        ⚠️ NO `confirm_order_fill`. That function's contract is "poll to a
+        bounded deadline and CANCEL THE REMAINDER" — the exact behaviour this
+        replaces. Calling it here would cancel the offer five seconds after
+        placing it.
+
+        ⚠️ NO `_walk_price`, NO `ladder_registry`. The price is
+        `signal.entry_premium`: the mark the strategy already read off the
+        chain on THIS tick when it selected the strike. Operator's ruling —
+        offer mark on the exact tick the trade fires.
+        """
+        from execution import resting_orders as _ro
+        try:
+            session = get_session()
+            account = get_account()
+            symbol  = signal.contract.symbol
+            mark    = float(signal.entry_premium or 0.0)
+            if mark <= 0:
+                logger.warning("[offer] no mark to price the standing offer — "
+                               "nothing posted")
+                return None, "", 0
+            leg = Leg(instrument_type=InstrumentType.EQUITY_OPTION,
+                      symbol=symbol, action=OrderAction.BUY_TO_OPEN,
+                      quantity=contracts)
+            order = NewOrder(time_in_force=OrderTimeInForce.DAY,
+                             order_type=OrderType.LIMIT,
+                             price=Decimal(str(-mark)),      # - = DEBIT to open
+                             legs=[leg])
+            response = account.place_order(session, order, dry_run=False)
+            if response.errors:
+                logger.error("[offer] rejected: %s", response.errors)
+                return None, "", 0
+            oid = str(getattr(response.order, "id", "") or "")
+            if not oid:
+                # 🔴 AN ORDER WITH NO ID CANNOT BE SUPERVISED OR CANCELLED.
+                # Page rather than pretend: reconcile will still adopt a fill,
+                # but no trigger can ever end this offer.
+                logger.error("[offer] placed with NO ORDER ID — it cannot be "
+                             "supervised or cancelled; reconcile only")
+                return None, "", 0
+            import json as _json
+            _snap = dict(self._record_kwargs(signal))
+            _snap.update(
+                option_side=signal.option_side, is_butterfly=False,
+                strike=float(signal.strike or 0.0), expiry=signal.expiry,
+                setup_grade="UNGRADED", setup_score=None,
+                stop_premium=signal.stop_premium(),
+                trail_activation=signal.trail_activation_premium(),
+                target_premium=signal.target_premium(),
+                adx_at_entry=getattr(signal, "adx_at_signal", 0.0),
+                flat_angle_deg=getattr(signal, "flat_angle_deg", 0.0),
+                swept_level_name=getattr(signal, "swept_level_name", ""),
+                level_strength=getattr(signal, "level_strength", 0.0),
+                relaxed_entry=int(getattr(signal, "relaxed_entry", 0) or 0),
+                notes=signal.notes,
+                orb_range_high=float(getattr(signal, "orb_range_high", 0.0) or 0.0),
+                orb_range_low=float(getattr(signal, "orb_range_low", 0.0) or 0.0),
+            )
+            # The 50% level for THIS attempt, from the signal's own geometry.
+            _bound = (_snap["orb_range_high"] if signal.direction == "long"
+                      else _snap["orb_range_low"])
+            _t50 = (_bound + (float(signal.underlying_target or 0.0) - _bound) / 2.0
+                    if _bound else 0.0)
+            _ro.record_placement(
+                direction=signal.direction, target_50pct=_t50,
+                structure_stop=float(signal.underlying_stop or 0.0),
+                signal_json=_json.dumps(_snap, default=str),
+                order_id=oid, session_date=_session_date(),
+                strategy=getattr(signal, "strategy_name", ""), symbol=symbol,
+                underlying=INSTRUMENT, side=signal.option_side,
+                strike=float(signal.strike or 0.0),
+                offered_qty=int(contracts), offer_price=mark)
+            logger.info("[offer] STANDING %s x%d @ %.2f — no re-bid, no walk; "
+                        "fills are discovered from broker positions",
+                        symbol, contracts, mark)
+            return None, oid, 0
+        except Exception as exc:                                # noqa: BLE001
+            logger.error("[offer] placement failed: %s", exc)
             return None, "", 0
 
     def _place_butterfly(self, signal: OptionsSignal,
@@ -623,6 +754,23 @@ class EntryEngine:
 
 
 _entry_engine: Optional[EntryEngine] = None
+
+
+def _session_date() -> str:
+    from utils.time_utils import now_et
+    return now_et().date().isoformat()
+
+
+def _is_standing_offer(signal) -> bool:
+    """ORB, and ONLY ORB, posts a standing offer instead of walking a ladder.
+
+    🔑 KEYED ON THE STRATEGY NAME ON PURPOSE, unlike sizing. This is not a
+    property of a STRUCTURE — every other long_debit still wants the walk, and
+    the exemption is the operator's judgement about ORB's edge, not a fact
+    about debits. `tests/check_ladder_exemption.py` pins that exactly one
+    strategy is exempt, so it cannot spread by accident.
+    """
+    return getattr(signal, "strategy_name", "") == "ORBStrategy"
 
 
 def get_entry_engine(paper_trading: bool = PAPER_TRADING) -> EntryEngine:

@@ -1,4 +1,17 @@
 """
+main.py  v4.29
+v4.29  2026-08-30  r195 — ORB'S RE-ARM MOVES FROM SIGNAL-FIRED TO
+       TRADE-RESOLVED, and one standing offer per setup. See
+       analysis/orb_engine.py v4.2 for the sequence this restores.
+
+main.py  v4.28
+v4.28  2026-08-30  r195 — THE STANDING OFFER IS SUPERVISED FROM BOTH LOOP
+       BRANCHES. `_supervise_offers` runs BEFORE the has_open_position()
+       split, so an offer with no fills yet — which has no trade record and
+       therefore no position — is still polled, adopted and cancelled. Put
+       it inside the manage branch and every unfilled offer is watched by
+       nothing. See execution/resting_orders.py v1.0.
+
 main.py  v4.27
 v4.27  2026-08-30  r192 — SIZING NORMALIZED, AND ORB GEOMETRY IS ACTUALLY
        ACTIVE. Every size now comes from `RiskManager.size_for(structure,...)`
@@ -2926,6 +2939,52 @@ def _l1_scores(ctx):
         return None
 
 
+def _orb_offer_working() -> bool:
+    """True when an ORB standing offer is live at the broker right now.
+
+    ⚠️ FAILS CLOSED. An unreadable offer store returns True — better to skip
+    one setup than to place a second order against one we cannot see.
+    """
+    try:
+        from execution import resting_orders as _ro
+        from utils.time_utils import now_et
+        return bool(_ro.working(now_et().date().isoformat(), "ORBStrategy"))
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning("offer check failed (%s) — treating as WORKING and "
+                       "skipping ORB this tick", exc)
+        return True
+
+
+def _supervise_offers(ctx: dict, state: BotState) -> None:
+    """Poll every standing ORB offer, adopt fills, fire the cancel triggers.
+
+    🔑 CALLED FROM BOTH BRANCHES OF THE LOOP, AND THAT IS THE WHOLE POINT. An
+    offer that has not filled has NO trade record, so `has_open_position()` is
+    False and the manage branch never runs for it. Supervising only from the
+    manage branch would leave every unfilled offer watched by nothing — the
+    orphan the module exists to prevent, reintroduced one level up.
+
+    ⚠️ NEVER RAISES INTO THE LOOP. A supervision failure must not stop the bot
+    from trading or managing; it logs and the next tick tries again, with the
+    10-minute broker reconcile underneath as the backstop.
+    """
+    try:
+        from execution import resting_orders as _ro
+        _df = ctx.get("df_1m")
+        _last = None
+        if _df is not None and len(_df) >= 2:
+            _last = float(_df.iloc[-2]["close"])
+        _ro.supervise(
+            price=float(ctx.get("price") or 0.0),
+            last_1m_close=_last,
+            eod=is_hard_close_time(),
+            paper=state.paper_trading,
+            adopt=lambda row, n: _ro.adopt_fill(row, n,
+                                                paper=state.paper_trading))
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning("offer supervision skipped this tick: %s", exc)
+
+
 def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     """Try to generate and execute a trade signal."""
     session  = get_session_guard()
@@ -3109,18 +3168,39 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # ORB dispatch is now gated on CONFIRMATION alone, which is what the
     # bypass's own doctrine said it was doing all along.
     if orb_confirmed and not _afd_orb:
-        orb_sig = _safe_strategy("ORB", lambda: _orb_strategy.generate_signal(
-            orb           = orb,
-            ms        = ms,
-            vol_state     = ctx["vol"],
-            liq_map       = ctx["liq_map"],
-            chain         = chain,
-            macro         = macro,
+        # ⚠️ ONE STANDING OFFER PER SETUP. The engine now correctly stays
+        # OPEN_LONG while an offer rests, so generate_signal() would keep
+        # producing the same signal every tick and place a new order each time.
+        # This is the other half of moving the re-arm: the state is honest, and
+        # the dispatch must respect it.
+        if _orb_offer_working():
+            _plan_skip("ORBStrategy", "a standing offer is already working "
+                                      "for this setup")
+            orb_sig = None
+        else:
+            orb_sig = _safe_strategy("ORB", lambda: _orb_strategy.generate_signal(
+                orb           = orb,
+                ms        = ms,
+                vol_state     = ctx["vol"],
+                liq_map       = ctx["liq_map"],
+                chain         = chain,
+                macro         = macro,
             current_price = ctx["price"]
-        ), ctx)
+            ), ctx)
         if orb_sig:
             signal = orb_sig
-            get_orb_engine().mark_triggered()
+            # 🔴 r195 — THE ENGINE NO LONGER RE-ARMS HERE, AND THAT WAS THE BUG.
+            # `mark_triggered()` fired the moment the SIGNAL existed, which
+            # re-armed the engine and `_rearm()` WIPES ORBData — direction,
+            # stop, target, confirmation — while the plan was still live. Under
+            # the ladder that was ~20s of exposure. With a standing offer it is
+            # the rest of the session, and a second attempt could confirm and
+            # place a SECOND offer at the same strike while the first still
+            # rested, giving two records for one broker position.
+            # The engine now stays OPEN_* until the TRADE resolves; the offer
+            # supervisor calls notify_position_closed() on a fill-and-close or
+            # a cancel trigger. Operator: "there is a SEQUENCE and 'waiting for
+            # the break' isn't what comes after 'enter long/short'."
     elif _afd_orb:
         _plan_skip("ORBStrategy", "past the afternoon debit cutoff")
     else:
@@ -4193,6 +4273,7 @@ def main_loop(state: BotState):
                 _readiness.assess_all(ctx, ms)
 
             # ── Manage open position ──────────────────────────────────────
+            _supervise_offers(ctx, state)   # r195 — BOTH branches
             if pos_mgr.has_open_position():
                 # ── Broken-wing roll: FIRST REFUSAL ───────────────────────
                 # The roll must run BEFORE manage_open_position. The per-leg

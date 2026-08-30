@@ -1,5 +1,9 @@
 """
-execution/position_manager.py  v4.6
+execution/position_manager.py  v4.7
+v4.7  2026-08-30  r195 — AN ORB EXIT CANCELS THE STANDING OFFER'S
+      REMAINDER BEFORE RE-ARMING THE ENGINE. A partly-filled offer left
+      the rest working after ANY exit the supervisor's trigger list did
+      not name. The setup ending is the trigger; the exit reason is not.
 v4.6  2026-08-27  r167: manage_open_position asks strategy/management.py's
       decide() first; for a covered record its intent (CLOSE / TRAIL / HOLD)
       is executed through the same _execute_exit and trail persistence as
@@ -638,6 +642,29 @@ class PositionManager:
         # Allows the engine to watch for another breakout attempt this session
         # rather than treating one trade as the end of the ORB opportunity.
         if "ORB" in record.get("strategy", ""):
+            # 🔴 r195 — THE REMAINDER DIES WITH THE TRADE, AND IT MUST GO FIRST.
+            # A standing offer can be partly filled: 4 of 10 fill, the position
+            # opens, and this exit closes it. The other 6 are STILL WORKING at
+            # the broker. The supervisor's triggers (fully filled / past the
+            # 50% TP / structure stop / EOD) do not cover an exit on
+            # theta_bleed, the velocity stall, the trail or the 15:45 flatten
+            # — so those 6 would keep standing with no position behind them
+            # while the engine re-armed onto a new setup with different
+            # geometry. Operator: a re-arm cancels any previous offer, because
+            # a new impulsive candle has a different high and low and so a
+            # different offer composition.
+            # ⚠️ BEFORE the re-arm, not after: once the engine re-arms it has
+            # forgotten this setup, and nothing left knows which offer belonged
+            # to it.
+            try:
+                from execution import resting_orders as _ro
+                _ro.cancel_all_working(
+                    f"position closed: {decision.exit_reason}",
+                    paper=self.paper_trading)
+            except Exception as e:                              # noqa: BLE001
+                logger.error("Could not cancel the standing offer remainder "
+                             "(%s) — it may still fill and would then be an "
+                             "UNMANAGED position", e)
             try:
                 from analysis.orb_engine import get_orb_engine
                 get_orb_engine().notify_position_closed()

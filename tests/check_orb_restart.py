@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_orb_restart.py  v1.0
+tests/check_orb_restart.py  v1.1
+v1.1  2026-08-30  r195 — three cases asserted the literal
+      WAITING_FOR_BREAK after a re-arm. r195 splits that into two honest
+      states — AWAITING_RANGE_REENTRY when price is outside the range,
+      WAITING_FOR_BREAK once a closed bar is back inside — so they now
+      assert THE ENGINE RE-ARMED, which is what they were always for.
 
 r95 — A RESTART MUST NOT ERASE THE SESSION, AND MUST NOT BUY A LATE ENTRY.
 
@@ -182,6 +187,22 @@ def check(name, ok, detail=""):
         FAILURES.append(name)
 
 
+# r195 — a re-arm now lands in one of TWO honest states, so these checks assert
+# "the engine re-armed", not a single label.
+# 🔑 AWAITING_RANGE_REENTRY IS STILL RE-ARMED. It says the attempt is over and
+# price is outside the range; a break can only register from a candle that
+# OPENS INSIDE, so nothing can arm from there anyway. Loosening to "either" is
+# not weakening the check — the thing these cases exist to prove is that the
+# engine did NOT stay OPEN and did NOT chase, and both states prove that.
+_REARMED = None
+
+
+def _rearmed(st) -> bool:
+    import analysis.orb_engine as _oe
+    return st in (_oe.ORBState.WAITING_FOR_BREAK,
+                  _oe.ORBState.AWAITING_RANGE_REENTRY)
+
+
 def main() -> int:
     print("check_orb_restart — a restart must not cost the ORB day")
 
@@ -213,7 +234,7 @@ def main() -> int:
           f"restarted={restarted}")
 
     check("C2c the consumed attempt re-arms for a FRESH break, not a chase",
-          restarted == oe.ORBState.WAITING_FOR_BREAK
+          _rearmed(restarted)
           and post.data.orb_high == ORB_HIGH and post.data.orb_low == ORB_LOW,
           f"state={restarted} range={post.data.orb_low}-{post.data.orb_high}")
 
@@ -350,7 +371,7 @@ def main() -> int:
     # ... and the session carries on, live, from the next bar.
     second = _live(eng2, SECOND_SETUP_TAPE, 13, len(SECOND_SETUP_TAPE) - 1)
     check("C10 after a miss, a FRESH break+retest still fires",
-          consumed == oe.ORBState.WAITING_FOR_BREAK
+          _rearmed(consumed)
           and second == oe.ORBState.OPEN_LONG
           and eng2.data.attempt_number == 2,
           f"after_miss={consumed} later={second} attempt={eng2.data.attempt_number}")
@@ -388,7 +409,7 @@ def main() -> int:
           f"attempt={ra.data.attempt_number} (expected 3)")
 
     check("C12b and CONSUMES it — the ruling survives a re-arm",
-          ra.data.state == oe.ORBState.WAITING_FOR_BREAK,
+          _rearmed(ra.data.state),
           f"state={ra.data.state}")
 
     check("C12c the miss is recorded, not swallowed",

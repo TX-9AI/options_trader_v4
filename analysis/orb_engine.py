@@ -1,5 +1,16 @@
 """
-analysis/orb_engine.py  v4.4
+analysis/orb_engine.py  v4.5
+v4.5  2026-08-30  r195 — AWAITING_RANGE_REENTRY: the sequence after a trade.
+      The engine returned to WAITING_FOR_BREAK the moment a position closed
+      — or, worse, the moment the SIGNAL fired — while price sat outside the
+      range with the break behind it. "Range set; no break yet" was false,
+      and `_rearm()` WIPES ORBData, so firing it early erased a live plan's
+      direction, stop, target and confirmation while the plan was still live.
+      🔑 A break can only register from a candle that OPENS INSIDE, so the
+      honest intermediate state is "price is out there"; it flips to
+      WAITING_FOR_BREAK on the first closed bar back in range. Only a
+      `close_inside` invalidation re-arms straight to WAITING_FOR_BREAK,
+      because that one PROVES re-entry.
 v4.4  2026-08-24  r103 STATE IS WRITTEN DOWN AND TRUSTED. state_snapshot() /
       load_state_file() make orb_state.json resumable and AUTHORITATIVE — the
       file has been written every tick since v3 and read by nobody, while r95
@@ -292,6 +303,16 @@ class ORBState:
     INVALIDATED                = "INVALIDATED"
     OPEN_LONG                  = "OPEN_LONG"
     OPEN_SHORT                 = "OPEN_SHORT"
+    # 🔴 r195 — THE SEQUENCE HAD A HOLE AND THE LABEL LIED. After a trade the
+    # engine went straight back to WAITING_FOR_BREAK — "range set; no break
+    # yet" — while price sat OUTSIDE the range with the break already behind
+    # it. Operator: "why would it be waiting for the break when it's in an
+    # active plan & sitting OUTSIDE the range? There is a SEQUENCE and
+    # 'waiting for the break' isn't what comes after 'enter long/short'."
+    # A break can only register from a candle that OPENS INSIDE, so the honest
+    # state between a finished trade and the next attempt is "price is out
+    # there; nothing can arm until it comes back".
+    AWAITING_RANGE_REENTRY     = "AWAITING_RANGE_REENTRY"
     EXPIRED                    = "EXPIRED"
 
 
@@ -374,7 +395,14 @@ class ORBEngine:
         self._resumed_from_file = False
         logger.info("ORB engine reset for new session")
 
-    def _rearm(self):
+    def _rearm(self, *, reentered: bool = False):
+        """Re-arm for the next attempt.
+
+        ⚠️ `reentered` says whether price is KNOWN to be back inside the range.
+        A `close_inside` invalidation proves it — that bar closed in there. A
+        finished trade or a stale retest proves nothing, and claiming
+        WAITING_FOR_BREAK then is a statement about the tape nobody checked.
+        """
         d = self._data
         orb_high, orb_low, orb_width_val = d.orb_high, d.orb_low, d.orb_width
         attempt = d.attempt_number
@@ -382,11 +410,12 @@ class ORBEngine:
         self._data.orb_high       = orb_high
         self._data.orb_low        = orb_low
         self._data.orb_width      = orb_width_val
-        self._data.state          = ORBState.WAITING_FOR_BREAK
+        self._data.state          = (ORBState.WAITING_FOR_BREAK if reentered
+                                     else ORBState.AWAITING_RANGE_REENTRY)
         self._data.attempt_number = attempt
         logger.info(
-            f"ORB re-armed for next attempt (#{attempt + 1}): "
-            f"watching range {orb_low:.2f}-{orb_high:.2f}"
+            f"ORB re-armed for next attempt (#{attempt + 1}) in state "
+            f"{self._data.state}: range {orb_low:.2f}-{orb_high:.2f}"
         )
 
     def _load_range_from_file(self):
@@ -489,6 +518,17 @@ class ORBEngine:
         if d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT):
             return
 
+        if d.state == ORBState.AWAITING_RANGE_REENTRY:
+            # 🔑 THE ONLY WAY BACK IN. `_check_for_break` already requires a
+            # candle that OPENS INSIDE, so nothing could arm from out here
+            # anyway — this state stops the engine CLAIMING otherwise, and
+            # flips the moment a closed bar is back inside the range.
+            if df_1m is not None and len(df_1m) >= 2:
+                _c = float(df_1m.iloc[-2]["close"])
+                if d.orb_low <= _c <= d.orb_high:
+                    d.state = ORBState.WAITING_FOR_BREAK
+                    logger.info("ORB: price back inside %.2f-%.2f — watching "
+                                "for the next break", d.orb_low, d.orb_high)
         if d.state == ORBState.WAITING_FOR_BREAK:
             self._check_for_break(df_1m)
 
@@ -504,7 +544,10 @@ class ORBEngine:
             # retest clock was removed per spec; armed persists until a market
             # event resolves it.
             if d.invalidation_reason == "close_inside":
-                self._rearm()
+                # The bar CLOSED inside the range — re-entry is proven, not
+                # assumed, so this is the one re-arm that may claim
+                # WAITING_FOR_BREAK.
+                self._rearm(reentered=True)
             else:
                 logger.debug(
                     f"ORB dormant after '{d.invalidation_reason}' invalidation "
