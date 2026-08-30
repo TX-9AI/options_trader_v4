@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.1
+# BACKLOG.md — v1.2
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -65,7 +65,6 @@ feed plumbing and are not warehouse candidates.
 | ID | item | status | notes |
 |---|---|---|---|
 | **S3.1** | Push `fork_series`, `indicator_series`, `surface_series` from `derived_store.db`. | ⬜ | **The long pole; SNS.3 waits on it.** ⚠️ `push_series()` is called with `FEED_DB` and these live in `DERIVED_DB` — needs a **second call** with its own table tuple and a namespaced ledger key, NOT an append to `SERIES_TABLES`, which would silently find nothing. These three are exactly "what the feed was doing at the time". |
-| **S3.2** | `fit_readiness.py` → source from `warehouse_source.load_derived()`. | ⬜ | Cheapest real win. Its `--db` defaults to `~/options-trader/data/derived_store.db`, **a box path that does not exist on control** (WA §3), so menu 57 has never produced a number there. Every table it reads is already in S3. |
 | **S3.3** | `eod_analysis._excursion()` → pass `--bundles-dir reports/warehouse`. | ⬜ | One line. The nightly builds an S3 bundle in `_consolidate()` and then, one phase later, reads the **local per-box DBs** anyway. |
 | **S3.4** | Menu 55 (excursion) → default to `reports/warehouse`; DB path becomes an explicit flag. | ⬜ | ⚠️ `--since` is **refused** without per-box DBs, so cumulative windows need `reports/warehouse/` populated for every date first (menu 76 does that). |
 | **S3.5** | Menu 56 (trade breakdown) → default to `reports/warehouse`. | ⬜ | `--bundles-dir` already exists; menu 81 is the warehouse twin. |
@@ -81,6 +80,7 @@ against each box. That is right **during** a session and wrong after it.
 |---|---|---|---|
 | **SNS.1** | Control-side twin for sensor 30 (Order flow). | ⬜ | `prints` and `quote_series` are already in S3. **Portable today**, no dependency on S3.1. |
 | **SNS.2** | Control-side twins for sensors 20, 21, 23, 24, 25, 29. | ⬜ | All six tables already in S3 via `DERIVED_TABLES`. |
+| **SNS.4** | Every future S3-sourced derived reader must use `warehouse_reader.load_derived()`, not a bare partition read. | ⬜ | Not a task on its own — a **condition on SNS.1–SNS.3 and END.1**. See C.9: a derived `dt=` is the PUSH day, so reading one partition per date under-reports silently. The loader already handles it; hand-rolling a `read_prefix` loop would reintroduce it. |
 | **SNS.3** | Control-side twins for sensors 26 (Surface), 27 (Indicators), 28 (Forks). | ⬜ | **BLOCKED on S3.1 having baked and collected a session.** |
 | — | Menu 19, 22, 58, 61 | ❌ **DEAD** | Deliberately NOT repointed. 19/22/58 are live diagnostics — S3 is the wrong source for *"is the feed fresh right now"*. 61 fetches from yfinance and writes to the box by design. |
 
@@ -114,6 +114,7 @@ against each box. That is right **during** a session and wrong after it.
 |---|---|---|---|
 | **DOC.1** | `tests/scrub_headers.py` had not parsed since r65. | r182 | ◐ **PUSHED.** r65's header pass matched the `v4.3` inside an **illustrative comment** in `_autodescribe()`, mistook it for the file's own version line, spliced a four-line changelog into the middle of it and stranded the tail at column 2. The real header was never touched and still read v4.0. Restored verbatim from `dfe5910`. **Born-red proof: `gen_file_map.py --check` rc=1 at `0241cb9`, rc=0 after.** |
 | **DOC.2** | `docs/BACKLOG.md` did not exist. | r182 | ◐ **PUSHED.** WA §18 mandates it in every archive and `analysis/trade_readiness.py` references it. This file. |
+| **S3.2** | `fit_readiness.py` sourced from a box path that does not exist on control. | r184 / dtp r226 | ◐ **PUSHED.** Menu **57 produces a number on control for the first time.** `warehouse_reader` v1.7 gains `load_derived()` (CDC collapse latest-per-(symbol,_rid) by `pushed_at_utc`); `fit_readiness` v1.1 defaults to S3 with `--db` kept as the explicit on-a-box escape hatch. **One aggregator, two sources** — `collect()` takes plain dicts and cannot tell them apart, proven by a row-for-row parity assertion. Also fixed in passing: v1.0 bounded its window with NAIVE LOCAL time on a UTC box, so "2026-08-25" meant 20:00 ET on the 24th — the operator's own "a report for today run after the close fails". Both paths now bound on the ET trading day. `tests/test_fit_readiness_s3.py` v1.0, 6 cases, born red at `438c827` (AttributeError — the loader did not exist). Full dtp suite unchanged before and after. |
 | **GATE.1** | Nothing verified that a delivery bumped its headers, wrote its changelog, appended its GENESIS row, or regenerated its maps. | r183 / dtp r225 | ◐ **PUSHED.** `day_trader_pro/tools/check_land_discipline.py` v1.0 — one tool, both repos, capability-detected (dtp has no GENESIS or maps; those report **SKIP by name**, never a silent pass). Selftest is **7 born-red cases + a positive control, 7/7**. Replayed over r162–r182: **zero false positives on correct deliveries**, and it found the real misses now filed as DOC.6/DOC.8. Optional pre-commit hook via `tools/install_land_hook.sh`. ⚠️ **It proves the BOOKKEEPING, never the truth of the edit** — see C.7. |
 | **DOC.3** | `FILE_MAP.md` and `WRITE_MAP.md` existed **twice** — repo root and `docs/`. | r182 | ◐ **PUSHED.** Both generators write to `docs/`; nothing read the root pair. They were last written at r160 and had gone stale: root `FILE_MAP.md` claimed **190 modules** against `docs/`'s **198**. Deleted per WA §28 and the SHIPPING_LOG lesson in WA §35 — *two documents claiming the same job, and whichever gets updated becomes the truth while the other rots.* |
 
@@ -133,12 +134,21 @@ not rediscovered the expensive way.
 | **C.5** | A version-bumping script **cannot distinguish a file's own header from a header quoted as an example**, and this repo's docs are full of quoted headers by design. Anchor on position or an explicit marker, never on a `vX.Y` pattern found anywhere in the file. | r182 (DOC.1) |
 | **C.6** | `docs/GENESIS.md` is never in a tarball (WA §35) and `docs/BACKLOG.md` is in **every** tarball (WA §18). The two rules point opposite ways on purpose: Genesis is append-only on the box, the backlog is authored here. | WA, restated r182 |
 
+| **C.9** | 🔴 **A DERIVED `dt=` PARTITION IS THE PUSH DAY, NOT THE ROW'S DAY.** `push_derived` files every CHANGED row under `datetime.now(ET).date()` at push time, so a plan created Monday and updated Wednesday lands in **Wednesday's** partition, and the first push after any gap files a whole table's history under one day. Reading one partition per requested date under-reports **silently** — it returns a smaller, entirely plausible number. `load_derived()` scans a forward window (`DTP_DERIVED_FORWARD_DAYS`, default 3) and then files each row by ITS OWN timestamp converted to the ET trading day. **Partition selection and row attribution are different questions.** | r184, read from `s3_push.push_derived` |
+| **C.10** | Timestamp columns differ by table and the difference is meaningful: `plan_ledger` is dated by **`created_ts`** (when the plan was FORMED), everything else by `ts_epoch`. Dating a plan by `updated_ts` would move it to whichever session it last transitioned in. | r184 |
 | **C.7** | **GATE.1 proves the bookkeeping, not the edit.** It asserts the version MOVED and that a dated entry names it; it cannot tell whether the entry is TRUE. The land command's own content gate — a positive grep for a distinctive line from the real change plus a negative grep that the superseded code is gone — is what proves the edit happened. Running GATE.1 and calling a delivery verified is the laundered green WA §18 names. | r183 |
 | **C.8** | The otv4 checkout on control is **`~/options-trader-v4`** (hyphens), not `options_trader_v4`. Confirmed by r182's land output. | 2026-08-29, observed |
 
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.2 — 2026-08-29 — r184 / dtp r226 — S3.2 CLOSED; SNS.4, C.9 AND C.10 OPENED.**
+The first item in the S3-repoint queue landed, and building it turned up C.9 —
+a property of the warehouse nobody had written down, and one that would have
+quietly under-reported every derived reader built after it. That is why SNS.4
+exists as a condition rather than a task: the next three sensor twins inherit
+the trap, and the loader is the place it is already solved.
 
 **v1.1 — 2026-08-29 — r183 / dtp r225 — GATE.1 CLOSED; DOC.6–DOC.8 AND C.7–C.8 OPENED.**
 The land-discipline checker landed, and measuring history with it is what
