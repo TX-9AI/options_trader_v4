@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-198 Python modules across 13 local packages.
+199 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -288,7 +288,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/__init__.py`
 - **calls:** (none)
-- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `tests/check_ladder_wired.py`
+- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `tests/check_ladder_wired.py`, `tests/check_orb_geometry_size.py`
 
 ### `execution/broker_reconcile.py`
 - **calls:** `config.py`, `utils/time_utils.py`
@@ -296,7 +296,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/entry_engine.py`
 - **calls:** `analysis/tape_at_level.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/ladder_registry.py`, `execution/limit_ladder.py`, `execution/order_confirm.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `strategy/base_strategy.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_entry_gate.py`, `tests/check_ladder_wired.py`
+- **called by:** `main.py`, `tests/check_entry_gate.py`, `tests/check_ladder_wired.py`, `tests/check_orb_geometry_size.py`
 
 ### `execution/entry_ladder.py`
 - **calls:** `execution/tick_size.py`, `utils/math_utils.py`
@@ -356,7 +356,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `risk/risk_manager.py`
 - **calls:** `config.py`, `database/trade_logger.py`, `notifications/alert_manager.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `execution/entry_engine.py`, `execution/position_manager.py`, `main.py`
+- **called by:** `execution/entry_engine.py`, `execution/position_manager.py`, `main.py`, `tests/check_orb_geometry_size.py`, `tests/check_sizing_parity.py`
 
 ### `risk/session_guard.py`
 - **calls:** `config.py`, `data/macro_data.py`, `utils/time_utils.py`
@@ -615,7 +615,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_orb_geometry_size.py`
-- **calls:** (none)
+- **calls:** `execution/__init__.py`, `execution/entry_engine.py`, `risk/risk_manager.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_orb_restart.py`
@@ -668,6 +668,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_singletons.py`
 - **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_sizing_parity.py`
+- **calls:** `risk/risk_manager.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_structure_viable.py`

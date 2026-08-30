@@ -1,5 +1,41 @@
 """
-risk/risk_manager.py  v4.1
+risk/risk_manager.py  v4.2
+v4.2  2026-08-30  r192 — ONE SIZING HANDLER, FOUR RULES, KEYED ON STRUCTURE.
+      Operator: "normalize the entry sizing, but use the stop size logic we
+      just wrote for orb specifically, and make it active — it shipped
+      inert/broken."
+      🔴 THE BUG THIS FIXES STRUCTURALLY, NOT JUST ONCE. r181 computed ORB's
+      geometry count IN THE CALLER (main.py) and assigned it to
+      `signal.contracts` — a field written four times and read ZERO times
+      tree-wide — while `entry_engine.enter()` ordered `sizing.contracts`.
+      Every ORB trade since the 08-28 bake has been a 1-lot while the log
+      printed "[orb-size] r181 geometry: ... -> N (was M)". A rule applied
+      by the CALLER is the only one of the four that can compute a number the
+      order never sees. Now every rule returns a SizingResult and the order
+      reads only SizingResult.contracts, which makes the failure
+      UNREPRESENTABLE rather than merely corrected.
+      🔑 NOTE WHAT DID NOT CHANGE: entry_engine is untouched. It already
+      ordered `sizing.contracts`; it was the sizer that was not answering.
+      That is the test of whether this refactor is the right one.
+      ⚠️ KEYED ON `structure`, THE SAME KEY `_afternoon_debit_blocked` USES,
+      not on a strategy-name list. That lesson is already paid for: the v3
+      cutoff held a name list, two of its three entries were deleted, and the
+      new long-debit strategy was silently EXEMPT. A name list rots every
+      time a strategy moves, AND IT ROTS PERMISSIVELY. Unknown structure
+      falls to the budget rule, which is the restrictive one.
+      ⚠️ THE ARITHMETIC OF THE THREE EXISTING RULES IS UNCHANGED — this is a
+      move, not a rewrite. `tests/check_sizing_parity.py` pins 25 golden rows
+      captured from THIS FILE AT r191 before the refactor, across all three.
+      🔴 ORB GEOMETRY BYPASSES THE BUDGET ENTIRELY, by the operator's 08-28
+      ruling ("NO notional cap for ORB ... I'm actually good, even with the
+      worst case taking the 25% floor on a leveraged position with a tight
+      stop"). CONSEQUENCE, STATED PLAINLY BECAUSE IT IS NEW BEHAVIOUR AND NOT
+      MERELY AN ACTIVATION: the budget path could REFUSE an ORB entry outright
+      with `insufficient_capital` when one contract cost more than the risk
+      budget. Geometry has no such rung, so those setups now trade at >=1 lot
+      where they previously did not fire at all. Only a non-positive premium
+      still refuses. The notional is logged on every geometry size so the
+      number is visible rather than inferred.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -114,6 +150,11 @@ class SizingResult:
     allowed:            bool  = True
     deploy_capped:      bool  = False    # r121 — risk wanted more than ownership allows
     reject_reason:      str   = ""
+    # r192 — WHICH RULE DECIDED THIS SIZE. Written on the trade record and the
+    # journal row, so "why is this 10 lots" is answerable from the record
+    # instead of reconstructed from the log. r181 was invisible for two days
+    # precisely because nothing on the row said which rule had run.
+    rule:               str   = ""
 
 
 @dataclass
@@ -177,7 +218,96 @@ class RiskManager:
             # If the DB is briefly unavailable, fall back to the in-memory tally.
             return float(self._session_pnl_usd)
 
-    def compute_size(self,
+    # ══ r192 ── THE ONE DOOR ═══════════════════════════════════════════════
+    def size_for(self, structure: str, *,
+                 grade: str = "B",
+                 premium: float = 0.0,
+                 stop_premium: float = 0.0,
+                 net_debit: float = 0.0,
+                 butterfly_half_size: bool = False,
+                 spread_width: float = 0.0,
+                 credit: float = 0.0,
+                 orb_width: float = 0.0,
+                 orb_stop_distance: float = 0.0) -> SizingResult:
+        """THE single entry point for position size. Dispatches on STRUCTURE.
+
+        🔑 EVERY RULE RETURNS A SizingResult, AND THE ORDER READS ONLY
+        SizingResult.contracts. That is the whole point of this function. r181
+        put ORB's rule in the CALLER, which wrote a field the order never read,
+        and the fleet sized 1 lot for two days while logging that it had not.
+        A rule that cannot return a SizingResult cannot be a sizing rule.
+
+        ⚠️ `structure` is the strategy's own declaration — the same key
+        `_afternoon_debit_blocked` reads — never a strategy-name list. An
+        unknown structure falls to the BUDGET rule, which is the restrictive
+        one.
+
+        Geometry is a sub-rule of `long_debit`, selected by the caller SUPPLYING
+        `orb_width` / `orb_stop_distance` rather than by naming ORB. A second
+        strategy that wants risk-normalised sizing supplies the geometry; it
+        does not get added to a list somewhere that later rots.
+        """
+        st = (structure or "").strip().lower()
+        if st == "vertical":
+            return self._size_vertical(spread_width, credit, grade)
+        if st == "butterfly":
+            return self._size_budget(premium=0.0, grade=grade, is_butterfly=True,
+                                     net_debit=net_debit,
+                                     butterfly_half_size=butterfly_half_size)
+        if st == "long_debit" and (orb_width or orb_stop_distance):
+            return self._size_geometry(premium, orb_width, orb_stop_distance, grade)
+        return self._size_budget(premium=premium, grade=grade,
+                                 stop_premium=stop_premium)
+
+    def _size_geometry(self, premium: float, width: float, distance: float,
+                       grade: str = "B") -> SizingResult:
+        """Risk-normalised size off the impulsive candle. NO BUDGET, NO CAP.
+
+        contracts = max(1, floor(width / stop_distance)); the worst entry — a
+        stop the full width away — sizes to exactly 1, so every ORB trade risks
+        roughly the same dollars AT THE STRUCTURE STOP by construction.
+
+        🔴 THIS RULE HAS NO `insufficient_capital` RUNG, deliberately, per the
+        operator's 2026-08-28 ruling. A setup the budget path would have
+        REFUSED outright now trades at one lot or more. The notional is logged
+        every time, so that is a visible fact rather than an inferred one.
+
+        ⚠️ DEGENERATE GEOMETRY SIZES 1, LOUDLY — never a leveraged position on
+        arithmetic nobody trusts. distance <= 0 or distance > width means the
+        entry or the stop is not what the strategy thinks it is.
+        """
+        result = SizingResult(grade=grade)
+        result.rule = "orb_geometry"
+        cost_per_contract = float(premium or 0.0) * CONTRACT_MULTIPLIER
+        if cost_per_contract <= 0:
+            result.allowed       = False
+            result.reject_reason = "zero_premium"
+            return result
+        if width > 0 and 0 < distance <= width * 1.0001:
+            count = max(1, int(width // distance))
+            logger.info(
+                "[size] orb_geometry: width %.2f / stop %.2f -> %d contract(s) "
+                "@ $%.0f = $%.0f notional (NO budget cap — operator ruling "
+                "2026-08-28)", width, distance, count, cost_per_contract,
+                count * cost_per_contract)
+        else:
+            count = 1
+            logger.warning(
+                "[size] orb_geometry DEGENERATE width=%.4f distance=%.4f -> 1 "
+                "contract. The entry or the stop is not what the strategy "
+                "thinks it is.", width, distance)
+        result.contracts         = count
+        result.cost_per_contract = cost_per_contract
+        # ⚠️ FULL PREMIUM, matching the budget rule's doctrine: max_loss is what
+        # a gap THROUGH a soft stop actually costs, and downstream gates read
+        # this field assuming the worst rather than the intent.
+        result.risk_per_contract = cost_per_contract
+        result.total_cost        = count * cost_per_contract
+        result.max_loss          = count * cost_per_contract
+        result.allowed           = True
+        return result
+
+    def _size_budget(self,
                      premium: float,
                      grade: str = "B",
                      is_butterfly: bool = False,
@@ -195,6 +325,7 @@ class RiskManager:
             butterfly_half_size: True when VIX 15-20 (halve butterfly size)
         """
         result = SizingResult(grade=grade)
+        result.rule = "butterfly" if is_butterfly else "budget"
 
         cost_per_share = net_debit if is_butterfly else premium
         # ── r121 — THE DENOMINATOR IS THE RISK, WHEN ENABLED ──────────────
@@ -280,7 +411,7 @@ class RiskManager:
         )
         return result
 
-    def compute_condor_leg_size(self, spread_width: float, credit: float,
+    def _size_vertical(self, spread_width: float, credit: float,
                                  grade: str = "B") -> SizingResult:
         """Size ONE condor vertical (credit spread) at the FULL grade budget.
 
@@ -298,6 +429,7 @@ class RiskManager:
         Max loss per contract for a credit spread = (width - credit) x 100.
         """
         result = SizingResult(grade=grade)
+        result.rule = "vertical"
 
         max_loss_per_contract = (spread_width - credit) * CONTRACT_MULTIPLIER
         if max_loss_per_contract <= 0:

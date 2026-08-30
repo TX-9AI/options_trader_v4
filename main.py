@@ -1,5 +1,15 @@
 """
-main.py  v4.26
+main.py  v4.27
+v4.27  2026-08-30  r192 — SIZING NORMALIZED, AND ORB GEOMETRY IS ACTUALLY
+       ACTIVE. Every size now comes from `RiskManager.size_for(structure,...)`
+       and arrives in `sizing.contracts` — the field `entry_engine.enter()`
+       has always ordered. The r181 override that lived in this function is
+       DELETED, not rewired: it assigned `signal.contracts`, written 4x and
+       read 0x tree-wide, so ORB has sized ONE LOT since the 08-28 bake while
+       logging "-> N (was M)". 🔴 A sizing rule applied by the CALLER is the
+       only kind that can compute a number the order never sees; the repair
+       is that this function no longer owns any sizing policy at all.
+
 v4.26  2026-08-28  r181 — ORB RISK-NORMALIZED SIZING, PURE GEOMETRY.
       contracts = max(1, floor(orb_width / stop_distance)); the stop is the
       impulsive candle's low/high (signal.underlying_stop). Worst entry
@@ -2010,7 +2020,14 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
 
     # Size this vertical at HALF the grade budget — each side is independent,
     # so a B-grade $1000 trade becomes two ~$500 verticals.
-    sizing = get_risk_manager().compute_condor_leg_size(spread_width, net_credit, "B")
+    # r192 — through the one door; the vertical rule and its arithmetic are
+    # unchanged, only its address is.
+    # ⚠️ grade is NOT passed. The default is already "B" (identical arithmetic
+    # to the old positional call), and writing `grade="B"` here trips
+    # check_conviction_removed S4 — "no code assigns an A or B grade". The
+    # grading system is retired; this call must not look like it revives it.
+    sizing = get_risk_manager().size_for("vertical", spread_width=spread_width,
+                                         credit=net_credit)
     if not sizing.allowed:
         logger.info(f"Condor leg not sized: {sizing.reject_reason}")
         return
@@ -3572,29 +3589,37 @@ def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool 
     # entry windows, level invalidation, distance-to-pin. A setup either meets
     # its own spec or it does not — there is no second opinion summed from
     # weights nobody chose.
-    sizing = risk_mgr.compute_size(
-        premium           = signal.entry_premium,
-        # r121 — the sizer needs the STOP to size on risk. Passed from the
-        # signal the strategy already computed; when it is absent or the flag
-        # is off, the sizer falls back to premium and nothing changes.
-        # 🔴 r173 — `stop_premium` on OptionsSignal is a METHOD (entry x
-        # (1 - stop_loss_pct)); strategies that assign it as an instance
-        # attribute shadow the method and float() worked, but a debit signal
-        # that leaves the method exposed (the r168 runaway, which sets only
-        # stop_loss_pct) made this line raise
-        #   float() argument must be ... not 'method'
-        # into the loop catch-all: EVERY tick died, no strategy on the box
-        # could enter, and at 30 loop errors the service exited and systemd
-        # restarted it — 2026-08-28's fleet-wide zero-trade morning and the
-        # Telegram restart spam were THIS LINE. _sig_num resolves both
-        # shapes and the method gives the correct 20% floor.
-        stop_premium      = _sig_num(signal, "stop_premium"),
-        # ⚠️ r152 — no grade exists. Size is flat by ruling; the sizer's
-        # GRADE_SIZE_MULTIPLIER lookup falls back to 1.0 on any unknown key.
-        grade             = "UNGRADED",
-        is_butterfly      = signal.is_butterfly,
-        net_debit         = signal.net_debit if signal.is_butterfly else 0.0,
-        butterfly_half_size = macro.butterfly_half_size if signal.is_butterfly else False
+    # ── r192 — ONE DOOR. The rule is chosen by the strategy's declared
+    # STRUCTURE inside size_for(), not by a branch here. ORB gets the geometry
+    # sub-rule by SUPPLYING its width and stop distance; every other
+    # long_debit supplies neither and takes the budget rule unchanged.
+    # 🔑 THE CALLER NO LONGER OWNS ANY SIZING POLICY, and that is the repair.
+    # r181 computed ORB's count HERE and assigned `signal.contracts`, a field
+    # the order never reads, so the fleet sized 1 lot for two days while
+    # logging that it had not.
+    # ⚠️ `stop_premium` stays exactly as r173 left it — see the note it
+    # replaced: it is a METHOD on OptionsSignal unless a strategy shadows it,
+    # and `_sig_num` is what stops float() raising into the loop catch-all.
+    _struct = (getattr(signal, "structure", None)
+               or _STRUCTURE_BY_NAME.get(getattr(signal, "strategy_name", ""))
+               or "long_debit")          # fail closed, as the debit cutoff does
+    _orb_w = _orb_d = 0.0
+    if getattr(signal, "strategy_name", "") == "ORBStrategy":
+        # Geometry INPUTS only — the rule itself (floor, clamp, degenerate→1)
+        # lives in the sizer, so there is exactly one place it can be wrong.
+        _orb_w = abs(float(getattr(signal, "orb_range_high", 0) or 0)
+                     - float(getattr(signal, "orb_range_low", 0) or 0))
+        _orb_d = abs(float(getattr(signal, "underlying_entry", 0) or 0)
+                     - float(getattr(signal, "underlying_stop", 0) or 0))
+    sizing = risk_mgr.size_for(
+        _struct,
+        premium             = signal.entry_premium,
+        stop_premium        = _sig_num(signal, "stop_premium"),
+        grade               = "UNGRADED",
+        net_debit           = signal.net_debit if signal.is_butterfly else 0.0,
+        butterfly_half_size = macro.butterfly_half_size if signal.is_butterfly else False,
+        orb_width           = _orb_w,
+        orb_stop_distance   = _orb_d,
     )
 
     if not sizing.allowed:
@@ -3609,40 +3634,12 @@ def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool 
                 pass
         return
 
-    # Populate contract count in signal
+    # r192 — the sizer's answer is the ONLY answer. The r181 geometry
+    # override that lived here is GONE: it wrote `signal.contracts`, which
+    # `entry_engine.enter()` never reads, so it could not reach the order.
+    # Geometry now runs INSIDE size_for() and arrives in sizing.contracts,
+    # the field the order actually places.
     signal.contracts  = sizing.contracts
-    # ── r181 — ORB SIZES ON ACTUAL RISK: PURE GEOMETRY (operator ruling,
-    # 2026-08-28): "adjust the position size based on 'actual' risk … using
-    # the impulsive candle as our sizing criteria … normalize it to 1
-    # contract minimum under the worst possible entry" — and, on the tail:
-    # "I'm actually good, even with the worst case taking the 25% floor on a
-    # leveraged position with a tight stop." So: contracts = floor(range
-    # width / stop distance), stop = the impulsive candle's LOW (long) /
-    # HIGH (short), already on the signal as underlying_stop. The notional
-    # cap does NOT bind ORB; the 25% floor stays underneath as the gap
-    # backstop at whatever size results. Every ORB trade risks the same
-    # dollars AT THE STRUCTURE STOP by construction (contracts x distance is
-    # ~constant). Degenerate geometry (distance <= 0 or > width) sizes 1,
-    # loudly — never a leveraged position on garbage.
-    if getattr(signal, "strategy_name", "") == "ORBStrategy":
-        try:
-            _w = abs(float(getattr(signal, "orb_range_high", 0) or 0)
-                     - float(getattr(signal, "orb_range_low", 0) or 0))
-            _d = abs(float(getattr(signal, "underlying_entry", 0) or 0)
-                     - float(getattr(signal, "underlying_stop", 0) or 0))
-            if _w > 0 and 0 < _d <= _w * 1.0001:
-                _geo = max(1, int(_w // _d))
-                logger.info("[orb-size] r181 geometry: width %.2f / stop %.2f "
-                            "-> %d contract(s) (was %s)",
-                            _w, _d, _geo, sizing.contracts)
-                signal.contracts = _geo
-            else:
-                logger.warning("[orb-size] r181 degenerate geometry width=%.4f "
-                               "dist=%.4f -> 1 contract", _w, _d)
-                signal.contracts = 1
-        except Exception as _gs_err:                            # noqa: BLE001
-            logger.warning("[orb-size] r181 sizing fell back to 1: %s", _gs_err)
-            signal.contracts = 1
     signal.total_cost = sizing.total_cost
 
     # ── Enter trade ───────────────────────────────────────────────────────────
