@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-warehouse/retention_purge.py  v1.0
+warehouse/retention_purge.py  v1.1
+v1.1  2026-08-29  r191 — THE DERIVED-SERIES PURGE LIST BECOMES A CONSTANT,
+      and its justification is retired. Behaviour is unchanged: the same
+      three tables, the same 20 days. What changes is that
+      `DERIVED_ARTIFACT_DAYS` is importable, so `check_purge_pushed` can see
+      it — which is why it never noticed that all three were being deleted
+      with no push stage. See the block above `purge()`'s derived loop for
+      why "pure functions of the candles" does not hold, especially for
+      `surface_series`.
 Trim expired LOCAL data. Dry by default. Never runs unless S3 verified first.
 
 v1.0  2026-08-25  Enforces the policy declared inert in `config.py` v4.4
@@ -62,6 +70,19 @@ RETENTION_DAYS = {"1m": 5, "5m": 10, "15m": 20, "1h": 60, "1d": None}
 # verified in source that the surface engine reads a 15-minute window and
 # nothing reaches across sessions. Three days rather than two because a Friday
 # push that fails silently is not noticed until Monday.
+# 🔴 r191 — THE DERIVED SERIES PURGE IS NOW A CONSTANT, AND IT WAS THE REASON
+# NOTHING CAUGHT THIS. These three were deleted at 20 days by a HARDCODED TUPLE
+# inside `purge()`, while `tests/check_purge_pushed.py` proves its invariant by
+# importing `ARTIFACT_DAYS` and `NEVER_PURGE` — module constants. A purge list
+# the checker cannot see is a purge list outside the invariant, so all three
+# were being trimmed with NO PUSH STAGE for as long as the purge has been armed
+# (r162). Same shape as the v1.0 finding, one level down.
+DERIVED_ARTIFACT_DAYS = {
+    "indicator_series":  20,
+    "fork_series":       20,
+    "surface_series":    20,
+}
+
 ARTIFACT_DAYS = {
     "greeks_series":     3,
     "quote_series":      3,
@@ -136,16 +157,28 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
             fc.commit()
         fc.close()
 
-    # ── derived: only the RECOMPUTABLE engines ──────────────────────────
-    # ⚠️ indicator/fork/surface series are pure functions of the candles, so
-    # trimming them costs a recomputation and nothing more. Everything else in
-    # this store is lifecycle and is excluded above.
+    # ── derived: the series the engines recompute ───────────────────────
+    # ⚠️ THE ORIGINAL JUSTIFICATION WAS "pure functions of the candles, so
+    # trimming them costs a recomputation and nothing more". r191 keeps the
+    # policy and RETIRES that reasoning, for two measured objections:
+    #   · A recomputation tells you what TODAY'S CODE would have said, not what
+    #     the bot ACTUALLY SAW. Those differ exactly when there is a bug, which
+    #     is the only time anyone goes looking. The operator made this same
+    #     argument about ORB state: the derived value is what the range SHOULD
+    #     have been, the recorded value is what was used.
+    #   · `surface_series` (charm / vanna / GEX) is NOT a function of the
+    #     candles at all. It comes off the options chain and `greeks_series`,
+    #     and chain snapshots are explicitly NOT reconstructible after the
+    #     session. For that table the premise was simply false.
+    # So the purge stands — 20 days of intraday series is a real disk cost —
+    # but it is now safe because s3_push v4.5 warehouses all three first, and
+    # DERIVED_ARTIFACT_DAYS above puts them inside check_purge_pushed's reach.
     dc = _open(derived_db)
     if dc is not None:
-        for table in ("indicator_series", "fork_series", "surface_series"):
+        for table, days in DERIVED_ARTIFACT_DAYS.items():
             if table in NEVER_PURGE:
                 continue
-            cutoff = now - 20 * DAY
+            cutoff = now - days * DAY
             try:
                 n = dc.execute(f"SELECT COUNT(*) FROM {table}"
                                " WHERE ts_epoch < ?", (cutoff,)).fetchone()[0]

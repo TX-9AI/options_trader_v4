@@ -1,5 +1,29 @@
 """
-warehouse/s3_push.py  v4.4
+warehouse/s3_push.py  v4.5
+v4.5  2026-08-29  r191 — THE THREE DERIVED SERIES ARE WAREHOUSED (backlog
+      S3.1). `fork_series`, `indicator_series` and `surface_series` live in
+      derived_store.db and had NO PUSH STAGE, while retention_purge deletes
+      all three at 20 DAYS. Armed since r162, so they have been going out
+      the door unwarehoused — the same loss v4.2 fixed for the feed series,
+      one store over.
+      🔴 WHY check_purge_pushed DID NOT CATCH IT: it imports
+      `ARTIFACT_DAYS`, and this purge list was a HARDCODED TUPLE inside
+      `purge()`. A policy the invariant cannot import is a policy outside
+      the invariant. retention_purge v1.1 makes it `DERIVED_ARTIFACT_DAYS`
+      and the checker now covers it by EXECUTION (C9/C10).
+      🔑 THEY ARE SERIES, NOT BIOGRAPHIES, SO THEY DO NOT GO THROUGH
+      push_derived. Those tables are append-only and keyed on `ts_epoch`, so
+      a high-water mark is right and CDC-by-rowid would re-hash the whole
+      table every run for nothing. `push_series` is now parameterised over
+      its table tuple and ledger namespace; the feed call is unchanged.
+      ⚠️ AND IT GETS ITS OWN LEDGER FILE. `push_series` was called ONLY with
+      FEED_DB and the CANDLE ledger; pointing a second call at DERIVED_DB
+      while sharing that dict would put two stores' high-water marks in one
+      file under one namespace — the r82 class exactly (two meanings, one
+      shape, one helper). `dseries_ledger.json`, namespace `dseries|`.
+      — KEY LAYOUT IS UNCHANGED ON PURPOSE: `raw/<table>/dt=/sym=/`, the
+      same shape push_series already writes, so `warehouse_source.load_series`
+      reads them with no reader change. The consumer is backlog SNS.3.
 v4.4  2026-08-28  r180 — 🔴 HEAL LEDGER DRIFT, HOLD FOR REAL LOSS. Two
       months of nightly conductor holds and self_close refusing to halt
       traced to ONE defect: the ledger counts PUTs, S3 counts keys, the
@@ -644,6 +668,11 @@ _SINCE_FLUSH = [0]
 MISC_LEDGER    = os.path.join(STATE_DIR, "misc_ledger.json")
 CANDLE_LEDGER  = os.path.join(STATE_DIR, "candle_ledger.json")
 DERIVED_LEDGER = os.path.join(STATE_DIR, "derived_ledger.json")
+# v4.5 — the derived SERIES high-water marks. Its own file: derived_ledger.json
+# holds {table: {rid: sha}} and candle_ledger.json holds {SYM|interval: hwm}.
+# A flat float map in either of those is two meanings in one dict, which is
+# the r82 failure this project has already paid for once.
+DSERIES_LEDGER = os.path.join(STATE_DIR, "dseries_ledger.json")
 DERIVED_DB     = os.path.join(_OT, "data", "derived_store.db")
 
 
@@ -879,6 +908,13 @@ SERIES_TABLES = ("greeks_series", "quote_series", "prints", "last_trade",
 # rotation and the fit needs weeks. `plan_check` is the higher-volume of the
 # two (one row per variable per plan per cycle) — it goes here, never before
 # `shadow` in the ordering, per the standing push-order rule.
+# v4.5 — the RECOMPUTABLE series in derived_store.db. Append-only and keyed on
+# ts_epoch, so they take the high-water path, not the CDC path. Kept in sync
+# with retention_purge.DERIVED_ARTIFACT_DAYS by tests/check_purge_pushed.py.
+# ⚠️ `character_axis_sample` is deliberately NOT here — its disposition is an
+# open operator ruling (backlog ASK.1) and guessing it would decide by default.
+DERIVED_SERIES_TABLES = ("fork_series", "indicator_series", "surface_series")
+
 DERIVED_TABLES = ("fire_snapshot", "strategy_note", "plan_ledger",
                   "plan_tick", "plan_check",
                   "gate_disposition", "character_ledger", "level_ledger",
@@ -936,8 +972,13 @@ def push_derived(s3, bucket, db_path, ledger, me, counters=None):
 SERIES_BATCH_ROWS = int(os.environ.get("OT_S3_SERIES_BATCH", "50000"))
 
 
-def push_series(s3, bucket, db_path, ledger, me, counters=None):
-    """The seven manifold series tables — batched, high-water per table.
+def push_series(s3, bucket, db_path, ledger, me, counters=None,
+                tables=None, ns="series"):
+    """Series tables — batched, high-water per table.
+
+    v4.5: `tables` and `ns` are parameters so the SAME implementation serves
+    feed_store's seven and derived_store's three. Defaults reproduce the v4.2
+    call exactly, so every existing caller and test is unaffected.
 
     Same contract as push_candles: rows are append-only and keyed on
     ts_epoch, so a per-table high-water mark pushes only what is new, as ONE
@@ -956,8 +997,8 @@ def push_series(s3, bucket, db_path, ledger, me, counters=None):
     except Exception:
         return 0, 0
     day = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
-    for table in SERIES_TABLES:
-        lk = "series|%s" % table
+    for table in (SERIES_TABLES if tables is None else tables):
+        lk = "%s|%s" % (ns, table)
         hwm = float(ledger.get(lk, 0) or 0)
         try:
             rows = [dict(r) for r in con.execute(
@@ -1093,6 +1134,7 @@ def main(argv=None) -> int:
         misc = load_ledger(MISC_LEDGER)
         c_ledger = load_ledger(CANDLE_LEDGER)
         d_ledger = load_ledger(DERIVED_LEDGER)
+        ds_ledger = load_ledger(DSERIES_LEDGER)
         me = own_symbol()
         total_pushed = 0
         total_failed = 0
@@ -1131,6 +1173,11 @@ def main(argv=None) -> int:
             # greeks/quote tape. Batched: one object per table per run.
             ("series", lambda: push_series(s3, BUCKET, FEED_DB, c_ledger, me, counters)),
             # v4.3 — the biographies. Small tables, but they are the ONLY copy.
+            # v4.5 — beside "series", not beside "derived": same shape, same
+            # perishability, and both are read by warehouse_source.load_series.
+            ("derived_series", lambda: push_series(
+                s3, BUCKET, DERIVED_DB, ds_ledger, me, counters,
+                tables=DERIVED_SERIES_TABLES, ns="dseries")),
             ("derived", lambda: push_derived(s3, BUCKET, DERIVED_DB, d_ledger,
                                              me, counters)),
             ("liquidity_ledger", lambda: push_whole_files(
