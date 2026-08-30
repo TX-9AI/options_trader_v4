@@ -1,5 +1,12 @@
 """
-strategy/orb_strategy.py  v4.2
+strategy/orb_strategy.py  v4.3
+v4.3  2026-08-30  r193 — POOL IN PATH IS RECORD-ONLY. A named pool within
+      BEYOND_TP_ADJUSTMENT_WIDTHS past the 100% target used to PULL the
+      target to that pool. Operator's ruling: record it, do not let it move
+      the trade. Detection, the counted clusters and the notes all stay, so
+      the effect can be studied later; the target is now the pure measured
+      move. ⚠️ The pull was a grading-era survivor that CHANGED WHAT THE
+      TRADE DOES while reading like an annotation.
 v4.2  2026-08-26  r146 — RECORDED THROUGH THE PLAN, ZERO HURDLES. Operator,
       2026-08-26: *"Include orb in that, zero hurdles."* The three refusals
       this file makes AFTER the engine confirms (no contract, zero premium,
@@ -229,7 +236,14 @@ class ORBStrategy(BaseOptionsStrategy):
                 f"{liq_result['block_reason']}"
             )
 
-        target_100 = liq_result.get("adjusted_target", orb.target_100pct)
+        # 🔴 r193 — POOL IS RECORD-ONLY. Operator, 2026-08-29: pool presence is
+        # "recorded but not influence the entry or target location. We can
+        # evaluate its effects later on." The target is the pure measured
+        # move; `adjusted_target` is still COMPUTED and still written to the
+        # notes and the plan row, so the study is possible later, but it no
+        # longer moves where the trade aims. A grading-era survivor that
+        # changed what the trade DOES while looking like an annotation.
+        target_100 = orb.target_100pct
         target_50  = orb.orb_high + (target_100 - orb.orb_high) * 0.5 \
                      if direction == "long" \
                      else orb.orb_low - (orb.orb_low - target_100) * 0.5
@@ -296,9 +310,13 @@ class ORBStrategy(BaseOptionsStrategy):
             )
 
         if liq_result.get("target_adjusted"):
+            # RECORDED, NOT APPLIED (r193). The note names the pool and what the
+            # target WOULD have become, so the counterfactual survives in the
+            # record; `target_100` above is untouched.
             signal.notes += (
-                f" | Target adjusted to {target_100:.2f} "
-                f"(named level {liq_result['target_adj_reason']} just beyond TP)"
+                f" | Pool {liq_result['target_adj_reason']} at "
+                f"{liq_result.get('adjusted_target', 0.0):.2f} just beyond TP "
+                f"(RECORDED ONLY — target stays {target_100:.2f})"
             )
 
         if macro.is_fed_day:

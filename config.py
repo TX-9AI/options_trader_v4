@@ -1,5 +1,13 @@
 """
-config.py  v4.9
+config.py  v4.10
+v4.10  2026-08-30  r193 — ORB_NO_ENTRY_AFTER_ET 11:00 -> 11:30. The window
+      gates PLACING an ORB order, not an offer already resting. 🔑 It now
+      EQUALS DEBIT_DIRECTIONAL_CUTOFF_ET, deliberately: both tests are `>=`
+      and ORB declares long_debit, so entries run to 11:29:59 and the debit
+      block takes over at 11:30:00 with no gap and no overlap. ⚠️ The
+      constant also expires the ORB engine from any state and feeds the
+      re-arm check, so this buys 30 more minutes of breaks and retests, not
+      only a later last entry. See the note at the constant itself.
 v4.9  2026-08-28  r175: TCS_DRIFT_HORIZON_BARS (24 x 5m) — the bounded horizon
       pop_drift may credit the session's measured drift over; baseline prior,
       stated, env-tunable.
@@ -704,8 +712,22 @@ HARD_CLOSE_ET               = (15, 45)
 # it crosses unconditionally. An unfilled 0DTE at the bell is an expiry (and an
 # assignment on a short leg), not an overnight hold — so the cross is absolute.
 FLATTEN_WINDOW_OPEN_ET      = (15, 40)
-ORB_NO_ENTRY_AFTER_ET       = (11, 0)   # ORB-SCOPED: ORB entries valid until 11:00 ET.
+ORB_NO_ENTRY_AFTER_ET       = (11, 30)  # ORB-SCOPED: ORB entries valid until 11:30 ET.
                                         #   Also the ARM condition for sweep reversal.
+# 🔴 r193 — 11:00 -> 11:30, operator 2026-08-30: "1130 is the cutoff for new
+# orb entries or a single attempt runaway that has not yet fired during the
+# session." It gates PLACING an order, not an offer already resting.
+# 🔑 IT LANDS EXACTLY ON THE DEBIT BLOCK, and that is deliberate rather than a
+# coincidence to be tidied later. `_afternoon_debit_blocked` fires at
+# `>= DEBIT_DIRECTIONAL_CUTOFF_ET` (11:30) for `long_debit`, ORB declares
+# long_debit, and the ORB test is also `>=`. So entries run to 11:29:59 and the
+# block takes over at 11:30:00 — no gap, no overlap. If one test were `>` and
+# the other `>=` there would be a one-minute hole that only ever showed up as a
+# rare fill nobody could explain.
+# ⚠️ NOT ONLY A LATER DEADLINE. This constant also sets `entries_expired` and
+# EXPIRES the ORB engine from ANY state (orb_engine ~441), and r60 made the
+# re-arm check read it too. So the change buys 30 more minutes of breaks,
+# retests and RE-ARMS — more attempts per session, not just a later last entry.
 # ── AFTERNOON DEBIT BLOCK (2026-08-13, operator's directive) ─────────────────
 # "no long contracts in the afternoon unless they're part of a vertical spread
 # or a butterfly."  MECHANISM: on 0DTE, an afternoon debit needs a large move

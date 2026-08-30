@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/cascade_real.py  v1.0  (2026-08-25)
+tests/cascade_real.py  v1.1  (2026-08-30)
+
+v1.1  2026-08-30  r193 — ORB_NO_ENTRY_AFTER_ET follows config (11:30).
+      This file declared its OWN (11, 0); a real-tape run rehearsing an 11:00
+      window against a fleet running 11:30 stays green while measuring a
+      different system. tests/check_orb_window.py W3 now pins every
+      declared copy against config.
 
 THE PLAN CASCADE RUN ON REAL 1-MINUTE TAPES.
 
@@ -42,7 +48,8 @@ UP = os.environ.get("TAPE_DIR", "/mnt/user-data/uploads")
 
 # Real production constants
 ORB_WINDOW_MIN              = 5
-ORB_NO_ENTRY_AFTER_ET       = (11, 0)
+ORB_NO_ENTRY_AFTER_ET       = (11, 30)   # r193 — keep in step with config;
+                                         # tests/check_orb_window.py pins every copy
 DEBIT_DIRECTIONAL_CUTOFF_ET = (11, 30)
 CONDOR_ENTRY_START_ET       = (11, 11)
 TCS_START_ET                = (11, 31)
