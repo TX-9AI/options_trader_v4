@@ -1,5 +1,16 @@
 """
-strategy/gex_pin_butterfly.py  v4.6
+strategy/gex_pin_butterfly.py  v4.7
+v4.7  2026-08-31  r198 — THE WINGS ARE SNAPPED TO THE CHAIN'S REAL STRIKE
+      LADDER. `config.STRIKE_INCREMENT` is one global number for fifteen
+      symbols and `round_to_strike()` returns an int, so every wing was
+      quantised to whole dollars: PLTR pin 190 -> legs 189/191 on a $2.50
+      ladder, AMD pin 472.5 -> legs 470.5/474.5. Neither pair exists, and the
+      `legs` gate refused for 242 and 243 MINUTES on 2026-08-31 for an
+      arithmetic reason, not a market one. 🔑 THE APEX NEVER MOVES — both
+      pins were listed strikes; only the wings were off-grid, so the
+      nearest-strike-substitute doctrine is untouched. ⚠️ A wider-than-
+      intended wing is ACCEPTED by operator ruling and recorded (intended,
+      grid, stretch) so the metrics can settle whether it is viable.
 v4.6  2026-08-31  r196 — THE NOON FLOOR IS HARD. Operator, on the first live
       open, seeing butterflies fire at 09:45: "the noon floor is
       non-negotiable." 🔴 That 09:45 is `relaxed.window()`'s relaxed_earliest
@@ -300,13 +311,16 @@ def expected_move(underlying: float, atm_iv: float, now=None) -> Optional[float]
 
 class ButterflyPreparation:
     """What the plan hands the strategy each tick of the slot — never executable."""
-    __slots__ = ("tick", "pin", "side", "conc", "em", "frac", "wing", "lower", "center",
+    __slots__ = ("tick", "pin", "side", "conc", "em", "frac", "wing",
+                 "wing_intended", "grid_inc", "wing_stretch", "lower", "center",
                  "upper", "debit", "width", "r", "r_min", "conditions", "unmet",
                  "structural", "starved", "ready")
 
     def __init__(self, tick):
         self.tick = tick
         self.pin = self.conc = self.em = self.frac = self.wing = 0.0
+        self.wing_intended = self.grid_inc = 0.0
+        self.wing_stretch = None
         self.side = ""
         self.lower = self.center = self.upper = None
         self.debit = self.width = self.r = None
@@ -444,13 +458,38 @@ class GEXPinButterflyStrategy:
             if chain is None:
                 prep.starved.append("chain")
             else:
-                inc = float(getattr(config, "STRIKE_INCREMENT", 1) or 1)
-                from utils.math_utils import round_to_strike
-                wing = float(round_to_strike(WING_EM_FRAC * em, inc) or 0.0)
-                wing = max(inc, min(wing, float(round_to_strike(abs(pin - price_now), inc) or inc)))
-                prep.wing = wing
-                t.check("wing_width", wing, wing >= inc)
                 contracts = chain.calls if side == "call" else chain.puts
+                # 🔴 r198 — THE GRID COMES FROM THE CHAIN, NOT FROM ONE GLOBAL
+                # CONSTANT. See _chain_increment(). ⚠️ NOT `round_to_strike`:
+                # it returns an int, so a $2.50 ladder cannot be represented by
+                # it at all and reusing it here would silently reintroduce the
+                # very bug this fixes for every half-strike symbol.
+                inc = _chain_increment(contracts, pin,
+                                       float(getattr(config, "STRIKE_INCREMENT", 1) or 1))
+                _snap = lambda v: round(round(v / inc) * inc, 4)
+                wing_intended = WING_EM_FRAC * em
+                wing = _snap(wing_intended)
+                # The near wing still may not cross spot — unchanged from v4.x.
+                wing = max(inc, min(wing, _snap(abs(pin - price_now)) or inc))
+                prep.wing = wing
+                prep.wing_intended = wing_intended
+                prep.grid_inc = inc
+                # ⚠️ OPERATOR RULING 2026-08-31: a wing wider than the prior
+                # wanted is ACCEPTED — *"the wide butterfly is fine, and it
+                # will bear out in the metrics later on if that is viable."*
+                # So there is no refusal here. But a ruling that defers to the
+                # metrics only works if the metrics can SEE it, so the intended
+                # width, the grid and the stretch ride on the record. Without
+                # that this is untestable later and the ruling cannot be
+                # revisited on evidence.
+                _stretch = (wing / wing_intended) if wing_intended > 0 else None
+                prep.wing_stretch = _stretch
+                if _stretch and _stretch >= 1.5:
+                    logger.info("[gex_bfly] wing STRETCHED to the %.2f grid: "
+                                "wanted %.2f, using %.2f (%.1fx) — accepted by "
+                                "ruling, recorded for the metrics",
+                                inc, wing_intended, wing, _stretch)
+                t.check("wing_width", wing, wing >= inc)
                 lo_k, hi_k = pin - wing, pin + wing
 
                 def _exact(k):
@@ -549,10 +588,49 @@ class GEXPinButterflyStrategy:
         sig.pin_em_fraction = round(prep.frac, 4)
         sig.pin_distance = round(abs(prep.pin - float(price_now)), 4)
         sig.pin_strike = prep.pin          # r178: the mark's key == the plan's key
+        # r198 — the metrics need the counterfactual, not just the outcome.
+        sig.wing_intended = round(prep.wing_intended, 4)
+        sig.wing_actual   = prep.wing
+        sig.grid_increment = prep.grid_inc
+        sig.wing_stretch  = (round(prep.wing_stretch, 3)
+                             if prep.wing_stretch else 1.0)
         relaxed.tag(sig)
         logger.info("[gex_bfly] FIRE  %s  pin conc %.2f  spot %.2f",
                     prep.trade_line(), prep.conc, float(price_now))
         return prep.tick.take(sig)
+
+
+def _chain_increment(contracts, pin: float, default: float = 1.0) -> float:
+    """The symbol's ACTUAL strike ladder near the pin, read off the chain.
+
+    🔴 r198 — `config.STRIKE_INCREMENT` IS ONE GLOBAL NUMBER FOR FIFTEEN
+    SYMBOLS, and `round_to_strike()` returns an **int**, so every wing was
+    quantised to whole dollars whatever the symbol actually lists. Measured
+    2026-08-31: PLTR pin 190, EM 3.25 -> wing 1 -> legs at 189/191 on a $2.50
+    ladder; AMD pin 472.5 -> legs at 470.5/474.5. Neither pair exists, so
+    `_exact()` correctly refused — for 242 and 243 MINUTES respectively, on
+    both boxes, all session.
+
+    🔑 THE APEX WAS NEVER THE PROBLEM. PLTR's 190 and AMD's 472.5 are listed
+    strikes; `_exact(pin)` would have found them. Only the WINGS were computed
+    off a grid that does not exist. So this changes nothing about the apex, and
+    the doctrine — *"the apex is the trade; a nearest-strike substitute is a
+    different one"* — is untouched: no substitution ever reaches the apex.
+
+    Median gap of the strikes nearest the pin. The MEDIAN, not the minimum:
+    one stray half-strike listing in a $2.50 ladder would otherwise set the
+    grid to 0.50 and reproduce the bug.
+    """
+    ks = sorted({float(c.strike) for c in (contracts or [])
+                 if getattr(c, "strike", None) is not None})
+    if len(ks) < 3:
+        return default
+    near = sorted(ks, key=lambda k: abs(k - pin))[:9]
+    gaps = sorted(round(b - a, 4) for a, b in zip(sorted(near), sorted(near)[1:])
+                  if b > a)
+    if not gaps:
+        return default
+    return gaps[len(gaps) // 2] or default
 
 
 def _nr(v):
