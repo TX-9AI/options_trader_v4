@@ -1,11 +1,11 @@
 """
-config.py  v4.11
-v4.11  2026-08-31  r200 — the noon butterfly floor keeps its VALUE and gets a
-      new JUSTIFICATION. Its original one — that a pin reached before noon is
-      unlikely to hold to the bell — was falsified by three 09:45 flies that
-      carried to the 15:40 close in profit. Noon now stands on pin probability
-      rising through the session and on cheaper contracts buying more size.
-      Docs only: no constant changes, nothing to bake for behaviour.
+config.py  v4.12
+v4.12  2026-08-31  r201 — ORB_BUDGET_USD: the ceiling on what one ORB setup
+      may deploy, defaulting to RISK_PER_TRADE_USD and overridable by
+      OT_ORB_BUDGET_USD. ORB was the only strategy with no budget at all — an
+      SPX setup opened $34,750 of premium on 2026-08-31. Applies in paper as
+      well as live, because an unconstrained paper sizer overstates every P&L
+      number against live.
 v4.10  2026-08-30  r193 — ORB_NO_ENTRY_AFTER_ET 11:00 -> 11:30. The window
       gates PLACING an ORB order, not an offer already resting. 🔑 It now
       EQUALS DEBIT_DIRECTIONAL_CUTOFF_ET, deliberately: both tests are `>=`
@@ -573,6 +573,43 @@ CONTRACT_MULTIPLIER = 100
 # ─── ACCOUNT & RISK ───────────────────────────────────────────────────────────
 
 RISK_PER_TRADE_USD  = float(os.environ.get("OT_RISK_USD", "200"))
+
+# ─── ORB BUDGET (r201) ─────────────────────────────────────────────────────
+# 🔴 THE CEILING ON WHAT ONE ORB SETUP MAY DEPLOY. Operator, 2026-08-31, after
+# an SPX ORB opened 50 contracts at $6.95 for $34,750 of premium on paper:
+# *"Knowing that we can end up with a nominal position size in the 10s of
+# thousands of dollars was eye opening. We are going to rein that in."*
+# ⚠️ ORB IS THE ONLY UNSCALED STRATEGY. Every other rule already knows its
+# budget from RISK_PER_TRADE_USD; the r181/r192 geometry was deliberately
+# cap-exempt, so `max(1, floor(width / stop_distance))` grew without bound as
+# the stop tightened. This is the bound.
+# 🔑 THE SCALING CURVE IS NOT A NEW RAMP — it falls out of two clamps meeting.
+#   contracts = min( floor(width / stop_distance),      # geometry
+#                    floor(budget / cost_per_contract) ) # budget
+# A tight stop makes geometry large, so the BUDGET binds and the position is
+# the biggest the budget allows. A wide stop makes geometry small, so GEOMETRY
+# binds and you get 1 lot. Operator's rule exactly: smallest stops get the
+# maximum budget, biggest stops get a 1-lot maximum, everything else in
+# between.
+# ⚠️ THIS APPLIES IN PAPER TOO, DELIBERATELY. Paper's "unlimited" is the
+# ACCOUNT, not the trade: an unconstrained paper sizer would overstate every
+# P&L number against live and make the two incomparable.
+# ⚠️ NOT read from the broker. Operator: *"I would prefer setting the orb's
+# budget locally vs the dealer because I have more control over my exposure
+# that way. A dealer offering available capital is a license for the bot to use
+# it."* Consequence: sizing is deterministic and does not depend on what other
+# boxes committed seconds earlier, and the reject-vs-reduce-to-fit question at
+# the broker is never approached (still unverified — see backlog).
+# ⚠️ PER BOX. Fifteen boxes each hold this much, so fleet exposure is 15x.
+ORB_BUDGET_USD     = float(os.environ.get("OT_ORB_BUDGET_USD",
+                                          str(RISK_PER_TRADE_USD)))
+# 🔑 WHETHER IT WAS SET, NOT JUST WHAT IT IS. The default FAILS CLOSED, so a box
+# nobody configured trades small rather than large — right, but it makes an
+# unconfigured box look like a BROKEN one: 1-lot SPX reads as a defect, not as
+# a config gap. Operator sets this per underlying ($3–5k), so the common case
+# is explicit and the default is the exception that needs announcing. main.py
+# logs it at startup and status.py prints it; this flag is how they tell.
+ORB_BUDGET_IS_DEFAULT = "OT_ORB_BUDGET_USD" not in os.environ
 # Daily loss limit: halt NEW entries when the day's NET realized P&L is down by
 # this much. Defaults to one trade's risk; override via OT_DAILY_LOSS_LIMIT.
 DAILY_LOSS_LIMIT_USD = float(os.environ.get("OT_DAILY_LOSS_LIMIT", str(RISK_PER_TRADE_USD)))
@@ -821,31 +858,9 @@ TCS_ENTRY_END_ET            = (14, 0)   # ⚠️ PROVISIONAL, INERT: TC.6's wind
                                         #   Operator specs TC.6's real v4
                                         #   window before any activation.
 BUTTERFLY_ENTRY_CUTOFF_ET   = (14, 0)   # was 15:00 and unreachable (see v3.1 header)
-# 🔴 NOON, AND IT IS NOW ACTUALLY IN FORCE (r142).
-# ⚠️ r200 — THE ORIGINAL JUSTIFICATION WAS FALSIFIED ON 2026-08-31 AND HAS BEEN
-# REPLACED. It read, operator 2026-08-26: *"Butterfly is debit & any sooner than
-# noon to reach a pin is unlikely to hold all the way to the closing bell."*
-# The relaxed floor (BFLY.1) let four flies open at 09:45 that day, and THREE
-# CARRIED TO THE 15:40 HARD CLOSE IN PROFIT — MU +$637.50, TSLA +$692.00,
-# NFLX +$47.00, together most of a +$1,543.50 fleet day. That is the sentence's
-# own prediction, tested and wrong.
-# 🔑 NOON STANDS ON TWO DIFFERENT REASONS, and they are stronger than the one
-# they replace because neither depends on how long a pin holds. Operator,
-# 2026-08-31: *"later in the day has a better chance of pinning and the
-# contracts will be cheaper so we might be able to get more into our position
-# size."*
-#   1. PIN PROBABILITY RISES THROUGH THE SESSION. Gamma concentration builds as
-#      0DTE flow accumulates and dealers hedge into it, so a pin read at 12:30
-#      has more evidence behind it than the same read at 09:45.
-#   2. THE CONTRACTS ARE CHEAPER. Six hours less extrinsic on the body — and the
-#      body is the leg we are short two of. ⚠️ This COMPOUNDS with r192: the
-#      butterfly sizes through the budget rule on `net_debit`, so a cheaper fly
-#      buys MORE CONTRACTS for the same dollars. The afternoon entry is not only
-#      likelier to work, it is structurally larger when it does.
-# ⚠️ REASON 2 IS LOAD-BEARING AND CURRENTLY UNMEASURED (backlog BFLY.5). If
-# cheaper afternoon contracts really do buy more size, butterfly rows should
-# show it against the three tagged pre-noon flies from 08-31. Check it rather
-# than assume it.
+# 🔴 NOON, AND IT IS NOW ACTUALLY IN FORCE (r142). Operator, 2026-08-26:
+# *"Butterfly is debit & any sooner than noon to reach a pin is unlikely to
+# hold all the way to the closing bell."*
 # ⚠️ THIS CONSTANT WAS READ BY NOTHING IN PRODUCTION — only by a test harness.
 # The live gate was `gex_pin_butterfly.EARLIEST_ET`, a getattr DEFAULT of
 # "11:00" whose key did not exist in this file, so the butterfly would have

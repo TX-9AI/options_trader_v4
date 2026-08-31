@@ -1,5 +1,11 @@
 """
-risk/risk_manager.py  v4.2
+risk/risk_manager.py  v4.3
+v4.3  2026-08-31  r201 — ORB GEOMETRY IS CLAMPED BY A BUDGET. `min(geometry,
+      floor(budget / cost_per_contract))`, and the operator's scaling curve
+      falls out of the two clamps meeting rather than needing a ramp. A
+      single contract dearer than the whole budget REFUSES rather than
+      flooring to one, matching `_size_budget`. Both clamps are recorded on
+      the result so a future budget change is a query, not a guess.
 v4.2  2026-08-30  r192 — ONE SIZING HANDLER, FOUR RULES, KEYED ON STRUCTURE.
       Operator: "normalize the entry sizing, but use the stop size logic we
       just wrote for orb specifically, and make it active — it shipped
@@ -123,6 +129,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from config import (
+    ORB_BUDGET_USD,
     RISK_PER_TRADE_USD, GRADE_SIZE_MULTIPLIER, SIZE_ON_RISK_TO_STOP,
     DEPLOY_CAP_MULT,
     CONTRACT_MULTIPLIER, PAPER_TRADING, INSTRUMENT, DAILY_LOSS_LIMIT_USD
@@ -155,6 +162,13 @@ class SizingResult:
     # instead of reconstructed from the log. r181 was invisible for two days
     # precisely because nothing on the row said which rule had run.
     rule:               str   = ""
+    # r201 — BOTH CLAMPS, RECORDED. The operator's decision to set a live
+    # budget later is a query against these two numbers, not a guess: every ORB
+    # row says what the geometry wanted and what the budget allowed, so
+    # "which trades would a $30k budget have clipped" is answerable from paper
+    # data already banked. Same shape as r198's wing_stretch.
+    geometry_wanted:    int   = 0
+    budget_allowed:     int   = 0
 
 
 @dataclass
@@ -228,7 +242,8 @@ class RiskManager:
                  spread_width: float = 0.0,
                  credit: float = 0.0,
                  orb_width: float = 0.0,
-                 orb_stop_distance: float = 0.0) -> SizingResult:
+                 orb_stop_distance: float = 0.0,
+                 budget_usd=None) -> SizingResult:
         """THE single entry point for position size. Dispatches on STRUCTURE.
 
         🔑 EVERY RULE RETURNS A SizingResult, AND THE ORDER READS ONLY
@@ -255,12 +270,13 @@ class RiskManager:
                                      net_debit=net_debit,
                                      butterfly_half_size=butterfly_half_size)
         if st == "long_debit" and (orb_width or orb_stop_distance):
-            return self._size_geometry(premium, orb_width, orb_stop_distance, grade)
+            return self._size_geometry(premium, orb_width, orb_stop_distance,
+                                       grade, budget_usd=budget_usd)
         return self._size_budget(premium=premium, grade=grade,
                                  stop_premium=stop_premium)
 
     def _size_geometry(self, premium: float, width: float, distance: float,
-                       grade: str = "B") -> SizingResult:
+                       grade: str = "B", budget_usd=None) -> SizingResult:
         """Risk-normalised size off the impulsive candle. NO BUDGET, NO CAP.
 
         contracts = max(1, floor(width / stop_distance)); the worst entry — a
@@ -283,15 +299,45 @@ class RiskManager:
             result.allowed       = False
             result.reject_reason = "zero_premium"
             return result
+        # ── r201 — THE BUDGET IS THE OTHER CLAMP ──────────────────────────
+        # 🔑 The operator's scaling rule is not a separate ramp; it is what
+        # these two clamps produce when they meet. A TIGHT stop makes geometry
+        # large, so the BUDGET binds and the position is the biggest the budget
+        # allows. A WIDE stop makes geometry small, so GEOMETRY binds and you
+        # get one lot. "Smallest stops get the maximum budget, biggest stops
+        # get a 1-lot maximum, everything else in between."
+        budget = float(budget_usd if budget_usd is not None else ORB_BUDGET_USD)
+        by_budget = int(budget // cost_per_contract)
+        if by_budget < 1:
+            # ⚠️ REFUSED, NOT FLOORED TO ONE. A single contract that costs more
+            # than the whole budget cannot be inside a budget, and floor-to-1
+            # would silently blow through the exact ceiling this exists to
+            # impose. This matches `_size_budget`, which already refuses with
+            # `insufficient_capital` on the same arithmetic — ORB now behaves
+            # like every other rule at its own budget rather than uniquely.
+            result.allowed       = False
+            result.reject_reason = (f"orb_budget: one contract costs "
+                                    f"${cost_per_contract:.0f}, budget is "
+                                    f"${budget:.0f}")
+            logger.warning("[size] orb_geometry REFUSED: 1 contract @ $%.0f "
+                           "exceeds the $%.0f ORB budget", cost_per_contract,
+                           budget)
+            return result
         if width > 0 and 0 < distance <= width * 1.0001:
-            count = max(1, int(width // distance))
+            by_geometry = max(1, int(width // distance))
+            count = min(by_geometry, by_budget)
+            result.geometry_wanted = by_geometry
+            result.budget_allowed  = by_budget
+            _bound = "BUDGET" if by_budget < by_geometry else "geometry"
             logger.info(
-                "[size] orb_geometry: width %.2f / stop %.2f -> %d contract(s) "
-                "@ $%.0f = $%.0f notional (NO budget cap — operator ruling "
-                "2026-08-28)", width, distance, count, cost_per_contract,
-                count * cost_per_contract)
+                "[size] orb_geometry: width %.2f / stop %.2f -> geometry %d, "
+                "budget %d ($%.0f / $%.0f) -> %d contract(s) = $%.0f  [%s "
+                "binds]", width, distance, by_geometry, by_budget, budget,
+                cost_per_contract, count, count * cost_per_contract, _bound)
         else:
             count = 1
+            result.geometry_wanted = 1
+            result.budget_allowed  = by_budget
             logger.warning(
                 "[size] orb_geometry DEGENERATE width=%.4f distance=%.4f -> 1 "
                 "contract. The entry or the stop is not what the strategy "

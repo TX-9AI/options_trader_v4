@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""tests/check_orb_geometry_size.py  v2.0
+"""tests/check_orb_geometry_size.py  v2.1
+v2.1  2026-08-31  r201 — the geometry cases pass an EXPLICIT budget so they
+      measure the arithmetic and not the box's risk setting, and G3c is
+      rewritten: it pinned the 08-28 cap exemption, which r201 REVERSES.
+      Replaced rather than deleted — geometry is still exempt from the
+      RISK-PER-TRADE rule and is now bound by its OWN budget. Two ceilings,
+      and conflating them is how a reversal gets half-applied later.
 ORB sizes on ACTUAL risk, and THE ORDER RECEIVES THAT NUMBER.
 
 v2.0  2026-08-30  r192 — REWRITTEN TO EXECUTE. v1.0 pinned the bug:
@@ -59,8 +65,14 @@ def main():
         print("FAILED 1: G0 (see above) — the rest cannot execute")
         return 1
 
-    def geo(w, d, premium=1.20):
-        return rm.size_for("long_debit", premium=premium,
+    # ⚠️ r201 — AN EXPLICIT BUDGET, SO THESE MEASURE THE GEOMETRY. ORB is now
+    # clamped by ORB_BUDGET_USD, default one trade's risk; without this every
+    # case below would measure the sandbox's risk setting instead of the
+    # arithmetic it exists to pin. Budget behaviour: tests/check_orb_budget.py.
+    _BIG = 10_000_000.0
+
+    def geo(w, d, premium=1.20, budget=_BIG):
+        return rm.size_for("long_debit", premium=premium, budget_usd=budget,
                            orb_width=w, orb_stop_distance=d)
 
     # ── G1-G3: the rule itself, EXECUTED against the repo's own sizer ──────
@@ -77,15 +89,21 @@ def main():
     check("G3b the rule identifies itself on the result",
           geo(6.35, 0.61).rule == "orb_geometry", geo(6.35, 0.61).rule)
 
-    # ⚠️ NO BUDGET RUNG. Operator's 2026-08-28 ruling: ORB is exempt from the
-    # notional cap. A premium the budget rule REFUSES outright must still size.
+    # ── G3c — SUPERSEDED AND REPLACED, NOT LOOSENED ───────────────────────
+    # 🔴 This pinned the 2026-08-28 ruling that ORB had NO notional cap (C.24).
+    # r201 REVERSES it after an SPX setup opened $34,750 of premium on 08-31 —
+    # "we are going to rein that in" — so the old assertion now asserts the
+    # opposite of the operator's position. Replaced rather than deleted,
+    # because what is still worth pinning is that geometry answers to its OWN
+    # budget and not to the risk-per-trade rule. Two different ceilings.
     _rich = rm.size_for("long_debit", premium=2.40, orb_width=6.35,
-                        orb_stop_distance=0.61)
-    _budget = rm.size_for("long_debit", premium=2.40)
-    check("G3c geometry is cap-exempt where the budget rule refuses",
-          _rich.allowed and _rich.contracts >= 1 and not _budget.allowed,
-          f"geometry={_rich.contracts} allowed={_rich.allowed} / "
-          f"budget allowed={_budget.allowed}")
+                        orb_stop_distance=0.61, budget_usd=5000)
+    _by_risk = rm.size_for("long_debit", premium=2.40)
+    check("G3c geometry answers to the ORB budget, not to the risk rule",
+          _rich.allowed and _rich.contracts >= 1 and not _by_risk.allowed
+          and _rich.rule == "orb_geometry",
+          f"orb_budget=$5000 -> n={_rich.contracts} allowed={_rich.allowed}; "
+          f"risk rule allowed={_by_risk.allowed}")
 
     # ── G4: everything else is untouched ──────────────────────────────────
     # A long_debit that supplies NO geometry takes the budget rule, and its
@@ -134,7 +152,7 @@ def main():
     try:
         ee.EntryEngine._place_single_leg = _spy
         ee.entries_open = lambda *a, **k: True
-        sizing = rm.size_for("long_debit", premium=1.20,
+        sizing = rm.size_for("long_debit", premium=1.20, budget_usd=_BIG,
                              orb_width=6.35, orb_stop_distance=0.61)
         ee.EntryEngine(paper_trading=True).enter(signal=_Sig(), sizing=sizing)
     finally:

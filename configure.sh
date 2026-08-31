@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# configure.sh  v4.2
+# configure.sh  v4.3
+#
+# v4.3  2026-08-31  r201 — menu item 8: ORB BUDGET (OT_ORB_BUDGET_USD), set
+#   PER UNDERLYING. Shows SPOT as the reference — live from orb_state.json,
+#   or derived from the last trade's underlying_entry, labelled either way.
+#   ⚠️ The default fails closed at one trade's risk, so an unconfigured box
+#   trades SMALL; the menu labels it "(default)" so it does not read broken.
+#   ⚠️ Fixed in passing: the prompt said "between 1 and 7" on an 8-item menu.
 # Per-box configuration.
 #
 # v4.2  2026-08-20  change_relaxed now calls reload_daemon after set_env, like
@@ -323,6 +330,82 @@ change_relaxed() {
 }
 
 
+
+# ── r201 — SPOT, FOR SIZING THE ORB BUDGET AGAINST ────────────────────────
+# The live figure from orb_state.json, which the bot rewrites every tick.
+# ⚠️ FALLS BACK TO A DERIVED SPOT, and says which it is showing. Every trade
+# records `underlying_entry` — spot at the moment it fired — so a box whose
+# state file is missing or stale still has a real number from its own tape.
+# Never invents one: no state and no trades prints nothing rather than a
+# figure that looks measured.
+orb_spot_hint() {
+    local py="$HOME/options-trader/venv/bin/python"
+    [[ -x "$py" ]] || py="python3"
+    "$py" - <<'PYEOF' 2>/dev/null
+import json, os, sqlite3
+home = os.path.expanduser("~/options-trader")
+try:
+    d = json.load(open(os.path.join(home, "data", "orb_state.json")))
+    if d.get("price"):
+        print("    Spot: %.2f  (live)" % d["price"])
+        raise SystemExit(0)
+except SystemExit:
+    raise
+except Exception:
+    pass
+try:
+    c = sqlite3.connect(os.path.join(home, "data", "trades.db"))
+    r = c.execute("SELECT underlying_entry, entry_time FROM trades "
+                  "WHERE underlying_entry > 0 ORDER BY entry_time DESC "
+                  "LIMIT 1").fetchone()
+    if r:
+        print("    Spot: %.2f  (derived from the last trade, %s)"
+              % (r[0], (r[1] or "")[:16]))
+except Exception:
+    pass
+PYEOF
+}
+
+change_orb_budget() {
+    local current risk
+    current=$(get_env "OT_ORB_BUDGET_USD")
+    risk=$(get_env "OT_RISK_USD")
+    echo ""
+    echo -e "  ${BOLD}ORB budget${RESET} — the ceiling on what ONE ORB setup may"
+    echo -e "  deploy. ORB sizes on GEOMETRY, not risk, so without this it grows"
+    echo -e "  without bound as the impulsive stop tightens."
+    echo ""
+    echo -e "  contracts = min( floor(width / stop), floor(budget / cost) )"
+    echo ""
+    orb_spot_hint
+    echo -e "  Current: ${BOLD}\$${current:-${risk} (default)}${RESET}"
+    echo ""
+    while true; do
+        read -p "    New ORB budget in \$, 'r' to reset to default, ENTER to keep: " input
+        if [[ -z "$input" ]]; then
+            print_info "Unchanged."
+            return
+        fi
+        if [[ "$input" == "r" ]]; then
+            set_env "OT_ORB_BUDGET_USD" "$risk"
+            reload_daemon
+            print_ok "ORB budget reset to the per-trade risk default (\$${risk})."
+            return
+        fi
+        if [[ "$input" =~ ^[0-9]+(\.[0-9]+)?$ ]] && (( $(echo "$input > 0" | bc -l) )); then
+            set_env "OT_ORB_BUDGET_USD" "$input"
+            reload_daemon
+            print_ok "ORB budget updated to ${BOLD}\$$input${RESET}."
+            # ⚠️ NAME THE CONSEQUENCE. A budget below one contract's cost
+            # REFUSES the trade outright rather than flooring to a 1-lot.
+            echo -e "  ${DIM}A setup whose single contract costs more than this"
+            echo -e "  will be REFUSED, not reduced to 1 lot.${RESET}"
+            return
+        fi
+        print_warn "Enter a positive number, 'r' to reset, or ENTER to keep."
+    done
+}
+
 change_daily_loss() {
     local current risk
     current=$(get_env "OT_DAILY_LOSS_LIMIT")
@@ -510,9 +593,10 @@ while true; do
     echo -e "  ${BOLD}5.${RESET}  TastyTrade credentials"
     echo -e "  ${BOLD}6.${RESET}  Daily loss cap      (currently: \$$(dll=$(get_env OT_DAILY_LOSS_LIMIT); echo ${dll:-$(get_env OT_RISK_USD)}))"
     echo -e "  ${BOLD}7.${RESET}  Relaxed entry       (currently: $([ "$(get_env OT_RELAXED_ENTRY)" = "1" ] && echo "ON - paper only" || echo "off"))"
-    echo -e "  ${BOLD}8.${RESET}  Done"
+    echo -e "  ${BOLD}8.${RESET}  ORB budget          (currently: \$$(ob=$(get_env OT_ORB_BUDGET_USD); echo "${ob:-$(get_env OT_RISK_USD) (default)}"))"
+    echo -e "  ${BOLD}9.${RESET}  Done"
     echo ""
-    read -p "    Select [1-8]: " menu_choice
+    read -p "    Select [1-9]: " menu_choice
 
     case "$menu_choice" in
         1) change_instrument; CHANGED=true ;;
@@ -522,8 +606,9 @@ while true; do
         5) change_tt_credentials; CHANGED=true ;;
         6) change_daily_loss;     CHANGED=true ;;
         7) change_relaxed;        CHANGED=true ;;
-        8) break ;;
-        *) print_warn "Please enter a number between 1 and 7." ;;
+        8) change_orb_budget;     CHANGED=true ;;
+        9) break ;;
+        *) print_warn "Please enter a number between 1 and 9." ;;
     esac
     echo ""
 done

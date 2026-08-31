@@ -1,4 +1,9 @@
 """
+main.py  v4.31
+v4.31  2026-08-31  r201 — the ORB budget is announced at startup and in the
+       banner, and says when it is the DEFAULT. An unconfigured box sizes a
+       1-lot on an index name, which reads as a defect unless it is named.
+
 main.py  v4.30
 v4.30  2026-08-31  r197 — A BUTTERFLY BLOCKS NOTHING. A box holding only a
        butterfly is managed AND still asked for entries; `additive` is now
@@ -856,6 +861,7 @@ from zoneinfo import ZoneInfo
 from config import (
     POLL_INTERVAL_SECONDS, LOG_LEVEL, LOG_FILE, LOG_ROTATION_MB,
     PAPER_TRADING, RISK_PER_TRADE_USD, DAILY_LOSS_LIMIT_USD,
+    ORB_BUDGET_USD, ORB_BUDGET_IS_DEFAULT,
     REASSESS_MINUTES, INSTRUMENT, SessionConfig, DIRECTIONAL_ONLY,
     DEBIT_BLOCKED_STRUCTURES,
     ORB_NO_ENTRY_AFTER_ET, BROKER_RECONCILE_ENABLED,
@@ -4894,6 +4900,11 @@ def main():
             f"{INSTRUMENT} | "
             f"risk=${RISK_PER_TRADE_USD:.0f}/trade | "
             f"daily_loss_cap=${DAILY_LOSS_LIMIT_USD:.0f} net"
+            # r201 — WHICH BUDGET, AND WHETHER ANYBODY CHOSE IT. An
+            # unconfigured box trades 1-lot on an index name, which reads as a
+            # defect rather than a config gap unless the banner says otherwise.
+            f" · orb_budget=${ORB_BUDGET_USD:.0f}"
+            f"{' (DEFAULT — not set for this box)' if ORB_BUDGET_IS_DEFAULT else ''}"
         )
     else:
         session_config = _interactive_startup()
@@ -5009,6 +5020,8 @@ def _interactive_startup() -> SessionConfig:
     print(f"  Risk/trade:    ${risk_usd:.0f}")
     print(f"  Mode:          {'PAPER' if paper else '⚠️  LIVE'}")
     print(f"  Daily cap:     ${DAILY_LOSS_LIMIT_USD:.0f} NET loss → halt new entries")
+    print(f"  ORB budget:    ${ORB_BUDGET_USD:.0f} per setup"
+          f"{'  (DEFAULT — not set for this box)' if ORB_BUDGET_IS_DEFAULT else ''}")
     print(f"{'─'*50}")
 
     if not paper:
