@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-202 Python modules across 13 local packages.
+203 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -324,7 +324,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/position_manager.py`
 - **calls:** `analysis/orb_engine.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/exit_engine.py`, `execution/resting_orders.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `strategy/management.py`, `strategy/structure.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_manage_call.py`, `tests/check_plan_prepares.py`
+- **called by:** `main.py`, `tests/check_butterfly_nonblocking.py`, `tests/check_manage_call.py`, `tests/check_plan_prepares.py`
 
 ### `execution/resting_orders.py`
 - **calls:** `analysis/orb_engine.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/order_confirm.py`, `utils/time_utils.py`
@@ -492,6 +492,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_butterfly_legs.py`
 - **calls:** `derived/plan_ledger.py`, `derived/registry.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/plan.py`, `utils/time_utils.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_butterfly_nonblocking.py`
+- **calls:** `execution/position_manager.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_chain_ordering.py`

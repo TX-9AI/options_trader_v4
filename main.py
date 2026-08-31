@@ -1,4 +1,12 @@
 """
+main.py  v4.30
+v4.30  2026-08-31  r197 — A BUTTERFLY BLOCKS NOTHING. A box holding only a
+       butterfly is managed AND still asked for entries; `additive` is now
+       decided by what is actually open rather than by the call site, so an
+       entry alongside a butterfly cannot drop it from management. Credit
+       remains blocked by an open ORB or runaway debit. See
+       execution/position_manager.py has_blocking_position().
+
 main.py  v4.29
 v4.29  2026-08-30  r195 — ORB'S RE-ARM MOVES FROM SIGNAL-FIRED TO
        TRADE-RESOLVED, and one standing offer per setup. See
@@ -3731,10 +3739,19 @@ def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool 
         _capture_entry_snapshot(ctx, record, signal.direction)
         _capture_fire_snapshot(ctx, record)
         _capture_entry_contract(ctx, record)          # v5.5 (N.9)
-        if additive:
-            get_position_manager(state.paper_trading).add_open_position(record)
+        _pm = get_position_manager(state.paper_trading)
+        # 🔴 r197 — ADDITIVE IS DECIDED BY WHAT IS OPEN, NOT BY THE CALL SITE.
+        # `set_open_position` REPLACES `_open_records`, so an ORB entry landing
+        # on a box that already holds a butterfly would silently drop the
+        # butterfly from management — the hazard `add_open_position`'s own
+        # docstring warns about, arriving from the other direction. Now that a
+        # butterfly no longer blocks entries, that collision is reachable, so
+        # the flag stops being a caller's opinion and becomes a fact: if
+        # anything is open, append.
+        if additive or _pm.has_open_position():
+            _pm.add_open_position(record)
         else:
-            get_position_manager(state.paper_trading).set_open_position(record)
+            _pm.set_open_position(record)
         get_alert_manager().send_entry_alert(record)
         logger.info(
             f"✅ Entry: {signal.setup_type} "
@@ -4407,6 +4424,22 @@ def main_loop(state: BotState):
                 # plan runs every tick of its slot, and a fire is ADDED to
                 # whatever is open.
                 _attempt_butterfly(ctx, ms, state, additive=True)
+                # ── 🔴 r197 — A BUTTERFLY BLOCKS NOTHING ──────────────────
+                # Operator, 2026-08-31: butterflies "are a rare opportunistic
+                # setup that does not affect our other trades. The only thing
+                # that should block it are the catastrophic cap or the open
+                # window." r161 made the butterfly take no slot on ENTRY;
+                # nothing made it reciprocal, so an open butterfly still threw
+                # the whole box into the second-leg-only branch. On 2026-08-31
+                # that cost MU, NFLX and TSLA their entire credit session.
+                # ⚠️ MANAGEMENT ALREADY RAN ABOVE. This only adds the ENTRY
+                # half back — flipping the branch itself would have left a
+                # butterfly-only box unmanaged, with no trail and no stop.
+                # ⚠️ CREDIT IS STILL BLOCKED BY AN OPEN ORB OR RUNAWAY DEBIT.
+                # has_blocking_position() counts everything except a butterfly,
+                # so that gate is untouched.
+                if not pos_mgr.has_blocking_position():
+                    attempt_new_entry(ctx, ms, state)
             else:
                 attempt_new_entry(ctx, ms, state)
 

@@ -1,5 +1,11 @@
 """
-execution/position_manager.py  v4.7
+execution/position_manager.py  v4.8
+v4.8  2026-08-31  r197 — has_blocking_position(): A BUTTERFLY BLOCKS NOTHING.
+      r161 exempted it from the single-position rule on ENTRY; nothing made
+      that reciprocal, so an open butterfly still threw the box into the
+      second-leg-only branch. Cost three boxes their whole credit session on
+      2026-08-31. Credit remains blocked by an open ORB or runaway debit —
+      that is correct and untouched.
 v4.7  2026-08-30  r195 — AN ORB EXIT CANCELS THE STANDING OFFER'S
       REMAINDER BEFORE RE-ARMING THE ENGINE. A partly-filled offer left
       the rest working after ANY exit the supervisor's trigger list did
@@ -206,6 +212,49 @@ class PositionManager:
                     "which reads as NO LEGS OPEN to every caller. If a leg IS "
                     "open, deferral and sibling checks are running blind.", exc)
             return 0
+
+    @staticmethod
+    def _is_butterfly(record) -> bool:
+        """A GEX pin butterfly. Reads the ROW, not the strategy name.
+
+        ⚠️ The column is the fact; `strategy` is a label that has been
+        rewritten before. `is_butterfly` is set at the record builder and is
+        what every other consumer keys on.
+        """
+        try:
+            return bool(record.get("is_butterfly", 0))
+        except Exception:                                       # noqa: BLE001
+            return False
+
+    def has_blocking_position(self) -> bool:
+        """Does an open position BLOCK a new entry? A butterfly never does.
+
+        🔑 r197 — THE RECIPROCAL OF r161, WHICH WAS ONLY EVER BUILT ONE WAY.
+        r161 exempted the butterfly from the single-position rule ON ENTRY
+        (operator: *"I want it to be able to fire regardless if any other open
+        trades are found"*, TRADES.md §3: *"no position slot, no capital, no
+        competition"*). But `has_open_position()` still counted it, so a
+        butterfly took no slot going IN and occupied one once it was THERE.
+
+        ⚠️ MEASURED COST, 2026-08-31, the first live-fleet session: three
+        boxes — MU, NFLX, TSLA — held 09:45 butterflies and every one sat in
+        the second-leg-only branch when the credit windows opened at 11:30.
+        `CondorManagement=HOLD(no credit verticals open)` on all three, so
+        nothing credit-side was open to justify it. One rare opportunistic
+        trade removed three boxes from the credit side for the whole session.
+
+        ⚠️ WHAT THIS DOES **NOT** CHANGE, and the operator was explicit: credit
+        entries stay blocked while an ORB or runaway DEBIT is open. That block
+        is correct and untouched. The only thing that stops counting is the
+        butterfly. A box may hold a butterfly PLUS one other thing — never a
+        butterfly plus a directional debit plus a credit leg.
+        """
+        # ⚠️ HYDRATE FIRST. On a fresh process `_open_records` is empty until
+        # something reloads it, so asking this before `has_open_position()`
+        # would answer "nothing blocks" on a box that restarted holding an ORB
+        # position — and let a credit trade open against it.
+        self.has_open_position()
+        return any(not self._is_butterfly(r) for r in self._open_records)
 
     def has_open_position(self) -> bool:
         if self._open_records:
