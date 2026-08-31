@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_gates.py  v4.1
+tests/check_gates.py  v4.2
+v4.2  2026-08-31  r196 — A CONSTANT PASSED AS ITS OWN RELAXED VALUE IS
+      PINNED. The butterfly's noon floor is now FOUNDATIONAL and pinned
+      through `relaxed_earliest=EARLIEST_ET`; without this the checker
+      would read the hardening as a relaxation and force the code out of
+      the one call shape it can inspect.
 
 v4.1  2026-08-20  AUDIT F1: import-resolving detector. See _relaxed_bindings.
 Every strategy declares its gates, and the code cannot relax a FOUNDATIONAL one.
@@ -137,6 +142,22 @@ def relaxed_calls(tree):
         names = [a.id for a in node.args if isinstance(a, ast.Name)]
         names += [k.value.id for k in node.keywords
                   if isinstance(k.value, ast.Name)]
+        # 🔑 A CONSTANT PASSED AS ITS OWN RELAXED VALUE IS PINNED, NOT LOOSENED.
+        # `relaxed.window(EARLIEST_ET, LATEST_ET, relaxed_earliest=EARLIEST_ET)`
+        # makes `min(earliest, relaxed_earliest)` return EARLIEST_ET for every
+        # input, so the floor cannot move. Counting that as "being RELAXED"
+        # would force the pinned form out of the one code path the checker can
+        # see — and a gate hardened by leaving the relax API entirely is a gate
+        # this file stops watching. Recognise the idiom instead.
+        _pinned = {k.arg.replace("relaxed_", ""): k.value.id
+                   for k in node.keywords
+                   if isinstance(k.value, ast.Name)
+                   and str(k.arg or "").startswith("relaxed_")}
+        for _pos, _nm in zip(("earliest", "latest"),
+                             [a.id if isinstance(a, ast.Name) else None
+                              for a in node.args[:2]]):
+            if _nm and _pinned.get(_pos) == _nm:
+                names = [x for x in names if x != _nm]
         if names:
             out.extend((n, node.lineno) for n in names)
         else:

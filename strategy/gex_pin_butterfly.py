@@ -1,5 +1,16 @@
 """
-strategy/gex_pin_butterfly.py  v4.5
+strategy/gex_pin_butterfly.py  v4.6
+v4.6  2026-08-31  r196 — THE NOON FLOOR IS HARD. Operator, on the first live
+      open, seeing butterflies fire at 09:45: "the noon floor is
+      non-negotiable." 🔴 That 09:45 is `relaxed.window()`'s relaxed_earliest
+      default EXACTLY — the fires were the relaxed floor, not a pin forming
+      early. EARLIEST_ET moves SELECTION -> FOUNDATIONAL and is passed as its
+      own relaxed value so it cannot widen. LATEST_ET stays relaxable.
+      🔑 THE RULE THIS TEACHES: relax DIALS, never STRUCTURAL gates. A dial's
+      near-misses tell you whether the line is right; a structural gate's
+      "near-misses" are a different trade entirely. And think twice before
+      relaxing anything on a strategy with a SESSION CAP — there, a relaxed
+      gate does not collect a sample, it SPENDS the sample.
 v4.5  2026-08-29  r178 — 🔴 ONE BUTTERFLY PER PIN PER SESSION. The hour
       r177 unblocked the starved atm_iv, the strategy fired the SAME UNH
       397.5 fly five times in ninety seconds: the additive exemption (r161)
@@ -221,7 +232,30 @@ LATEST_ET = getattr(config, "GEX_BFLY_LATEST_ET", "15:00")
 
 # ── GATE CATEGORIES AS DATA (WA §36) ───────────────────────────────────────
 GATES = {
-    "EARLIEST_ET":   "SELECTION",
+    # 🔴 r196 — FOUNDATIONAL, NOT SELECTION. Operator, 2026-08-31, watching
+    # butterflies open at 09:45 on the first live open: "the noon floor is
+    # non-negotiable."
+    # The 09:45 was not a marginal call and not GEX pinning early — it is
+    # `relaxed.window()`'s `relaxed_earliest` default EXACTLY, so the fires
+    # were the relaxed floor, not the market.
+    # ⚠️ WHY THE CATEGORY WAS WRONG, WHICH IS THE PART WORTH KEEPING:
+    # relaxation only informs a gate that is a DIAL ALONG A CONTINUUM. Widen a
+    # dial and you collect the near-misses, whose outcomes tell you whether the
+    # line sits in the right place. `PIN_CONC_MIN` and `EM_MAX_FRAC` are dials
+    # and are relaxed correctly. This is not a dial. The operator's rule is
+    # "any sooner than noon to reach a pin is unlikely to hold all the way to
+    # the closing bell" — a claim about TIME TO EXPIRY, not about pin quality.
+    # A 09:45 butterfly is not a marginally worse butterfly; it is a different
+    # trade with six and a half hours of gamma ahead of it instead of four, and
+    # its outcome says nothing about whether noon is the right hour.
+    # ⚠️ AND THE WIDENING CAME FROM UNRELATED REASONING. `relaxed.window`'s
+    # 09:45 floor is documented as avoiding the opening auction's residue — a
+    # QUOTE-QUALITY argument. It silently overrode a TIME-TO-PIN argument. Two
+    # different concerns sharing one default.
+    # ⚠️ AND THE COST IS WORST HERE BECAUSE THE BUTTERFLY IS ONE PER SESSION.
+    # Relaxing a dial spends a marginal trade. Relaxing this spent the day's
+    # ONLY attempt, three hours before the thesis is valid.
+    "EARLIEST_ET":   "FOUNDATIONAL",
     "LATEST_ET":     "SELECTION",
     "EM_MAX_FRAC":   "SELECTION",
     # ⚠️ SELECTION WITH RELUCTANCE. At the far edge of the expected move the
@@ -346,7 +380,13 @@ class GEXPinButterflyStrategy:
                 **_ignored) -> ButterflyPreparation:
         t = self.planner.tick(price_now)
         prep = ButterflyPreparation(t)
-        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET)
+        # r196 — the floor is passed as its OWN relaxed value, so
+        # `min(earliest, relaxed_earliest)` can only ever return EARLIEST_ET.
+        # LATEST_ET stays relaxable: staying LATER is a dial (a pin that forms
+        # at 15:10 is a marginally worse version of the same trade), whereas
+        # starting EARLIER is a different trade.
+        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET,
+                                       relaxed_earliest=EARLIEST_ET)
         if now_et and not (_early <= now_et <= _late):
             # ⚠️ TIME-INVARIANT reason (check_plan_signal PS7): the dormant row
             # is edge-triggered on its text; a clock in it defeats the dedupe.
