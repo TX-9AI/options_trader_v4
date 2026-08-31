@@ -1,5 +1,11 @@
 """
-config.py  v4.10
+config.py  v4.11
+v4.11  2026-08-31  r200 — the noon butterfly floor keeps its VALUE and gets a
+      new JUSTIFICATION. Its original one — that a pin reached before noon is
+      unlikely to hold to the bell — was falsified by three 09:45 flies that
+      carried to the 15:40 close in profit. Noon now stands on pin probability
+      rising through the session and on cheaper contracts buying more size.
+      Docs only: no constant changes, nothing to bake for behaviour.
 v4.10  2026-08-30  r193 — ORB_NO_ENTRY_AFTER_ET 11:00 -> 11:30. The window
       gates PLACING an ORB order, not an offer already resting. 🔑 It now
       EQUALS DEBIT_DIRECTIONAL_CUTOFF_ET, deliberately: both tests are `>=`
@@ -815,9 +821,31 @@ TCS_ENTRY_END_ET            = (14, 0)   # ⚠️ PROVISIONAL, INERT: TC.6's wind
                                         #   Operator specs TC.6's real v4
                                         #   window before any activation.
 BUTTERFLY_ENTRY_CUTOFF_ET   = (14, 0)   # was 15:00 and unreachable (see v3.1 header)
-# 🔴 NOON, AND IT IS NOW ACTUALLY IN FORCE (r142). Operator, 2026-08-26:
-# *"Butterfly is debit & any sooner than noon to reach a pin is unlikely to
-# hold all the way to the closing bell."*
+# 🔴 NOON, AND IT IS NOW ACTUALLY IN FORCE (r142).
+# ⚠️ r200 — THE ORIGINAL JUSTIFICATION WAS FALSIFIED ON 2026-08-31 AND HAS BEEN
+# REPLACED. It read, operator 2026-08-26: *"Butterfly is debit & any sooner than
+# noon to reach a pin is unlikely to hold all the way to the closing bell."*
+# The relaxed floor (BFLY.1) let four flies open at 09:45 that day, and THREE
+# CARRIED TO THE 15:40 HARD CLOSE IN PROFIT — MU +$637.50, TSLA +$692.00,
+# NFLX +$47.00, together most of a +$1,543.50 fleet day. That is the sentence's
+# own prediction, tested and wrong.
+# 🔑 NOON STANDS ON TWO DIFFERENT REASONS, and they are stronger than the one
+# they replace because neither depends on how long a pin holds. Operator,
+# 2026-08-31: *"later in the day has a better chance of pinning and the
+# contracts will be cheaper so we might be able to get more into our position
+# size."*
+#   1. PIN PROBABILITY RISES THROUGH THE SESSION. Gamma concentration builds as
+#      0DTE flow accumulates and dealers hedge into it, so a pin read at 12:30
+#      has more evidence behind it than the same read at 09:45.
+#   2. THE CONTRACTS ARE CHEAPER. Six hours less extrinsic on the body — and the
+#      body is the leg we are short two of. ⚠️ This COMPOUNDS with r192: the
+#      butterfly sizes through the budget rule on `net_debit`, so a cheaper fly
+#      buys MORE CONTRACTS for the same dollars. The afternoon entry is not only
+#      likelier to work, it is structurally larger when it does.
+# ⚠️ REASON 2 IS LOAD-BEARING AND CURRENTLY UNMEASURED (backlog BFLY.5). If
+# cheaper afternoon contracts really do buy more size, butterfly rows should
+# show it against the three tagged pre-noon flies from 08-31. Check it rather
+# than assume it.
 # ⚠️ THIS CONSTANT WAS READ BY NOTHING IN PRODUCTION — only by a test harness.
 # The live gate was `gex_pin_butterfly.EARLIEST_ET`, a getattr DEFAULT of
 # "11:00" whose key did not exist in this file, so the butterfly would have
