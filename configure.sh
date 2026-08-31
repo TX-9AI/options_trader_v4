@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# configure.sh  v4.3
+# configure.sh  v4.4
+#
+# v4.4  2026-08-31  r203 — THE r201 SPOT HINT WAS BROKEN AND BAKED. It read a
+#   `data/` subdirectory that does not exist, and `2>/dev/null` made the
+#   failure look like a deliberate blank. Paths now come from config.py;
+#   stderr is visible; the land gate RUNS the function and requires output.
+#   🔴 r201's gate checked that the function existed and that this file
+#   parsed. Presence and a clean parse are not evidence that a display
+#   displays.
 #
 # v4.3  2026-08-31  r201 — menu item 8: ORB BUDGET (OT_ORB_BUDGET_USD), set
 #   PER UNDERLYING. Shows SPOT as the reference — live from orb_state.json,
@@ -331,39 +339,66 @@ change_relaxed() {
 
 
 
-# ── r201 — SPOT, FOR SIZING THE ORB BUDGET AGAINST ────────────────────────
-# The live figure from orb_state.json, which the bot rewrites every tick.
-# ⚠️ FALLS BACK TO A DERIVED SPOT, and says which it is showing. Every trade
-# records `underlying_entry` — spot at the moment it fired — so a box whose
-# state file is missing or stale still has a real number from its own tape.
-# Never invents one: no state and no trades prints nothing rather than a
-# figure that looks measured.
+# ── r203 — SPOT, FOR SIZING THE ORB BUDGET AGAINST ────────────────────────
+# 🔴 THIS FUNCTION SHIPPED BROKEN IN r201 AND THE FLEET BAKED IT. It read
+# `<install>/data/orb_state.json` and `<install>/data/trades.db`. Neither
+# exists: both files sit at the install root, and both paths were already in
+# config.py — DB_PATH at 1604, LOG_FILE at 1613 — with orb_state.json written
+# beside the log (main.py ~1358). I invented a subdirectory instead of reading
+# two lines I had edited an hour earlier.
+# 🔴 AND `2>/dev/null` TURNED THE FAILURE INTO A BLANK LINE. That was a
+# deliberate choice, made to keep this screen tidy, on a feature whose entire
+# job is to display a number. Silence over noise is the failure class this
+# project exists to hunt, committed inside a display.
+# 🔴 THE TEST COULD NOT FAIL. I built a fixture directory matching my own guess
+# and verified against it. It passed, and it proved only that the guess was
+# consistent with itself. The r201 land gate asserted the function EXISTED and
+# that configure.sh PARSED — neither asks whether it produces output.
+# 🔑 THE FIX, AND WHY IT IS SHAPED THIS WAY:
+#   · paths are IMPORTED from config, never spelled here, so a future move of
+#     either file cannot silently blank this display;
+#   · stderr is NOT suppressed — every failure names itself and its path;
+#   · the r203 land gate RUNS this body against a planted repo and REQUIRES a
+#     Spot line back, and refuses both a literal `data/` path and any
+#     re-suppression of stderr on this call.
 orb_spot_hint() {
     local py="$HOME/options-trader/venv/bin/python"
     [[ -x "$py" ]] || py="python3"
-    "$py" - <<'PYEOF' 2>/dev/null
-import json, os, sqlite3
-home = os.path.expanduser("~/options-trader")
+    ( cd "$HOME/options-trader" 2>/dev/null || cd "$SCRIPT_DIR" 2>/dev/null || true
+      "$py" - <<'PYEOF'
+import json, os, sqlite3, sys
 try:
-    d = json.load(open(os.path.join(home, "data", "orb_state.json")))
-    if d.get("price"):
-        print("    Spot: %.2f  (live)" % d["price"])
-        raise SystemExit(0)
-except SystemExit:
-    raise
-except Exception:
-    pass
+    from config import DB_PATH, LOG_FILE
+except Exception as exc:
+    print("    Spot: unavailable (config import failed: %s)" % exc)
+    sys.exit(0)
+state = os.path.join(os.path.dirname(LOG_FILE), "orb_state.json")
 try:
-    c = sqlite3.connect(os.path.join(home, "data", "trades.db"))
+    with open(state) as f:
+        price = json.load(f).get("price")
+    if price:
+        print("    Spot: %.2f  (live)" % float(price))
+        sys.exit(0)
+    print("    Spot: state file has no price yet (%s)" % state)
+except FileNotFoundError:
+    print("    Spot: no state file yet (%s)" % state)
+except Exception as exc:
+    print("    Spot: state unreadable (%s)" % exc)
+# Fall back to the last trade's underlying_entry — spot when it fired.
+try:
+    c = sqlite3.connect(DB_PATH)
     r = c.execute("SELECT underlying_entry, entry_time FROM trades "
                   "WHERE underlying_entry > 0 ORDER BY entry_time DESC "
                   "LIMIT 1").fetchone()
     if r:
         print("    Spot: %.2f  (derived from the last trade, %s)"
-              % (r[0], (r[1] or "")[:16]))
-except Exception:
-    pass
+              % (float(r[0]), str(r[1] or "")[:16]))
+    else:
+        print("    Spot: no trades on this box yet - read the chain")
+except Exception as exc:
+    print("    Spot: no trade history (%s)" % exc)
 PYEOF
+    )
 }
 
 change_orb_budget() {
