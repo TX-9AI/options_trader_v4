@@ -1,5 +1,12 @@
 """
-status.py  v4.2
+status.py  v4.3
+v4.3  2026-08-31  r199 — EVERY OPEN POSITION, NOT JUST THE NEWEST. The
+      query asked for LIMIT 1 and the panel rendered it as the whole book,
+      so a box holding a butterfly AND a directional trade under-reported
+      both the positions and the capital at risk. Latent since r161 made
+      the butterfly additive; r197 makes it the norm. Plan rows are also
+      deduped FOR DISPLAY, with the collapsed count shown, because the
+      duplication in the ledger is real and hiding it would be worse.
 v4.2  2026-08-24  r111: the PRE-OPEN REHEARSAL state is on the status board, RED
       with a flag emoji while it is running. The box reads its OWN flag off its
       OWN disk — three revisions were spent on a control-side marker standing in
@@ -280,19 +287,35 @@ def get_strategy_and_orb():
     return strategy, orb, gex_pin, gex_env
 
 
-def get_open_trade():
+def get_open_trades():
+    """EVERY open position on this box, oldest first.
+
+    🔴 r199 — THIS ASKED FOR `LIMIT 1` AND RENDERED IT AS THE WHOLE BOOK.
+    Latent since r161 made the butterfly additive: before that, one position
+    per box was true and the limit was correct. Nothing swept the readers when
+    the rule changed, so a box holding a butterfly AND a directional trade
+    showed only the most recent — and `at risk` understated the box's real
+    exposure on the one line you would check it on. Measured 2026-08-31 on CRM,
+    which held a runaway and a butterfly and reported one.
+
+    ⚠️ r197 makes multi-position boxes the norm rather than the exception, so
+    this stops being latent tomorrow.
+
+    Oldest first, deliberately: DESC put the newest on top and hid the one that
+    had been running longest, which is usually the one worth seeing.
+    """
     if not os.path.exists(DB_PATH):
-        return None
+        return []
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT * FROM trades WHERE status='open' ORDER BY entry_time DESC LIMIT 1"
-        ).fetchone()
+        rows = conn.execute(
+            "SELECT * FROM trades WHERE status='open' ORDER BY entry_time ASC"
+        ).fetchall()
         conn.close()
-        return dict(row) if row else None
+        return [dict(r) for r in rows]
     except Exception:
-        return None
+        return []
 
 
 def get_session_summary():
@@ -468,7 +491,23 @@ def main():
         pass
 
     if _live:
+        # ⚠️ DEDUPED FOR DISPLAY ONLY, AND THE DUPLICATION IS REAL. CRM showed
+        # "RunawayContinuation [TRIGGERED] @ 259.38" twice on 2026-08-31 — two
+        # plan-ledger rows for one strategy at one trigger. Collapsing them
+        # makes the panel readable; it does NOT fix the ledger, and the count
+        # is printed so the duplication stays visible rather than hidden.
+        _seen, _rows = set(), []
         for _p in _live:
+            _k = (_p.get("strategy"), _p.get("state"),
+                  _p.get("short_strike") or _p.get("trigger_price"))
+            if _k in _seen:
+                continue
+            _seen.add(_k)
+            _rows.append(_p)
+        if len(_rows) < len(_live):
+            print(f"  \u26A0\uFE0F  {len(_live) - len(_rows)} duplicate plan row(s) "
+                  f"collapsed for display \u2014 the ledger still has them")
+        for _p in _rows:
             _what = _p.get("short_strike") or _p.get("trigger_price")
             _at = f" @ {_what:.2f}" if _what else ""
             print(f"  \U0001F3AF Active plan: {_p['strategy']} "
@@ -582,8 +621,16 @@ def main():
     print()
     sep()
 
-    trade = get_open_trade()
-    if trade:
+    _open = get_open_trades()
+    if len(_open) > 1:
+        # ⚠️ THE HEADER CARRIES THE COUNT AND THE SUM. A per-position block is
+        # only half the fix: the number you check before adding risk is the
+        # BOX's exposure, and one position's `at risk` line silently was it.
+        _tot = sum((t.get("total_cost") or 0) for t in _open)
+        print(f"  \U0001F4E6 {len(_open)} OPEN POSITIONS  "
+              f"\u2014  ${_tot:,.2f} at risk on this box")
+        print()
+    for trade in _open:
         is_butterfly = bool(trade.get("is_butterfly", 0))
         entry_prem   = trade.get("entry_premium", 0) or 0
         stop_prem    = trade.get("stop_premium",  0) or 0
@@ -629,7 +676,9 @@ def main():
 
         print(f"     Grade:      {grade}  |  {strategy_name}")
         print(f"     Entered:    {to_et(trade.get('entry_time', ''))}")
-    else:
+        if len(_open) > 1:
+            print()
+    if not _open:
         print("  \u23F3 No open position")
 
     print()

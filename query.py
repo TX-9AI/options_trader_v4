@@ -1,5 +1,9 @@
 """
-query.py  v4.3
+query.py  v4.4
+v4.4  2026-08-31  r199 — EVERY OPEN POSITION GETS ITS OWN CARD, and a
+      summed deployed figure heads them. `LIMIT 1` had been rendering one
+      position as the whole book since r161 made the butterfly additive;
+      CRM held a runaway and a butterfly on 2026-08-31 and showed one.
 v4.3  2026-08-28  r172 — THE DECISIONS PANEL SHOWS TODAY'S SESSION, OR
       NOTHING. Operator: "Make the decision section only display today's
       decision, blank before 0930" and "If the box was up for maintenance the
@@ -190,19 +194,46 @@ def show_header():
 
 
 def show_open_position(conn):
-    row = conn.execute(
-        "SELECT * FROM trades WHERE status='open' ORDER BY entry_time DESC LIMIT 1"
-    ).fetchone()
+    """Every open position, each with its full detail card.
+
+    🔴 r199 — THIS ASKED FOR `LIMIT 1`. Latent since r161 made the butterfly
+    additive; measured 2026-08-31 on CRM, which held a runaway AND a butterfly
+    and showed one. r197 makes multi-position boxes the norm.
+
+    ⚠️ THE SUMMED EXPOSURE IS THE POINT, not just the extra card. This function
+    already splits deployed / at-risk / max-loss per position (r121, after
+    "How is 2 contracts at $96 costing me $800???"). Showing one position's
+    three numbers while a second sits unmentioned recreates exactly the
+    confusion r121 fixed, one level up.
+    """
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM trades WHERE status='open' ORDER BY entry_time ASC"
+    ).fetchall()]
 
     sep("═")
-    print("  OPEN POSITION")
+    print(f"  OPEN POSITIONS  ({len(rows)})" if len(rows) != 1
+          else "  OPEN POSITION")
     sep("═")
 
-    if not row:
+    if not rows:
         print("  ⏳ No open position.")
         print()
         return
 
+    if len(rows) > 1:
+        _dep = sum((r.get("total_cost") or 0) for r in rows)
+        print(f"  📦 {len(rows)} positions on this box  —  "
+              f"${_dep:,.2f} deployed in total")
+        print()
+
+    for _i, row in enumerate(rows, 1):
+        if len(rows) > 1:
+            sep("─")
+            print(f"  [{_i}/{len(rows)}]  {row.get('strategy') or '?'}")
+        _show_one_open(row)
+
+
+def _show_one_open(row):
     is_bf      = bool(row["is_butterfly"])
     entry_prem = row["entry_premium"] or 0
     stop_prem  = row["stop_premium"]  or 0
