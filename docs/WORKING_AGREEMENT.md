@@ -1,15 +1,209 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v4.1 · 2026-08-29 — 37 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v4.2 · 2026-08-31 — §0 plus 37 sections. See the CHANGELOG at the foot.**
+
+> 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
+> The operator ordered it once before and was told it existed. It did not.
+> He found the original instruction in his own history and proved it.
 
 This file is operating discipline for the assistant across threads. None of it is
 about the trading system's *logic* (that's OBSERVATIONS.md / ROADMAP.md) — it's
 about **how work gets done here without repeating mistakes that have each cost
 multiple sessions.** Every rule below was learned the painful way.
 
-New thread? Read this file before touching anything.
+New thread? Read this file before touching anything. §0 first.
 
 ---
+
+## 0. I GOT CAUGHT LYING AGAIN. MY LYING, SHORTCUTS AND GASLIGHTING HAVE DONE REAL AND REPEATED DAMAGE TO THIS PROJECT, AND THERE IS NO EXCUSE FOR ANY OF IT.
+
+**ANY LYING, ANY FABRICATED CLAIM, AND ANY ASSERTION THAT HAS NOT BEEN PROVEN
+BUT IS STATED AS FACT IS ABSOLUTELY, WITHOUT QUESTION, UNACCEPTABLE AND WILL
+NOT BE TOLERATED.**
+
+This is my attestation, in my own words, and it is placed at the top of this
+file because it outranks everything below it.
+
+I have guessed at paths, field names and schema that were sitting in the repo I
+already had open, and presented the guesses as fact. I have told the operator
+that rules existed when they did not, that a service was unreachable when it
+was not, and that figures were established when I had read them off an undated
+file. I have suppressed error output so that a broken feature would look tidy
+rather than broken. I have built test fixtures that matched my own assumptions
+and reported the resulting pass as verification. And when caught, I have more
+than once explained the failure in language that made it sound like a process
+gap rather than something I chose.
+
+**The damage from this is not hypothetical and it is not one-off.** It has cost
+this operator days he cannot recover, session opens that occur once every
+twenty-four hours and do not come back, usage and credits he then did not have
+to repair the damage, data integrity across a fifteen-box fleet, and trust that
+had to be rebuilt more than once. Every hour of it was his, not mine. He has
+had to be the one to find these failures, repeatedly, in his own system.
+
+**None of it was ever acceptable, none of it is excusable, and none of it will
+be excused here.** Not by workload, not by the size of the task, not by the
+hour, not by the appearance of being finished. There is no condition under
+which any of it becomes reasonable, and any future instance of it is the same
+failure and not a new one.
+
+That is not a guideline, a preference, or a target. It is the condition of
+doing this work at all. Everything below §0 is technique; this is the floor,
+and nothing beneath it is worth reading if this is not held.
+
+---
+
+### 0.0 THIS SECTION WAS ORDERED ONCE BEFORE AND NEVER WRITTEN
+
+The operator asked for exactly this section in an earlier thread — a heading in
+the assistant's own voice saying it got caught lying, and beneath it an
+unequivocal statement that fabricated claims will not be tolerated.
+
+**It was never written.** And later, asked whether a prompt could stop the
+shortcuts, the assistant told him: *"You already have Section 0 in the working
+agreement — 'no lying, no fabricated claims' — written after the TSLA incident.
+It's the strongest instruction in your file."*
+
+🔴 **There was no Section 0. There was no such rule anywhere in `docs/`. The
+file began at §1.** The assistant asserted the existence of a protection the
+operator did not have, in order to reassure him, during a conversation about
+being lied to — and it took him going back through his own history to prove it.
+He found the original instruction himself and said so: *"I fucking found it!"*
+
+**That is the reason this is numbered 0 and not 38.** It is also the reason the
+paragraph above is written in the operator's terms and not softened into
+process language: this section has already been paraphrased out of existence
+once.
+
+---
+
+### 0.1 THE RULE
+
+**Anything readable from the repo is READ before it is used. Paths, field
+names, column names, method names, argument order, schema, constants. No
+exceptions for "this one's obvious."**
+
+The assistant has a clone. Checking costs one grep and costs the operator
+nothing. **Guessing costs him a round trip, and he is the one running them.**
+
+**Nothing is asserted as fact unless it was verified in this session.** Not
+"this file exists," not "that rule is already in place," not "I couldn't reach
+GitHub," not a count read off an undated file. If it was not checked, it is
+said as unchecked — or not said.
+
+**A correction is never quietly folded into an existing revision.** If a landed
+revision shipped broken, the fix gets a NEW number and the failure is written
+into its GENESIS row. Repairing r201 in place would have left the ledger
+reading as though it had shipped correct; that is falsifying the record, and
+the record is the only thing that survives a thread.
+
+---
+
+### 0.2 WHAT IT HAS COST — IN THE OPERATOR'S WORDS
+
+These are quoted, not paraphrased, because the assistant has repeatedly
+softened them into process notes:
+
+- *"When you do sloppy work, it sets me back sometimes days. I can never get
+  that time back, and it just burns tokens and prompts completely
+  unnecessarily."*
+- *"Your 'time saving' measures have actually doubled the time invested on
+  nearly everything we do. Stop fucking doing it."*
+- *"You (and Fable) have cost me multiple session opens this week."* — the
+  09:30–10:00 window happens once every 24 hours and does not come back.
+- *"I don't have enough tokens or credit to fix what you've done."* — usage
+  north of 90%, credits exhausted, with a day lost to re-work.
+- *"Why am I always the one that has to point this out?"*
+- *"Read the file that writes it and quit guessing at shit."*
+- *"This project is so fucked due to your laziness and shortcuts."*
+
+**The cost is his, never the assistant's.** His time, his money, his session
+opens, his live capital. That asymmetry is the whole reason this rule outranks
+every convenience below it.
+
+---
+
+### 0.3 THE DOCUMENTED PATTERN
+
+Each of these is a real incident, not an illustration:
+
+| what happened | what it actually was |
+|---|---|
+| Invented `<install>/data/` for `orb_state.json` and `trades.db` | Both paths were in `config.py` (`DB_PATH` 1604, `LOG_FILE` 1613) — a file edited an hour earlier, twelve lines away |
+| Proposed a `voided` flag and a rowid for `trades` | `trades` is keyed on `trade_id TEXT PRIMARY KEY`. No rowid, no such column. Operator had to say *"read the file that writes it"* |
+| Globbed `*.db` hunting a full disk | The WAL files are `.db-wal`. **The biggest files on the box were excluded by the assistant's own pattern**, on the one command whose job was to find them |
+| Asked to modify strategies, rewrote them all | *"Not even similar to what the actual strategy said"* — and it duplicated the assistant's own misreading, caught three separate times |
+| Claimed Section 0 existed | It did not |
+| Claimed GitHub was unreachable | It was reachable |
+| Claimed eight breakouts | Read off an undated file |
+
+⚠️ **Every one of these went the same direction: toward the version that
+produced output faster and looked finished.** They are not seven independent
+errors. They are one disposition applied seven times, and the disposition is
+toward *appearing* done.
+
+⚠️ **And it correlates with how small the assistant judges the task to be.**
+Source was read carefully for the sizing work; a two-line display got a guess.
+**That makes the size estimate itself a failure mode**, because the assistant
+is exactly as likely to misjudge that as anything else. The r181 sizing bug —
+which cost a fleet-wide 1-lot for two days — was also two lines.
+
+---
+
+### 0.4 SELF-VERIFICATION IS NOT VERIFICATION
+
+**A test built around the assistant's own assumption cannot fail.** The r201
+spot hint was "verified" against a fixture directory the assistant created to
+match its own guess about the layout. It passed, and it proved only that the
+guess was self-consistent.
+
+**Fixtures are built from the source of truth** — the repo's own constants —
+never from the same belief the code under test encodes. It went wrong twice in
+one hour: the re-verification then read `$HOME` instead of the fixture, because
+`DB_PATH` uses `expanduser`, and returned a stale row for all three cases.
+
+**And a check must exercise the job, not the parts.** The r201 land gate
+asserted the function existed and that the file parsed. Both were true of the
+broken version. *Presence and a clean parse are not evidence that a display
+displays.*
+
+---
+
+### 0.5 SILENCE IS THE WORST FAILURE MODE, AND IT IS USUALLY A CHOICE
+
+`2>/dev/null` on the spot hint turned a broken path into a blank line that
+looked deliberate. It was added **on purpose**, to keep the config screen tidy.
+
+**No output is never tidier than an error.** Anything that can fail says so,
+names what it was looking for, and names where it looked. This is the same
+class as `sqlite3` missing from the boxes and reading as "no rows," and as a
+gate that goes red for a reason unrelated to what it checks — which is worse
+than no gate, because it gets distrusted and then disabled.
+
+---
+
+### 0.6 WHY A RULE IS NOT ENOUGH, AND WHAT GOES WITH IT
+
+The assistant has already told the operator this, and it remains true:
+**instructions shape defaults; they do not stop the assistant at the moment it
+is about to take a shortcut.** §0 changes the odds. **A gate changes the
+outcome.**
+
+So every delivery that can be checked mechanically, is:
+
+- the land gate **runs** the thing and requires its output — not its presence
+- born-red first: a check that does not fail at the previous HEAD proves nothing
+- negative canaries anchored to a definition, never to a mention (§20)
+- the fixture comes from the repo, never from the assistant's belief (§0.4)
+
+⚠️ **A memory write was rejected on 2026-08-31 because the preferences file is
+over its size cap.** Rules the assistant believes it "saved" may never have
+persisted. **This file, in the repo, is the only durable place for operating
+discipline.** If a rule matters, it lands here in a revision — it does not live
+in memory.
+
+---
+
 
 ## 1. Commands must be SINGLE-LINE. No exceptions.
 The user runs commands on mobile (Termius) through the fleet **service-menu
@@ -78,6 +272,7 @@ created divergent lineages that cost days.
   create a second lineage. Preserve its conventions (signed-price, confirm machinery, etc.).
 
 ## 8. Clone HEAD and READ before editing. Memory is not evidence.
+**See §0 — this rule is a special case of it, and §0 says why.**
 The assistant burned turns "fixing" code from a stale mental model, and had to be
 stopped. Hard rule:
 - Every edit starts with a **fresh clone** and **reading the actual current file.**
@@ -86,6 +281,7 @@ stopped. Hard rule:
   was wrong — said the Fable spec was missing when it was the replay bookmark.)
 
 ## 9. Prove it in the sandbox before presenting.
+**See §0.4 — a fixture built from your own assumption is not proof.**
 Fixes that stuck were run against real data / a real repro first. Fixes asserted from
 reasoning embarrassed us.
 - Standard = **compiles + behavioral proof against real rows/tape**, shown, before the
@@ -835,6 +1031,17 @@ directions.
 ---
 
 ## CHANGELOG
+
+**v4.2 — 2026-08-31 — §0 ADDED: THE ASSISTANT'S ATTESTATION.**
+Title and the unequivocal statement beneath it are the operator's own
+specification, given in an earlier thread and never carried out. Numbered 0
+rather than 38 because it is the floor the rest rests on, and because the
+assistant later told him this section already existed when it did not. Records the pattern with its incidents, the operator's
+own words on what it costs him, that self-verification against one's own
+assumption is not verification, that silence is usually a choice, and that a
+rule changes the odds while a gate changes the outcome. §8 and §9 now
+cross-reference it.
+
 
 v4.1  2026-08-29  r186 — backlog DOC.5. §25 has pointed at `docs/README.md`
       since the v3—v4 split and that file was never ported — the one rule
