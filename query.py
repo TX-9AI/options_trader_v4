@@ -1,5 +1,30 @@
 """
-query.py  v4.4
+query.py  v4.5
+v4.5  2026-09-01  r209 (chunk A) — FOUR SECTIONS AND TWO PANELS REMOVED, on
+      the operator's reading of what this dashboard is FOR. It is the PER-BOX
+      report; an all-time or by-strategy rollup computed from one symbol's
+      trades.db is a slice nobody acts on. His words, going bottom-up:
+      Live Levels "don't care, take it out"; by setup type "just trivia in my
+      opinion, useless by itself"; by setup grade "we don't have grades";
+      by strategy "I don't need a per symbol snapshot of that"; all-time
+      "irrelevant"; Character "keep, but not in query.py — it belongs in
+      status, below the pin line."
+      🔴 AND ALL-TIME WAS QUIETLY WRONG, not merely noisy. This file has no
+      ENGINE EPOCH floor, so it pooled pre- and post-v4-split trades — 109 of
+      them, reaching back through engines that no longer exist. r187 built
+      that floor for exactly this contamination and this file never got it.
+      ⚠️ BY SETUP GRADE was structurally empty: r152 deleted the scorer and
+      every v4 write path hardcodes UNGRADED, so it had one bucket forever.
+      ⚠️ THE CROSS-FLEET VERSIONS ALREADY EXIST AND ARE THE RIGHT HOME —
+      day_trader_pro's trade breakdown (r187) groups by strategy, setup type,
+      exit reason, symbol, hour and weekday across every box, epoch-floored.
+      Nothing is lost; it is asked in the place that can answer it.
+      ⚠️ A VIEW CHANGE, NOT A COLLECTOR CHANGE. `level_ledger` is still
+      written and still read by the sweep and the fork; r81 keeps it unpurged
+      in code because a recomputation cannot rebuild a biography. Q4 pins it.
+      ⚠️ CHARACTER RENDERS NOWHERE UNTIL CHUNK C, and that costs nothing:
+      r85 set BANDS_SET=False, so the panel has printed "No character
+      recorded yet today" on every box since. Stated, not discovered.
 v4.4  2026-08-31  r199 — EVERY OPEN POSITION GETS ITS OWN CARD, and a
       summed deployed figure heads them. `LIMIT 1` had been rendering one
       position as the whole book since r161 made the butterfly additive;
@@ -410,145 +435,6 @@ def show_today(conn):
     print()
 
 
-def show_alltime(conn):
-    rows = conn.execute(
-        "SELECT * FROM trades WHERE status='closed' ORDER BY exit_time"
-    ).fetchall()
-
-    sep()
-    print("  ALL-TIME PERFORMANCE")
-    sep()
-
-    if not rows:
-        print("  No closed trades yet.")
-        print()
-        return
-
-    wins         = [r for r in rows if (r["pnl_usd"] or 0) > 0]
-    losses       = [r for r in rows if (r["pnl_usd"] or 0) <= 0]
-    total_pnl    = sum(r["pnl_usd"] or 0 for r in rows)
-    win_rate     = len(wins) / len(rows) * 100 if rows else 0
-    avg_win      = sum(r["pnl_usd"] or 0 for r in wins) / len(wins) if wins else 0
-    avg_loss     = sum(r["pnl_usd"] or 0 for r in losses) / len(losses) if losses else 0
-    total_wins   = sum(r["pnl_usd"] or 0 for r in wins)
-    total_losses = abs(sum(r["pnl_usd"] or 0 for r in losses))
-    pf           = total_wins / total_losses if total_losses > 0 else 0
-
-    # Max drawdown
-    running = peak = max_dd = 0.0
-    for r in rows:
-        running += (r["pnl_usd"] or 0)
-        peak     = max(peak, running)
-        max_dd   = max(max_dd, peak - running)
-
-    # Avg hold time
-    hold_times = []
-    for r in rows:
-        try:
-            entry = datetime.fromisoformat(r["entry_time"])
-            exit_ = datetime.fromisoformat(r["exit_time"])
-            hold_times.append((exit_ - entry).total_seconds() / 60)
-        except Exception:
-            pass
-    avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0
-
-    print(f"  Total Trades:    {len(rows)}  ({len(wins)}W / {len(losses)}L)")
-    print(f"  Win Rate:        {win_rate:.1f}%  {bar(win_rate)}")
-    print(f"  Net P&L:         {pnl_str(total_pnl)}")
-    print(f"  Avg Win:         {pnl_str(avg_win)}")
-    print(f"  Avg Loss:        {pnl_str(avg_loss)}")
-    print(f"  Profit Factor:   {pf:.2f}")
-    print(f"  Max Drawdown:    ${max_dd:.2f}")
-    print(f"  Avg Hold Time:   {avg_hold:.0f} min")
-    print()
-
-
-def show_by_strategy(conn):
-    sep()
-    print("  PERFORMANCE BY STRATEGY")
-    sep()
-
-    strategies = conn.execute(
-        "SELECT DISTINCT strategy FROM trades WHERE status='closed' AND strategy IS NOT NULL"
-    ).fetchall()
-
-    if not strategies:
-        print("  No closed trades yet.")
-        print()
-        return
-
-    for strat in strategies:
-        name = strat["strategy"]
-        rows = conn.execute(
-            "SELECT pnl_usd, pnl_pct, total_cost FROM trades WHERE status='closed' AND strategy=?",
-            (name,)
-        ).fetchall()
-        wins     = [r for r in rows if (r["pnl_usd"] or 0) > 0]
-        win_rate = len(wins) / len(rows) * 100 if rows else 0
-        net_pnl  = sum(r["pnl_usd"] or 0 for r in rows)
-        print(
-            f"  {name:<24} {len(rows):>3} trades  "
-            f"WR={win_rate:.0f}%  {bar(win_rate, 12)}  "
-            f"Net={pnl_str(net_pnl)}"
-        )
-    print()
-
-
-def show_by_grade(conn):
-    sep()
-    print("  PERFORMANCE BY SETUP GRADE")
-    sep()
-
-    for grade in ["A", "B", "C"]:
-        rows = conn.execute(
-            "SELECT pnl_usd, pnl_pct FROM trades WHERE status='closed' AND setup_grade=?",
-            (grade,)
-        ).fetchall()
-        if not rows:
-            print(f"  Grade {grade}:  No trades yet")
-            continue
-        wins     = [r for r in rows if (r["pnl_usd"] or 0) > 0]
-        win_rate = len(wins) / len(rows) * 100
-        net_pnl  = sum(r["pnl_usd"] or 0 for r in rows)
-        avg_pct  = sum(r["pnl_pct"] or 0 for r in rows) / len(rows)
-        print(
-            f"  Grade {grade}:  {len(rows):>3} trades  "
-            f"WR={win_rate:.0f}%  {bar(win_rate, 12)}  "
-            f"Net={pnl_str(net_pnl)}  AvgPnl%={avg_pct:+.1%}"
-        )
-    print()
-
-
-def show_by_setup_type(conn):
-    sep()
-    print("  PERFORMANCE BY SETUP TYPE")
-    sep()
-
-    types = conn.execute(
-        "SELECT DISTINCT setup_type FROM trades WHERE status='closed' AND setup_type IS NOT NULL"
-    ).fetchall()
-
-    if not types:
-        print("  No closed trades yet.")
-        print()
-        return
-
-    for st in types:
-        stype = st["setup_type"]
-        rows  = conn.execute(
-            "SELECT pnl_usd FROM trades WHERE status='closed' AND setup_type=?",
-            (stype,)
-        ).fetchall()
-        wins     = [r for r in rows if (r["pnl_usd"] or 0) > 0]
-        win_rate = len(wins) / len(rows) * 100 if rows else 0
-        net_pnl  = sum(r["pnl_usd"] or 0 for r in rows)
-        print(
-            f"  {stype:<28} {len(rows):>3} trades  "
-            f"WR={win_rate:.0f}%  Net={pnl_str(net_pnl)}"
-        )
-    print()
-
-
 def show_recent(conn, n: int = 10):
     rows = conn.execute(
         "SELECT * FROM trades WHERE status='closed' ORDER BY exit_time DESC LIMIT ?", (n,)
@@ -654,54 +540,6 @@ def _q(dc, sql, args=()):
         return dc.execute(sql, args).fetchall()
     except Exception:                                           # noqa: BLE001
         return None                    # None = table absent; [] = no rows
-
-
-def show_character(dc):
-    """The tape's character now, and the last few CHANGES with timestamps.
-
-    🔴 A CHARACTER THAT HELD ALL SESSION AND ONE THAT FLIPPED SIX TIMES ARE
-    DIFFERENT SESSIONS. The transitions are the object, which is why this shows
-    changes rather than a current value repeated.
-
-    ⚠️ THE ACCEPTANCE GATE IS VISIBLE HERE: the operator's 20-year prior is
-    1-3 changes per symbol-day. If this list is long, the deriver is wrong —
-    the retired engine produced ~20/symbol-day and that gap is what made its
-    churn visible at all.
-    """
-    sep("═")
-    print("  CHARACTER  (state, not signal — informs nothing, gates nothing)")
-    sep("═")
-    rows = _q(dc, "SELECT character, from_character, entered_ts, held_s,"
-                  " persistence, vol_ratio, gap_pct, gap_class"
-                  " FROM character_ledger WHERE symbol=?"
-                  " ORDER BY entered_ts DESC LIMIT 8", (INSTRUMENT,))
-    if rows is None:
-        print("  (character_ledger not present on this box)")
-        print(); return
-    if not rows:
-        print("  No character recorded yet today.")
-        print(); return
-
-    cur = rows[0]
-    held = (datetime.now(ET).timestamp() - cur[2]) / 60.0
-    print(f"  Now:  {str(cur[0]).upper():<12} held {held:.0f} min")
-    if cur[4] is not None or cur[5] is not None:
-        pv = "n/a" if cur[4] is None else f"{cur[4]:.2f}"
-        vv = "n/a" if cur[5] is None else f"{cur[5]:.2f}x"
-        print(f"        persistence {pv}   volatility {vv}")
-    if cur[6] is not None:
-        # ⚠️ THE GAP IS ADDITIVE CONTEXT, NEVER A FINDING ON ITS OWN. It
-        # qualifies the reading above; it does not assert anything by itself.
-        print(f"        on a {cur[6]:+.2f}% gap day"
-              + (f"  ({cur[7]})" if cur[7] else ""))
-    print()
-    print(f"  Changes today: {len(rows)}   (expected 1-3)")
-    for r in rows:
-        t = datetime.fromtimestamp(r[2], ET).strftime("%H:%M")
-        frm = f"{r[1]} -> " if r[1] else ""
-        hs = f"  held {r[3]/60:.0f}m" if r[3] else ""
-        print(f"    {t}  {frm}{r[0]}{hs}")
-    print()
 
 
 def show_gates(dc):
@@ -881,20 +719,13 @@ def show_market(dc):
     print("  MARKET")
     sep("═")
 
-    lv = _q(dc, "SELECT price, kind, provenance, touch_count, is_live_session"
-                " FROM level_ledger WHERE symbol=? AND retired_ts IS NULL"
-                " ORDER BY touch_count DESC LIMIT 8", (INSTRUMENT,))
-    if lv:
-        print("  Live levels (by touches — a touch is a HOLD):")
-        for pr, kind, prov, touches, live in lv:
-            star = " (live)" if live else ""
-            print(f"    {pr:>9.2f}  {str(kind or ''):<11} {str(prov or ''):<10}"
-                  f" touches={touches}{star}")
-    elif lv is None:
-        print("  (level_ledger not present)")
-    else:
-        print("  No live levels.")
-
+    # 🔴 r209 (chunk A) — LIVE LEVELS REMOVED. Operator: "Market: Live Levels —
+    # don't care. Take it out." Eight rows of touch counts on every box report,
+    # and nothing in the operator's workflow reads them.
+    # ⚠️ THE LEDGER IS UNTOUCHED AND STILL WRITTEN. `level_ledger` is a
+    # LIFECYCLE table — retention_purge excludes it in code precisely because a
+    # recomputation cannot rebuild a biography (r81) — and the sweep and fork
+    # paths both read it live. This deletes a VIEW, not a collector.
     fk = _q(dc, "SELECT interval, built, reject_reason, containment, span_bars"
                 " FROM fork_series WHERE symbol=? ORDER BY ts_epoch DESC LIMIT 2",
             (INSTRUMENT,))
@@ -941,12 +772,22 @@ def main():
     print()
     show_header()
     # ── TRADES: what happened ────────────────────────────────────────────
+    # 🔴 r209 (chunk A) — FOUR SECTIONS DELETED, on the operator's reading of
+    # what this dashboard is FOR. It is the per-SYMBOL box report, and an
+    # all-time or by-strategy rollup on one box is a slice nobody acts on:
+    # "I don't need a per symbol snapshot of that", "that's just trivia in my
+    # opinion, useless by itself", "we don't have grades", "irrelevant".
+    # ⚠️ THE CROSS-FLEET VERSIONS OF THESE ALREADY EXIST AND ARE THE RIGHT
+    # HOME: day_trader_pro's trade breakdown (r187) groups by strategy, setup
+    # type, exit reason, symbol, hour and weekday across every box, with an
+    # ENGINE EPOCH floor so pre-2026-08-25 trades cannot contaminate it. This
+    # file had no epoch filter at all, so its ALL-TIME numbers pooled the old
+    # engines with the new ones — 109 trades reaching back past the v4 split.
+    # Removing them removes a number that was quietly wrong, not just noisy.
+    # ⚠️ BY SETUP GRADE was structurally empty: r152 deleted the scorer and
+    # every write path hardcodes UNGRADED, so the section had one bucket.
     show_open_position(conn)
     show_today(conn)
-    show_alltime(conn)
-    show_by_strategy(conn)
-    show_by_grade(conn)
-    show_by_setup_type(conn)
     show_recent(conn)
     show_circuit_breakers(conn)
 
@@ -961,8 +802,16 @@ def main():
         print("  (expected at ~/options-trader/data/derived_store.db)")
         sep("═")
     else:
+        # 🔴 r209 (chunk A) — CHARACTER MOVES TO status.py. Operator:
+        # "Character — keep, but not in query.py; it belongs in status, below
+        # the pin line." It is a STATE, which is what status.py is for; this
+        # file is the trade log.
+        # ⚠️ IT IS NOT RENDERED ANYWHERE UNTIL CHUNK C LANDS, and that costs
+        # nothing today: r85 set BANDS_SET=False because the old bands were
+        # calibrated against a quantity that turned out to be the wrong one, so
+        # the section has printed "No character recorded yet today" on every
+        # box since. Stated rather than discovered.
         show_decisions(dc)
-        show_character(dc)
         show_gates(dc)
         show_plans(dc)
         show_market(dc)

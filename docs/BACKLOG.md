@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.27
+# BACKLOG.md — v1.28
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -214,6 +214,20 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.28 — 2026-09-01 — r209 (chunk A) — RPT.7 OPENED; RPT.6 AND RPT.8 FILED.**
+The box dashboard loses four per-symbol performance rollups and the Live Levels
+panel; CHARACTER moves toward status.py. RPT.7 tracks the remaining chunks
+(B today-scoping and width, C status.py, D the duplicate plan writer, E the
+"NOT ASKED" reasons). RPT.6: otv4 `query.py:268` computes unrealized as
+(current − entry) for EVERY structure, which is sign-inverted on credit
+verticals — their `current_premium` is the spread's value and they profit as it
+falls. dtp r236 got the sign right and deliberately did NOT copy this, because
+making two reports agree on a wrong number is worse than having them differ.
+RPT.8: `standings.py` carried a hardcoded `-4 hours` session offset (EDT, wrong
+for four months of the year) and its own comment says it mirrors
+`eod_summary.py` — so that file almost certainly carries it too. Fixed in
+standings at dtp r236; eod_summary UNEXAMINED.
 
 **v1.27 — 2026-09-01 — r208 — BFLY.7 AND BFLY.8 SHIPPED.**
 The butterfly wing is searched over listed strikes, bracketed by R_FLOOR and

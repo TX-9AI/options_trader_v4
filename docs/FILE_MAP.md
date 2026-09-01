@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-209 Python modules across 13 local packages.
+210 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -680,6 +680,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_purge_pushed.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/s3_push.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_query_sections.py`
+- **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_rehearsal_toggle.py`
