@@ -1,5 +1,33 @@
 """
-query.py  v4.6
+query.py  v4.7
+v4.7  2026-09-01  r214 — 🔴 THE UNREALIZED LINE WAS SIGN-INVERTED ON EVERY
+      CREDIT SPREAD, and had been since the panel was written. It applied the
+      DEBIT formula `(now - cost)` to every structure. A credit vertical's
+      `current_premium` is the SPREAD'S CURRENT VALUE — what it costs to buy
+      back — and the position profits as that FALLS, so its P&L is
+      `(credit - now)`, the mirror. A winning sweep printed as a loser and a
+      losing one printed as a winner, on the one line the operator reads
+      before deciding whether to intervene.
+      ⚠️ DISPLAY ONLY, AND VERIFIED RATHER THAN ASSUMED. The same expression
+      appears EIGHT times in exit_engine.py and every one is a DEBIT evaluator
+      (`_evaluate_orb`, `_evaluate_sweep` — the retired long SweepReversal —
+      `_evaluate_butterfly`, `_evaluate_adopted`), where it is correct.
+      `_evaluate_condor_leg`, the credit path, already computes
+      `(entry_prem - current_premium)`. So no exit decision was ever taken on
+      the wrong sign and no trade was mis-managed; only the report lied. S3
+      pins that, because the obvious "tidy-up" — making the eight consistent
+      with this fix — would invert every debit exit in the book.
+      🔑 THE CLASSIFIER IS `structure.is_credit_vertical`, the one the engine
+      uses. r22's doctrine: DERIVE it, never add a column — a column fixes
+      tomorrow and not today, because every position opened before the
+      migration rehydrates without it and `None` reads as `False`, which is
+      the exact failure, silently.
+      ⚠️ `unrealized()` IS EXTRACTED so the check executes the real function.
+      S2's first draft re-implemented the formula in the test and passed
+      against the BROKEN version, because the copy was right — C.23.
+      Found via day_trader_pro r236, which got the sign right in standings.py
+      and deliberately did not copy this one (RPT.6).
+v4.6
 v4.6  2026-09-01  r210 (chunk B) — TODAY ONLY, AND ONE LINE PER ROW.
       Operator, 2026-09-01: PLANS "only TODAY's Plans"; GATES "only TODAY's
       gates and use abbreviations — it's spanning multi-line"; the closed
@@ -377,6 +405,32 @@ def show_open_position(conn):
         _show_one_open(row)
 
 
+def unrealized(row, entry_prem, current_prem, contracts):
+    """(dollars, fraction) of open P&L, SIGNED BY STRUCTURE. (None, None) when
+    the box has not stamped a mark yet.
+
+    🔑 EXTRACTED SO THE CHECK CAN EXECUTE THE REAL THING. The first cut of
+    check_unrealized_sign S2 re-implemented this formula inside the test and
+    measured its own copy, which passed against the BROKEN version — C.23, the
+    r181 sizing checker that stayed green for two days because it
+    re-implemented the arithmetic it was meant to pin.
+
+    ⚠️ ABSENT IS NOT ZERO. No mark returns None, never 0.00: a fabricated zero
+    on a live position reads as a flat trade.
+    ⚠️ AND IT FAILS CLOSED TO DEBIT — every legacy row in this book is one.
+    """
+    if not current_prem or not entry_prem:
+        return None, None
+    try:
+        from strategy.structure import is_credit_vertical as _is_cv
+        # ⚠️ `sqlite3.Row` has no `.get`; the classifier takes a Mapping.
+        credit = _is_cv(dict(row))
+    except Exception:                                           # noqa: BLE001
+        credit = False
+    move = (entry_prem - current_prem) if credit else (current_prem - entry_prem)
+    return move * contracts * 100, move / entry_prem
+
+
 def _show_one_open(row):
     is_bf      = bool(row["is_butterfly"])
     entry_prem = row["entry_premium"] or 0
@@ -404,13 +458,33 @@ def _show_one_open(row):
     else:
         pos_desc = f"{(row['option_side'] or '').upper()}  Strike {row['strike']:.0f}"
 
-    # Live P&L from current_premium stored by position_manager each tick
+    # ── 🔴 r214 — THE UNREALIZED LINE WAS SIGN-INVERTED ON EVERY CREDIT
+    #    SPREAD, AND HAD BEEN SINCE THE PANEL WAS WRITTEN ──────────────────
+    # It applied the DEBIT formula `(now - cost)` to every structure. A credit
+    # vertical's `current_premium` is the SPREAD'S CURRENT VALUE — the cost to
+    # buy it back — and the position profits as that FALLS, so its P&L is
+    # `(credit - now)`, the mirror. A winning sweep printed as a loser and a
+    # losing one printed as a winner, on the one line the operator reads to
+    # decide whether to intervene.
+    # ⚠️ DISPLAY ONLY — VERIFIED, NOT ASSUMED. The same expression appears
+    # eight times in exit_engine.py and every one of them is a DEBIT evaluator
+    # (`_evaluate_orb`, `_evaluate_sweep` — the retired long SweepReversal —
+    # `_evaluate_butterfly`, `_evaluate_adopted`), where it is correct.
+    # `_evaluate_condor_leg`, the credit path, already computes
+    # `(entry_prem - current_premium)`. So no exit decision was ever taken on
+    # the wrong sign and no trade was mis-managed; only the report lied.
+    # 🔑 THE TEST IS `structure.is_credit_vertical`, THE ONE THE ENGINE USES.
+    # r22's doctrine: DERIVE the classification, never add a column — a column
+    # fixes tomorrow and not today, because every row opened before the
+    # migration rehydrates without it and `None` reads as `False`, which is the
+    # exact failure silently. Deriving works on rows that already exist.
+    # ⚠️ `sqlite3.Row` HAS NO `.get`, so it is converted to a plain dict first;
+    # passing the Row straight in would raise inside a display path.
+    # ⚠️ AND IT FAILS CLOSED: an unrecognised record is treated as a DEBIT,
+    # which is what every legacy row in this book is.
     current_prem = row["current_premium"] if row["current_premium"] else None
-    live_pnl_usd = None
-    live_pnl_pct = None
-    if current_prem and entry_prem:
-        live_pnl_usd = (current_prem - entry_prem) * contracts * 100
-        live_pnl_pct = (current_prem - entry_prem) / entry_prem
+    live_pnl_usd, live_pnl_pct = unrealized(row, entry_prem, current_prem,
+                                            contracts)
 
     print(f"  ID:            {row['trade_id'][:8]}")
     print(f"  Position:      {pos_desc}")

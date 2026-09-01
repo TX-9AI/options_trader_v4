@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.32
+# BACKLOG.md — v1.33
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -214,6 +214,16 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.33 — 2026-09-01 — r214 — RPT.6 CLOSED; RPT.10 OPENED.**
+`query.py`'s unrealized line is signed by structure. Confirmed display-only:
+all eight `(current - entry)` sites in exit_engine.py are debit evaluators
+where the sign is right, and `_evaluate_condor_leg` already used the credit
+sign — so no exit decision was ever taken on it. RPT.10: **menu 55 (fit
+readiness) is OOM-KILLED on a multi-day range** — `fit_readiness.py` over
+2026-08-24..09-01 was killed by the OOM reaper on control, so any S3 read
+spanning a range is currently unusable. That blocks BFLY.9, which needs the
+same reader over the chain history.
 
 **v1.32 — 2026-09-01 — r213 (chunk E) — RPT.7 CLOSED. THE FIVE-CHUNK DASHBOARD
 PASS IS DONE.** Every skip now names itself: `CondorManagement`, `CreditRoll`
