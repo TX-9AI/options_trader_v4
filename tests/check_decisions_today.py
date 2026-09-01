@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""check_decisions_today.py — v1.0
+"""check_decisions_today.py — v1.1
+v1.1  2026-09-01  r210 — D2 RE-DERIVED. It matched the SOURCE TEXT
+      `_today0 = _open.timestamp()`, so extracting that boundary into
+      `session_start_epoch()` — so GATES and PLANS could share one definition
+      of "today" — turned it red for a refactor that was correct. WA §24: a
+      canary pinned to a spelling rots on the next legitimate change. D2 now
+      EXECUTES the cut and asserts 09:30 ET today.
+v1.0
 
 🔴 THE DECISIONS PANEL SHOWS TODAY'S SESSION, OR NOTHING.
 
@@ -61,8 +68,28 @@ def main():
     # ── 🔴 D2 — THE CUT IS THE OPEN, NOT MIDNIGHT ────────────────────────
     # ⚠️ `_open.replace(hour=0...)` was the first version and would have let a
     # 06:00 maintenance wake through.
-    check("D2 the row cut is the open itself",
-          "_today0 = _open.timestamp()" in body)
+    # 🔴 RE-DERIVED AT r210. This asserted the SOURCE TEXT
+    # `_today0 = _open.timestamp()`, so it went red the moment r210 extracted
+    # the boundary into `session_start_epoch()` for gates and plans to share —
+    # a legitimate refactor, failing a check pinned to a SPELLING. WA §24:
+    # canaries check BEHAVIOUR, never a literal that a correct change moves.
+    # It now EXECUTES the cut and asserts it is 09:30 ET today.
+    import importlib.util as _u
+    _sp = _u.spec_from_file_location("_q", os.path.join(_root, "query.py"))
+    _m = _u.module_from_spec(_sp)
+    try:
+        _sp.loader.exec_module(_m)
+    except SystemExit:
+        pass
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+    # ⚠️ `_cut_dt`, not `_cut`: this file already defines a `_cut()` helper
+    # and shadowing it turned the next case into a TypeError.
+    _cut_dt = _dt.fromtimestamp(_m.session_start_epoch(), _Z("US/Eastern"))
+    check("D2 the row cut is the open itself, not midnight",
+          (_cut_dt.hour, _cut_dt.minute, _cut_dt.second) == (9, 30, 0)
+          and _cut_dt.date() == _dt.now(_Z("US/Eastern")).date(),
+          _cut_dt.strftime("%Y-%m-%d %H:%M:%S ET"))
 
     # ── D3 — both halves of the panel use it ─────────────────────────────
     # A watcher row from yesterday is not "an open position under management".

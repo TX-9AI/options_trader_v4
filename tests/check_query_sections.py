@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/check_query_sections.py  v1.0
+tests/check_query_sections.py  v1.1
+v1.1  2026-09-01  r210 (chunk B) — TODAY-SCOPING AND WIDTH. Operator: PLANS,
+      GATES and the closed-trade table to TODAY only, abbreviated, "it's
+      spanning multi-line". Q7-Q11 added.
+      🔑 ONE DEFINITION OF TODAY. r172 inlined the 09:30 cut inside
+      show_decisions; gates and plans now need the same boundary, and three
+      copies is three chances for two to disagree about what day it is.
+      `session_start_epoch()` is extracted and Q7 pins that all three call it.
+      🔴 AND THE `-4 hours` EDT HARDCODE WAS IN HERE TOO — the same class r125
+      fixed in the otv4 sensors and dtp r236 found in standings.py (RPT.8).
+      Q8 refuses its return.
 v1.0  2026-09-01  r209 (chunk A) — WHAT THE BOX DASHBOARD IS FOR.
 
 Operator, 2026-09-01, going through `query.py` from the bottom up: Live Levels
@@ -102,9 +112,11 @@ def main():
           and "fork_series" in src and "surface_series" in src)
 
     # ── Q6 — what the operator kept is still here ────────────────────────
+    # ⚠️ `show_recent` LEFT THIS SET AT r210 — chunk B merged it into
+    # show_today, and Q9 pins that merge. Leaving it here would have made Q6
+    # demand a section Q9 demands be absent.
     kept = {"show_open_position": "open positions",
             "show_today": "today's trades",
-            "show_recent": "recent closed",
             "show_decisions": "decisions",
             "show_gates": "gates",
             "show_plans": "plans",
@@ -112,6 +124,87 @@ def main():
     missing = sorted(k for k in kept if k not in fns)
     check("Q6 nothing the operator kept was removed with them",
           not missing, f"missing: {missing}")
+
+    # ── Q7 — ONE definition of "today", used by all three panels ─────────
+    # 🔑 r172 established the cut (09:30 ET, not midnight: a 06:00 maintenance
+    # wake writes real rows against a market that is not trading). It was
+    # inlined in one function; three panels need it now, and a boundary copied
+    # three times is two chances to disagree about what day it is (§7).
+    fn_src = {}
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef):
+            fn_src[n.name] = ast.get_source_segment(src, n) or ""
+    users = [f for f in ("show_decisions", "show_gates", "show_plans")
+             if "session_start_epoch()" in fn_src.get(f, "")]
+    check("Q7 decisions, gates and plans share one session cut",
+          "session_start_epoch" in fns and len(users) == 3,
+          f"callers: {users}")
+
+    # ── Q8 — the EDT hardcode is gone ────────────────────────────────────
+    # 🔴 ANCHORED ON THE AST, NOT THE TEXT, AND THE FIRST DRAFT WAS NOT.
+    # A plain string search matched the CHANGELOG SENTENCE that names the bug
+    # while explaining its removal — §20 exactly: rule 5 requires the entry to
+    # say what changed, so the honest entry contains the token, and the canary
+    # is guaranteed to trip on the documentation the version discipline
+    # demands. `#` comments are not AST nodes, so scanning string CONSTANTS
+    # sees the code and not the prose about it.
+    _lits = {n.value for n in ast.walk(tree)
+             if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    check("Q8 no hardcoded -4 hours offset survives",
+          "-4 hours" not in _lits,
+          "EDT is right for eight months and wrong for four")
+
+    # ── Q9 — LAST 10 CLOSED merged away ──────────────────────────────────
+    check("Q9 the duplicate closed-trade table is gone",
+          "show_recent" not in fns,
+          "today-scoping made it the same table as TODAY'S TRADES")
+
+    # ── Q10 — the grade column is gone ───────────────────────────────────
+    # r152 deleted the scorer; every write path hardcodes UNGRADED, so the
+    # column could only ever print one value.
+    check("Q10 the trade table no longer prints a grade column",
+          "setup_grade" not in fn_src.get("show_today", ""),
+          "one bucket, forever")
+
+    # ── Q11 — A REAL ROW FITS THE PHONE, executed ────────────────────────
+    # ⚠️ NOT A SOURCE MATCH — the format string is BUILT and measured, using
+    # the operator's own 2026-09-01 trades. A width assertion that reads the
+    # f-string proves nothing about what renders.
+    import importlib.util as _u
+    _sp = _u.spec_from_file_location("_q210", os.path.join(_root, "query.py"))
+    _m = _u.module_from_spec(_sp)
+    try:
+        _sp.loader.exec_module(_m)
+    except SystemExit:
+        pass
+    # ⚠️ THE REAL BUILDER, NOT A COPY OF IT (C.23). `trade_row` is what the
+    # table prints; measuring a reconstruction would only prove the
+    # reconstruction fits.
+    class _R(dict):
+        def __getitem__(self, k): return self.get(k)
+    widest = 0
+    for t, st, side, k, n, e, x, p, pc, w in [
+            ("2026-09-01 09:44:00", "ORBStrategy", "put", 705, 2, 1.56, 1.15,
+             -82.0, -26.3, "hard_stop_25% pnl=-26.3%"),
+            ("2026-09-01 09:46:00", "ORBStrategy", "put", 705, 24, 1.15, 0.94,
+             -516.0, -18.7, "orb_structure_stop: 1m close"),
+            ("2026-09-01 10:48:00", "RunawayContinuation", "call", 709, 8,
+             1.21, 2.56, 1080.0, 111.6, "target_hit pnl=111.6%")]:
+        row = _R(exit_time=t, strategy=st, option_side=side, strike=k,
+                 contracts=n, entry_premium=e, exit_premium=x, pnl_usd=p,
+                 pnl_pct=pc, exit_reason=w, is_butterfly=0, center_strike=0)
+        widest = max(widest, len(_m.trade_row(row)))
+    check("Q11 a real trade row fits on one line (<= 60 chars)",
+          widest <= 60, f"widest {widest}")
+
+    # ⚠️ AND THE REASON KEEPS ITS CAUSE. Abbreviating must not turn four
+    # distinct exits into one blank — that would hide WHY a trade ended, which
+    # is the column the operator reads first.
+    causes = {_m.abbr_reason(r) for r in
+              ("hard_stop_25% pnl=-26.3%", "orb_structure_stop: 1m close",
+               "target_hit pnl=111.6%", "orb_trail_stop pnl=14.9%")}
+    check("Q11b four distinct exits abbreviate to four distinct causes",
+          len(causes) == 4 and "" not in causes, str(sorted(causes)))
 
     print()
     if _fails:

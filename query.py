@@ -1,5 +1,30 @@
 """
-query.py  v4.5
+query.py  v4.6
+v4.6  2026-09-01  r210 (chunk B) — TODAY ONLY, AND ONE LINE PER ROW.
+      Operator, 2026-09-01: PLANS "only TODAY's Plans"; GATES "only TODAY's
+      gates and use abbreviations — it's spanning multi-line"; the closed
+      table "get rid of the grade column & abbreviate".
+      🔑 ONE DEFINITION OF TODAY. r172 inlined the 09:30 cut inside
+      show_decisions; gates and plans need the same boundary now, so it is
+      extracted as `session_start_epoch()` — three copies of a boundary is
+      two chances for two of them to disagree about what day it is (§7). The
+      cut is the OPEN, not midnight: a 06:00 maintenance wake writes real
+      rows against a market that is not trading.
+      ⚠️ GATES WAS ON A 24-HOUR WINDOW, which reached into YESTERDAY's
+      session — a morning read mixed last afternoon's refusals with this
+      morning's, separated by nothing but a bare HH:MM.
+      🔴 AND THE `-4 hours` EDT HARDCODE WAS IN show_today TOO. Same class
+      r125 fixed in the otv4 sensors and dtp r236 found in standings.py
+      (RPT.8): right for eight months, silently wrong for four, and the
+      failure is a table filtering on the WRONG DAY rather than one that
+      errors. Read from the tz database now.
+      ⚠️ LAST 10 CLOSED IS MERGED AWAY. Scoping both tables to today made
+      them the same table — one filtered by date, one by a LIMIT that landed
+      on the same rows. Two sections rendering one answer is §35's rot.
+      ⚠️ `trade_row()` IS EXTRACTED SO THE WIDTH CHECK MEASURES THE REAL
+      LINE. Q11's first draft rebuilt the format inside the test and measured
+      its own copy — C.23, the r181 sizing checker that was green for two
+      days because it re-implemented what it was pinning.
 v4.5  2026-09-01  r209 (chunk A) — FOUR SECTIONS AND TWO PANELS REMOVED, on
       the operator's reading of what this dashboard is FOR. It is the PER-BOX
       report; an all-time or by-strategy rollup computed from one symbol's
@@ -175,6 +200,100 @@ def pct_str(val: float) -> str:
 def bar(pct: float, width: int = 20) -> str:
     filled = max(0, min(width, int(pct / 100 * width)))
     return "█" * filled + "░" * (width - filled)
+
+
+def session_start_epoch() -> float:
+    """Today's 09:30 ET as an epoch — THE one definition of "today" here.
+
+    🔑 THE CUT IS THE OPEN, NOT MIDNIGHT, and r172 established why: a 06:00 ET
+    maintenance wake writes real plan rows against a market that is not
+    trading, and showing those in a panel about the session is the same lie as
+    showing last night's, only harder to spot because the date matches.
+
+    ⚠️ EXTRACTED AT r210 (chunk B) BECAUSE THREE PANELS NOW NEED IT. r172
+    inlined this in `show_decisions`; gates and plans are being scoped to the
+    same window, and three copies of a boundary is three chances for two of
+    them to disagree about what day it is — WORKING_AGREEMENT 7.
+
+    ⚠️ ET, NOT THE BOX CLOCK. The boxes run UTC and a bare `date.today()` rolls
+    the day at 20:00 ET, which is the operator's own long-standing symptom.
+    """
+    return now_et().replace(hour=9, minute=30, second=0,
+                            microsecond=0).timestamp()
+
+
+# ── SHORT NAMES, BECAUSE THE READER IS A PHONE ──────────────────────────────
+# 🔑 Operator, 2026-09-01: the gates and the trade table are "spanning
+# multi-line". Termius on a phone wraps around 60 characters, and a row that
+# wraps is a row that has to be reassembled by eye before it can be read.
+# ⚠️ AN UNKNOWN NAME IS TRUNCATED, NEVER DROPPED — a blank column would
+# silently hide a strategy nobody added to this table (r202's rule, same table).
+_STRAT_ABBR = {
+    "ORBStrategy": "ORB", "RunawayContinuation": "RUN",
+    "GEXPinButterfly": "BFLY", "SweepCreditSpread": "SWP",
+    "TrendCreditSpread": "TCS", "IronCondorStrategy": "CNDR",
+    "CondorManagement": "CMGT", "CreditRoll": "ROLL",
+    "SweepReversal": "SWPR", "ContinuationStrategy": "CONT",
+}
+
+# Exit reasons carry their own P&L in the string (r16), so they are long AND
+# unbounded. These are the stems; anything else truncates to 8.
+_EXIT_ABBR = (
+    ("hard_stop", "stop"), ("orb_structure_stop", "struct"),
+    ("structure_stop", "struct"), ("target_hit", "target"),
+    ("orb_trail_stop", "trail"), ("trail_stop", "trail"),
+    ("theta_bleed", "theta"), ("velocity", "stall"),
+    ("nickel", "nickel"), ("flatten", "flat"), ("acceptance", "accept"),
+)
+
+
+def abbr_strategy(name) -> str:
+    n = str(name or "?")
+    return _STRAT_ABBR.get(n, n[:4].upper())
+
+
+def trade_row(r) -> str:
+    """One closed trade, one line, 60 characters or fewer.
+
+    🔑 EXTRACTED SO THE CHECK CAN MEASURE THE REAL THING. The first cut of
+    `check_query_sections` Q11 rebuilt this format string inside the test and
+    measured its own copy — C.23, the r181 sizing checker that stayed green for
+    two days because it re-implemented the arithmetic it was meant to pin. A
+    width test that reads a reconstruction proves the reconstruction fits.
+
+    ⚠️ WHOLE DOLLARS AND WHOLE PERCENT HERE ONLY. The row already carries entry
+    and exit to the cent, so "-$82.00 -26.3%" spent eight characters restating
+    precision nobody acts on — and eight characters is the difference between
+    one line and two on a phone. Stored values are untouched and `pnl_str` /
+    `pct_str` keep full precision everywhere else.
+    """
+    if bool(r["is_butterfly"]):
+        contract = f"{r['center_strike']:.0f}BF"
+    else:
+        side = (r["option_side"] or "")[:1].upper()
+        contract = f"{side}{r['strike']:.0f}" if r["strike"] else "n/a"
+    pnl = r["pnl_usd"] or 0
+    money = f"{'+' if pnl >= 0 else '-'}${abs(pnl):,.0f}"
+    return (f"  {to_et(r['exit_time'])[6:11]:<5} "
+            f"{abbr_strategy(r['strategy']):<4} "
+            f"{contract:<7} "
+            f"{r['contracts'] or 0:>3} "
+            f"{r['entry_premium'] or 0:>5.2f} "
+            f"{r['exit_premium'] or 0:>5.2f} "
+            f"{money:>8} "
+            f"{(r['pnl_pct'] or 0):>+4.0f}%  "
+            f"{abbr_reason(r['exit_reason'])}")
+
+
+def abbr_reason(reason) -> str:
+    """The exit reason, short. ⚠️ The percentage is DROPPED, not the cause —
+    the row already prints P&L% in its own column, so keeping it in the reason
+    was the same number twice at the cost of the wrap."""
+    r = str(reason or "")
+    for stem, short in _EXIT_ABBR:
+        if r.startswith(stem):
+            return short
+    return r.split()[0][:8] if r else ""
 
 
 def sep(char: str = "─", width: int = 62):
@@ -367,13 +486,25 @@ def _show_one_open(row):
 
 
 def show_today(conn):
+    # 🔴 r210 (chunk B) — THE OFFSET WAS A HARDCODED '-4 hours'. That is EDT:
+    # correct for eight months and silently wrong for four, and the failure is
+    # a table filtering on the WRONG DAY rather than one that errors. r125
+    # found and fixed this exact class in the otv4 sensor reports and this
+    # query kept it; dtp r236 found the twin in standings.py (RPT.8). Read
+    # from the tz database, so it is -4 in September and -5 in December
+    # without anyone remembering.
+    # ⚠️ ENTRY DATE, NOT EXIT DATE, DELIBERATELY. status.py's TODAY'S SESSION
+    # and the EOD rollup both key on entry, and a table that disagreed with the
+    # panel above it about which trades are "today" is worse than one that
+    # misses a rare overnight close. Changing the semantics is its own call.
     today = today_et_prefix()
+    off = f"{int(now_et().utcoffset().total_seconds() // 3600)} hours"
     rows = conn.execute(
         """SELECT * FROM trades
            WHERE status='closed'
-           AND date(datetime(entry_time, '-4 hours')) = ?
+           AND date(datetime(entry_time, :off)) = :day
            ORDER BY exit_time""",
-        (today,)
+        {"off": off, "day": today}
     ).fetchall()
 
     sep()
@@ -404,86 +535,29 @@ def show_today(conn):
     # Trade detail table
     # ⚠️ SAME CHANGE, DIFFERENT FORMAT. Every row in TODAY'S TRADES is from
     # today, so the date would be noise; the exit TIME is what separates them.
-    print(f"  {'Closed':<8} {'Type':<8} {'Strike':<14} {'Grade':<6} "
-          f"{'Entry':>7} {'Exit':>7} {'P&L':>9} {'P&L%':>7}  Exit Reason")
+    # 🔴 r210 (chunk B) — THE GRADE COLUMN IS GONE AND THE ROW FITS THE PHONE.
+    # Operator, 2026-09-01: "get rid of the grade column & abbreviate though"
+    # — the old row ran past 90 characters and wrapped onto a second line on
+    # every trade, so a nine-trade session read as eighteen.
+    # ⚠️ GRADE WAS A COLUMN THAT COULD ONLY EVER SAY ONE THING: r152 deleted
+    # the setup scorer and every v4 write path hardcodes UNGRADED. Six
+    # characters of "UNGRADED" per row, on every row, forever.
+    # ⚠️ THE EXIT REASON KEEPS ITS CAUSE AND LOSES ITS PERCENTAGE. r16 writes
+    # the trade's own P&L into the reason string, so "hard_stop_25% pnl=-26.3%"
+    # was printing a number the row already has in its own column — the same
+    # value twice, at the cost of the wrap.
+    print(f"  {'time':<5} {'strat':<4} {'contract':<7} {'n':>3} "
+          f"{'entry':>5} {'exit':>5} {'P&L':>8} {'pct':>6}  why")
     sep()
     for r in rows:
         is_bf = bool(r["is_butterfly"])
         if is_bf:
-            strike_str = f"{r['center_strike']:.0f} BF"
+            contract = f"{r['center_strike']:.0f}BF"
         else:
             side = (r["option_side"] or "")[:1].upper()
-            strike_str = f"{side} {r['strike']:.0f}"
+            contract = f"{side}{r['strike']:.0f}" if r["strike"] else "n/a"
 
-        trade_type = "BUTTERFLY" if is_bf else (r["setup_type"] or "")[:8]
-        entry_p    = r["entry_premium"] or 0
-        exit_p     = r["exit_premium"]  or 0
-        pnl        = r["pnl_usd"]       or 0
-        pnl_p      = r["pnl_pct"]       or 0
-
-        print(
-            f"  {to_et(r['exit_time'])[6:]:<8} "
-            f"{trade_type:<8} "
-            f"{strike_str:<14} "
-            f"{r['setup_grade'] or '?':<6} "
-            f"${entry_p:>6.2f} "
-            f"${exit_p:>6.2f} "
-            f"{pnl_str(pnl):>9} "
-            f"{pct_str(pnl_p):>7}  "
-            f"{(r['exit_reason'] or '')[:28]}"
-        )
-    print()
-
-
-def show_recent(conn, n: int = 10):
-    rows = conn.execute(
-        "SELECT * FROM trades WHERE status='closed' ORDER BY exit_time DESC LIMIT ?", (n,)
-    ).fetchall()
-
-    sep()
-    print(f"  LAST {n} CLOSED TRADES")
-    sep()
-
-    if not rows:
-        print("  No closed trades yet.")
-        print()
-        return
-
-    # 🔴 DATE, NOT TRADE ID (r145). Operator, 2026-08-26: *"displaying the date
-    # of the trade would carry far more value to me (human reader) than the
-    # trade ID, which I'm never going to go back & reference... so I know if
-    # we're talking about today or what other day it happened."*
-    # ⚠️ THE ID IS STILL RECORDED — this changes the VIEW, not the row. `trades`
-    # keeps trade_id, and r144's plan->trade join depends on it.
-    print(f"  {'Closed':<14} {'Type':<8} {'Strike':<14} {'Contr':>5} "
-          f"{'Entry':>7} {'Exit':>7} {'P&L':>9} {'P&L%':>7}  Reason")
-    sep()
-
-    for r in rows:
-        is_bf = bool(r["is_butterfly"])
-        if is_bf:
-            strike_str = f"{r['center_strike']:.0f} BF"
-        else:
-            side = (r["option_side"] or "")[:1].upper()
-            strike_str = f"{side} {r['strike']:.0f}" if r["strike"] else "N/A"
-
-        trade_type = "BUTTERFLY" if is_bf else (r["setup_type"] or "")[:8]
-        entry_p    = r["entry_premium"] or 0
-        exit_p     = r["exit_premium"]  or 0
-        pnl        = r["pnl_usd"]       or 0
-        pnl_p      = r["pnl_pct"]       or 0
-
-        print(
-            f"  {to_et(r['exit_time']):<14} "
-            f"{trade_type:<8} "
-            f"{strike_str:<14} "
-            f"{r['contracts'] or 0:>5} "
-            f"${entry_p:>6.2f} "
-            f"${exit_p:>6.2f} "
-            f"{pnl_str(pnl):>9} "
-            f"{pct_str(pnl_p):>7}  "
-            f"{(r['exit_reason'] or '')[:25]}"
-        )
+        print(trade_row(r))
     print()
 
 
@@ -554,25 +628,36 @@ def show_gates(dc):
     sep("═")
     print("  GATES  (why a strategy is not trading)")
     sep("═")
+    # 🔴 r210 (chunk B) — TODAY ONLY, AND ONE LINE PER GATE. Operator,
+    # 2026-09-01: "keep, but only want TODAY's gates and use abbreviations —
+    # it's spanning multi-line."
+    # ⚠️ THE 24-HOUR WINDOW WAS THE WRONG UNIT. It reached back into YESTERDAY's
+    # session, so a morning read showed last afternoon's refusals mixed with
+    # this morning's with nothing but a bare HH:MM to tell them apart. Same cut
+    # as DECISIONS and PLANS now — `session_start_epoch()`, one definition.
+    # ⚠️ THE REASON KEEPS ITS FIRST LINE, NOT ALL OF IT. Two lines per gate at
+    # 78 characters was four rendered lines on a phone; twelve gates filled the
+    # screen and buried the one that mattered. Truncated, never dropped: a
+    # refusal with no reason is what r73 exists to prevent.
     rows = _q(dc, "SELECT strategy, gate, reason, event, held_s, ticks,"
                   " ts_epoch FROM gate_disposition"
-                  " WHERE symbol=? AND ts_epoch > ?"
+                  " WHERE symbol=? AND ts_epoch >= ?"
                   " ORDER BY ts_epoch DESC LIMIT 12",
-              (INSTRUMENT, datetime.now(ET).timestamp() - 86400))
+              (INSTRUMENT, session_start_epoch()))
     if rows is None:
         print("  (gate_disposition not present on this box)")
         print(); return
     if not rows:
-        print("  No gate transitions recorded in the last 24h.")
+        print("  No gate transitions today.")
         print(); return
     for st, gate, reason, ev, held, ticks, ts in rows:
         t = datetime.fromtimestamp(ts, ET).strftime("%H:%M")
         # ASCII only: the fleet terminal rendered these as "?" over SSH.
         mark = {"CLEARED": "ok", "CHANGED": "->"}.get(ev, "X ")
-        extra = f"  ({held/60:.0f}m, {ticks} ticks)" if held else ""
-        print(f"    {t} {mark} {st:<22} {gate}{extra}")
-        if reason and ev != "CLEARED":
-            print(f"           {reason[:78]}")
+        extra = f" {held/60:.0f}m" if held else ""
+        why = "" if (ev == "CLEARED" or not reason) else f"  {str(reason)[:24]}"
+        print(f"  {t} {mark} {abbr_strategy(st):<4} {str(gate)[:14]:<14}"
+              f"{extra}{why}")
     print()
 
 
@@ -622,7 +707,7 @@ def show_decisions(dc):
     # plan rows against a market that is not trading; showing them in a panel
     # about "the next tick" is the same lie as showing last night's, just
     # harder to spot because the date matches.
-    _today0 = _open.timestamp()
+    _today0 = session_start_epoch()   # r210 — one definition, shared
     rows = _q(dc, "SELECT strategy, verdict, reason, ts_epoch FROM plan_tick p"
                   " WHERE strategy NOT LIKE '%/manage'"
                   " AND ts_epoch >= ?"
@@ -688,28 +773,36 @@ def show_plans(dc):
     sep("═")
     print("  PLANS  (intent — fired, expired, and never triggered)")
     sep("═")
+    # 🔴 r210 (chunk B) — TODAY ONLY, ONE LINE PER PLAN. Operator: "keep, but
+    # I only want TODAY's Plans." The same 09:30 cut as DECISIONS and GATES.
+    # ⚠️ THE DATE LEAVES THE ROW WITH THE YESTERDAYS. Every plan is now from
+    # today, so "09-01" on every line is a column repeating one value —
+    # r145's rule, applied where it was not.
     rows = _q(dc, "SELECT strategy, state, terminal_reason, created_ts,"
                   " closed_ts, short_strike, trigger_price, trade_ids"
-                  " FROM plan_ledger WHERE symbol=?"
-                  " ORDER BY created_ts DESC LIMIT 10", (INSTRUMENT,))
+                  " FROM plan_ledger WHERE symbol=? AND created_ts >= ?"
+                  " ORDER BY created_ts DESC LIMIT 10",
+              (INSTRUMENT, session_start_epoch()))
     if rows is None:
         print("  (plan_ledger not present on this box)")
         print(); return
     if not rows:
-        print("  No plans recorded.")
+        print("  No plans today.")
         print(); return
     for strat, state, term, cts, clts, ss, tp, tids in rows:
-        t = datetime.fromtimestamp(cts, ET).strftime("%m-%d %H:%M")
+        t = datetime.fromtimestamp(cts, ET).strftime("%H:%M")
         at = ss or tp
-        atx = f" @ {at:.2f}" if at else ""
+        atx = f" @{at:.2f}" if at else ""
         # ⚠️ WIPED_BY_RESTART IS ITS OWN CATEGORY, not folded into CANCELLED —
-        # it is the countable cost of deploying mid-session.
-        flag = "⚠️ " if term == "WIPED_BY_RESTART" else "   "
-        live = "" if clts else "  <- LIVE"
-        traded = f"  traded={len(__import__('json').loads(tids))}" if tids else ""
-        print(f"  {flag}{t}  {strat:<22} {state}{atx}{traded}{live}")
-        if term:
-            print(f"        terminal: {term}")
+        # it is the countable cost of deploying mid-session — so it keeps a
+        # mark even at this width. ASCII: the fleet terminal renders the emoji
+        # as a run of question marks over SSH (r77).
+        flag = "!" if term == "WIPED_BY_RESTART" else " "
+        live = " LIVE" if not clts else ""
+        traded = f" x{len(__import__('json').loads(tids))}" if tids else ""
+        tm = f"  {str(term)[:18]}" if term else ""
+        print(f"  {flag}{t} {abbr_strategy(strat):<4} {str(state)[:11]:<11}"
+              f"{atx}{traded}{live}{tm}")
     print()
 
 
@@ -787,8 +880,12 @@ def main():
     # ⚠️ BY SETUP GRADE was structurally empty: r152 deleted the scorer and
     # every write path hardcodes UNGRADED, so the section had one bucket.
     show_open_position(conn)
+    # 🔴 r210 (chunk B) — LAST 10 CLOSED IS GONE, MERGED INTO TODAY'S TRADES.
+    # Operator asked to keep both AND to scope both to today, which makes them
+    # the same table: one filtered by date, one by a LIMIT that happened to
+    # land on the same rows. Two sections rendering one answer is the
+    # two-documents-one-job rot (§35) in a report.
     show_today(conn)
-    show_recent(conn)
     show_circuit_breakers(conn)
 
     # ── MARKET: what the tape was doing, and why nothing fired ───────────

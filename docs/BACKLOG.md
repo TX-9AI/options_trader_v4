@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.28
+# BACKLOG.md — v1.29
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -214,6 +214,14 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.29 — 2026-09-01 — r210 (chunk B) — RPT.8 CLOSED IN otv4.**
+PLANS, GATES and the closed-trade table scoped to today's session on the one
+shared 09:30 cut; rows abbreviated to a single line (59 chars). The `-4 hours`
+EDT hardcode is gone from `query.py` — `eod_summary.py` remains UNEXAMINED and
+RPT.8 stays open on that file alone. LAST 10 CLOSED merged into TODAY'S TRADES.
+Chunks C (status.py), D (the duplicate plan writer) and E (the "NOT ASKED"
+reasons) remain under RPT.7.
 
 **v1.28 — 2026-09-01 — r209 (chunk A) — RPT.7 OPENED; RPT.6 AND RPT.8 FILED.**
 The box dashboard loses four per-symbol performance rollups and the Live Levels
