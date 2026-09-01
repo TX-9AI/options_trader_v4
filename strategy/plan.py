@@ -1,5 +1,29 @@
 """
-strategy/plan.py  v1.6
+strategy/plan.py  v1.7
+v1.7  2026-09-01  r213 (chunk E) — EVERY SKIP NAMES ITSELF. Operator,
+      2026-09-01: *"I don't like 'NOT ASKED' as a reason. It makes no sense.
+      Not asked? why or Why not?"*
+      🔴 THE CAUSE WAS A GAP, NOT WORDING. `CondorManagement`, `CreditRoll`
+      and every `<Strategy>/manage` row are driven ONLY from main.py's
+      `has_open_position()` branch, and no skip site named them — so on a flat
+      box they fell to the default on every tick of every session. The other
+      half of that same branch already said the reverse out loud ("position
+      open — managing; only the second-leg window asks the credit
+      strategies"): one direction had a sentence, the other did not.
+      ⚠️ AND A `/manage` ENTRY OUTLIVES ITS POSITION — REGISTRY persists for
+      the life of the process, so once a strategy has managed anything its row
+      keeps reporting for the rest of the day.
+      · `skipped_management(reason)` names them all, by REGISTRATION rather
+        than by a name list in another file — r35's allow-list rot, where the
+        list held three names, two of which had been deleted, while the live
+        strategy was silently exempt.
+      · `setdefault`, not assignment: a plan already skipped for a specific
+        cause keeps that cause.
+      🔑 AND THE FALLBACK ADMITS WHAT IT IS. It fires only where main.py named
+      nothing, so it now reads as a DISPATCH GAP rather than a market
+      condition — r73 one level up: a refusal that cannot say which rung
+      refused it is worse than no refusal, because it gets trusted anyway.
+v1.6
 v1.6  2026-09-01  r212 (chunk D) — `_ledger_open` SUPERSEDES THE PREVIOUS
       UNFILLED PLAN of the same strategy before opening a new one. A plan that
       FIRES and is then refused downstream (sizing rejection, no priced
@@ -139,6 +163,11 @@ _TICK: Dict[str, Any] = {"n": 0, "ts": 0.0}
 REGISTRY: Dict[str, "Plan"] = {}
 
 # main.py's `_safe_strategy` labels -> the strategy name the plan writes under
+# r213 — plans that only run while something is open. Named here rather than
+# in main.py so a new management plan is covered by REGISTERING, not by
+# remembering to add it to a list in another file (the r35 allow-list rot).
+_MANAGEMENT_PLANS = {"CondorManagement", "CreditRoll"}
+
 DISPATCH_ALIAS = {
     "ORB": "ORBStrategy",
     "CondorPlan": "IronCondorStrategy",
@@ -755,6 +784,28 @@ def skipped(strategy: str, reason: str) -> None:
         pass
 
 
+def skipped_management(reason: str) -> None:
+    """Every MANAGEMENT plan is not being asked, and here is why.
+
+    🔑 r213 (chunk E) — THE ENTRIES NOTHING NAMED. `CondorManagement`,
+    `CreditRoll` and every `<Strategy>/manage` row are driven only inside
+    main.py's `has_open_position()` branch. With nothing open they are never
+    called, and no skip site names them — so they fell to the default and the
+    panel said "dispatch gave no reason" on every tick of every flat session.
+    ⚠️ AND A `/manage` ENTRY OUTLIVES ITS POSITION. `REGISTRY` persists for the
+    life of the process, so once a strategy has managed anything its row keeps
+    reporting for the rest of the day.
+    ⚠️ `setdefault`, NOT ASSIGNMENT: a management plan that DID write a real
+    verdict this tick, or was skipped for a more specific reason, keeps it.
+    """
+    try:
+        for name in list(REGISTRY):
+            if name.endswith("/manage") or name in _MANAGEMENT_PLANS:
+                _SKIPPED.setdefault(name, reason)
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
 def skipped_all(reason: str) -> None:
     """main.py: NO strategy is being asked this tick (halted, outside the
     session, no chain, a position is open). Never raises."""
@@ -797,7 +848,19 @@ def close_tick(store=None, symbol: str = "") -> int:
                 verdict = "NO PLAN"
                 logger.warning("[plan] %s %s", name, why)
             else:
-                why = _SKIPPED.get(name, "not asked this tick — dispatch gave no reason")
+                # 🔴 r213 (chunk E) — THE DEFAULT ADMITS WHAT IT IS. Operator,
+                # 2026-09-01: *"I don't like 'NOT ASKED' as a reason. It makes
+                # no sense. Not asked? why or Why not?"* He is right: the old
+                # text restated the verdict and told him nothing.
+                # ⚠️ AN UNEXPLAINED SKIP IS A GAP IN DISPATCH, NOT A MARKET
+                # CONDITION, and the row now says so. Every skip main.py can
+                # name IS named; this fires only where none is, which makes it
+                # a defect report rather than a status — and one that reads as
+                # a defect, so it gets fixed instead of scrolled past.
+                why = _SKIPPED.get(
+                    name, "no reason recorded — main.py reached a return path "
+                          "that does not name this strategy. That is a "
+                          "dispatch gap, not a market condition")
                 verdict = "NOT ASKED"
             if write_row(store, symbol, ts, name, verdict, why):
                 written += 1

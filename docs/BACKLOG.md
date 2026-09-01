@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.31
+# BACKLOG.md — v1.32
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -214,6 +214,19 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.32 — 2026-09-01 — r213 (chunk E) — RPT.7 CLOSED. THE FIVE-CHUNK DASHBOARD
+PASS IS DONE.** Every skip now names itself: `CondorManagement`, `CreditRoll`
+and every `<Strategy>/manage` row are driven only from the position-open branch
+and nothing named them, so a flat session printed "dispatch gave no reason" on
+every tick. The membership list lives with the registry, not in main.py, so a
+new management plan is covered by registering (r35's allow-list rot). The
+fallback now reads as a dispatch gap rather than a market condition, because it
+fires only where main.py named nothing.
+Chunks A-E: r209 subtractions, r210 today-scoping and width, r211 status.py,
+r212 the plan-ledger writer, r213 the skip reasons. RPT.8 remains open on
+`eod_summary.py` alone; RPT.6 (query.py's sign-inverted unrealized on credit
+verticals) and RPT.9 are open.
 
 **v1.31 — 2026-09-01 — r212 (chunk D) — RPT.5 CLOSED, AND r199's DIAGNOSIS
 WAS WRONG.** Plans opened by `PlanTick.take()` were never closed by anything,

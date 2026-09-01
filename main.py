@@ -1,4 +1,15 @@
 """
+main.py  v4.34
+v4.34  2026-09-01  r213 (chunk E) — THE FLAT BRANCH SAYS WHY THE MANAGEMENT
+       PLANS ARE QUIET. `_plan_skip_management("no open position — nothing to
+       manage")` on the else side of the `has_open_position()` split. Until
+       now only the position-open half explained itself, so a flat session
+       printed "dispatch gave no reason" against CondorManagement, CreditRoll
+       and every `<Strategy>/manage` row on every tick.
+       ⚠️ CONTRIBUTOR-ONLY, AS ALL BOARD CALLS ARE: wrapped, never raises, and
+       cannot affect dispatch. The membership list lives in strategy/plan.py
+       so a new management plan is covered by registering rather than by
+       someone remembering to edit a list here.
 main.py  v4.33
 v4.33  2026-09-01  r207 — THE DISPATCH ASKS THE ENGINE, NOT THE TICK'S COPY.
        `orb = ctx["orb"]` bound the ORBData instance at the
@@ -2446,6 +2457,21 @@ def _plan_skip_all(reason: str) -> None:
         pass
 
 
+def _plan_skip_management(reason: str) -> None:
+    """r213 — the management plans are not being asked, and here is why.
+
+    🔑 `CondorManagement`, `CreditRoll` and every `<Strategy>/manage` row are
+    driven ONLY from the `has_open_position()` branch. On a flat box nothing
+    called them and nothing named them, so the panel printed the bare default
+    on every tick — operator: *"Not asked? why or Why not?"*
+    """
+    try:
+        from strategy import plan as _plan_board
+        _plan_board.skipped_management(reason)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def _safe_strategy(name: str, fn, ctx=None):
     """v4.9 — run ONE strategy evaluation in isolation.
 
@@ -4555,6 +4581,17 @@ def main_loop(state: BotState):
                 if not pos_mgr.has_blocking_position():
                     attempt_new_entry(ctx, ms, state)
             else:
+                # 🔴 r213 (chunk E) — SAY WHY THE MANAGEMENT PLANS ARE QUIET.
+                # They run only in the branch above; with nothing open they are
+                # never called and, until now, nothing named them — so
+                # CondorManagement, CreditRoll and every `<Strategy>/manage`
+                # row reported "dispatch gave no reason" for the whole of a
+                # flat session.
+                # ⚠️ THIS IS THE SAME FACT THE OTHER BRANCH ALREADY STATES in
+                # reverse ("position open — managing; only the second-leg
+                # window asks the credit strategies"). One of the two halves
+                # had a sentence and the other did not.
+                _plan_skip_management("no open position — nothing to manage")
                 attempt_new_entry(ctx, ms, state)
 
             # ── Periodic heartbeat log ────────────────────────────────────
