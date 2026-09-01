@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.29
+# BACKLOG.md — v1.30
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -214,6 +214,14 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.30 — 2026-09-01 — r211 (chunk C) — status.py; RPT.9 FILED.**
+Open positions to a bare count (the cards and the summed exposure stay in
+query.py, which runs beside it), the duplicate-plan warning removed with the
+collapse kept until chunk D fixes the writer, EXPIRED stated plainly, and the
+CHARACTER line made unconditional at `inactive`. RPT.9: the EXPIRED label was
+stale in TWO places — both the live branch and `ORB_STATE_LABELS` still named
+the 11:00 cutoff r193 moved to 11:30 on 2026-08-30. Chunks D and E remain.
 
 **v1.29 — 2026-09-01 — r210 (chunk B) — RPT.8 CLOSED IN otv4.**
 PLANS, GATES and the closed-trade table scoped to today's session on the one

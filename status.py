@@ -1,5 +1,33 @@
 """
-status.py  v4.3
+status.py  v4.4
+v4.4  2026-09-01  r211 (chunk C) — THE MIDDLE OF THE BOARD. Operator,
+      2026-09-01: open positions "just list the number (nothing else)"; the
+      duplicate-plan warning "what do I need this for — get rid of that";
+      ORB "on expired, just say that without all the other qualifiers"; and
+      "add a line for Character... put 'inactive' until it is" activated.
+      ⚠️ THE COUNT REPLACES THE CARDS, AND THE DETAIL IS NOT LOST. Menu 15
+      runs status.py and query.py in the SAME fan-out, and query.py still
+      renders every position with its own card and the summed at-risk line
+      (r199). What goes is the DUPLICATE of that figure, not the figure.
+      🔴 THE CHARACTER LINE WAS ALREADY HERE AND HAS NEVER PRINTED. r75 gated
+      it on `current()` returning a state; r85 then set BANDS_SET=False,
+      because the old bands were calibrated against a per-bar volatility
+      RATIO that is silent about direction — a trend scored 1.00 and
+      ALTERNATING CHOP scored 1.00 too. So the engine emits nothing and the
+      line was invisible on every box. ABSENT AND INACTIVE ARE DIFFERENT
+      FACTS, and an unreadable engine is a THIRD one: it now prints
+      inactive / unavailable / the state, and sits below the pin line.
+      🔴 AND THE EXPIRED LABEL WAS STALE IN TWO PLACES. Both the live branch
+      and `ORB_STATE_LABELS` read "past 11:00 ET cutoff"; r193 moved
+      ORB_NO_ENTRY_AFTER_ET to 11:30 on 2026-08-30 and neither was updated.
+      Two spellings of one constant is how the first rots unnoticed (§35) —
+      and a line nobody reads is a line nobody notices going stale, which is
+      the argument for deleting it rather than correcting it.
+      ⚠️ THE PLAN COLLAPSE STAYS. r199 printed the collapsed COUNT so the
+      ledger duplication remained visible and RPT.5 records the write side
+      was never examined; chunk D repairs the writer, after which the
+      collapse has nothing to do. Removing the collapse WITH the warning
+      would render two identical plans as two rows — the defect inverted.
 v4.3  2026-08-31  r199 — EVERY OPEN POSITION, NOT JUST THE NEWEST. The
       query asked for LIMIT 1 and the panel rendered it as the whole book,
       so a box holding a butterfly AND a directional trade under-reported
@@ -61,7 +89,7 @@ banner reflects the NET daily loss halt (day P&L <= -limit).
 read authoritative orb_state.json (live engine state:
         disarm reason, break latches, price, 11:00 cutoff) instead of clock
         inference/log-scraping. Adds a live Price line, shows DISARMED (runaway
-        past 50% TP) and EXPIRED (past 11:00) truthfully, and reports price vs
+        past 50% TP) and EXPIRED truthfully, and reports price vs
         range instead of always saying "inside range, waiting".
 show live Risk per trade ($ from OT_RISK_USD) under Mode.
 repo-wide v3.0 bump: Yahoo-Finance purge & data stream
@@ -173,7 +201,13 @@ ORB_STATE_LABELS = {
     "INVALIDATED":                 "Invalidated, re-arming",
     "OPEN_LONG":                   "OPEN LONG (confirmed)",
     "OPEN_SHORT":                  "OPEN SHORT (confirmed)",
-    "EXPIRED":                     "Expired (past 11:00 ET cutoff)",
+    # 🔴 r211 — A SECOND SPELLING OF THE SAME FACT, AND IT WAS STALE TOO.
+    # The live branch in main() carried "past 11:00 ET cutoff" and so did this
+    # fallback; r193 moved ORB_NO_ENTRY_AFTER_ET to 11:30 on 2026-08-30 and
+    # neither was updated. Two places holding one constant is exactly how the
+    # first one rots unnoticed (§35). Now it states the state and nothing else,
+    # which is also the operator's ruling: "it's just expired."
+    "EXPIRED":                     "EXPIRED",
     "IN_PROGRESS":                 "Opening range forming (9:30-9:35 ET)",
     "EXPIRED_RANGE":               "Last session's range - today NOT established",
     "NOT_ESTABLISHED":             "Today's range not established",
@@ -471,25 +505,6 @@ def main():
         _live = _led.live_plans() if _led else []
     except Exception:                                          # noqa: BLE001
         _live = []
-    # ── r75 — CHARACTER: what the tape is doing, and for how long ────────
-    # ⚠️ A DESCRIPTION, NOT A SIGNAL. It gates nothing and carries no score.
-    # A character that has held all session is a different session from one
-    # that has flipped six times, which is why the duration is on the line.
-    try:
-        from derived.registry import build_engines as _be
-        _ce = None
-        for _e in (_be(INSTRUMENT) or []):
-            if getattr(_e, "name", "") == "character":
-                _ce = _e
-                break
-        _cur = _ce.current() if _ce else {}
-        if _cur.get("character"):
-            _mins = (_cur.get("held_s") or 0) / 60.0
-            print(f"  \U0001F30A Character:   {_cur['character'].upper()}"
-                  f"  (held {_mins:.0f} min)")
-    except Exception:                                          # noqa: BLE001
-        pass
-
     if _live:
         # ⚠️ DEDUPED FOR DISPLAY ONLY, AND THE DUPLICATION IS REAL. CRM showed
         # "RunawayContinuation [TRIGGERED] @ 259.38" twice on 2026-08-31 — two
@@ -504,9 +519,17 @@ def main():
                 continue
             _seen.add(_k)
             _rows.append(_p)
-        if len(_rows) < len(_live):
-            print(f"  \u26A0\uFE0F  {len(_live) - len(_rows)} duplicate plan row(s) "
-                  f"collapsed for display \u2014 the ledger still has them")
+        # 🔴 r211 (chunk C) — THE WARNING LINE GOES, THE COLLAPSE STAYS.
+        # Operator, 2026-09-01: "what do I need this for — get rid of that."
+        # ⚠️ THE DUPLICATION IS STILL REAL AND IS NOT BEING HIDDEN, IT IS BEING
+        # FIXED AT THE SOURCE. r199 printed the count precisely so the ledger
+        # defect stayed visible, and RPT.5 records that the WRITE side was
+        # never examined. The operator's call, same day: "for D — also agree,
+        # let's fix the writer." So chunk D repairs `plan_ledger` so there is
+        # nothing to collapse, and this line has no job once it lands.
+        # ⚠️ UNTIL THEN THE DUPLICATION IS INVISIBLE ON THIS PANEL. Stated
+        # rather than discovered: query.py's PLANS section still shows every
+        # ledger row untouched, so the raw evidence is one screen away.
         for _p in _rows:
             _what = _p.get("short_strike") or _p.get("trigger_price")
             _at = f" @ {_what:.2f}" if _what else ""
@@ -528,8 +551,17 @@ def main():
         # Truthful state label straight from the engine (orb_state.json).
         st = orb["state"]
         reason = orb.get("reason", "")
+        # 🔴 r211 (chunk C) — EXPIRED JUST SAYS EXPIRED. Operator: "on expired,
+        # just say that without all the other qualifiers. It's unimportant.
+        # It's just expired."
+        # ⚠️ AND THE QUALIFIER WAS WRONG BESIDES. It read "past 11:00 ET
+        # cutoff" — r193 moved ORB_NO_ENTRY_AFTER_ET to 11:30 on 2026-08-30
+        # and this label kept the old number, so the panel has been printing a
+        # stale constant for two days. A line nobody reads is a line nobody
+        # notices going stale, which is the argument for deleting it rather
+        # than correcting it.
         if st == "EXPIRED" or orb.get("past_cutoff"):
-            state_label = "\u26D4 EXPIRED — past 11:00 ET cutoff (no ORB entries)"
+            state_label = "EXPIRED"
         elif st == "INVALIDATED" and reason == "runaway":
             state_label = "\U0001F6D1 DISARMED — ran past 50% TP, no retest (favors sweep)"
         elif st == "INVALIDATED" and reason == "close_inside":
@@ -563,7 +595,12 @@ def main():
             rs = orb["range_status"]
             date_note = f"  [{orb.get('range_date')}]" if rs != "ESTABLISHED" else ""
             print(f"      Range:       {rs}{date_note}")
-        print(f"      State:       {state_label}{attempt_str}{brk_note}")
+        # ⚠️ r211 — THE QUALIFIERS ARE SUPPRESSED ON EXPIRED ONLY. Attempt
+        # count and break latches are exactly what you want while the engine is
+        # live; on a finished session they are trivia after a terminal word.
+        _expired = (st == "EXPIRED" or orb.get("past_cutoff"))
+        _quals = "" if _expired else f"{attempt_str}{brk_note}"
+        print(f"      State:       {state_label}{_quals}")
     else:
         print(f"  \u23F1  ORB:         Waiting for 9:35 ET range to be set")
 
@@ -584,6 +621,39 @@ def main():
         gex_icon = ("\U0001F4CC" if gex_env == "PINNING"
                     else "\U0001F4C8" if gex_env == "TRENDING" else "\u2796")
         print(f"  {gex_icon} GEX pin:     ${gex_pin}  ({_gex_label})")
+
+    # ── r75 / r211 (chunk C) — CHARACTER, BELOW THE PIN LINE, ALWAYS ────────
+    # Operator, 2026-09-01: "Add a line for Character. I know it's not
+    # activated yet, so put 'inactive' until it is."
+    # ⚠️ IT WAS ALREADY HERE AND HAS NEVER PRINTED. The r75 block sat ABOVE the
+    # active plan and rendered only when `current()` returned a character —
+    # and r85 set BANDS_SET=False, because the old bands were calibrated
+    # against a quantity that turned out to be the wrong one (a per-bar
+    # volatility RATIO, silent about direction: a trend scored 1.00 and
+    # ALTERNATING CHOP also scored 1.00). So the engine emits no state at all
+    # and the line has been invisible on every box since.
+    # 🔑 ABSENT AND INACTIVE ARE DIFFERENT FACTS, and printing nothing said
+    # neither. "inactive" says the engine is running and deliberately not
+    # emitting; a missing line says nothing and reads as an oversight.
+    # ⚠️ A DESCRIPTION, NOT A SIGNAL — it gates nothing and carries no score.
+    # A character that has held all session is a different session from one
+    # that has flipped six times, which is why the duration rides the line.
+    _char = "inactive"
+    try:
+        from derived.registry import build_engines as _be
+        _ce = None
+        for _e in (_be(INSTRUMENT) or []):
+            if getattr(_e, "name", "") == "character":
+                _ce = _e
+                break
+        _cur = _ce.current() if _ce else {}
+        if _cur.get("character"):
+            _mins = (_cur.get("held_s") or 0) / 60.0
+            _char = f"{_cur['character'].upper()}  (held {_mins:.0f} min)"
+    except Exception:                                          # noqa: BLE001
+        # ⚠️ AN UNREADABLE ENGINE IS NOT AN INACTIVE ONE. Say which it is.
+        _char = "unavailable"
+    print(f"  \U0001F30A Character:   {_char}")
 
     # ── r78 — FORK TILT. Relative, never literal, and None is not FLAT. ─────
     # ⚠️ "FLAT" MEANS FLAT-ISH: a band around zero, because a channel tilting a
@@ -621,65 +691,20 @@ def main():
     print()
     sep()
 
+    # 🔴 r211 (chunk C) — THE COUNT, AND NOTHING ELSE. Operator, 2026-09-01:
+    # "Open positions — keep, but just list the number of open positions
+    # (nothing else)."
+    # ⚠️ THIS UNDOES HALF OF r199 DELIBERATELY, AND THE DETAIL IS NOT LOST.
+    # r199 added the per-position cards AND the summed exposure here because
+    # ONE card was being rendered as the whole book — "the number you check
+    # before adding risk". Menu item 15 runs `status.py` and then `query.py` in
+    # the same fan-out, and query.py still renders every position with its own
+    # card and the summed at-risk line (r199, kept through chunks A and B). So
+    # the exposure figure is one screen down, not gone; what goes is the
+    # DUPLICATE of it, which is why this is safe and why it would not be if
+    # status were read alone.
     _open = get_open_trades()
-    if len(_open) > 1:
-        # ⚠️ THE HEADER CARRIES THE COUNT AND THE SUM. A per-position block is
-        # only half the fix: the number you check before adding risk is the
-        # BOX's exposure, and one position's `at risk` line silently was it.
-        _tot = sum((t.get("total_cost") or 0) for t in _open)
-        print(f"  \U0001F4E6 {len(_open)} OPEN POSITIONS  "
-              f"\u2014  ${_tot:,.2f} at risk on this box")
-        print()
-    for trade in _open:
-        is_butterfly = bool(trade.get("is_butterfly", 0))
-        entry_prem   = trade.get("entry_premium", 0) or 0
-        stop_prem    = trade.get("stop_premium",  0) or 0
-        target_prem  = trade.get("target_premium", 0) or 0
-        trail_prem   = trade.get("trail_activation", 0) or 0
-        contracts    = trade.get("contracts", 0) or 0
-        total_cost   = trade.get("total_cost", 0) or 0
-        direction    = trade.get("direction", "").upper()
-        strategy_name = trade.get("strategy", "")
-        grade        = trade.get("setup_grade", "?")
-        option_side  = trade.get("option_side", "").upper()
-        strike       = trade.get("strike", 0) or 0
-        expiry       = trade.get("expiry", "")
-        current_prem = trade.get("current_premium") or entry_prem
-        pnl_usd      = (current_prem - entry_prem) * contracts * 100 if entry_prem else 0.0
-        pnl_icon = "\U0001F4C8" if pnl_usd >= 0 else "\U0001F4C9"
-
-        if is_butterfly:
-            net_debit  = trade.get("net_debit", 0) or 0
-            max_profit = trade.get("max_profit", 0) or 0
-            lower_s    = trade.get("lower_strike", 0) or 0
-            center_s   = trade.get("center_strike", 0) or 0
-            upper_s    = trade.get("upper_strike", 0) or 0
-            print(f"  \U0001F98B OPEN BUTTERFLY \u2014 {option_side}")
-            print(f"     Strikes:    {lower_s:.0f} / {center_s:.0f} / {upper_s:.0f}")
-            print(f"     Net debit:  ${net_debit:.2f}/share")
-            print(f"     Max profit: ${max_profit:.2f}/share  (TP @ 20%: ${max_profit*0.20:.2f})")
-            print(f"     Contracts:  {contracts}")
-            print(f"     Total cost: ${total_cost:.2f}")
-            if current_prem != entry_prem:
-                print(f"     Current:    ${current_prem:.2f}/share  ({usd(pnl_usd)})")
-            print(f"     Stop:       < ${stop_prem:.2f}/share  (25% loss)")
-        else:
-            print(f"  {pnl_icon} OPEN {direction}  \u2014  {option_side} {strike:.0f}")
-            print(f"     Expiry:     {expiry}")
-            print(f"     Entry:      ${entry_prem:.2f}/share")
-            if current_prem != entry_prem:
-                print(f"     Current:    ${current_prem:.2f}/share  ({usd(pnl_usd)})")
-            print(f"     Stop:       ${stop_prem:.2f}/share  (25% loss)")
-            print(f"     Trail at:   ${trail_prem:.2f}/share  (50% TP)")
-            print(f"     Target:     ${target_prem:.2f}/share  (100% TP)")
-            print(f"     Contracts:  {contracts}  \u00d7  $100  =  ${total_cost:.2f} at risk")
-
-        print(f"     Grade:      {grade}  |  {strategy_name}")
-        print(f"     Entered:    {to_et(trade.get('entry_time', ''))}")
-        if len(_open) > 1:
-            print()
-    if not _open:
-        print("  \u23F3 No open position")
+    print(f"  \U0001F4E6 Open positions: {len(_open)}")
 
     print()
     sep()

@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""tests/check_dashboards_multi_position.py  v1.0
+"""tests/check_dashboards_multi_position.py  v1.1
+v1.1  2026-09-01  r211 — D3/D4/D5 RE-DERIVED. Chunk C reduced status.py's
+      open-position block to a bare count on the operator's ruling, so
+      asserting BOTH files carry the summed exposure was asserting a
+      DUPLICATE. r199's real invariant — the figure a reader checks must be
+      the BOX's, never one position's — is unchanged and now pinned once, in
+      query.py, plus a new D3b refusing any per-position exposure line in
+      status.py at all.
+      ⚠️ D3b IS ANCHORED ON `print()` CALLS, not on the file text: the first
+      draft matched the module docstring and a comment, both of which describe
+      the r199 defect while explaining it (§20, and rule 5 makes that prose
+      mandatory).
 BOTH DASHBOARDS SHOW EVERY OPEN POSITION, AND THE EXPOSURE THEY PRINT IS THE
 BOX'S — NOT ONE ROW'S.
 
@@ -60,19 +71,54 @@ def main():
           "fetchall()" in st and "fetchall()" in qy)
 
     # ── D3: the exposure printed is the BOX's ─────────────────────────────
-    check("D3 status sums total_cost across positions",
-          'sum((t.get("total_cost") or 0) for t in _open)' in st,
-          "one position's `at risk` line silently was the box's")
-    check("D3b query sums deployed across positions",
-          'sum((r.get("total_cost") or 0) for r in rows)' in qy)
+    # 🔴 RE-DERIVED AT r211. This asserted the SUM lived in BOTH files. Chunk C
+    # reduced status.py's open-position block to a bare count on the operator's
+    # ruling ("just list the number, nothing else"), so the sum is now query.py's
+    # alone — and menu item 15 runs status.py and query.py in the SAME fan-out,
+    # so the figure is one screen down rather than gone.
+    # 🔑 r199's ACTUAL INVARIANT IS UNCHANGED AND IS WHAT IS PINNED HERE: the
+    # number a reader checks before adding risk must be the BOX's exposure, not
+    # one position's `at risk` line masquerading as it. That claim is about the
+    # figure EXISTING and being a SUM, not about which of the two panels
+    # carries it. Requiring both was requiring a duplicate.
+    check("D3 the box's summed exposure is printed somewhere",
+          'sum((r.get("total_cost") or 0) for r in rows)' in qy,
+          "query.py carries it; status.py carries the count (r211)")
+    # ⚠️ AND STATUS MUST NOT PRINT A SINGLE POSITION'S FIGURE AS THE BOX'S —
+    # which is the defect r199 existed to fix, and the one a count cannot
+    # reintroduce. Pinned so a future edit cannot put a lone card back.
+    # ⚠️ ANCHORED ON WHAT IS PRINTED, NOT ON THE FILE TEXT. The first draft
+    # searched the source and matched the module docstring and a comment, both
+    # of which describe the r199 defect while explaining it — §20 exactly, for
+    # the fourth time in this session: rule 5 requires the prose to name what
+    # changed, so a text search is guaranteed to trip on it. This walks
+    # `print(...)` calls and reads only what reaches the terminal.
+    import ast as _ast
+    _st_tree = _ast.parse(st, "status.py")
+    _printed = []
+    for _n in _ast.walk(_st_tree):
+        if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name)
+                and _n.func.id == "print"):
+            for _c in _ast.walk(_n):
+                if isinstance(_c, _ast.Constant) and isinstance(_c.value, str):
+                    _printed.append(_c.value)
+    check("D3b status prints no per-position exposure at all",
+          not any("at risk" in x for x in _printed),
+          "a lone card's number reading as the box's is the r199 defect")
 
     # ── D4: the count is visible ──────────────────────────────────────────
+    # ⚠️ r211 — status says "Open positions: N", query says "OPEN POSITIONS (N)".
+    # Different words, same fact; the check is that BOTH state the count.
     check("D4 both name how many positions are open",
-          "OPEN POSITIONS" in st and "OPEN POSITIONS" in qy)
+          "Open positions:" in st and "OPEN POSITIONS" in qy)
 
     # ── D5: oldest first, deliberately ────────────────────────────────────
-    check("D5 both sort oldest-first, so a long-running position is not hidden",
-          "entry_time ASC" in st and "entry_time ASC" in qy)
+    # ⚠️ r211 — status no longer renders rows, so ordering is query's concern
+    # alone. The fetch stays ordered in both because the COUNT does not care
+    # and a future edit restoring rows should not have to rediscover this.
+    check("D5 the rendering dashboard sorts oldest-first",
+          "entry_time ASC" in qy,
+          "so a long-running position is not hidden behind a newer one")
 
     # ── D6: EXECUTED — two open rows, both rendered ───────────────────────
     # 🔑 The only check here that runs the code rather than reading it.
