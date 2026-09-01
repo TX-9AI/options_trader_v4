@@ -1,5 +1,16 @@
 """
-strategy/criteria.py  v1.2
+strategy/criteria.py  v1.3
+v1.3  2026-09-01  r208 — `butterfly_reach_max` REMOVED. The butterfly relaxes
+      nothing now: reach, strength and both window bounds are strict, and its
+      wing is SEARCHED over listed strikes rather than widened. Operator,
+      2026-09-01: "reachability and pin strength are synonymous with
+      'possible'. If either is a 'no' it's much less possible."
+      ⚠️ THE SWEEP'S THREE DIALS ARE UNTOUCHED AND DELIBERATELY STILL LOOSE —
+      operator, same day: "the sweep is going to get tightened later. Right
+      now we're getting bad TRADES and that's to collect some parameters."
+      So this is a butterfly-scoped removal, not the start of a sweep-wide
+      one, and the difference is recorded so a later reader does not tidy
+      the remaining entries away as leftovers.
 v1.2  2026-08-29  r176: runaway_cutoff_et relaxed value = strict 11:30 — the
       debit cutoff does not extend under relaxed (operator ruling).
 v1.1  2026-08-27  r154 (RECORDED RETROACTIVELY in r159 — r154 added
@@ -200,7 +211,10 @@ CRITERIA = {
     # r176 — operator 2026-08-29: "Debit entries are finished at 1130,
     # period. Do not extend it for relaxed. We are burning theta."
     "runaway_cutoff_et":      ("11:30",        "11:30"), # SELECTION — does not relax
-    "butterfly_reach_max":    (1.00,           1.50),    # SELECTION
+    # 🔴 r208 — REMOVED. The butterfly relaxes nothing now: reach, strength and
+    # both window bounds are strict, and the wing is SEARCHED rather than
+    # widened. Operator, 2026-09-01: "reachability and pin strength are
+    # synonymous with possible. If either is a no it's much less possible."
     "level_hold_min":         (0.75,           0.50),    # SELECTION
 }
 

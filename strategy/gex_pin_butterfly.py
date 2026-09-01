@@ -1,5 +1,38 @@
 """
-strategy/gex_pin_butterfly.py  v4.7
+strategy/gex_pin_butterfly.py  v4.8
+v4.8  2026-09-01  r208 — THE WING IS SEARCHED, THE FLOOR MUST CLEAR THE
+      SPREAD, AND RELAXED IS GONE FROM THIS STRATEGY.
+      🔴 2026-09-01: five flies fired at 12:00:00 and three were stopped out
+      INSIDE THE SAME MINUTE — META 577.5 debit 0.17 (25% floor = 4.3c), CRM
+      0.21 (5.3c), MU 0.28 (7.0c). A fly's value is `lower + upper -
+      2*center`, a small difference of three larger numbers, so THREE legs of
+      quote noise compound into a figure itself worth 17 cents. They were not
+      stopped by price; they were stopped by their own marks.
+      🔑 R AND SURVIVABILITY PULL OPPOSITE WAYS AND ONLY R WAS WIRED. R rises
+      as the wing narrows; survivability falls. So the selector steered to the
+      LEAST survivable structure available and called it best — META at R 10.8
+      was not a fly that happened to be fragile, it was the most fragile
+      constructible fly, chosen because it was. Both bounds together require
+      width >= 64 x leg-spread, so on a wide-spread symbol NO wing qualifies,
+      which is reported as a definite answer rather than a fallback.
+      · `stop_survivable` (r154, one caller until now — the sweep) is wired
+        here as FEASIBILITY. The butterfly was not even on r154's untouched
+        list because on 2026-08-27 it had never fired.
+      · `WING_EM_FRAC` DELETED. The wing is searched over the chain's LISTED
+        strikes — R_FLOOR caps the wide side, survivability floors the narrow
+        side, narrowest qualifying wing wins. Operator: "the wings should be
+        a 1-R or better (that's the widest allowed) but prefer narrower."
+      · Candidates come from the strikes themselves, NOT from a stride of
+        `_chain_increment`'s median gap: a mixed ladder would let the stride
+        step PAST listed wings — r198's C.29 in a new costume. `inc` survives
+        for reporting only.
+      · RELAXED IS REMOVED ENTIRELY from this file (no widen, no window, no
+        tag). Operator: "reachability and pin strength are synonymous with
+        possible — if either is a no it's much less possible", and the
+        butterfly is ONE PER SESSION, so relaxing a dial does not collect a
+        marginal trade, it SPENDS the day's only slot on one.
+      · GATES: EM_MAX_FRAC, PIN_CONC_MIN and LATEST_ET all SELECTION ->
+        FOUNDATIONAL, reversing r196 on the last of those.
 v4.7  2026-08-31  r198 — THE WINGS ARE SNAPPED TO THE CHAIN'S REAL STRIKE
       LADDER. `config.STRIKE_INCREMENT` is one global number for fifteen
       symbols and `round_to_strike()` returns an int, so every wing was
@@ -206,10 +239,9 @@ from datetime import datetime
 from typing import Optional
 
 import config
-from strategy import relaxed
 from strategy.base_strategy import OptionsSignal as Signal
 from strategy.plan import Plan
-from strategy.criteria import R_FLOOR
+from strategy.criteria import stop_survivable, R_FLOOR, STOP_VS_SPREAD_MIN
 from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
@@ -231,10 +263,16 @@ def _gate(name: str, reason: str) -> None:
 # 2026-08-19. `GEX_PIN_CONCENTRATION = 0.15` in gex_data was tuned against the
 # gamma-squared surface and means nothing for real positioning.
 ENABLED = getattr(config, "GEX_BUTTERFLY_ENABLED", True)       # v4.3: ON
-# ⟨PRIOR⟩ wing width as a fraction of the expected move. Narrow enough that the
-# apex payoff is concentrated, wide enough that the pin has a strike of room
-# either side. Floor: one increment. Ceiling: the distance to the pin.
-WING_EM_FRAC = getattr(config, "GEX_BFLY_WING_EM_FRAC", 0.25)
+# 🔴 r208 — `WING_EM_FRAC` IS DELETED. The wing is no longer a fraction of the
+# expected move; it is SEARCHED over the chain's listed strikes, bracketed by
+# R_FLOOR on the wide side and survivability on the narrow side, narrowest
+# qualifying wing wins. Operator, 2026-09-01: "the wings should be a 1-R or
+# better (that's the widest allowed) but prefer narrower if available."
+# ⚠️ AND IT WAS DECIDING MORE THAN A PAYOFF SHAPE. At 0.25 of the expected move
+# it also set whether a survivable fly existed AT ALL, because the two bounds
+# together require width >= 64 x leg-spread. Nobody ever fitted it.
+# config.GEX_BFLY_WING_EM_FRAC is left in place, unread, so a box carrying the
+# old env var starts cleanly rather than failing on an unknown key.
 PIN_CONC_MIN = getattr(config, "GEX_BFLY_PIN_CONC_MIN", 0.25)
 EM_MIN_FRAC = getattr(config, "GEX_BFLY_EM_MIN_FRAC", 0.30)
 EM_MAX_FRAC = getattr(config, "GEX_BFLY_EM_MAX_FRAC", 1.00)
@@ -267,20 +305,64 @@ GATES = {
     # Relaxing a dial spends a marginal trade. Relaxing this spent the day's
     # ONLY attempt, three hours before the thesis is valid.
     "EARLIEST_ET":   "FOUNDATIONAL",
-    "LATEST_ET":     "SELECTION",
-    "EM_MAX_FRAC":   "SELECTION",
+    # 🔴 r208 — SELECTION -> FOUNDATIONAL, reversing r196 on this one bound.
+    # Operator, 2026-09-01: "the only relaxing I'm ok with is when wing width
+    # gets kind of like diminishing returns." r196 kept this relaxable because
+    # "a pin that forms at 15:10 is a marginally worse version of the same
+    # trade"; under the reachability ruling it is not one, because a fly opened
+    # at 15:20 has twenty minutes to the 15:40 flatten to reach the pin AND
+    # hold it. Same argument as the noon floor, other end of the day.
+    "LATEST_ET":     "FOUNDATIONAL",
+    # 🔴 r208 — SELECTION -> FOUNDATIONAL, AND THIS REVERSES r196's OWN
+    # SENTENCE THREE LINES BELOW, WHICH IS WHY IT IS SAID OUT LOUD. r196 wrote
+    # that "PIN_CONC_MIN and EM_MAX_FRAC are dials and are relaxed correctly."
+    # On 2026-09-01 the x1.3 widening admitted pins at 1.5x the expected move
+    # and five flies fired on the first tick of the noon window; three were
+    # stopped out inside the same minute. Operator: "can the Pin even be
+    # reached? ... if any of those are no then I don't even want a relaxed one
+    # taking it."
+    # ⚠️ WHY IT IS NOT A DIAL, on the test r196 itself supplied: relaxation only
+    # informs a gate along a CONTINUUM, where the near-misses tell you whether
+    # the line sits right. A pin the tape cannot reach in the time remaining is
+    # not a marginally worse pin trade — the magnet never gets to act, so the
+    # outcome says nothing about whether the bound is correct. It is the same
+    # shape as the noon floor: a claim about REACHABILITY, not about quality.
+    # ⚠️ C.31 APPLIES — when evidence kills a justification, replace it rather
+    # than leave the constant defended by a claim the record contradicts.
+    "EM_MAX_FRAC":   "FOUNDATIONAL",
     # ⚠️ SELECTION WITH RELUCTANCE. At the far edge of the expected move the
     # trade RELIES on the magnet pulling price, so a weak pin far away is the
     # worst cell in the matrix. It is selection only because a weak pin is
     # still a pin.
-    "PIN_CONC_MIN":  "SELECTION",
+    # 🔴 r208 — SELECTION -> FOUNDATIONAL. An earlier cut of r208 kept this a
+    # dial on the reading that the operator had named three conditions and
+    # strength was not one. He corrected it: "reachability and pin strength are
+    # synonymous with POSSIBLE. If either is a no it's much less possible."
+    # ⚠️ AND r196's OWN ARGUMENT SUPPORTS HIM AGAINST MY VERSION. Relaxation
+    # earns its place by collecting near-misses whose outcomes fit the line.
+    # THE BUTTERFLY IS ONE PER SESSION (r179), so a relaxed near-miss does not
+    # collect a marginal trade — it SPENDS the day's only slot on one, and the
+    # good setup that forms at 13:00 finds the shot already taken. r196 made
+    # exactly this argument about the noon floor and it applies to every dial
+    # on a capped strategy.
+    # ⚠️ CONSEQUENCE, STATED: relaxed now moves NOTHING on the butterfly except
+    # LATEST_ET. That means PIN_CONC_MIN and EM_MAX_FRAC can no longer be
+    # fitted from relaxed OUTCOMES — the plan table still records their values
+    # on every DECLINE, but a decline has no P&L. Fitting them needs the reach
+    # study (BFLY.8), not a wider gate.
+    "PIN_CONC_MIN":  "FOUNDATIONAL",
+    # 🔴 r208 — FEASIBILITY, via criteria.stop_survivable(). "Can the floor
+    # clear the spread?" A fly's value is `lower + upper - 2*center`, so three
+    # legs' quote noise compounds into a number that was itself 17 cents on
+    # 2026-09-01 — against a 4.3c floor. Not a bad trade, a broken one (r154).
+    # No knob here: it is one comparison of two numbers off the same chain,
+    # which is why it needs no constant per symbol and no debit floor beside
+    # it. Never mode-dependent.
+    "STOP_VS_SPREAD_MIN": "FEASIBILITY",
     # FEASIBILITY - nearer than this the debit is expensive and the payoff ratio
     # poor. **The asymmetry IS the trade**; without it there is no reason to
     # prefer this structure over anything else.
     "EM_MIN_FRAC":   "FEASIBILITY",
-    # v4.3 — SELECTION: a narrower or wider fly is a worse example of the same
-    # trade. The floor of one increment is tested inline (no knob).
-    "WING_EM_FRAC":  "SELECTION",
     # FOUNDATIONAL: PINNING, the apex ON the pin, and the pin OTM. Tested
     # inline - no knob.
 }
@@ -307,6 +389,37 @@ def expected_move(underlying: float, atm_iv: float, now=None) -> Optional[float]
     except Exception:                                          # noqa: BLE001
         hours = 3.0
     return underlying * atm_iv * math.sqrt(hours / 6.5) / math.sqrt(252)
+
+
+
+
+def _structure_quote(lower, center, upper):
+    """(bid, ask) for the FLY ITSELF, built per leg and conservatively.
+
+    🔑 THE FLY'S SPREAD IS NOT ONE LEG'S SPREAD. Buying the structure costs
+    `lower.ask + upper.ask - 2*center.bid`; selling it receives
+    `lower.bid + upper.bid - 2*center.ask`. Three legs, so three spreads
+    compound — which is the whole reason a 17-cent fly cannot hold a 4-cent
+    floor. r105 built exactly this shape for the credit vertical and its own
+    note applies here: limit_ladder v1.1 dropped its synthetic walk because
+    "the shade was guesswork about a spread we cannot see"; now we can see it.
+
+    ⚠️ A LEG WITH NO QUOTE RETURNS (0, 0), which `stop_survivable` reads as
+    UNMEASURABLE and REFUSES. Unmeasurable is not passing — that is the failure
+    class this repo keeps finding, a gate that silently never applied.
+    """
+    def _q(c):
+        try:
+            return (float(getattr(c, "bid", 0.0) or 0.0),
+                    float(getattr(c, "ask", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            return (0.0, 0.0)
+    lb, la = _q(lower)
+    cb, ca = _q(center)
+    ub, ua = _q(upper)
+    if min(la, ca, ua) <= 0:
+        return 0.0, 0.0
+    return (max(0.0, lb + ub - 2.0 * ca), max(0.0, la + ua - 2.0 * cb))
 
 
 class ButterflyPreparation:
@@ -358,13 +471,15 @@ class GEXPinButterflyStrategy:
     CONDITIONS = {
         "enabled":           "GEX_BUTTERFLY_ENABLED is on",
         "pinning":           "GEX environment is PINNING with a pin strike",
-        "pin_concentration": f"pin concentration >= {PIN_CONC_MIN:.2f} (relaxed 0.6x, floor 0.10)",
+        "pin_concentration": f"pin concentration >= {PIN_CONC_MIN:.2f} (NOT relaxable, r208)",
         "entry_window":      f"{EARLIEST_ET}-{LATEST_ET} ET",
         "expected_move":     "an expected move from the chain's ATM IV (no fallback)",
-        "pin_em_fraction":   f"pin at {EM_MIN_FRAC:.0%}-{EM_MAX_FRAC:.0%} of the expected move (relaxed x1.3)",
+        "pin_em_fraction":   f"pin at {EM_MIN_FRAC:.0%}-{EM_MAX_FRAC:.0%} of the expected move (NOT relaxable, r208)",
     }
-    STRUCTURAL = ("legs", "debit", "r", "pin_played")
-    PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + ("gex", "wing_width", "width", "debit_pct_width")
+    STRUCTURAL = ("legs", "debit", "r", "pin_played", "stop_survivable")
+    PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + ("gex", "wing_width", "width",
+                                                    "debit_pct_width", "stop_vs_spread",
+                                                    "r_muted")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
@@ -399,8 +514,7 @@ class GEXPinButterflyStrategy:
         # LATEST_ET stays relaxable: staying LATER is a dial (a pin that forms
         # at 15:10 is a marginally worse version of the same trade), whereas
         # starting EARLIER is a different trade.
-        _early, _late = relaxed.window(EARLIEST_ET, LATEST_ET,
-                                       relaxed_earliest=EARLIEST_ET)
+        _early, _late = EARLIEST_ET, LATEST_ET
         if now_et and not (_early <= now_et <= _late):
             # ⚠️ TIME-INVARIANT reason (check_plan_signal PS7): the dormant row
             # is edge-triggered on its text; a clock in it defeats the dedupe.
@@ -434,7 +548,11 @@ class GEXPinButterflyStrategy:
             t.check("pin_played", pin, False)
         pinning = env == "PINNING" and pin > 0
         prep.cond("pinning", pin or None, f"PINNING (now {env or 'unknown'})", pinning)
-        _conc_min = relaxed.widen(PIN_CONC_MIN, 0.6, floor=0.10, name="pin_conc_min")
+        # 🔴 r208 — BOTH BOUNDS ARE FOUNDATIONAL AND BOTH COME FROM ONE PLACE.
+        # See relaxed_bounds(): pinned to themselves, so relaxation moves
+        # neither, and a checker can execute the same function the strategy
+        # calls rather than re-deriving it.
+        _conc_min = PIN_CONC_MIN
         prep.cond("pin_concentration", conc, f">= {_conc_min:.2f}", conc >= _conc_min)
         em = expected_move(price_now, atm_iv)
         prep.em = em or 0.0
@@ -443,7 +561,15 @@ class GEXPinButterflyStrategy:
             dist = abs(pin - price_now)
             frac = dist / em
             prep.frac = frac
-            _em_max = relaxed.widen(EM_MAX_FRAC, 1.3, name="em_max_frac")
+            # 🔴 r208 — REACH IS FOUNDATIONAL AND CANNOT BE WIDENED. Operator,
+            # 2026-09-01: "is price pinning right now? can the Pin even be
+            # reached? Can the floor clear the spread? If any of those are 'no'
+            # then I don't even want a relaxed one taking it."
+            # `cap=EM_MAX_FRAC` makes `min(value*1.3, value)` return the value
+            # for every input, so the bound cannot move. Kept INSIDE the relax
+            # API on purpose — r196's lesson: a gate hardened by leaving the
+            # API entirely is a gate check_gates stops watching.
+            _em_max = EM_MAX_FRAC
             prep.cond("pin_em_fraction", frac, f"{EM_MIN_FRAC:.2f}-{_em_max:.2f}",
                       EM_MIN_FRAC <= frac <= _em_max)
             t.anchor(trigger=pin)
@@ -466,31 +592,7 @@ class GEXPinButterflyStrategy:
                 # very bug this fixes for every half-strike symbol.
                 inc = _chain_increment(contracts, pin,
                                        float(getattr(config, "STRIKE_INCREMENT", 1) or 1))
-                _snap = lambda v: round(round(v / inc) * inc, 4)
-                wing_intended = WING_EM_FRAC * em
-                wing = _snap(wing_intended)
-                # The near wing still may not cross spot — unchanged from v4.x.
-                wing = max(inc, min(wing, _snap(abs(pin - price_now)) or inc))
-                prep.wing = wing
-                prep.wing_intended = wing_intended
                 prep.grid_inc = inc
-                # ⚠️ OPERATOR RULING 2026-08-31: a wing wider than the prior
-                # wanted is ACCEPTED — *"the wide butterfly is fine, and it
-                # will bear out in the metrics later on if that is viable."*
-                # So there is no refusal here. But a ruling that defers to the
-                # metrics only works if the metrics can SEE it, so the intended
-                # width, the grid and the stretch ride on the record. Without
-                # that this is untestable later and the ruling cannot be
-                # revisited on evidence.
-                _stretch = (wing / wing_intended) if wing_intended > 0 else None
-                prep.wing_stretch = _stretch
-                if _stretch and _stretch >= 1.5:
-                    logger.info("[gex_bfly] wing STRETCHED to the %.2f grid: "
-                                "wanted %.2f, using %.2f (%.1fx) — accepted by "
-                                "ruling, recorded for the metrics",
-                                inc, wing_intended, wing, _stretch)
-                t.check("wing_width", wing, wing >= inc)
-                lo_k, hi_k = pin - wing, pin + wing
 
                 def _exact(k):
                     for c in contracts or []:
@@ -500,38 +602,130 @@ class GEXPinButterflyStrategy:
                         except (TypeError, ValueError, AttributeError):
                             continue
                     return None
-                lower, center, upper = _exact(lo_k), _exact(pin), _exact(hi_k)
-                missing = [f"{k:g}" for k, c in ((lo_k, lower), (pin, center), (hi_k, upper)) if c is None]
-                t.check("legs", 3 - len(missing), not missing)
-                if missing:
+
+                center = _exact(pin)
+                if center is None:
+                    t.check("legs", 0, False)
                     prep.structural.append(("legs",
-                        f"no priced {side} contract at strike(s) {', '.join(missing)} — the "
-                        f"apex is the trade; a nearest-strike substitute is a different one"))
+                        f"no priced {side} contract at the pin {pin:g} — the apex "
+                        f"IS the trade; a nearest-strike substitute is a "
+                        f"different one"))
                 else:
-                    debit = float(lower.mark) - 2.0 * float(center.mark) + float(upper.mark)
-                    width = float(upper.strike) - float(center.strike)
-                    t.butterfly(debit, width, trigger=pin)
-                    if debit <= 0:
-                        prep.structural.append(("debit",
-                            f"{side} fly {lo_k:g}/{pin:g}/{hi_k:g} prices at {debit:.2f} — "
-                            f"no debit, marks stale or crossed"))
+                    # ── 🔴 r208 — THE WING IS SEARCHED, NOT COMPUTED ────────
+                    # Operator, 2026-09-01: "construct a narrow OTM debit fly
+                    # with the pin at the apex. The wings should be a 1-R or
+                    # better (that's the widest allowed) but prefer narrower if
+                    # available."
+                    # WHAT THIS REPLACES: a single wing at WING_EM_FRAC (0.25)
+                    # x the expected move, snapped to the grid, with R checked
+                    # AFTER the fact. That constant is DELETED. It was a prior
+                    # nobody fitted, and it was deciding something bigger than
+                    # a payoff shape — see the bracket below.
+                    # 🔑 THE TWO BOUNDS PULL OPPOSITE WAYS, AND ONLY ONE WAS
+                    # EVER WIRED. R = (width-debit)/debit RISES as the wing
+                    # NARROWS; survivability FALLS, because a fly's quote is
+                    # FOUR leg-spreads wide - (la-lb) + (ua-ub) + 2*(ca-cb) -
+                    # while its debit shrinks. With only R in the code the
+                    # selector steered to the least survivable structure
+                    # available and called it the best one: on 2026-09-01 five
+                    # flies fired at 12:00:00 with R 8.5 to 16.9 and three were
+                    # stopped out inside the same minute, on floors of 4.3c,
+                    # 5.3c and 7.0c. META at R 10.8 was not a fly that happened
+                    # to be fragile; it was the MOST fragile constructible fly,
+                    # chosen because it was.
+                    # ⚠️ SO THE SEARCH IS BRACKETED FROM BOTH ENDS: R_FLOOR
+                    # caps the WIDE side, survivability floors the NARROW side,
+                    # and among what is left we take the NARROWEST per the
+                    # ruling. Both bounds together require
+                    # width >= 64 x leg-spread, so on a wide-spread symbol NO
+                    # wing qualifies — which is a definite answer and is
+                    # reported as one, not a fallback to something worse.
+                    # ⚠️ SYMMETRIC AND EXACT. Both wings must be LISTED and
+                    # priced; the apex is never rounded (r198's W3).
+                    _cap_dist = abs(pin - price_now)          # never cross spot
+                    # 🔑 CANDIDATES COME FROM THE LISTED STRIKES, NOT FROM AN
+                    # INCREMENT. A first cut of r208 stepped the search by
+                    # `_chain_increment`'s median gap, which is r198's C.29 in a
+                    # new costume: an ESTIMATE of the ladder standing in for the
+                    # ladder. It cannot demand an unlisted strike the way r198's
+                    # snap-and-demand did — every candidate here is only a
+                    # candidate because BOTH legs came back priced — but a
+                    # mixed ladder (2.50 near the money, 1.00 in the tails, or
+                    # half-strikes at ATM) would let the stride step PAST real
+                    # wings and silently narrow the search.
+                    # Enumerating the chain's own strikes removes the estimate
+                    # from the decision path entirely. `inc` survives for
+                    # REPORTING only (r198's grid telemetry on the record).
+                    _wings = sorted({round(float(c.strike) - pin, 4)
+                                     for c in (contracts or [])
+                                     if float(getattr(c, "strike", 0) or 0) > pin})
+                    _cands, _rej_r, _rej_surv, _best_r, _best_ratio = [], 0, 0, None, None
+                    for _w in _wings:
+                        if _w <= 0 or _w > _cap_dist + 1e-9:
+                            continue
+                        _lo, _up = _exact(pin - _w), _exact(pin + _w)
+                        if _lo is None or _up is None:
+                            continue        # asymmetric ladder — not a fly
+                        _d = float(_lo.mark) - 2.0 * float(center.mark) + float(_up.mark)
+                        if _d <= 0 or _w <= _d:
+                            continue
+                        _r = (_w - _d) / _d
+                        _best_r = _r if _best_r is None else max(_best_r, _r)
+                        if _r < R_FLOOR:
+                            _rej_r += 1
+                            continue
+                        _b, _a = _structure_quote(_lo, center, _up)
+                        _sd = _d * float(getattr(config, "BUTTERFLY_STOP_LOSS_PCT", 0.25))
+                        _ok, _why = stop_survivable(_sd, _b, _a)
+                        if (_a - _b) > 0:
+                            _ratio = _sd / (_a - _b)
+                            _best_ratio = _ratio if _best_ratio is None else max(_best_ratio, _ratio)
+                        if not _ok:
+                            _rej_surv += 1
+                            continue
+                        _cands.append((_w, _lo, _up, _d, _r, _sd / (_a - _b) if (_a - _b) > 0 else None))
+
+                    t.check("wing_candidates", float(len(_cands)))
+                    t.check("r", _best_r)
+                    t.check("stop_vs_spread", _best_ratio)
+                    if not _cands:
+                        # NAME WHICH BOUND REFUSED. "No fly" and "no fly that
+                        # can hold its stop" are different facts, and the fit
+                        # needs to tell them apart.
+                        t.check("legs", 0, False)
+                        prep.structural.append(("wing_search",
+                            f"no wing qualifies at pin {pin:g} on the {inc:g} grid "
+                            f"(within {_cap_dist:.2f} of spot): {_rej_r} too wide "
+                            f"for R>={R_FLOOR:.2f} (best R {_nr(_best_r)}), "
+                            f"{_rej_surv} too narrow to clear their own spread "
+                            f"(best {_nr(_best_ratio)}x of {STOP_VS_SPREAD_MIN:.1f}x)"))
                     else:
+                        # ⚠️ NARROWEST FIRST, per the ruling. `_cands` is built
+                        # in ascending wing order, so [0] IS the narrowest that
+                        # cleared both bounds.
+                        wing, lower, upper, debit, r, _ratio = _cands[0]
+                        width = wing
+                        prep.wing = wing
+                        prep.wing_intended = wing        # searched, not intended
+                        prep.wing_stretch = None
+                        t.check("wing_width", wing, True)
+                        t.check("legs", 3, True)
+                        t.butterfly(debit, width, trigger=pin)
                         _pct = debit / width if width else None
-                        _cap = float(getattr(config, "BUTTERFLY_MAX_DEBIT_PCT_WIDTH", 0.33))
-                        t.check("debit_pct_width", _pct, None if _pct is None else _pct <= _cap)
-                        r = (width - debit) / debit if width > debit else None
-                        # ⚠️ STRUCTURAL: R >= 1 is economic feasibility, the third
-                        # of the operator's three hurdles. Relaxed does not waive it.
-                        t.check("r", r, None if r is None else r >= R_FLOOR)
-                        if r is None or r < R_FLOOR:
-                            prep.structural.append(("r",
-                                f"{side} fly {lo_k:g}/{pin:g}/{hi_k:g} debit {debit:.2f} on "
-                                f"width {width:.2f} is R {_nr(r)} — below the {R_FLOOR:.2f} "
-                                f"floor; economic feasibility is structure, not selection"))
-                        else:
-                            prep.lower, prep.center, prep.upper = lower, center, upper
-                            prep.debit, prep.width, prep.r = debit, width, r
-                            prep.ready = True
+                        _dcap = float(getattr(config, "BUTTERFLY_MAX_DEBIT_PCT_WIDTH", 0.33))
+                        t.check("debit_pct_width", _pct, None if _pct is None else _pct <= _dcap)
+                        t.check("r", r, True)
+                        t.check("stop_vs_spread", _ratio)
+                        t.check("stop_survivable", None, True)
+                        if len(_cands) > 1:
+                            logger.info("[gex_bfly] wing search: %d qualified, "
+                                        "taking the narrowest %.2f (R %.2f, stop "
+                                        "%.2fx its spread); widest was %.2f",
+                                        len(_cands), wing, r, _ratio or 0.0,
+                                        _cands[-1][0])
+                        prep.lower, prep.center, prep.upper = lower, center, upper
+                        prep.debit, prep.width, prep.r = debit, width, r
+                        prep.ready = True
 
         head = f"pin {pin:g} ({env or 'no env'}, conc {conc:.2f}, {prep.frac:.0%} of EM {prep.em:.2f})"
         if prep.starved:
@@ -594,7 +788,6 @@ class GEXPinButterflyStrategy:
         sig.grid_increment = prep.grid_inc
         sig.wing_stretch  = (round(prep.wing_stretch, 3)
                              if prep.wing_stretch else 1.0)
-        relaxed.tag(sig)
         logger.info("[gex_bfly] FIRE  %s  pin conc %.2f  spot %.2f",
                     prep.trade_line(), prep.conc, float(price_now))
         return prep.tick.take(sig)

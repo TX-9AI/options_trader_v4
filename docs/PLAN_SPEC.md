@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.23 · 2026-09-01 · r208 — the butterfly wing is searched, not computed (§28).**
 **v1.22 · 2026-09-01 · r207 — the ORB firing sequence is the gate (§27).**
 **v1.21 · 2026-08-28 · r181 — ORB risk-normalized sizing, pure geometry (§26).**
 **v1.20 · 2026-08-28 · r179 — 🔴 one per session, DB-backed (§25).**
@@ -1042,3 +1043,61 @@ Pinned by `tests/check_orb_sequence.py`: 16 checks, **10 born red at f74818b**.
 S8/S8b pass there by design — HEAD already sized entry-to-stop, and they exist
 to keep it that way — so they are mutation-proven instead: restoring the frozen
 field to the sizer turns both red.
+
+---
+
+## 28. r208 — THE BUTTERFLY: SEARCHED WINGS, A SURVIVABLE FLOOR, NO RELAXATION
+
+Operator, 2026-09-01: *"from noon onwards, upon finding that we have a (strong)
+pin, and it's reachable, we as early as feasible construct a narrow OTM debit
+fly with the pin at the apex. The wings should be a 1-R or better (that's the
+widest allowed) but prefer narrower if available."*
+
+**The three conditions relaxation may never waive**, and they are now the only
+gates: *is price pinning right now*, *can the pin even be reached*, *can the
+floor clear the spread*. His framing: **"reachability and pin strength are
+synonymous with 'possible'. If either is a 'no' it's much less possible."**
+
+🔴 **R AND SURVIVABILITY PULL OPPOSITE WAYS, AND ONLY R WAS WIRED.**
+`R = (width − debit)/debit` RISES as the wing narrows. Survivability FALLS,
+because a fly's quote is **four leg-spreads wide** — `(la−lb) + (ua−ub) +
+2·(ca−cb)` — while its debit shrinks. With only R in the code the selector
+steered to the least survivable structure available and called it the best one.
+On 2026-09-01 five flies fired at 12:00:00 with R 8.5 to 16.9 and three were
+stopped out inside the same minute on floors of 4.3¢, 5.3¢ and 7.0¢. **META at
+R 10.8 was not a fly that happened to be fragile; it was the most fragile
+constructible fly, chosen because it was.**
+
+**So the wing is SEARCHED and bracketed from both ends.** Candidates come from
+the chain's own listed strikes — never a stride of `_chain_increment`'s median
+gap, which on a mixed ladder would step past real wings (r198's C.29 in a new
+costume). `R_FLOOR` caps the wide side, `stop_survivable` (r154) floors the
+narrow side, the near wing may not cross spot, and among what survives the
+**narrowest wins**. No qualifying wing is a definite answer and says which
+bound refused it, with the best available R and stop-to-spread ratio recorded.
+
+⚠️ **THE TWO BOUNDS TOGETHER REQUIRE `width ≥ 64 × leg-spread`** — 2¢ legs need
+$1.28 of wing, 3¢ $1.92, a nickel $3.20. On a wide-spread symbol no fly will
+ever qualify. That is the arithmetic of the two rules meeting, not a defect,
+and it is filed as BFLY.9 to be settled from S3 chain data rather than argued.
+
+⚠️ **`WING_EM_FRAC` IS DELETED, NOT RE-TUNED.** At 0.25 of the expected move it
+was setting whether a survivable fly existed at all, and nobody ever fitted it.
+
+⚠️ **RELAXED IS REMOVED FROM THIS STRATEGY ENTIRELY** — no widen, no window, no
+`tag()`. The butterfly is ONE PER SESSION (r179), so relaxing a dial does not
+collect a marginal trade, it **spends the day's only slot** on one; r196 made
+that argument about the noon floor and it holds for every dial on a capped
+strategy. `EM_MAX_FRAC`, `PIN_CONC_MIN` and `LATEST_ET` all move SELECTION →
+FOUNDATIONAL, the last reversing r196. **The sweep's three dials are untouched
+and deliberately still loose** — operator: *"the sweep is going to get tightened
+later. Right now we're getting bad TRADES and that's to collect some
+parameters."*
+
+⚠️ **CHARM NEEDS NO BUILD.** `derived/snapshot.py` already writes it onto the
+fire snapshot and that runs on every fill (r144), so *"what was charm doing for
+our winners and losers"* is a join whenever it is wanted (BFLY.10).
+
+Pinned by `tests/check_butterfly_foundational.py` (11 checks, 8 born red at
+f74818b) plus re-derived `check_butterfly_legs` v2.2, `check_butterfly_wing_grid`
+v1.1 and `check_plan_prepares` v1.5 — each born red 2 at HEAD.

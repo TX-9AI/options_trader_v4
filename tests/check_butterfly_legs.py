@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
-tests/check_butterfly_legs.py  v2.1  (2026-08-28, r170)
+tests/check_butterfly_legs.py  v2.2  (2026-09-01, r208)
+v2.2  r208: THE BUTTERFLY PINS ARE RE-DERIVED, NOT PATCHED. B1-B3 encoded a
+      world that no longer exists — a wing COMPUTED from WING_EM_FRAC and
+      snapped to a grid, with R checked afterwards. The wing is now SEARCHED
+      over listed strikes and bracketed by R_FLOOR (wide side) and
+      stop survivability (narrow side).
+      🔴 THE OLD B1 FIXTURE IS THE 2026-09-01 TRADE. A 1-wide ladder on 4c
+      legs prices a 0.18 debit at R 4.56, and the old code TOOK it: that is
+      META/CRM/MU, three flies stopped out inside the minute they opened on
+      floors of 4.3c to 7.0c. It is kept, inverted, as the refusal case —
+      r155's rule that a fixture encoding the replaced rule is re-derived
+      rather than deleted.
+      B2's premise is gone outright: there is no computed wing to floor at one
+      increment. What survives is the CAP (the near wing may not cross spot)
+      and the new invariant that candidates come from listed strikes only.
 v2.1  r170: clock pinned at 12:30 and atm_iv 0.43 (see check_plan_prepares
       v1.6) — the B pins were time-of-day dependent.
 v2.0  (2026-08-27, r160)
@@ -21,9 +35,10 @@ THE BUTTERFLY HAS LEGS.
   L10    a finished level survives a restart (reloaded from plan_ledger).
   L11    no candidate -> HOLD row saying leg two is off the table.
   L12    the pairing table filters level CLASS (trend-first -> named pools only).
-  B1     the butterfly fires a VALID three-leg debit signal on the pin.
-  B2     wing width is floored at one increment and capped at the pin distance.
-  B3     STRICT vetoes a fly below 1:1; RELAXED takes it.
+  B1     the 2026-09-01 fly (1-wide ladder, 4c legs, R 4.56) is REFUSED, and
+         the row names WHICH bound refused it.
+  B2     a qualifying ladder fires the NARROWEST wing that clears both bounds.
+  B3     no wing clears R 1.00 -> refused, best-available R stated.
   B4     no exact strike at the pin -> refused, never a nearest substitute.
 """
 import os
@@ -60,9 +75,11 @@ def _df(rows, t0):
 
 
 class _C:
-    def __init__(self, k, mark, delta=0.2):
+    def __init__(self, k, mark, delta=0.2, spread=0.02):
         self.strike, self.mark = float(k), float(mark)
-        self.bid, self.ask = mark - 0.02, mark + 0.02
+        # ⚠️ THE LEG SPREAD IS A PARAMETER NOW, because it is half the
+        # arithmetic: a fly's own quote is FOUR of these wide.
+        self.bid, self.ask = mark - spread, mark + spread
         self.delta, self.gamma, self.theta = delta, 0.01, -0.03
         self.expiry, self.symbol, self.open_interest = "x", f"O{k}", 100
 
@@ -95,7 +112,10 @@ def main():
     class _GEX:
         gex_environment, pin_strike, pin_concentration = "PINNING", 101.0, 0.60
 
-    # spot 100, pin 101, ATM IV 1.20 at 12:30 -> EM ~1.5, pin ~0.67 EM away
+    # ⚠️ THE 2026-09-01 SHAPE, KEPT AS THE REFUSAL CASE. 1-wide ladder, 4c
+    # legs. A fly's quote is FOUR leg-spreads wide, so no debit on this ladder
+    # can both clear R 1.00 and hold a 25% floor: width >= 64 x leg-spread
+    # means 4c legs need $2.56 of wing.
     calls = [_C(k, m) for k, m in ((99, 1.60), (100, 1.00), (101, 0.55), (102, 0.28), (103, 0.14))]
     chain_b = _Chain(calls, [])
     # PIN THE CLOCK (see check_plan_prepares): expected_move reads wall time.
@@ -105,29 +125,44 @@ def main():
     bf.expected_move = lambda u, iv, now=None: _em_real(u, iv, now=_fixed_now)
     b = GEXPinButterflyStrategy()
     b.planner.symbol = "TST"
-    os.environ["OT_RELAXED_ENTRY"] = "1"
     P.begin_tick(20.0)
     sig = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=0.43,
                             chain=chain_b)
-    rowb = st.conn.execute("SELECT verdict, reason, r_now FROM plan_tick WHERE "
+    rowb = st.conn.execute("SELECT verdict, reason FROM plan_tick WHERE "
                            "strategy='GEXPinButterfly' AND ts_epoch=20.0").fetchone()
-    check("B1 the butterfly fires a VALID three-leg call debit on the pin",
-          sig is not None and sig.is_valid and sig.is_butterfly and sig.center_contract.strike == 101.0
-          and sig.butterfly_direction == "call" and sig.net_debit > 0,
-          f"{rowb} legs={sig and (sig.lower_contract.strike, sig.center_contract.strike, sig.upper_contract.strike)}")
-    check("B2 wing floored at one increment, capped at the pin distance",
-          sig is not None and (sig.upper_contract.strike - sig.center_contract.strike) == 1.0
-          and sig.lower_contract.strike == 100.0)
-    # strict: this fly's R = (w - debit)/debit — make a fat debit to force a veto
-    os.environ["OT_RELAXED_ENTRY"] = "0"
-    calls_fat = [_C(k, m) for k, m in ((99, 2.00), (100, 1.50), (101, 0.55), (102, 0.28), (103, 0.14))]
+    check("B1 the 2026-09-01 fly is REFUSED, and the row names the bound",
+          sig is None and rowb and rowb[0] == "DECLINE"
+          and "wing_search" in (rowb[1] or "")
+          and "clear their own spread" in (rowb[1] or ""), str(rowb))
+
+    # ── B2 — a ladder where a fly IS constructible: narrowest wins ────────
+    # Two wings clear both bounds (1-wide at R 1.50, 2-wide at R 1.00) and the
+    # operator's rule is "1-R or better is the widest allowed, prefer narrower
+    # if available", so the 1-wide is the answer.
+    tight = [_C(k, m, spread=0.005) for k, m in
+             ((99, 2.55), (100, 1.70), (101, 1.00), (102, 0.70), (103, 0.45))]
+    P.begin_tick(20.5)
+    sig_ok = b.generate_signal(gex=_GEX(), price_now=99.0, now_et="12:30", atm_iv=0.90,
+                               chain=_Chain(tight, []))
+    check("B2 a qualifying ladder fires the NARROWEST wing of those that clear",
+          sig_ok is not None and sig_ok.is_valid and sig_ok.is_butterfly
+          and sig_ok.center_contract.strike == 101.0
+          and sig_ok.lower_contract.strike == 100.0
+          and sig_ok.upper_contract.strike == 102.0
+          and sig_ok.butterfly_direction == "call" and sig_ok.net_debit > 0,
+          f"legs={sig_ok and (sig_ok.lower_contract.strike, sig_ok.center_contract.strike, sig_ok.upper_contract.strike)}")
+
+    # ── B3 — nothing clears R: refused, with the best R on the record ─────
+    calls_fat = [_C(k, m, spread=0.005) for k, m in
+                 ((99, 2.00), (100, 1.50), (101, 0.55), (102, 0.28), (103, 0.14))]
     P.begin_tick(21.0)
     sig2 = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=0.43,
                              chain=_Chain(calls_fat, []))
     row2 = st.conn.execute("SELECT verdict, reason FROM plan_tick WHERE "
                            "strategy='GEXPinButterfly' AND ts_epoch=21.0").fetchone()
-    check("B3 STRICT vetoes a fly below 1:1 (R recorded on the DECLINE row)",
-          sig2 is None and row2 and row2[0] == "DECLINE" and "r:" in (row2[1] or ""), str(row2))
+    check("B3 no wing clears R 1.00 -> refused, best-available R stated",
+          sig2 is None and row2 and row2[0] == "DECLINE"
+          and "too wide for R>=" in (row2[1] or ""), str(row2))
     P.begin_tick(22.0)
     sig3 = b.generate_signal(gex=_GEX(), price_now=100.0, now_et="12:30", atm_iv=0.43,
                              chain=_Chain([c for c in calls if c.strike != 101.0], []))
@@ -140,7 +175,7 @@ def main():
     if _fails:
         print(f"FAILED {len(_fails)}: " + ", ".join(_fails))
         return 1
-    print("check_leg2_levels: all checks pass")
+    print("check_butterfly_legs: all checks pass")
     return 0
 
 

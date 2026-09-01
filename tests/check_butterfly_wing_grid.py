@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""tests/check_butterfly_wing_grid.py  v1.0
+"""tests/check_butterfly_wing_grid.py  v1.1
+v1.1  2026-09-01  r208 — W2/W3/W7 RE-DERIVED AGAINST THE SEARCH. The wing is
+      no longer computed from WING_EM_FRAC and snapped to a grid, so W2/W3
+      re-implemented arithmetic that no longer exists (C.23: a test that
+      re-implements the thing it measures tests itself). They now DRIVE
+      generate_signal on the PLTR 2.50 ladder that broke r198 and assert the
+      selected legs are LISTED and symmetric about an unmoved pin — which is
+      the invariant r198 was really about. W7's stretch pin is retired: with
+      the wing searched, `wing_stretch` is always None and the old assertion
+      still PASSED while measuring a quantity that can no longer vary.
+      W1/W4/W5/W6 stand — `_chain_increment` survives for REPORTING.
 THE BUTTERFLY'S WINGS SIT ON STRIKES THAT ACTUALLY EXIST.
 
 v1.0  2026-08-31  r198 — born red at r197: `_chain_increment` does not exist
@@ -70,22 +80,71 @@ def main():
     check("W1 the increment is read off the chain, per symbol", not bad,
           f"wrong: {bad}" if bad else "PLTR/AMD 2.5, SPX 5, NVDA 1")
 
-    # ── W2: the live failures now produce LISTED strikes ──────────────────
-    # PLTR: pin 190, EM 3.25, WING_EM_FRAC 0.25 -> intended 0.8125.
-    inc = b._chain_increment(ladder(2.5, 180, 200), 190.0)
-    wing = round(round((b.WING_EM_FRAC * 3.25) / inc) * inc, 4)
-    wing = max(inc, wing)
-    listed = {k.strike for k in ladder(2.5, 180, 200)}
-    check("W2 PLTR's wings land on strikes that exist",
-          (190.0 - wing) in listed and (190.0 + wing) in listed,
-          f"inc={inc} wing={wing} -> {190.0 - wing} / {190.0 + wing}")
+    # ── W2/W3 — RE-DERIVED AT r208: THE SEARCH IS DRIVEN, NOT THE SNAP ────
+    # 🔴 THE OLD W2/W3 COMPUTED `round(WING_EM_FRAC*EM/inc)*inc` IN THE TEST
+    # and asserted the result was listed. That constant is deleted and the wing
+    # is now SEARCHED over the chain's own strikes — and a test that
+    # re-implements the thing it measures tests itself (C.23, the r181 sizing
+    # checker that was green for two days over a dead field). These now drive
+    # the real `generate_signal` on a PLTR-shaped 2.50 ladder.
+    # ⚠️ AND THIS IS THE INVARIANT THE OPERATOR ASKED ABOUT: r198's failure was
+    # compute-a-wing-then-DEMAND-it, so an unlisted wing refused the trade for
+    # 242 minutes. The search cannot do that — a wing is only a candidate
+    # because both legs came back priced — and W2 pins exactly that.
+    import sqlite3
+    from strategy import plan as P
+
+    class _St:
+        def __init__(s):
+            s.conn = sqlite3.connect(":memory:"); s.conn.row_factory = sqlite3.Row
+        def commit(s): s.conn.commit()
+
+    class _Q:
+        def __init__(s, k, m, sp=0.01):
+            s.strike, s.mark = float(k), float(m)
+            s.bid, s.ask = m - sp, m + sp
+            s.delta, s.gamma, s.theta = 0.2, 0.01, -0.03
+            s.expiry, s.symbol, s.open_interest = "x", f"O{k}", 100
+
+    class _Ch:
+        def __init__(s, c): s.calls, s.puts = c, []
+
+    class _G:
+        gex_environment, pin_strike, pin_concentration = "PINNING", 190.0, 0.60
+
+    st2 = _St(); P.ensure_tables(st2); P.bind_store(st2)
+    b.ENABLED = True
+    _e0, _l0 = b.EARLIEST_ET, b.LATEST_ET
+    b.EARLIEST_ET, b.LATEST_ET = "09:30", "16:00"
+    _em0 = b.expected_move
+    from utils.time_utils import ET as _ET0
+    b.expected_move = lambda u, iv, now=None: _em0(
+        u, iv, now=b.datetime(2026, 8, 27, 12, 30, tzinfo=_ET0))
+    strat = b.GEXPinButterflyStrategy(); strat.planner.symbol = "PLTR"
+    # atm_iv 0.60 at the pinned 12:30 clock -> EM ~5.2, so the 2.50 pin sits
+    # at 48% of it: inside the 30-100% band. At 1.20 the EM is 10.4 and the
+    # setup HOLDS on pin_em_fraction — a fixture fault, not a code one.
+    pltr = [_Q(k, m) for k, m in ((182.5, 8.60), (185.0, 6.60), (187.5, 4.00),
+                                  (190.0, 2.40), (192.5, 1.60), (195.0, 1.10))]
+    P.begin_tick(70.0)
+    sigw = strat.generate_signal(gex=_G(), price_now=187.5, now_et="12:30",
+                                 atm_iv=0.60, chain=_Ch(pltr))
+    b.EARLIEST_ET, b.LATEST_ET = _e0, _l0
+    b.expected_move = _em0
+    _listed = {q.strike for q in pltr}
+    _legs = sigw and (sigw.lower_contract.strike, sigw.center_contract.strike,
+                      sigw.upper_contract.strike)
+    check("W2 every leg the search selects is a LISTED strike",
+          sigw is not None and set(_legs) <= _listed,
+          f"legs={_legs} listed={sorted(_listed)}")
 
     # ── W3: THE APEX NEVER MOVES ──────────────────────────────────────────
-    # 🔑 The doctrine protects the apex, not the wings. Snapping must be
-    # symmetric about the pin and leave it untouched.
-    check("W3 the apex stays exactly on the pin after snapping",
-          (190.0 - wing) + (190.0 + wing) == 2 * 190.0,
-          "wings are symmetric about the pin; the pin itself is never rounded")
+    # 🔑 The doctrine protects the apex, not the wings: symmetric about the
+    # pin, and the pin itself is never rounded.
+    check("W3 the wings stay symmetric about the pin, which is never moved",
+          sigw is not None and _legs[1] == 190.0
+          and abs((_legs[0] + _legs[2]) - 2 * 190.0) < 1e-9,
+          f"legs={_legs}")
 
     # ── W4: the int rounder is not used for the wing any more ─────────────
     # ⚠️ Shape of the CALL, not a mention (WA §20): the v4.7 changelog names
@@ -94,9 +153,10 @@ def main():
                encoding="utf-8").read()
     body = "\n".join(l for l in src.splitlines()
                      if not l.strip().startswith("#"))
-    check("W4 round_to_strike() no longer computes the wing",
+    check("W4 neither round_to_strike() nor WING_EM_FRAC computes the wing",
           "round_to_strike(WING_EM_FRAC" not in body
-          and "from utils.math_utils import round_to_strike" not in body,
+          and "from utils.math_utils import round_to_strike" not in body
+          and not hasattr(b, "WING_EM_FRAC"),
           "it returns an int, so a $2.50 ladder cannot be expressed by it")
 
     # ── W5: a stray listing must not drag the grid down ───────────────────
@@ -111,14 +171,24 @@ def main():
           and b._chain_increment(None, 190.0, 1.0) == 1.0
           and b._chain_increment([], 190.0, 2.5) == 2.5)
 
-    # ── W7: the stretch is RECORDED, because the ruling defers to metrics ──
-    # ⚠️ Operator accepted a wider-than-intended wing *on the condition that it
-    # bears out in the metrics later*. That is only checkable if the
-    # counterfactual rides on the signal.
-    check("W7 intended width, grid and stretch ride on the signal",
+    # ── W7 — RE-DERIVED AT r208: THE STRETCH IS GONE, THE GRID IS RECORDED ─
+    # 🔴 W7 USED TO PIN `wing_intended` AND `wing_stretch`, and r198's ruling
+    # behind it — a wider-than-intended wing is accepted, on the condition that
+    # it bears out in the metrics — DOES NOT SURVIVE r208. There is no intended
+    # width any more: the wing is searched over listed strikes, so "stretch"
+    # (chosen ÷ intended) is identically 1.0 and `wing_stretch` is always None.
+    # ⚠️ LEAVING THE OLD ASSERTION WOULD HAVE BEEN WORSE THAN DELETING IT. It
+    # still PASSED — the field names are all still in the source — while
+    # measuring a quantity that can no longer vary. A check that cannot fail is
+    # the decorative-green class this repo keeps finding in its own tools.
+    # What survives is the part still capable of being wrong: the SELECTED wing
+    # and the grid it came off ride the record, so BFLY.9's survey can ask
+    # "which wing did we take on which ladder" from the trade rows.
+    check("W7 the selected wing and its grid ride on the signal",
           "sig.wing_intended" in src and "sig.grid_increment" in src
-          and "sig.wing_stretch" in src,
-          "a ruling that defers to the metrics needs the metrics to see it")
+          and sigw is not None and abs(sigw.wing_intended - 2.5) < 1e-9
+          and abs(sigw.grid_increment - 2.5) < 1e-9,
+          f"wing={sigw and sigw.wing_intended} grid={sigw and sigw.grid_increment}")
 
     print()
     if _fails:

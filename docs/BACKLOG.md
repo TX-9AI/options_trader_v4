@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.25
+# BACKLOG.md — v1.27
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -121,6 +121,10 @@ against each box. That is right **during** a session and wrong after it.
 | **ORB.8** | The ORB firing sequence is the gate; one confirmation, one order. | r207 | ◐ **PUSHED.** QQQ 2026-09-01 took TWO ORB shorts off ONE confirmation — 2 lots @ 1.56 stopped on the 25% floor, then 24 lots @ 1.15 (the exact premium the first exited at) on the same tick, dead two minutes later on the structure stop. Three defects stacked: r195 replaced `mark_triggered()` with `_orb_offer_working()`, which reads a table PAPER NEVER WRITES because `_place_single_leg` short-circuited to the paper filler above the standing-offer branch — so paper ran pre-r195 behaviour behind a green board; `main.py` bound `orb = ctx["orb"]` at the top of the tick and dispatched on it at the bottom, and `_rearm()` REPLACES ORBData, so after the exit the reference was an orphan still reading OPEN_SHORT (r96's defect at the manage→entry seam); and `_orb_d` measured the stop distance from the LIVE price, so the second fire — a few cents from its own invalidation — sized twelve times larger. Fixed by a latch on the CONFIRMATION (mode-independent) and an engine re-read at the dispatch that announces the stale copy. Paper now reaches the same door and fills whole. 🔴 AN INTERMEDIATE CUT ALSO CHANGED THE SIZER to a boundary-to-wick distance frozen at the break; the operator refused it before it landed — *"the true risk is based on where we entered, not the range boundary. That's arbitrary. The 2 factuals are the distance from entry to the stop"* — and he is right, and it was fixing a symptom the latch had already removed. Sizing is UNCHANGED at |entry - stop|; `stop_distance_px` survives RECORDED-ONLY for r119's question, pinned by S8/S8b. ⚠️ CHANGES WHAT GETS TRADED: fewer ORB entries, same sizing. Operator: *"the second bite honestly does not happen very often and muddies the water."* |
 | **ORB.9** | Does the depth of the impulsive candle inside the range predict anything? | ⬜ | r119's open question, unanswered since 2026-08-29 and now measurable: r207 records `stop_distance_px` as a plan check on every ORB row, fired or not, beside `underlying_entry`, and `SizingResult` carries `geometry_wanted`/`budget_allowed` from r201. So "did shallow-break setups do better, and did the fill drift from the boundary" is a QUERY after a session rather than an argument. ⚠️ RECORDED, NOT GRADED — S8b fails if anything reads it in a decision first. |
 | **ORB.10** | The 15-second fire drift is a WASH. | ruled | ✅ **CLOSED BY RULING**, 2026-09-01. The fire lands on the tick after the retest bar closes, so price can move before the fill and size the trade off slightly different room. Operator: *"I'm ok with fast tape because sometimes it works in our favor and sometimes it doesn't. It's a wash."* Symmetric, so no floor, no refusal, nothing to tune. Filed so it is not re-opened as a finding by a future reader who spots the asymmetry-shaped hole and assumes nobody looked. |
+| **BFLY.7** | The butterfly has never had a stop-survivability gate. | r208 | ◐ **PUSHED.** 2026-09-01: five flies fired at 12:00:00, three stopped out inside the same minute — META 577.5 debit 0.17 (25% floor = **4.3c**), CRM 0.21 (5.3c), MU 0.28 (7.0c). A fly's value is `lower + upper - 2*center`, so THREE legs of quote noise compound into a figure itself worth 17 cents. Not stopped by price, stopped by their own marks. `criteria.stop_survivable` was built for exactly this at r154 and had ONE caller — the sweep; the butterfly was not even on r154's untouched list because on 08-27 it had never fired. Wired as FEASIBILITY, never mode-dependent. |
+| **BFLY.8** | 🔴 R AND SURVIVABILITY PULL OPPOSITE WAYS, AND ONLY R WAS WIRED. | r208 | ◐ **PUSHED.** R = (width-debit)/debit RISES as the wing narrows; survivability FALLS. With only R in the code the selector steered to the **least survivable structure available and called it the best one** — META at R 10.8 was not a fly that happened to be fragile, it was the most fragile constructible fly, chosen because it was. Fix: the wing is SEARCHED over listed strikes, R_FLOOR caps the wide side, survivability floors the narrow side, narrowest qualifying wing wins, no wing qualifying is a definite answer. `WING_EM_FRAC` DELETED — it was a prior nobody fitted that was also deciding whether a survivable fly existed at all. |
+| **BFLY.9** | Fit `STOP_VS_SPREAD_MIN` for a FOUR-leg structure from S3 chain data. | ⬜ | 2.0x is r154's prior, chosen for a two-leg vertical whose quote is ONE spread wide; a fly's is FOUR. The two bounds together require **width >= 64 x leg-spread** — 2c legs need $1.28 of wing, 3c $1.92, nickel $3.20 — and the wing may not cross spot, so on many symbols the two windows barely overlap and no fly will ever qualify. ⚠️ MUST BE QUERIED FROM S3, NOT CONTROL: the operator has purged control's chain data (2026-09-01), so `chain_marks`/`greeks_series` in the bucket back to 08-22 are the only source. Question: how many qualifying wings existed per symbol per session at 12:00. Sets the constant from data instead of from argument. |
+| **BFLY.10** | Charm vs. butterfly outcomes. | ⬜ | Operator, 2026-09-01: "later, we are going to look at what charm was doing for all of our winners and losers." NO BUILD NEEDED — `derived/snapshot.py:99` already writes charm onto the fire snapshot and `_capture_fire_snapshot` runs on every fill (r144), so this is a join, not a collection problem. |
 | **ORB.1** | Could ORB select long contracts via an OTM gamma play scaled by breakout/retest strength? | ⬜ | Operator's open question raised 2026-08-28 before r181 landed. Agreed to bring the design **after a session of r181 fills**, with the delta-aware geometry interaction for him to rule on. Filed here so it does not live only in a thread. |
 
 ### Awaiting an operator ruling
@@ -210,6 +214,21 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.27 — 2026-09-01 — r208 — BFLY.7 AND BFLY.8 SHIPPED.**
+The butterfly wing is searched over listed strikes, bracketed by R_FLOOR and
+stop survivability, narrowest wins; relaxed is removed from that strategy
+entirely. Three existing checkers were re-derived rather than patched — each
+had a fixture encoding the rule being replaced, and `check_plan_prepares`'
+`calls_good` WAS the 2026-09-01 trade. BFLY.9 (fit STOP_VS_SPREAD_MIN for a
+four-leg structure, from S3) and BFLY.10 (charm, already recorded) stay open.
+
+**v1.26 — 2026-09-01 — BFLY.7-BFLY.10 OPENED; LAND.1 RULED.**
+LAND.1: a devtools menu item for the lander is NOT wanted — operator,
+2026-09-01: *"a manual land command in devtools can wait indefinitely. Your
+installer scripts should call it — not me manually running it."* So
+`day_trader_pro/tools/land.sh` (dtp r235) is called by install/deploy scripts,
+never typed. Closed by ruling before it was built.
 
 **v1.25 — 2026-09-01 — r207 — ORB.8 CLOSED; ORB.9 OPENED; ORB.10 RULED; C.40 AND C.41.**
 C.41: **fix the defect, then stop.** The sizing change in the first cut of this

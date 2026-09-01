@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.4  (2026-08-27)
+tests/check_plan_prepares.py  v1.5  (2026-09-01, r208)
+v1.5  r208 — THE BUTTERFLY HYPOTHETICALS ARE RE-DERIVED. `calls_good` WAS the
+      2026-09-01 trade: penny legs on a 1-wide ladder, debit 0.18, R 4.6, and
+      the old code took it. It is kept as `calls_unsurvivable` and B1b, the
+      refusal case (r155 — a fixture encoding the replaced rule is re-derived,
+      not deleted). B2 now pins the NARROWEST of two qualifying wings; B3
+      pins the wing_search refusal with the best available R stated. B3b is
+      inverted: it asserted relaxed does not waive feasibility and still
+      PASSED for a reason that no longer exists, so it now drives BOTH
+      postures over one chain and asserts the verdicts are identical.
+      ⚠️ B12 needed a 104 strike, and its absence was informative: a migrated
+      pin near the edge of the listed chain has fewer wings to choose from,
+      so "the magnet moved" and "the magnet moved somewhere we can trade"
+      are different facts.
 v1.5  r168: R2b — the runaway carries no underlying stop; a 20% premium floor.
 v1.4  r165: R1-R8 — the runaway: contract prepared before the TP confirms;
       the buy on confirmation; the gamma-leverage pick is the best strike
@@ -310,14 +323,33 @@ def main():
         def __init__(self, env="PINNING", pin=101.0, conc=0.60):
             self.gex_environment, self.pin_strike, self.pin_concentration = env, pin, conc
 
-    calls_good = [_C(k, m - 0.01, m + 0.01) for k, m in
-                  ((99, 1.60), (100, 1.00), (101, 0.55), (102, 0.28), (103, 0.14))]
-    # debit 1.00 - 1.10 + 0.28 = 0.18 on width 1 -> R 4.6
-    calls_fat = [_C(k, m - 0.01, m + 0.01) for k, m in
+    # 🔴 r208 — THE OLD `calls_good` WAS THE 2026-09-01 TRADE. Penny legs on a
+    # 1-wide ladder price a 0.18 debit at R 4.6, and the old code took it: that
+    # is META/CRM/MU, stopped out inside the minute they opened on floors of
+    # 4.3c to 7.0c. A fly's quote is FOUR leg-spreads wide, so on this ladder no
+    # debit can both clear R 1.00 and hold its floor — width >= 64 x leg-spread
+    # means 2c legs need $1.28 of wing. It is KEPT, as the refusal case.
+    calls_unsurvivable = [_C(k, m - 0.01, m + 0.01) for k, m in
+                          ((99, 1.60), (100, 1.00), (101, 0.55), (102, 0.28), (103, 0.14))]
+    # A ladder where a fly IS constructible: half-cent legs, and TWO wings
+    # clear both bounds — 1-wide at R 1.50 and 2-wide at R 1.00 — so "prefer
+    # narrower" has something to prefer.
+    # ⚠️ 104 IS HERE FOR B12, and its absence is a real lesson rather than a
+    # fixture convenience: with the ladder ending at 103 the MIGRATED pin at
+    # 102 had exactly one constructible wing (101/102/103, debit 0.05, R 19)
+    # and the search refused it as unsurvivable — correctly. A pin near the
+    # edge of the listed chain has fewer wings to choose from, so "the magnet
+    # moved" and "the magnet moved somewhere we can trade" are different
+    # facts. 104 gives pin 102 its 2-wide (100/102/104, debit 0.60, R 2.33).
+    calls_good = [_C(k, m - 0.005, m + 0.005) for k, m in
+                  ((99, 2.55), (100, 1.70), (101, 1.00), (102, 0.70),
+                   (103, 0.45), (104, 0.30))]
+    calls_fat = [_C(k, m - 0.005, m + 0.005) for k, m in
                  ((99, 2.00), (100, 1.50), (101, 0.55), (102, 0.28), (103, 0.14))]
-    # debit 1.50 - 1.10 + 0.28 = 0.68 on width 1 -> R 0.47
-    # atm_iv 0.43 -> EM ~2.0 at the pinned 12:30 clock
-    bcommon = dict(price_now=100.0, now_et="12:30", atm_iv=0.43)
+    # debit 1.50 - 1.10 + 0.28 = 0.68 on width 1 -> R 0.47, nothing clears
+    # atm_iv 0.90 -> EM ~4.1 at the pinned 12:30 clock, so a 2.00 pin distance
+    # sits at 49% of it (inside the 30-100% band) with spot at 99.
+    bcommon = dict(price_now=99.0, now_et="12:30", atm_iv=0.90)
 
     os.environ["OT_RELAXED_ENTRY"] = "0"
     P.begin_tick(20.0)
@@ -326,21 +358,47 @@ def main():
     check("B1 PINNING but the pin is weak -> HOLD with the fly PREPARED, waiting on pin_concentration",
           sig is None and rb1 and rb1[0] == "HOLD" and "PREPARED" in rb1[1]
           and "buy 100/101/102" in rb1[1] and "pin_concentration" in rb1[1], str(rb1))
+    # ── B1b (r208) — the 2026-09-01 fly is refused, and the row names WHICH
+    # bound refused it. "No fly" and "no fly that can hold its stop" are
+    # different facts and the fit has to tell them apart.
+    P.begin_tick(20.5)
+    sig_bad = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_unsurvivable), **bcommon)
+    rb1b = _row(st, "GEXPinButterfly", 20.5)
+    check("B1b the 2026-09-01 fly is REFUSED and the row names the bound",
+          sig_bad is None and rb1b and rb1b[0] == "DECLINE"
+          and "wing_search" in rb1b[1] and "clear their own spread" in rb1b[1],
+          str(rb1b)[:120])
     P.begin_tick(21.0)
     sig = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_good), **bcommon)
     rb2 = _row(st, "GEXPinButterfly", 21.0)
-    check("B2 pinning, strong, reachable, R>=1 -> fires the plan's three legs, VALID",
-          sig is not None and sig.is_valid and sig.is_butterfly and sig.center_contract.strike == 101.0
-          and abs(sig.net_debit - 0.18) < 1e-9 and rb2 and rb2[0] == "TAKE", f"{rb2}")
+    check("B2 pinning, strong, reachable -> fires the NARROWEST qualifying wing",
+          sig is not None and sig.is_valid and sig.is_butterfly
+          and sig.center_contract.strike == 101.0
+          and sig.lower_contract.strike == 100.0
+          and sig.upper_contract.strike == 102.0
+          and abs(sig.net_debit - 0.40) < 1e-9 and rb2 and rb2[0] == "TAKE", f"{rb2}")
     P.begin_tick(22.0)
     sig = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_fat), **bcommon)
     rb3 = _row(st, "GEXPinButterfly", 22.0)
-    check("B3 everything true but R 0.47 -> DECLINE r (structural)",
-          sig is None and rb3 and rb3[0] == "DECLINE" and rb3[1].startswith("r:"), str(rb3))
+    check("B3 everything true but no wing clears R 1.00 -> DECLINE, best R stated",
+          sig is None and rb3 and rb3[0] == "DECLINE"
+          and rb3[1].startswith("wing_search:") and "too wide for R>=" in rb3[1],
+          str(rb3))
+    # ── B3b (r208) — RELAXED CANNOT REACH THIS STRATEGY AT ALL ────────────
+    # 🔴 THE OLD B3b ASSERTED "relaxed does NOT waive economic feasibility" and
+    # it still PASSES — for a reason that no longer exists. Operator, 2026-09-01:
+    # "the relaxed is adding unnecessary complexity — get rid of relaxed
+    # entirely", scoped to the butterfly (the sweep stays loose on purpose to
+    # collect parameters). So the claim worth pinning is stronger and simpler:
+    # the flag changes NOTHING here, verified by driving both postures over the
+    # same chain and comparing the verdicts — not by reading the source.
     os.environ["OT_RELAXED_ENTRY"] = "1"
     P.begin_tick(22.5)
-    sig = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_fat), **bcommon)
-    check("B3b relaxed does NOT waive economic feasibility", sig is None)
+    sig_rx = B.generate_signal(gex=_GEX(), chain=_Chain([], calls_fat), **bcommon)
+    rb3b = _row(st, "GEXPinButterfly", 22.5)
+    check("B3b the relaxed flag changes nothing on the butterfly",
+          sig_rx is None and rb3b and rb3b[0] == rb3[0] and rb3b[1] == rb3[1],
+          f"strict={rb3} relaxed={rb3b}")
     os.environ["OT_RELAXED_ENTRY"] = "0"
     P.begin_tick(23.0)
     sig = B.generate_signal(gex=_GEX(env="NEUTRAL"), chain=_Chain([], calls_good), **bcommon)
