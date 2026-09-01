@@ -1,5 +1,14 @@
 """
-strategy/plan.py  v1.5
+strategy/plan.py  v1.6
+v1.6  2026-09-01  r212 (chunk D) — `_ledger_open` SUPERSEDES THE PREVIOUS
+      UNFILLED PLAN of the same strategy before opening a new one. A plan that
+      FIRES and is then refused downstream (sizing rejection, no priced
+      contract, a failed order) links no trade, so the exit-side close can
+      never reach it and it stayed live all session. Safe here because `take()`
+      and the entry attempt happen on the SAME tick.
+      ⚠️ ROWS THAT FILLED ARE UNTOUCHED — those close on their exit. See
+      derived/plan_ledger.py v4.1.
+v1.5
 v1.5  2026-08-29  r177: tick_id (begin_tick's monotonic counter) persisted on
       plan_tick and plan_check — the vector<->plan join becomes BY KEY, not by
       timestamp coincidence, before the first fit. In-place ALTER migration;
@@ -704,6 +713,18 @@ class Plan:
             led = _pl(self.symbol)
             if led is None:
                 return
+            # 🔴 r212 — THE PREVIOUS UNFILLED PLAN OF THIS STRATEGY IS CLOSED
+            # FIRST. A plan that FIRES but whose entry is then refused (sizing
+            # rejection, no priced contract, a failed order) links no trade, so
+            # the exit hook never reaches it and it stays live all session.
+            # Safe here because `take()` and the entry attempt happen on the
+            # SAME tick, so by the time the next one fires the previous has
+            # resolved either way.
+            # ⚠️ ROWS THAT FILLED ARE UNTOUCHED — those are closed by their
+            # exit. Collapsing the two would lose the difference between
+            # "fired and lost" and "fired and never filled", which is the
+            # population this ledger exists to keep.
+            led.close_unfilled(self.strategy, "superseded — never filled")
             ctx = {"price": t.spot}
             sp = getattr(signal, "short_put_contract", None)
             lp = getattr(signal, "long_put_contract", None)

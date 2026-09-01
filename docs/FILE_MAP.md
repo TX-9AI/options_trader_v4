@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-211 Python modules across 13 local packages.
+212 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -223,7 +223,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing - orphan or leaf)
 
 ### `database/trade_logger.py`
-- **calls:** `config.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `utils/time_utils.py`
+- **calls:** `config.py`, `derived/registry.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `utils/time_utils.py`
 - **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_condor_pairing.py`, `tests/check_condor_stop_suppression.py`, `tests/check_one_per_session.py`, `tests/check_orb_resume.py`, `tests/check_standing_offer.py`
 
 ### `debug_status.py`
@@ -264,7 +264,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `derived/plan_ledger.py`
 - **calls:** (none)
-- **called by:** `derived/registry.py`, `tests/check_audit_20260823.py`, `tests/check_butterfly_legs.py`, `tests/check_missed_inert.py`
+- **called by:** `derived/registry.py`, `tests/check_audit_20260823.py`, `tests/check_butterfly_legs.py`, `tests/check_missed_inert.py`, `tests/check_plan_lifecycle.py`
 
 ### `derived/plans.py`
 - **calls:** `derived/base.py`, `strategy/__init__.py`, `strategy/plan.py`
@@ -272,7 +272,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `derived/registry.py`
 - **calls:** `data/derived_store.py`, `derived/character_engine.py`, `derived/counterfactual.py`, `derived/forks.py`, `derived/indicators.py`, `derived/levels.py`, `derived/notes.py`, `derived/plan_ledger.py`, `derived/plans.py`, `derived/snapshot.py`, `derived/surface.py`
-- **called by:** `main.py`, `status.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `tests/check_butterfly_legs.py`, `tests/check_derived_layer.py`
+- **called by:** `database/trade_logger.py`, `main.py`, `status.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `tests/check_butterfly_legs.py`, `tests/check_derived_layer.py`
 
 ### `derived/snapshot.py`
 - **calls:** `derived/base.py`
@@ -664,6 +664,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_pairing_table.py`
 - **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_plan_lifecycle.py`
+- **calls:** `derived/plan_ledger.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_plan_prepares.py`

@@ -1,5 +1,14 @@
 """
-database/trade_logger.py  v4.8
+database/trade_logger.py  v4.9
+v4.9  2026-09-01  r212 (chunk D) — `log_exit` CLOSES THE PLAN THAT PRODUCED
+      THE TRADE. Hooked here for the same reason r154's spent lock is: this is
+      the ONE choke point every close passes through, and a rule with a hole in
+      it is worse than none because it fires sometimes and is trusted always.
+      Never raises — a bookkeeping failure must not stop a position being
+      booked closed. The symbol comes off the row via `_get_field`, the way
+      every other hook in this function gets it; a first cut called a
+      `self._instrument()` that does not exist on this class (§0.1).
+v4.8
 v4.8  2026-08-28  r179: count_today(strategy) — the DB-backed one-per-
       session count (survives restarts, which the in-process registries did
       not; five bounces on 08-28 re-armed the butterfly through two
@@ -672,6 +681,34 @@ class TradeLogger:
             f"Trade closed: {trade_id[:8]} "
             f"exit=${exit_price:.2f} pnl=${pnl_usd:+.2f}"
         )
+
+        # ── 🔴 r212 — THE PLAN THAT PRODUCED THIS TRADE IS NOW CLOSED ───────
+        # Rows opened by `PlanTick.take()` were never closed by anything:
+        # `transition()` had two callers, neither of which covered them, so
+        # `closed_ts` stayed NULL and `live_plans()` returned every fired plan
+        # for the rest of the session. QQQ 2026-09-01 showed SEVEN
+        # `RunawayContinuation TRIGGERED` rows flagged LIVE while six of those
+        # trades had closed hours earlier.
+        # ⚠️ HOOKED HERE FOR THE SAME REASON r154's SPENT LOCK IS: `log_exit`
+        # is the ONE choke point every close passes through. In the exit engine
+        # it would miss the paths that close elsewhere, and a rule with a hole
+        # in it is worse than none because it fires sometimes and is trusted
+        # always.
+        # ⚠️ NEVER RAISES. A bookkeeping failure must not stop a position being
+        # booked closed.
+        try:
+            from derived.registry import plan_ledger as _pl212
+            # ⚠️ THE SYMBOL COMES OFF THE ROW, the way every other hook in this
+            # function gets it (`_sym = self._get_field(trade_id, "symbol")`
+            # twenty lines below). A first cut called `self._instrument()`,
+            # which does not exist on this class — §0.1, read the file rather
+            # than assume the accessor.
+            _sym212 = self._get_field(trade_id, "symbol") or ""
+            _led212 = _pl212(_sym212) if _sym212 else None
+            if _led212 is not None:
+                _led212.close_for_trade(trade_id, exit_reason)
+        except Exception as _exc212:                            # noqa: BLE001
+            logger.debug("[plan] close_for_trade skipped: %s", _exc212)
 
         # ── 🔴 r154 — A LOSING SWEEP SPENDS ITS LEVEL FOR THE DAY ────────────
         # Operator, 2026-08-27: *"The stop isn't too tight, the level that we

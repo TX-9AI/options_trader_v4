@@ -1,5 +1,17 @@
 """
-status.py  v4.4
+status.py  v4.5
+v4.5  2026-09-01  r212 (chunk D) — THE PLAN COLLAPSE GOES WITH ITS PREMISE.
+      r199 saw two rows for one strategy at one trigger, called them
+      duplicates and merged them for display; r211 kept the merge while the
+      writer was unfixed. They were never duplicates — `PlanTick.take()`
+      opens a row per FIRE and nothing closed them, so every fired plan
+      stayed live all session. QQQ 2026-09-01: SEVEN RunawayContinuation
+      TRIGGERED rows at one trigger, all flagged LIVE, while six of those
+      trades had closed hours earlier — seven real plans, not one six times.
+      ⚠️ SO THE MERGE WAS HIDING DISTINCT PLANS, and (strategy, state,
+      trigger) can never tell two runaway fires at one boundary apart. Fixed
+      at the WRITER (derived/plan_ledger.py v4.1), so `live_plans()` now
+      returns what is actually live and this panel simply prints it.
 v4.4  2026-09-01  r211 (chunk C) — THE MIDDLE OF THE BOARD. Operator,
       2026-09-01: open positions "just list the number (nothing else)"; the
       duplicate-plan warning "what do I need this for — get rid of that";
@@ -506,31 +518,21 @@ def main():
     except Exception:                                          # noqa: BLE001
         _live = []
     if _live:
-        # ⚠️ DEDUPED FOR DISPLAY ONLY, AND THE DUPLICATION IS REAL. CRM showed
-        # "RunawayContinuation [TRIGGERED] @ 259.38" twice on 2026-08-31 — two
-        # plan-ledger rows for one strategy at one trigger. Collapsing them
-        # makes the panel readable; it does NOT fix the ledger, and the count
-        # is printed so the duplication stays visible rather than hidden.
-        _seen, _rows = set(), []
+        # 🔴 r212 — THE COLLAPSE IS GONE, BECAUSE ITS PREMISE WAS WRONG.
+        # r199 saw two rows for one strategy at one trigger, called them
+        # duplicates and merged them for display. They were not duplicates:
+        # `PlanTick.take()` opens a ledger row per FIRE and NOTHING closed
+        # them, so every fired plan stayed live for the session. QQQ on
+        # 2026-09-01 showed SEVEN RunawayContinuation TRIGGERED rows at one
+        # trigger price, all flagged LIVE, while six of those trades had
+        # closed hours earlier — seven real plans, not one plan six times.
+        # ⚠️ SO COLLAPSING THEM WAS HIDING DISTINCT PLANS. Two runaway fires
+        # at the same boundary are two trades with two outcomes, and the key
+        # (strategy, state, trigger) cannot tell them apart. The defect is
+        # fixed at the WRITER — r212 closes a plan when its trade closes, and
+        # supersedes one that never filled — so `live_plans()` now returns
+        # what is actually live and there is nothing to merge.
         for _p in _live:
-            _k = (_p.get("strategy"), _p.get("state"),
-                  _p.get("short_strike") or _p.get("trigger_price"))
-            if _k in _seen:
-                continue
-            _seen.add(_k)
-            _rows.append(_p)
-        # 🔴 r211 (chunk C) — THE WARNING LINE GOES, THE COLLAPSE STAYS.
-        # Operator, 2026-09-01: "what do I need this for — get rid of that."
-        # ⚠️ THE DUPLICATION IS STILL REAL AND IS NOT BEING HIDDEN, IT IS BEING
-        # FIXED AT THE SOURCE. r199 printed the count precisely so the ledger
-        # defect stayed visible, and RPT.5 records that the WRITE side was
-        # never examined. The operator's call, same day: "for D — also agree,
-        # let's fix the writer." So chunk D repairs `plan_ledger` so there is
-        # nothing to collapse, and this line has no job once it lands.
-        # ⚠️ UNTIL THEN THE DUPLICATION IS INVISIBLE ON THIS PANEL. Stated
-        # rather than discovered: query.py's PLANS section still shows every
-        # ledger row untouched, so the raw evidence is one screen away.
-        for _p in _rows:
             _what = _p.get("short_strike") or _p.get("trigger_price")
             _at = f" @ {_what:.2f}" if _what else ""
             print(f"  \U0001F3AF Active plan: {_p['strategy']} "

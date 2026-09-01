@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_status_panel.py  v1.0
+tests/check_status_panel.py  v1.1
+v1.1  2026-09-01  r212 — C2 AND C7 RE-DERIVED, exactly as chunk C said they
+      would be. C2 required the plan collapse to REMAIN, which was right while
+      the writer was unfixed; r212 fixed the writer and disproved the premise
+      (they were never duplicates), so both the warning and the collapse are
+      gone and C2 pins their absence.
 v1.0  2026-09-01  r211 (chunk C) — THE MIDDLE OF THE STATUS BOARD.
 
 Operator, 2026-09-01, going through `status.py`: open positions "just list the
@@ -77,10 +82,18 @@ def main():
         if isinstance(n, ast.FunctionDef):
             fn_src[n.name] = ast.get_source_segment(src, n) or ""
     body = fn_src.get("main", "")
-    check("C2 the duplicate-count line is gone but the collapse remains",
+    # 🔴 RE-DERIVED AT r212, AS CHUNK C SAID IT WOULD BE. C2 required the
+    # collapse to REMAIN — correct while the writer was unfixed, because
+    # removing both halves would have rendered two identical plans as two rows.
+    # r212 then showed the premise was wrong: they were never duplicates.
+    # `PlanTick.take()` opens a row per FIRE and nothing closed them, so every
+    # fired plan stayed live all session; the collapse was merging DISTINCT
+    # plans that shared a trigger price. Fixed at the writer, so both the
+    # warning and the collapse are gone and this pins their absence.
+    check("C2 neither the duplicate warning nor the collapse survives",
           "duplicate plan row" not in joined
-          and "_seen" in body and "_rows.append" in body,
-          "collapse kept until chunk D fixes the writer")
+          and "_seen" not in body and "_rows.append" not in body,
+          "the writer closes plans now; there is nothing to merge")
 
     # ── C3 — EXPIRED says EXPIRED ────────────────────────────────────────
     # ⚠️ SCOPED TO WHAT REACHES THE TERMINAL AND TO THE LABEL TABLE, not to
@@ -136,8 +149,9 @@ def main():
 
     # ── C7 — more than one active plan still renders as more than one ────
     check("C7 every active plan is listed, not just the first",
-          "for _p in _rows:" in body,
-          "operator: 'Active plan: keep. If there's more than 1, list them'")
+          "for _p in _live:" in body,
+          "operator: 'Active plan: keep. If there's more than 1, list them' — "
+          "and at r212 it iterates the LIVE rows directly, not a deduped copy")
 
     print()
     if _fails:

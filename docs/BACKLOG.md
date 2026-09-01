@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.30
+# BACKLOG.md — v1.31
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -214,6 +214,18 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.31 — 2026-09-01 — r212 (chunk D) — RPT.5 CLOSED, AND r199's DIAGNOSIS
+WAS WRONG.** Plans opened by `PlanTick.take()` were never closed by anything,
+so every fired plan stayed live for the session — QQQ showed seven runaway
+plans flagged LIVE while six of those trades had closed. r199 read that as
+duplicate rows and collapsed them for display; they were distinct plans, and
+the collapse was merging trades with different outcomes. Fixed at the writer:
+`close_for_trade` on the `log_exit` choke point, `close_unfilled` on
+supersession, and `CLOSED` added to `TERMINAL` (without it the state said
+closed while the query still returned the row as live). The status.py collapse
+is removed with its premise. Only chunk E — the "NOT ASKED" reasons in main.py
+dispatch — remains under RPT.7.
 
 **v1.30 — 2026-09-01 — r211 (chunk C) — status.py; RPT.9 FILED.**
 Open positions to a bare count (the cards and the summed exposure stay in

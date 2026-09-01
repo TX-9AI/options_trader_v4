@@ -29,7 +29,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `fork_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | `main.py`, `query.py`, `status.py`, `tests/check_derived_layer.py` |
 | `indicator_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | — |
 | `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | `derived/levels.py` |
-| `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `query.py`, `tests/check_audit_20260823.py`, `tests/check_butterfly_legs.py`, `tests/check_missed_inert.py`, `tests/edge_scan.py` |
+| `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `query.py`, `tests/check_audit_20260823.py`, `tests/check_butterfly_legs.py`, `tests/check_missed_inert.py`, `tests/check_plan_lifecycle.py`, `tests/edge_scan.py` |
 | `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | `tests/check_management_plan.py`, `tests/check_tick_join.py` |
 | `surface_series` | `data/derived_store.py` | `data/derived_store.py` (insert) | `main.py`, `query.py` |
 

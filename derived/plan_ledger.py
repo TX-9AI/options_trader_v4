@@ -1,5 +1,37 @@
 """
-derived/plan_ledger.py  v4.0
+derived/plan_ledger.py  v4.1
+v4.1  2026-09-01  r212 (chunk D) — A PLAN CLOSES WHEN ITS TRADE DOES.
+      🔴 ROWS OPENED BY `PlanTick.take()` WERE NEVER CLOSED BY ANYTHING.
+      `transition()` had exactly two callers — main.py's ORB plan and the
+      condor's `_plan_id` — so every plan opened through `Plan._ledger_open`
+      (runaway, sweep, butterfly, TCS, condor leg two) kept `closed_ts` NULL
+      for the whole session and `live_plans()` returned it forever. QQQ,
+      2026-09-01: SEVEN `RunawayContinuation TRIGGERED @ 708.43` rows, every
+      one flagged LIVE, while six of those trades had closed hours earlier.
+      🔴 AND r199 MISDIAGNOSED THIS AS DUPLICATION. It saw two rows for one
+      strategy at one trigger, called them duplicates and collapsed them for
+      display. They were never duplicates — they were distinct plans that had
+      not been closed, and the collapse merged trades with different outcomes,
+      because (strategy, state, trigger) cannot tell two runaway fires at one
+      boundary apart. RPT.5 recorded that the write side had never been
+      examined; this is that examination.
+      · `close_for_trade(trade_id, reason)` — hooked into
+        `trade_logger.log_exit`, the ONE choke point every close passes
+        through (r154's precedent). Keyed on the TRADE, so it inherits none of
+        `link_trade`'s most-recent-live ⟨ASSUMPTION⟩.
+      · `close_unfilled(strategy, reason)` — the SECOND leak: a plan that
+        fires and is then refused links no trade, so the exit hook can never
+        reach it. Called just before the next plan of that strategy opens.
+      ⚠️ THE TWO ARE KEPT DISTINCT ON PURPOSE. A filled plan is closed by its
+      EXIT and never by supersession; collapsing them would lose the line
+      between "fired and lost" and "fired and never filled", which is exactly
+      the population this ledger exists to separate.
+      🔴 AND "CLOSED" HAD TO JOIN `TERMINAL`. `transition()` sets `closed_ts`
+      only for states in that set and `live_plans()` selects on
+      `closed_ts IS NULL`, so the first cut wrote rows reading CLOSED that the
+      query still returned as live — the state saying one thing and the lookup
+      another, silently.
+v4.0
 Owns `plan_ledger`. INTENT as a first-class record.
 
 v4.0  2026-08-25  See docs/DERIVED_STORES.md.
@@ -72,8 +104,16 @@ logger = logging.getLogger(__name__)
 # four boxes held confirmed break+retest setups at 10:20-10:24 and the 10:39
 # deploy erased them. Folding that into CANCELLED would hide the cost of
 # deploying mid-session, which is exactly the number worth knowing.
+# 🔴 r212 — "CLOSED" JOINS THE TERMINAL SET, AND ITS ABSENCE WAS HALF THE BUG.
+# `transition()` sets `closed_ts` only for a state in here, and `live_plans()`
+# selects on `closed_ts IS NULL`. So a plan moved to a state NOT in this set is
+# marked and updated and STILL RETURNED AS LIVE — the state says one thing and
+# the query says another, silently. That is what the first cut of r212 hit: the
+# rows read CLOSED with `closed_ts` NULL and the panel still showed them.
+# ⚠️ THE SET IS THE AUTHORITY, NOT THE WORD. Any future terminal state must be
+# added here or it will look terminal and behave live.
 TERMINAL = {"FIRED", "EXPIRED", "CANCELLED", "WIPED_BY_RESTART", "COMPLETE",
-            "MISSED"}
+            "MISSED", "CLOSED"}
 LIVE = {"DECIDED", "LEG1_FILLED", "CONFIRMED", "ARMED"}
 
 
@@ -236,6 +276,93 @@ class PlanLedger:
                     for r in cur.fetchall()]
         except Exception:                                       # noqa: BLE001
             return []
+
+    def close_for_trade(self, trade_id: str, reason: str = "") -> Optional[str]:
+        """Close the plan that produced this trade, now that the trade has.
+
+        🔴 THE ROWS OPENED BY `PlanTick.take()` WERE NEVER CLOSED BY ANYTHING.
+        `transition()` had exactly two callers — main.py's ORB plan and the
+        condor's `_plan_id` — so every plan opened through `Plan._ledger_open`
+        (runaway, sweep, butterfly, TCS, condor leg two) kept `closed_ts` NULL
+        for the life of the session. `live_plans()` therefore returned each one
+        forever, and status.py printed all of them as `<- LIVE`.
+        ⚠️ MEASURED, NOT REASONED: QQQ on 2026-09-01 showed SEVEN
+        `RunawayContinuation TRIGGERED @ 708.43` rows all flagged LIVE while
+        six of those trades had closed hours earlier.
+        🔴 AND r199 MISDIAGNOSED IT. It saw two rows for one strategy at one
+        trigger, called it duplication, and collapsed them for display with a
+        warning naming the count. They were not duplicates — they were two real
+        plans, neither of which had been closed. The collapse was hiding
+        distinct plans that happened to share a trigger price, which is why the
+        fix is here and not in the panel.
+
+        ⚠️ FOUND BY trade_id, NOT BY STRATEGY. `link_trade` resolves the most
+        recent live plan and records that as an ⟨ASSUMPTION⟩; closing has an
+        exact key available — the trade that just ended — so it uses it and
+        inherits none of that heuristic's risk.
+        """
+        if self._store is None or not trade_id:
+            return None
+        try:
+            self._ensure()
+            cur = self._store.conn.execute(
+                "SELECT plan_id, trade_ids FROM plan_ledger"
+                " WHERE symbol=? AND closed_ts IS NULL", (self.symbol,))
+            for pid, tids in cur.fetchall():
+                if not tids:
+                    continue
+                try:
+                    ids = json.loads(tids) or []
+                except Exception:                              # noqa: BLE001
+                    continue
+                if trade_id in ids:
+                    self.transition(pid, "CLOSED", reason or "trade closed")
+                    return pid
+            return None
+        except Exception as exc:                               # noqa: BLE001
+            # ⚠️ NEVER RAISES INTO log_exit. A bookkeeping failure must not
+            # stop a position from being booked closed.
+            logger.warning("[plan] close_for_trade failed for %s: %s",
+                           trade_id[:8], exc)
+            return None
+
+    def close_unfilled(self, strategy: str, reason: str) -> int:
+        """Close any live plan of this strategy that never got a fill.
+
+        🔑 THE SECOND LEAK. A plan that FIRES but whose entry is then refused —
+        sizing rejection, no priced contract, a failed order — links no trade,
+        so `close_for_trade` never reaches it and it stays live for the
+        session. Called just before a new plan of the same strategy opens: by
+        then the previous fire has resolved either way, because `take()` and
+        the entry attempt happen on the same tick.
+
+        ⚠️ ONLY ROWS WITH NO TRADE. A plan that HAS a trade_id is closed by the
+        exit, not by being superseded — collapsing the two would lose the
+        difference between "fired and lost" and "fired and never filled",
+        which is exactly the population the plan ledger exists to keep.
+        ⚠️ ORB IS NOT AFFECTED. It sets `self_ledgers`, so `_ledger_open`
+        returns early and main.py owns its rows and their EXPIRED transition.
+        """
+        if self._store is None:
+            return 0
+        n = 0
+        try:
+            self._ensure()
+            for p in self.live_plans():
+                if p.get("strategy") != strategy:
+                    continue
+                cur = self._store.conn.execute(
+                    "SELECT trade_ids FROM plan_ledger WHERE plan_id=?",
+                    (p["plan_id"],))
+                row = cur.fetchone()
+                if row and row[0] and json.loads(row[0] or "[]"):
+                    continue                    # it filled; the exit closes it
+                self.transition(p["plan_id"], "EXPIRED", reason)
+                n += 1
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning("[plan] close_unfilled failed for %s: %s",
+                           strategy, exc)
+        return n
 
     def link_trade(self, strategy: str, trade_id: str) -> Optional[str]:
         """Attach a filled trade to the LIVE plan that produced it.
