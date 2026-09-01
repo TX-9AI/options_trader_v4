@@ -1,4 +1,13 @@
 """
+main.py  v4.32
+v4.32  2026-08-31  r205 — ATM IV IS STORED ON ctx. It was computed in two
+       butterfly dispatch branches as a LOCAL and never assigned, so every
+       fire_snapshot row carried a null atm_iv (measured: 31/31 rows across
+       13 symbols) and volatility_measures.summarise has derived
+       expected_move_iv and VRP from None since it was written. Both branches
+       now read the one stored value, so dispatch and snapshot cannot
+       disagree about the same tick.
+
 main.py  v4.31
 v4.31  2026-08-31  r201 — the ORB budget is announced at startup and in the
        banner, and says when it is the DEFAULT. An unconfigured box sizes a
@@ -1227,6 +1236,31 @@ def _feed_liquidity_ledger(liq_map, df_1m) -> None:
         logger.debug("[ledger] skipped: %s", exc)
 
 
+def atm_iv_from_chain(chain):
+    """The ONE conversion from a chain to a stored ATM IV. None when absent.
+
+    🔑 EXTRACTED SO IT CAN BE TESTED. `run_analysis` needs live market data and
+    cannot run in a sandbox, so a check that only exercised it would report
+    "could not execute" and gate nothing — the weak-gate failure that let r201
+    ship (WORKING_AGREEMENT §0.4). This function is the part worth pinning and
+    it runs anywhere.
+
+    ⚠️ NONE, NEVER 0.0. A chain whose feed has not populated ivs yet is ABSENT,
+    not zero-vol, and r177 exists precisely because a `getattr(..., 0.0)`
+    default masked that absence for months. Downstream must be able to tell
+    "no reading" from "a reading of zero".
+    """
+    if chain is None:
+        return None
+    try:
+        return float(getattr(chain, "atm_iv", 0.0) or 0.0) or None
+    except Exception as exc:                                    # noqa: BLE001
+        # Never silent — a chain that cannot produce an IV is a fact worth
+        # seeing, not a blank (§0.5).
+        logger.warning("[atm_iv] chain present but unreadable: %s", exc)
+        return None
+
+
 def run_analysis(state: BotState, chain=None) -> dict:
     """Fetch all market data and run analysis pipeline."""
     cache  = get_cache()
@@ -1539,7 +1573,27 @@ def run_analysis(state: BotState, chain=None) -> dict:
     ctx.setdefault("charm", None)
     ctx.setdefault("vanna", None)
     ctx.setdefault("levels", None)
-    ctx.setdefault("atm_iv", None)
+    # ── r205 — ATM IV IS COMPUTED AND WAS NEVER STORED ────────────────────
+    # 🔴 MEASURED FROM THE BUCKET, NOT REASONED: every one of the 31
+    # fire_snapshot rows from the fleet's first live session (2026-08-31)
+    # carried `price` and a NULL `atm_iv`, across all 13 symbols that fired.
+    # The value existed the whole time. `chain.atm_iv` is a real property
+    # (options_chain.py:175, added by r177) and `chain` is a PARAMETER of this
+    # function — but the only two readers, the butterfly dispatch branches at
+    # ~3378 and ~3596, bound it to a LOCAL `_atm_iv` and passed it straight
+    # into generate_signal. Nothing ever assigned `ctx["atm_iv"]`; a grep for
+    # any assignment came back empty. This setdefault(None) was the first and
+    # last word on the field.
+    # ⚠️ THE SNAPSHOT WAS THE SYMPTOM, NOT THE INJURY. `ctx["atm_iv"]` feeds
+    # `volatility_measures.summarise(...)` below, which produces
+    # expected_move_iv and variance_risk_premium — both derived from None since
+    # they were written. The comment above that call says "THE DECAY IS THE
+    # POINT... a constant atm_iv scalar gave one expected move all day", so the
+    # term it was built to supply never arrived either.
+    # ⚠️ `chain` is None on the two derive-only callers (4059, 4179) by design;
+    # only the trading tick (4223) passes it. A None chain leaves this None,
+    # which is honest — the value is ABSENT, not zero.
+    ctx["atm_iv"] = atm_iv_from_chain(chain)
     ctx.setdefault("iv_slope", None)
     ctx.setdefault("realised_vol_cc", None)
     ctx.setdefault("realised_vol_parkinson", None)
@@ -3373,11 +3427,10 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         _plan_skip("GEXPinButterfly",
                    "one per session on this box — already traded today")
     elif signal is None:
-        _atm_iv = None
-        try:
-            _atm_iv = float(getattr(chain, "atm_iv", 0.0) or 0.0) or None
-        except Exception:                                      # noqa: BLE001
-            _atm_iv = None
+        # r205 — ONE SOURCE. Computed once in run_analysis and stored on ctx.
+        # Recomputing here would let the dispatch and the snapshot disagree
+        # about the same tick, which is the bug nobody would ever find.
+        _atm_iv = ctx.get("atm_iv")
         bf_sig = _safe_strategy("GEXPinButterfly",
                                 lambda: _gex_bfly_strategy.generate_signal(
                                     gex           = ctx.get("gex"),
@@ -3591,11 +3644,10 @@ def _attempt_butterfly(ctx, ms, state, *, additive: bool) -> None:
         if chain is None:
             _plan_skip("GEXPinButterfly", "no options chain this tick")
             return
-        _atm_iv = None
-        try:
-            _atm_iv = float(getattr(chain, "atm_iv", 0.0) or 0.0) or None
-        except Exception:                                      # noqa: BLE001
-            _atm_iv = None
+        # r205 — ONE SOURCE. Computed once in run_analysis and stored on ctx.
+        # Recomputing here would let the dispatch and the snapshot disagree
+        # about the same tick, which is the bug nobody would ever find.
+        _atm_iv = ctx.get("atm_iv")
         bf_sig = _safe_strategy("GEXPinButterfly",
                                 lambda: _gex_bfly_strategy.generate_signal(
                                     gex=ctx.get("gex"), price_now=ctx["price"],
