@@ -1,5 +1,23 @@
 """
-execution/entry_engine.py  v4.5
+execution/entry_engine.py  v4.6
+v4.6  2026-09-01  r207 — PAPER GOES THROUGH THE SAME DOOR, AND THE
+      CONFIRMATION IS SPENT AT PLACEMENT. `_place_single_leg` tested
+      `self.paper_trading` ABOVE `_is_standing_offer`, so on a paper box the
+      whole of r195 was unreachable: no offer was ever placed, no row was ever
+      written, and `_orb_offer_working()` — the guard r195 installed when it
+      removed `mark_triggered()` from the ORB dispatch — returned False on
+      every tick of every session. Paper ran pre-r195 behaviour behind a green
+      board, and on 2026-09-01 QQQ took two ORB shorts off one confirmation.
+      ORB is now tested FIRST and reaches `_place_standing_offer` in both
+      modes; paper records the offer, fills it WHOLE at the mark and closes it
+      out FILLED, per the operator: "on a live order it places the number of
+      contracts as a limit order at mark and in paper mode, they ALL fill."
+      🔑 AND THE LATCH IS SET AT PLACEMENT, NOT AT FILL, because a live offer
+      that has not filled is still an order against that confirmation — and
+      because `enter()` returns None for BOTH a working offer and a sizing
+      refusal, so main.py cannot tell them apart and this is the only site
+      that can. `_record_offer` is shared by both modes so the frozen row
+      cannot describe two different things.
 v4.5  2026-08-30  r195 — ORB LEAVES THE LADDER AND POSTS A STANDING OFFER.
       Backlog ORB.2. One DAY limit at the mark for the geometry count, posted
       ONCE on the tick the setup fires, never re-priced. Every other strategy
@@ -440,10 +458,18 @@ class EntryEngine:
         BACK from the broker's fills — a market order has no .price, so the
         old `placed.price or signal.entry_premium` always booked the signal
         mark. filled_qty==0 means record NOTHING."""
-        if self.paper_trading:
-            return self._paper_fill_single(signal, contracts)
+        # 🔴 r207 — ORB IS TESTED FIRST, IN BOTH MODES. This was the paper
+        # check, and `_place_standing_offer` sat BELOW it, so on a paper box
+        # the whole of r195 was unreachable: no offer row was ever written, so
+        # `_orb_offer_working()` — the duplicate suppressor r195 installed when
+        # it removed `mark_triggered()` from the dispatch — returned False on
+        # every tick of every session. Paper was still running pre-r195
+        # behaviour behind a green board. Operator, 2026-09-01: "wire it for
+        # live, but make paper respect it."
         if _is_standing_offer(signal):
             return self._place_standing_offer(signal, contracts)
+        if self.paper_trading:
+            return self._paper_fill_single(signal, contracts)
 
         try:
             session  = get_session()
@@ -554,14 +580,35 @@ class EntryEngine:
         """
         from execution import resting_orders as _ro
         try:
-            session = get_session()
-            account = get_account()
             symbol  = signal.contract.symbol
             mark    = float(signal.entry_premium or 0.0)
             if mark <= 0:
                 logger.warning("[offer] no mark to price the standing offer — "
                                "nothing posted")
                 return None, "", 0
+            # ── 🔴 r207 — PAPER FILLS THE WHOLE OFFER, AT THE MARK, NOW ──────
+            # Operator: "on a live order it places the number of contracts as
+            # a limit order at mark and in paper mode, they ALL fill." So the
+            # SEQUENCE is identical in both modes and only the fill is
+            # simulated. The offer is still RECORDED and then closed out
+            # FILLED, so the working-orders surface is truthful in paper and
+            # r195's supervisor is exercised daily rather than first meeting
+            # reality on live capital (WORKING_AGREEMENT 17).
+            # ⚠️ NO NO-FILL MODELLING. A paper fill model that guessed at
+            # partials would be inventing evidence we do not have, and the
+            # operator's rule is explicit.
+            if self.paper_trading:
+                _oid = f"PAPER-ORB-{uuid.uuid4().hex[:8].upper()}"
+                _fill = paper_fill_price(mark, floor=0.01)
+                self._record_offer(_ro, signal, contracts, mark, _oid, symbol)
+                _ro.note_seen_qty(_oid, int(contracts))
+                _ro.close_out(_oid, "FILLED", "paper: filled whole at mark")
+                _mark_orb_confirmation_spent()
+                logger.info("[offer] PAPER STANDING %s x%d @ %.2f — filled "
+                            "whole at the mark", symbol, contracts, _fill)
+                return _fill, _oid, int(contracts)
+            session = get_session()
+            account = get_account()
             leg = Leg(instrument_type=InstrumentType.EQUITY_OPTION,
                       symbol=symbol, action=OrderAction.BUY_TO_OPEN,
                       quantity=contracts)
@@ -581,38 +628,15 @@ class EntryEngine:
                 logger.error("[offer] placed with NO ORDER ID — it cannot be "
                              "supervised or cancelled; reconcile only")
                 return None, "", 0
-            import json as _json
-            _snap = dict(self._record_kwargs(signal))
-            _snap.update(
-                option_side=signal.option_side, is_butterfly=False,
-                strike=float(signal.strike or 0.0), expiry=signal.expiry,
-                setup_grade="UNGRADED", setup_score=None,
-                stop_premium=signal.stop_premium(),
-                trail_activation=signal.trail_activation_premium(),
-                target_premium=signal.target_premium(),
-                adx_at_entry=getattr(signal, "adx_at_signal", 0.0),
-                flat_angle_deg=getattr(signal, "flat_angle_deg", 0.0),
-                swept_level_name=getattr(signal, "swept_level_name", ""),
-                level_strength=getattr(signal, "level_strength", 0.0),
-                relaxed_entry=int(getattr(signal, "relaxed_entry", 0) or 0),
-                notes=signal.notes,
-                orb_range_high=float(getattr(signal, "orb_range_high", 0.0) or 0.0),
-                orb_range_low=float(getattr(signal, "orb_range_low", 0.0) or 0.0),
-            )
-            # The 50% level for THIS attempt, from the signal's own geometry.
-            _bound = (_snap["orb_range_high"] if signal.direction == "long"
-                      else _snap["orb_range_low"])
-            _t50 = (_bound + (float(signal.underlying_target or 0.0) - _bound) / 2.0
-                    if _bound else 0.0)
-            _ro.record_placement(
-                direction=signal.direction, target_50pct=_t50,
-                structure_stop=float(signal.underlying_stop or 0.0),
-                signal_json=_json.dumps(_snap, default=str),
-                order_id=oid, session_date=_session_date(),
-                strategy=getattr(signal, "strategy_name", ""), symbol=symbol,
-                underlying=INSTRUMENT, side=signal.option_side,
-                strike=float(signal.strike or 0.0),
-                offered_qty=int(contracts), offer_price=mark)
+            # r207 — ONE BUILDER FOR BOTH MODES. Two copies of the frozen
+            # snapshot would drift, and the paper row would stop describing the
+            # same thing the live row does.
+            self._record_offer(_ro, signal, contracts, mark, oid, symbol)
+            # 🔑 r207 — SPENT AT PLACEMENT, NOT AT FILL. A working offer that
+            # has not filled is still an order against this confirmation, and
+            # the window between placing and filling is exactly where r195 left
+            # `_orb_offer_working()` as the only guard.
+            _mark_orb_confirmation_spent()
             logger.info("[offer] STANDING %s x%d @ %.2f — no re-bid, no walk; "
                         "fills are discovered from broker positions",
                         symbol, contracts, mark)
@@ -620,6 +644,47 @@ class EntryEngine:
         except Exception as exc:                                # noqa: BLE001
             logger.error("[offer] placement failed: %s", exc)
             return None, "", 0
+
+    def _record_offer(self, _ro, signal: OptionsSignal, contracts: int,
+                      mark: float, oid: str, symbol: str) -> None:
+        """Freeze this attempt's levels onto the offer row. Paper and live.
+
+        ⚠️ THE LEVELS ARE FROZEN HERE ON PURPOSE — see resting_orders.py: the
+        engine may re-arm onto a new attempt with different geometry, and this
+        offer belongs to the attempt that placed it.
+        """
+        import json as _json
+        _snap = dict(self._record_kwargs(signal))
+        _snap.update(
+            option_side=signal.option_side, is_butterfly=False,
+            strike=float(signal.strike or 0.0), expiry=signal.expiry,
+            setup_grade="UNGRADED", setup_score=None,
+            stop_premium=signal.stop_premium(),
+            trail_activation=signal.trail_activation_premium(),
+            target_premium=signal.target_premium(),
+            adx_at_entry=getattr(signal, "adx_at_signal", 0.0),
+            flat_angle_deg=getattr(signal, "flat_angle_deg", 0.0),
+            swept_level_name=getattr(signal, "swept_level_name", ""),
+            level_strength=getattr(signal, "level_strength", 0.0),
+            relaxed_entry=int(getattr(signal, "relaxed_entry", 0) or 0),
+            notes=signal.notes,
+            orb_range_high=float(getattr(signal, "orb_range_high", 0.0) or 0.0),
+            orb_range_low=float(getattr(signal, "orb_range_low", 0.0) or 0.0),
+        )
+        # The 50% level for THIS attempt, from the signal's own geometry.
+        _bound = (_snap["orb_range_high"] if signal.direction == "long"
+                  else _snap["orb_range_low"])
+        _t50 = (_bound + (float(signal.underlying_target or 0.0) - _bound) / 2.0
+                if _bound else 0.0)
+        _ro.record_placement(
+            direction=signal.direction, target_50pct=_t50,
+            structure_stop=float(signal.underlying_stop or 0.0),
+            signal_json=_json.dumps(_snap, default=str),
+            order_id=oid, session_date=_session_date(),
+            strategy=getattr(signal, "strategy_name", ""), symbol=symbol,
+            underlying=INSTRUMENT, side=signal.option_side,
+            strike=float(signal.strike or 0.0),
+            offered_qty=int(contracts), offer_price=mark)
 
     def _place_butterfly(self, signal: OptionsSignal,
                           contracts: int) -> Tuple[Optional[float], str, int]:
@@ -759,6 +824,26 @@ _entry_engine: Optional[EntryEngine] = None
 def _session_date() -> str:
     from utils.time_utils import now_et
     return now_et().date().isoformat()
+
+
+def _mark_orb_confirmation_spent() -> None:
+    """r207 — tell the ORB engine this confirmation has produced an order.
+
+    🔑 CALLED FROM THE PLACEMENT SITE, WHICH IS THE ONLY PLACE THAT KNOWS. In
+    live a placed-but-unfilled offer returns `record=None` from `enter()`,
+    exactly as a sizing refusal does, so main.py cannot tell the two apart and
+    cannot own this. Here the two are different lines.
+
+    ⚠️ NEVER RAISES. Failing to latch would leave the confirmation re-fireable,
+    which is the whole defect — so it is loud, and the caller carries on either
+    way because the order is already at the broker.
+    """
+    try:
+        from analysis.orb_engine import get_orb_engine
+        get_orb_engine().mark_order_placed()
+    except Exception as exc:                                    # noqa: BLE001
+        logger.error("[offer] COULD NOT MARK THE ORB CONFIRMATION SPENT (%s) "
+                     "— the setup may fire a SECOND order this session", exc)
 
 
 def _is_standing_offer(signal) -> bool:

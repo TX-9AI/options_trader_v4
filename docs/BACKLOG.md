@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.24
+# BACKLOG.md — v1.25
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -118,6 +118,9 @@ against each box. That is right **during** a session and wrong after it.
 |---|---|---|---|
 | **ORB.3** | ORB entry window 11:00 — 11:30. | r193 | ◐ **PUSHED.** Gates PLACING, not resting. 🔑 Lands EXACTLY on the debit block — both tests are `>=`, ORB declares `long_debit`, `DEBIT_DIRECTIONAL_CUTOFF_ET` is 11:30 — so entries run to 11:29:59 and the block takes over at 11:30:00, no gap, no overlap. ⚠️ Not only a later deadline: the constant also sets `entries_expired` and expires the engine from ANY state, and r60 made the re-arm check read it, so it buys 30 more minutes of breaks, retests and RE-ARMS. Two stale copies fixed (`cascade_harness.py`, `cascade_real.py`) and `tests/check_orb_window.py` W3 now pins EVERY declared copy against config, so a fourth cannot appear quietly. |
 | **ORB.4** | Pool in path becomes RECORD-ONLY. | r193 | ◐ **PUSHED.** The named-pool target pull is gone; the target is the pure measured move. Detection, the counted clusters and the notes all stay — the note now names the pool and what the target WOULD have become, so the counterfactual survives for the later study the operator asked for. ⚠️ The pull was a grading-era survivor that CHANGED WHAT THE TRADE DOES while reading like an annotation. |
+| **ORB.8** | The ORB firing sequence is the gate; one confirmation, one order. | r207 | ◐ **PUSHED.** QQQ 2026-09-01 took TWO ORB shorts off ONE confirmation — 2 lots @ 1.56 stopped on the 25% floor, then 24 lots @ 1.15 (the exact premium the first exited at) on the same tick, dead two minutes later on the structure stop. Three defects stacked: r195 replaced `mark_triggered()` with `_orb_offer_working()`, which reads a table PAPER NEVER WRITES because `_place_single_leg` short-circuited to the paper filler above the standing-offer branch — so paper ran pre-r195 behaviour behind a green board; `main.py` bound `orb = ctx["orb"]` at the top of the tick and dispatched on it at the bottom, and `_rearm()` REPLACES ORBData, so after the exit the reference was an orphan still reading OPEN_SHORT (r96's defect at the manage→entry seam); and `_orb_d` measured the stop distance from the LIVE price, so the second fire — a few cents from its own invalidation — sized twelve times larger. Fixed by a latch on the CONFIRMATION (mode-independent) and an engine re-read at the dispatch that announces the stale copy. Paper now reaches the same door and fills whole. 🔴 AN INTERMEDIATE CUT ALSO CHANGED THE SIZER to a boundary-to-wick distance frozen at the break; the operator refused it before it landed — *"the true risk is based on where we entered, not the range boundary. That's arbitrary. The 2 factuals are the distance from entry to the stop"* — and he is right, and it was fixing a symptom the latch had already removed. Sizing is UNCHANGED at |entry - stop|; `stop_distance_px` survives RECORDED-ONLY for r119's question, pinned by S8/S8b. ⚠️ CHANGES WHAT GETS TRADED: fewer ORB entries, same sizing. Operator: *"the second bite honestly does not happen very often and muddies the water."* |
+| **ORB.9** | Does the depth of the impulsive candle inside the range predict anything? | ⬜ | r119's open question, unanswered since 2026-08-29 and now measurable: r207 records `stop_distance_px` as a plan check on every ORB row, fired or not, beside `underlying_entry`, and `SizingResult` carries `geometry_wanted`/`budget_allowed` from r201. So "did shallow-break setups do better, and did the fill drift from the boundary" is a QUERY after a session rather than an argument. ⚠️ RECORDED, NOT GRADED — S8b fails if anything reads it in a decision first. |
+| **ORB.10** | The 15-second fire drift is a WASH. | ruled | ✅ **CLOSED BY RULING**, 2026-09-01. The fire lands on the tick after the retest bar closes, so price can move before the fill and size the trade off slightly different room. Operator: *"I'm ok with fast tape because sometimes it works in our favor and sometimes it doesn't. It's a wash."* Symmetric, so no floor, no refusal, nothing to tune. Filed so it is not re-opened as a finding by a future reader who spots the asymmetry-shaped hole and assumes nobody looked. |
 | **ORB.1** | Could ORB select long contracts via an OTM gamma play scaled by breakout/retest strength? | ⬜ | Operator's open question raised 2026-08-28 before r181 landed. Agreed to bring the design **after a session of r181 fills**, with the delta-aware geometry interaction for him to rule on. Filed here so it does not live only in a thread. |
 
 ### Awaiting an operator ruling
@@ -207,6 +210,22 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.25 — 2026-09-01 — r207 — ORB.8 CLOSED; ORB.9 OPENED; ORB.10 RULED; C.40 AND C.41.**
+C.41: **fix the defect, then stop.** The sizing change in the first cut of this
+revision was aimed at a symptom the latch had already deleted, and it traded a
+true measure (entry-to-stop) for a determinate one (boundary-to-wick). Two
+repairs for one defect is how the second becomes the next defect, and the
+operator caught it in review rather than in the tape.
+
+
+The firing sequence becomes the gate. C.40 is the lesson worth more than the
+fix: **a guard installed in the ORDER PLUMBING cannot protect a mode that has
+no plumbing.** r195 removed ORB's only mode-independent suppressor
+(`mark_triggered()`) and replaced it with one that reads a table paper never
+writes, and every check went green because they exercised `resting_orders`
+directly and never drove `_place_single_leg` in paper. When a guard is
+replaced, the new one must be proven in EVERY mode the old one covered.
 
 **v1.24 — 2026-09-01 — r206 / dtp r234 — ORB.7 CLOSED; C.39 RECORDED.**
 Staged as a standalone script and proven against the live fleet before it

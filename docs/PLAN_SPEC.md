@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.22 · 2026-09-01 · r207 — the ORB firing sequence is the gate (§27).**
 **v1.21 · 2026-08-28 · r181 — ORB risk-normalized sizing, pure geometry (§26).**
 **v1.20 · 2026-08-28 · r179 — 🔴 one per session, DB-backed (§25).**
 **v1.19 · 2026-08-29 · r178 — 🔴 one butterfly per pin per session (§24).**
@@ -967,3 +968,77 @@ after `compute_size`.
 check_orb_geometry_size.py, born red at 14869dc: G1a/G1b the operator's two
 extremes, G2 worst-entry 1-lot, G3 degenerate guard, G4/G5 the seam (one
 sizing assign, one override, after compute_size, ORB-gated).
+
+---
+
+## 27. r207 — ONE CONFIRMATION, ONE ORDER; THE GEOMETRY IS FROZEN AT THE BREAK
+
+Operator, 2026-09-01, after QQQ took two ORB shorts off one confirmation:
+*"The only way it should be allowed to fire an order is a very specific
+sequence."* His sequence, and it is now the gate rather than a description:
+
+1. **BREAK** — a 1-min candle CLOSES outside the range. The candle must also
+   OPEN INSIDE it (v3.5, kept by ruling: a candle already outside never broke
+   out of anything).
+2. **RETEST** — a 1-min candle TOUCHES or re-enters the range and still CLOSES
+   outside it. The BODY test is kept by ruling, so open *and* close stay
+   outside; the touch is `<=` / `>=` (r207), because *"a touch is acceptable as
+   a re-enter, we are just making sure the level is respected before
+   committing."*
+3. **SIZE** — `orb_width / |entry - stop|`, unchanged from r181/r192. The
+   stop is the impulsive candle's wick; the distance is measured **from the
+   fill**, because that is what is actually at stake.
+4. **ORDER** — the contract count as one limit at the mark. Live: a standing
+   DAY offer (r195). Paper: the same path, filled whole, immediately.
+5. **EXIT** — a 1-min close through the impulsive candle's high/low, or one of
+   the capital-preservation stops. The 25% premium floor keeps its precedence
+   over the structure test by ruling: *"if the floor fires on a retest and
+   breathe, it's because we lost the edge."*
+
+**Any break in that sequence blocks construction**, and the enforcement is a
+latch on the CONFIRMATION (`ORBData.order_placed`), not on the order plumbing.
+r195 used `_orb_offer_working()`, which reads a table paper never writes,
+because `_place_single_leg` short-circuited to the paper filler above the
+standing-offer branch — so paper had no duplicate suppressor at all while the
+board stayed green. A latch on the confirmation is mode-independent, and
+`_rearm()` replaces ORBData wholesale so the next genuine attempt is clean by
+construction rather than by anyone remembering to clear it.
+
+🔴 **THE SIZING RULE DID NOT CHANGE, AND AN INTERMEDIATE CUT OF r207 CHANGED
+IT WRONGLY.** That cut sized on the boundary-to-wick distance frozen at the
+break, on the theory that a fire priced against its own stop should not size
+up. Operator, 2026-09-01: *"The true risk is based on where we entered though,
+not the range boundary. That's arbitrary. The 2 factuals are the distance from
+entry to the stop."* Correct. The stop is a **price level**, so what is at
+stake is the gap between the **fill** and it; the boundary is where the candle
+started and stands in for the entry only while the two coincide. Freezing it
+bought determinism and paid for it in truth, which is the wrong trade — r119
+and r181 both already said actual risk.
+
+⚠️ **AND IT WAS THE SAME DEFECT FIXED TWICE.** The 2-then-24 was an
+**illegitimate fire** — a spent confirmation re-fired off a stale ORBData — not
+a mis-sized one. The latch and the engine re-read remove it on their own. A
+second repair aimed at a symptom the first had already deleted is how a fix
+becomes a defect; it is recorded here rather than quietly dropped.
+
+`stop_distance_px` survives as a **recorded field only** — how deep inside the
+range the invalidation sits, which is r119's own open question and r119's own
+ruling on it, *"observe first. Obviously."* `check_orb_sequence` S8/S8b fail if
+anything ever sizes off it, the same shape as r119's G4.
+
+⚠️ **THE 15-SECOND DRIFT IS RULED A WASH, NOT A GAP.** The fire lands on the
+tick after the retest bar closes, so price can move before the fill. Operator,
+2026-09-01: *"I'm ok with fast tape because sometimes it works in our favor and
+sometimes it doesn't. It's a wash."* Symmetric, so there is no floor, no
+refusal and nothing to tune. Recorded so it is not re-opened as a finding.
+
+⚠️ **A NEW ATTEMPT IS STILL PERMITTED AND STILL WANTED.** After any exit before
+`ORB_NO_ENTRY_AFTER_ET` (11:30), a closed bar back inside the range, a fresh
+impulsive candle and a fresh retest construct a new order with new geometry.
+Nothing caps ORB attempts; `_one_per_session_used` is wired to the runaway and
+the butterfly only.
+
+Pinned by `tests/check_orb_sequence.py`: 16 checks, **10 born red at f74818b**.
+S8/S8b pass there by design — HEAD already sized entry-to-stop, and they exist
+to keep it that way — so they are mutation-proven instead: restoring the frozen
+field to the sizer turns both red.

@@ -1,5 +1,15 @@
 """
-strategy/orb_strategy.py  v4.3
+strategy/orb_strategy.py  v4.4
+v4.4  2026-09-01  r207 — ONE CONFIRMATION, ONE ORDER, AND THE GEOMETRY COMES
+      FROM THE ENGINE. This file gated on `orb.state` ALONE, so anything
+      holding an OPEN_* object fired every tick it was asked. On 2026-09-01
+      QQQ took two ORB shorts off one confirmation because main.py held a
+      stale ORBData across the manage→entry seam and this gate had nothing
+      else to say no with. It now refuses a confirmation whose
+      `order_placed` latch is set, which is true in paper and live alike.
+      The signal also carries `orb_stop_distance_px` — the boundary-to-wick
+      distance frozen at the break — so the sizer stops recomputing it from
+      the live price at the entry seam.
 v4.3  2026-08-30  r193 — POOL IN PATH IS RECORD-ONLY. A named pool within
       BEYOND_TP_ADJUSTMENT_WIDTHS past the 100% target used to PULL the
       target to that pool. Operator's ruling: record it, do not let it move
@@ -147,6 +157,11 @@ class ORBStrategy(BaseOptionsStrategy):
                    "break_direction", "break_close", "bars_since_break",
                    "retest_depth_px", "attempt_number", "stop_level",
                    "target_50pct", "target_100pct",
+                   # r207 — both declared so the row can say WHY a confirmed
+                   # setup did not produce an order. `stop_distance_px` is the
+                   # number the size ramps on and is recorded whether or not
+                   # the trade fires.
+                   "stop_distance_px", "order_already_placed",
                    "contract", "premium", "atr_pct")
 
     def __init__(self):
@@ -183,6 +198,7 @@ class ORBStrategy(BaseOptionsStrategy):
         t.check("retest_depth_px", getattr(orb, "retest_depth_px", None))
         t.check("attempt_number", getattr(orb, "attempt_number", None))
         t.check("stop_level", getattr(orb, "stop_level", None))
+        t.check("stop_distance_px", getattr(orb, "stop_distance_px", None))
         t.check("target_50pct", getattr(orb, "target_50pct", None))
         t.check("target_100pct", getattr(orb, "target_100pct", None))
 
@@ -210,6 +226,24 @@ class ORBStrategy(BaseOptionsStrategy):
             return t.refuse("engine_state",
                             f"ORB {_st} — {_await}")
         t.check("engine_state", None, True)
+
+        # ── 🔴 r207 — ONE CONFIRMATION, ONE ORDER ────────────────────────────
+        # Checked AFTER the state gate so the refusal is distinguishable from
+        # "not confirmed", and BEFORE anything is priced so a spent setup never
+        # reaches the chain. r195 made `_orb_offer_working()` the duplicate
+        # suppressor; that reads a table paper never writes, so paper had no
+        # suppressor at all. This latch is a property of the CONFIRMATION, so
+        # it is mode-independent — and `_rearm()` replaces ORBData wholesale,
+        # so a genuine next attempt is unaffected by construction.
+        if getattr(orb, "order_placed", False):
+            return t.refuse(
+                "order_already_placed",
+                f"attempt #{getattr(orb, 'attempt_number', '?')} has already "
+                f"produced an order — this confirmation is SPENT. A new order "
+                f"needs price back inside {_n(getattr(orb, 'orb_low', None))}-"
+                f"{_n(getattr(orb, 'orb_high', None))}, a fresh break and a "
+                f"fresh retest.")
+        t.check("order_already_placed", None, True)
 
         direction   = orb.break_direction
         option_side = "call" if direction == "long" else "put"
@@ -260,6 +294,9 @@ class ORBStrategy(BaseOptionsStrategy):
             # ── ORB range boundaries for strategy-aware exit ──────────────────
             orb_range_high    = orb.orb_high,
             orb_range_low     = orb.orb_low,
+            # r207 — FROZEN AT THE BREAK, not recomputed at the fill. The
+            # sizer reads this; see analysis/orb_engine.py v4.6.
+            orb_stop_distance_px = float(getattr(orb, "stop_distance_px", 0.0) or 0.0),
             # r120 — carried from the engine's own counter, not recomputed.
             # r120 — the tape window opens at the CONFIRMED BREAK, so the
             # measurement spans the fight over the level rather than the fire

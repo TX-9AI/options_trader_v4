@@ -1,5 +1,50 @@
 """
-analysis/orb_engine.py  v4.5
+analysis/orb_engine.py  v4.6
+v4.6  2026-09-01  r207 — THE SEQUENCE IS THE GATE, AND THE GEOMETRY IS FROZEN
+      AT THE BREAK. Three additions, all of them operator spec.
+
+      (1) `order_placed` — ONE CONFIRMATION, ONE ORDER, IN EITHER MODE. r195
+      moved the re-arm from signal-fired to trade-resolved and made
+      `_orb_offer_working()` the thing that stops a second order. That is a
+      property of the ORDER PLUMBING, and the plumbing does not exist in
+      paper, so the guard could never fire there. On 2026-09-01 QQQ took TWO
+      ORB shorts off ONE confirmation (2 lots @ 1.56 stopped on the 25%
+      floor, then 24 lots @ 1.15 on the same tick) because the dispatch held
+      a stale ORBData reference across the manage→entry seam. The latch is a
+      property of the CONFIRMATION, so it is mode-independent. It rides
+      state_snapshot/load_state_file, because r103 makes the file
+      authoritative and a bake mid-setup would otherwise re-fire the same
+      trigger — WORKING_AGREEMENT 37, "a completed entry trigger is NOT
+      re-enterable", broken by restart.
+      🔑 `_rearm()` REPLACES ORBData wholesale, so a genuine next attempt
+      gets a clean latch BY CONSTRUCTION rather than by anyone remembering
+      to clear it. That is why the latch lives here and not on the engine.
+
+      (2) `stop_distance_px` — RECORDED, NEVER READ IN A DECISION. How deep
+      inside the range the invalidation sits: the impulsive wick measured from
+      the boundary it broke. This is r119's question — "the closer to the
+      range boundary the impulsive candle sits, the lower the risk and higher
+      the R-value" — and r119's own ruling on it was *"observe first.
+      Obviously."*
+      🔴 AN INTERMEDIATE CUT OF r207 SIZED ON IT. Operator, same day: *"The
+      true risk is based on where we entered though, not the range boundary.
+      That's arbitrary. The 2 factuals are the distance from entry to the
+      stop."* He is right. The stop is a PRICE LEVEL, so what is at stake is
+      the gap between the FILL and that level; the boundary is where the
+      candle started and stands in for the entry only while the two coincide.
+      Freezing it bought determinism and paid for it in truth. Worse, it was
+      solving a problem (1) had already removed: the 2→24 was an ILLEGITIMATE
+      FIRE, not a mis-sized one. `main.py` sizes on |entry - stop| exactly as
+      r181 and r192 left it. `tests/check_orb_sequence.py` S8 now FAILS if
+      anything ever sizes off this field, the same shape as r119's own G4.
+
+      (3) THE RETEST ACCEPTS A TOUCH. `low < orb_high` / `high > orb_low`
+      became `<=` / `>=`. Operator: "a touch is acceptable as a re-enter, we
+      are just making sure the level is respected before committing." The
+      BODY test is unchanged and still requires open AND close outside —
+      kept deliberately, it is stricter than the spec's "close outside" and
+      the operator ruled to keep it. `opens_inside` on the break is likewise
+      unchanged.
 v4.5  2026-08-30  r195 — AWAITING_RANGE_REENTRY: the sequence after a trade.
       The engine returned to WAITING_FOR_BREAK the moment a position closed
       — or, worse, the moment the SIGNAL fired — while price sat outside the
@@ -336,6 +381,18 @@ class ORBData:
     attempt_number:     int   = 0
     entries_expired:    bool  = False
     invalidation_reason: str  = ""   # 'runaway' | 'close_inside' (v3.8: 'timeout' removed)
+    # r207 — THE SIZING GEOMETRY, FROZEN AT THE BREAK. |impulsive wick - the
+    # boundary it broke|: break_candle_low vs orb_high for a long,
+    # break_candle_high vs orb_low for a short. Set once in _check_for_break
+    # and never recomputed, so a fill priced closer to the stop cannot inflate
+    # the position. 0.0 means UNKNOWN, and the sizer's degenerate branch takes
+    # it to a 1-lot loudly rather than guessing.
+    stop_distance_px:   float = 0.0
+    # r207 — ONE CONFIRMATION, ONE ORDER. Set the moment an order is
+    # CONSTRUCTED for this confirmation, in paper and live alike. `_rearm()`
+    # builds a fresh ORBData, so the next attempt starts clean without anyone
+    # clearing it.
+    order_placed:       bool  = False
     retest_depth_px:    float = 0.0  # v3.7 (defect G): confirming retest wick's
                                      # penetration into the range, in PX
                                      # (long: orb_high - low; short: high - orb_low).
@@ -594,6 +651,10 @@ class ORBEngine:
             "target_100pct": d.target_100pct,
             "target_strike": d.target_strike,
             "retest_depth_px": d.retest_depth_px,
+            # r207 — both RESUMABLE. The latch especially: without it a bake
+            # mid-setup re-fires a trigger that already produced an order.
+            "stop_distance_px": d.stop_distance_px,
+            "order_placed": d.order_placed,
             "last_bar_ts": self._last_bar_ts or "",
         }
 
@@ -634,7 +695,8 @@ class ORBEngine:
                               ("stop_level", "stop_level"),
                               ("target_50pct", "target_50pct"),
                               ("target_100pct", "target_100pct"),
-                              ("retest_depth_px", "retest_depth_px")):
+                              ("retest_depth_px", "retest_depth_px"),
+                              ("stop_distance_px", "stop_distance_px")):
                 _v = data.get(_k)
                 if _v is not None:
                     setattr(d, _attr, float(_v))
@@ -645,6 +707,7 @@ class ORBEngine:
             d.last_retest_bar_ts = str(data.get("last_retest_bar_ts") or "")
             d.confirmed_at       = str(data.get("confirmed_at") or "")
             d.invalidation_reason = str(data.get("reason") or "")
+            d.order_placed       = bool(data.get("order_placed"))
             self._broke_high = bool(data.get("broke_high"))
             self._broke_low  = bool(data.get("broke_low"))
             self._range_date = today if d.orb_high > 0 else None
@@ -1085,6 +1148,9 @@ class ORBEngine:
             d.target_100pct      = d.orb_high + d.orb_width
             d.target_50pct       = d.orb_high + d.orb_width * 0.5
             d.stop_level         = d.break_candle_low
+            # r207 — the sizing distance, measured from the boundary this
+            # candle broke, frozen here and never recomputed downstream.
+            d.stop_distance_px   = abs(d.orb_high - d.break_candle_low)
             d.target_strike      = orb_strike_selection(d.orb_high, d.orb_low, "long", STRIKE_INCREMENT)
             d.attempt_number    += 1
             d.state              = ORBState.ARMED_LONG
@@ -1106,6 +1172,9 @@ class ORBEngine:
             d.target_100pct      = d.orb_low - d.orb_width
             d.target_50pct       = d.orb_low - d.orb_width * 0.5
             d.stop_level         = d.break_candle_high
+            # r207 — the sizing distance, measured from the boundary this
+            # candle broke, frozen here and never recomputed downstream.
+            d.stop_distance_px   = abs(d.break_candle_high - d.orb_low)
             d.target_strike      = orb_strike_selection(d.orb_high, d.orb_low, "short", STRIKE_INCREMENT)
             d.attempt_number    += 1
             d.state              = ORBState.ARMED_SHORT
@@ -1190,7 +1259,9 @@ class ORBEngine:
             # retest is the falsification step — the level either held or it did
             # not. A body that closes back inside the range is a DISARM, not a
             # near-miss, and falls through to the (b) branch below.
-            if low < d.orb_high and body_low >= d.orb_high:
+            # r207 — a TOUCH of the boundary counts as the re-entry (`<=`).
+            # The BODY test is unchanged: open AND close must stay outside.
+            if low <= d.orb_high and body_low >= d.orb_high:
                 # phantom OPEN the dispatch will override — leave it awaiting
                 # retest so the engine can't get stuck OPEN with no position.
                 # sweep: confirm OPEN and let the dispatch fire it.
@@ -1217,7 +1288,9 @@ class ORBEngine:
                 return
             # RETEST (v3.3) — mirror of the long side. Wick enters the range
             # (high > orb_low), body stays outside (body_high <= orb_low). No grace.
-            if high > d.orb_low and body_high <= d.orb_low:
+            # r207 — a TOUCH of the boundary counts as the re-entry (`>=`).
+            # The BODY test is unchanged: open AND close must stay outside.
+            if high >= d.orb_low and body_high <= d.orb_low:
                 # v4.1 — mirror of the long side; same deletion.
                 d.state           = ORBState.OPEN_SHORT
                 d.confirmed_at    = str(now_et())
@@ -1231,6 +1304,29 @@ class ORBEngine:
 
     def mark_triggered(self):
         self.notify_position_closed()
+
+    def mark_order_placed(self) -> None:
+        """r207 — an order has been CONSTRUCTED for this confirmation.
+
+        🔑 CALLED FROM THE PLACEMENT SITE, NOT THE FILL SITE, and in both
+        modes. A live standing offer that has not filled yet is still an order
+        against this setup; waiting for a fill would leave the window in which
+        r195's `_orb_offer_working()` was the only guard — the window that does
+        not exist in paper at all.
+
+        ⚠️ NEVER RAISES and never asserts a state. A latch that refuses to set
+        because the engine has moved on would leave the confirmation
+        re-fireable, which is the failure it exists to prevent.
+        """
+        self._data.order_placed = True
+        logger.info("ORB order placed for attempt #%d — this confirmation is "
+                    "SPENT; a new order needs a new break+retest",
+                    self._data.attempt_number)
+
+    @property
+    def order_already_placed(self) -> bool:
+        """True when this confirmation has already produced an order."""
+        return bool(self._data.order_placed)
 
     @property
     def is_confirmed(self) -> bool:

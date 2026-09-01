@@ -1,5 +1,12 @@
 """
-strategy/base_strategy.py  v4.3
+strategy/base_strategy.py  v4.4
+v4.4  2026-09-01  r207 — OptionsSignal gains `orb_stop_distance_px`: the
+      impulsive wick measured from the boundary it broke, frozen by the engine
+      at break time. ⚠️ RECORDED, NEVER READ IN A DECISION — sizing stays on
+      |entry - stop| per the operator, because the stop is a price level and
+      what is at stake is the gap between the FILL and it. This field answers
+      r119's separate question, how deep inside the range the invalidation
+      sits, and check_orb_sequence S8 fails if anything ever sizes off it.
 v4.3  2026-08-24  r99 — is_valid's credit-vertical arm accepts a ONE-SIDED
       vertical (the only shape any writer produces since r90) and FAILS CLOSED
       on a naked short, a wing without a short, or a wing inside the short.
@@ -75,6 +82,11 @@ class OptionsSignal:
     atr_at_signal: float = 0.0
     orb_range_high: float = 0.0
     orb_range_low:  float = 0.0
+    # r207 — the FROZEN sizing geometry: |impulsive wick - the boundary it
+    # broke|, set by orb_engine at break time. The sizer reads THIS, never
+    # |current_price - underlying_stop|, which floated with the fill price and
+    # sized a re-entry twelve times larger than the trade that just failed.
+    orb_stop_distance_px: float = 0.0
 
     # ── Option details (single-leg) ───────────────────────────────────────
     strike:         float = 0.0

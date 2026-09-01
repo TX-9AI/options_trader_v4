@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-execution/resting_orders.py  v1.0
+execution/resting_orders.py  v1.1
+v1.1  2026-09-01  r207 — PAPER FILLS THE WHOLE OFFER. The v1.0 paper branch
+      compared the UNDERLYING price against the OPTION STRIKE
+      (`price >= row["strike"]`) and called that "the underlying has come back
+      to the level the offer was anchored on". Those are different quantities:
+      on a short ORB with a 705 put and spot at 709 it is trivially true, so
+      the model would have filled instantly on any OTM offer and never on an
+      ITM one — backwards, and undetected only because `_place_single_leg`
+      short-circuited to the paper filler before an offer was ever placed, so
+      this branch has never executed. Operator, 2026-09-01: "in paper mode,
+      they ALL fill." The comparison is deleted rather than corrected; there
+      is no partial-fill evidence to model and inventing one is worse than
+      admitting the residual gap.
 
 THE ORB STANDING OFFER: one limit at mark, posted once, left to rest.
 
@@ -370,23 +382,22 @@ def supervise(*, price: float, last_1m_close, eod: bool = False,
 def _filled_qty(order_id: str, row: dict, *, paper: bool, price: float):
     """Filled quantity for this offer, or None when it cannot be read.
 
-    ⚠️ PAPER IS SIMULATED, NOT INSTANT. The live path fills when the market
-    trades our price; a paper path that filled the whole order the moment it
-    was placed would model a certainty we have no evidence for, and the entire
-    value of a standing offer is the no-fill risk it carries. Paper fills the
-    full size only once the underlying has come back to or through the level
-    the offer was anchored on.
+    🔴 r207 — PAPER FILLS THE WHOLE OFFER, ALWAYS. Operator's ruling. v1.0
+    tried to model no-fill risk and compared the UNDERLYING price to the
+    OPTION STRIKE, which are different quantities — on a short ORB with a 705
+    put and spot at 709 the test was trivially true, so it filled instantly on
+    every OTM offer and never on an ITM one. It never executed, because
+    `_place_single_leg` reached the paper filler before an offer was ever
+    placed, so the error sat behind a green board.
+
+    ⚠️ THE RESIDUAL GAP IS STATED RATHER THAN MODELLED. Paper is optimistic on
+    fill rate and we know it; a model built on no evidence would make it
+    optimistic in a way nobody could see. Under r207 the paper path fills and
+    closes the offer at placement, so this branch is a backstop for a row that
+    somehow survives — and its answer must be the same one.
     """
     if paper:
-        d = str(row.get("direction") or "long")
-        stop = float(row.get("structure_stop") or 0.0)
-        if not stop:
-            return int(row["offered_qty"])
-        # A retest that trades back toward the origin is what fills a resting
-        # bid; anything further out leaves it working.
-        touched = (price <= float(row["strike"])) if d == "long" else \
-                  (price >= float(row["strike"]))
-        return int(row["offered_qty"]) if touched else 0
+        return int(row["offered_qty"])
     try:
         from data.tasty_client import get_session, get_account
         from execution.order_confirm import net_from_fills

@@ -1,8 +1,24 @@
 #!/usr/bin/env python3
-"""tests/check_standing_offer.py  v1.0
+"""tests/check_standing_offer.py  v1.1
 THE ORB STANDING OFFER: one order, supervised from both branches, and the
 BROKER declares the position.
 
+v1.1  2026-09-01  r207 — S3 IS RE-DERIVED AND THE FIXTURE STOPS ROTTING.
+      S3 asserted that a paper offer at a price "not back to the level" was
+      LEFT STANDING. That premise is retired by operator ruling — "in paper
+      mode, they ALL fill" — and the arithmetic behind it was wrong anyway:
+      it compared the UNDERLYING price to the OPTION STRIKE. Re-derived rather
+      than deleted, per r155: a fixture whose numbers encode the rule being
+      replaced is the trap, not the test.
+      ⚠️ AND `SNAP["expiry"]` WAS HARDCODED "2026-08-31". `get_open_trades_live()`
+      drops rows whose expiry has passed, so S5/S5b went red on 2026-09-01 and
+      would have stayed red forever — verified by running this file unmodified
+      at f74818b. Now relative to today. r170's lesson: a hypothetical pinned
+      to a wall-clock value is a check that eventually fails for a reason that
+      has nothing to do with the code.
+      ⚠️ THIS FILE STILL DOES NOT DRIVE `_place_single_leg`, which is the gap
+      that let r195 go green over a path that never executed in paper. That
+      coverage lives in tests/check_orb_sequence.py S9.
 v1.0  2026-08-30  r195 — backlog ORB.2. Born red at r194 (0b0d15a):
       `execution/resting_orders.py` does not exist there, ORB walks the ladder,
       and nothing supervises an unfilled order.
@@ -23,6 +39,7 @@ else in this file EXECUTES.
 Run:  python3 tests/check_standing_offer.py
 """
 import json
+import datetime as _dt
 import os
 import sys
 import tempfile
@@ -41,11 +58,19 @@ def check(label, cond, detail=""):
         _fails.append(label)
 
 
+_TODAY = _dt.datetime.now().strftime("%Y-%m-%d")
+
 SNAP = dict(symbol="NVDA", strategy="ORBStrategy", setup_type="ORB Long",
             direction="long", underlying_entry=197.15, underlying_stop=195.89,
             underlying_target=202.85, vix_at_entry=15.0, is_fed_day=False,
             option_side="call", is_butterfly=False, strike=196.0,
-            expiry="2026-08-31", setup_grade="UNGRADED", setup_score=None,
+            # ⚠️ r207 — RELATIVE, NOT HARDCODED. This read "2026-08-31" and
+            # `get_open_trades_live()` drops any row whose expiry is in the
+            # past, so S5/S5b went red on 2026-09-01 and would have stayed red
+            # forever — a date-rotting fixture, the same class as the r170
+            # butterfly hypotheticals that drifted with the hour they ran at.
+            # A permanent red teaches the reader to skip red runs.
+            expiry=_TODAY, setup_grade="UNGRADED", setup_score=None,
             stop_premium=0.9, trail_activation=1.8, target_premium=2.4,
             adx_at_entry=28.0, flat_angle_deg=0.0, swept_level_name="",
             level_strength=0.0, relaxed_entry=0, notes="")
@@ -89,13 +114,26 @@ def main():
           and rows[0]["target_50pct"] == 199.68
           and rows[0]["structure_stop"] == 195.89)
 
-    # ── S3: the offer stands while nothing has happened ────────────────────
+    # ⚠️ r207 — CAPTURED BEFORE SUPERVISION. Paper now fills the whole offer on
+    # the first pass, so `working()` is empty afterwards and the later cases
+    # would have nothing to read. The row is the fixture; the table is the
+    # thing under test.
+    row = ro.working(d)[0]
+
+    # ── S3: r207 — A PAPER OFFER FILLS WHOLE, FIRST PASS ───────────────────
+    # 🔴 THIS CHECK USED TO ASSERT THE OPPOSITE, and its premise is retired by
+    # operator ruling, 2026-09-01: "in paper mode, they ALL fill." v1.0 modelled
+    # no-fill risk by comparing the UNDERLYING price to the OPTION STRIKE —
+    # different quantities — so it filled every OTM offer instantly and no ITM
+    # one, backwards, and never executed because `_place_single_leg` reached the
+    # paper filler before an offer was ever placed. A fixture that encodes the
+    # rule being replaced is the r155 trap; it is re-derived, not deleted.
     n = ro.supervise(price=197.5, last_1m_close=197.2, paper=True, adopt=None)
-    check("S3 an untouched offer is left standing", n == 0 and
-          len(ro.working(d)) == 1)
+    check("S3 a paper offer fills WHOLE on the first supervision pass",
+          n == 1 and len(ro.working(d)) == 0,
+          f"closed={n} still_working={len(ro.working(d))}")
 
     # ── S4: every cancel trigger, both directions ──────────────────────────
-    row = ro.working(d)[0]
     cr = ro.cancel_reason
     t50 = ro.cancel_reason(row, price=199.70, last_1m_close=199.5,
                            target_50pct=199.68, structure_stop=195.89,

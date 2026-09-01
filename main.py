@@ -1,4 +1,25 @@
 """
+main.py  v4.33
+v4.33  2026-09-01  r207 — THE DISPATCH ASKS THE ENGINE, NOT THE TICK'S COPY.
+       `orb = ctx["orb"]` bound the ORBData instance at the
+       TOP of the tick and the ORB dispatch read it at the BOTTOM. On the tick
+       where `manage_open_position()` closes an ORB, `notify_position_closed()`
+       calls `_rearm()`, which REPLACES `self._data` — so the ctx reference
+       became an orphan still reading OPEN_SHORT, `has_blocking_position()`
+       was now False, and `attempt_new_entry()` ran in that same tick against
+       a corpse. QQQ 2026-09-01: two ORB shorts on one confirmation, the
+       second entered at the exact premium the first stopped out at. This is
+       r96's orphaned-dataclass defect one level up, at the manage→entry seam.
+       The dispatch now reads `get_orb_engine().data` and says so at WARNING
+       when the tick's copy disagreed, because the mismatch IS the bug and
+       silently papering over it would hide the next one.
+       ⚠️ `_orb_d` IS UNCHANGED, AND AN INTERMEDIATE CUT OF THIS REVISION HAD
+       IT WRONG. That cut sized on the boundary-to-wick distance frozen at the
+       break. Operator: "the true risk is based on where we entered, not the
+       range boundary. That is arbitrary. The 2 factuals are the distance from
+       entry to the stop." Correct, and the frozen version was also solving a
+       problem the latch above had already removed — the QQQ 2-then-24 was an
+       illegitimate FIRE, not a mis-sized one. Sizing stays entry-to-stop.
 main.py  v4.32
 v4.32  2026-08-31  r205 — ATM IV IS STORED ON ctx. It was computed in two
        butterfly dispatch branches as a LOCAL and never assigned, so every
@@ -3141,7 +3162,25 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # retest is self-validating — the engine has already proven the setup
     # for. When the switch is on and the engine is in a confirmed OPEN state, an
     # UNKNOWN/undefined label does not veto: it flows through to the ORB dispatch
-    orb = ctx["orb"]
+    # ── 🔴 r207 — ASK THE ENGINE, NEVER THE TICK'S COPY ──────────────────────
+    # `ctx["orb"]` was bound in run_analysis at the top of this tick. Between
+    # then and here, `manage_open_position()` may have closed an ORB, which
+    # calls `notify_position_closed()` -> `_rearm()`, and `_rearm()` REPLACES
+    # ORBData with a new instance. The ctx reference then reads OPEN_SHORT from
+    # an object nothing else is looking at any more. That is exactly how QQQ
+    # took two ORB shorts off one confirmation on 2026-09-01, and it is r96's
+    # stale-dataclass defect at a different seam.
+    # ⚠️ THE MISMATCH IS ANNOUNCED, NOT ABSORBED. A silent re-read would fix
+    # this instance and hide the next one; WORKING_AGREEMENT 0.5 — no output is
+    # never tidier than an error.
+    orb = get_orb_engine().data
+    if orb is not ctx.get("orb"):
+        logger.warning(
+            "[orb] the tick's ORB snapshot is STALE (ctx=%s engine=%s) — the "
+            "engine re-armed inside this tick; dispatching on the ENGINE's "
+            "state, not the copy",
+            getattr(ctx.get("orb"), "state", "?"), getattr(orb, "state", "?"))
+        ctx["orb"] = orb        # one view of one thing, for the rest of the tick
     orb_confirmed = orb.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)
     # ── 🔴 v4.3 (2026-08-21) — THE DISPATCH HARD GATE IS DELETED ─────────────
     # It read:
@@ -3755,6 +3794,23 @@ def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool 
         # lives in the sizer, so there is exactly one place it can be wrong.
         _orb_w = abs(float(getattr(signal, "orb_range_high", 0) or 0)
                      - float(getattr(signal, "orb_range_low", 0) or 0))
+        # 🔑 r207 — THE RISK IS ENTRY-TO-STOP, AND THAT IS NOT NEGOTIABLE.
+        # An intermediate cut of r207 sized on `orb_stop_distance_px`, the
+        # impulsive wick measured from the BOUNDARY, frozen at the break.
+        # Operator, 2026-09-01: *"The true risk is based on where we entered
+        # though, not the range boundary. That's arbitrary. The 2 factuals are
+        # the distance from entry to the stop."* He is right and the reasoning
+        # was mine: the stop is a PRICE LEVEL, so what is at stake is the gap
+        # between the fill and that level. The boundary is where the CANDLE
+        # started, and it stands in for the entry only while the two coincide.
+        # Freezing it bought determinism and paid for it in truth, which is
+        # backwards — r119 and r181 both already said actual risk.
+        # ⚠️ AND IT WAS SOLVING A PROBLEM THE LATCH HAD ALREADY REMOVED. The
+        # 2-then-24 on QQQ was an ILLEGITIMATE FIRE — a spent confirmation
+        # re-fired off a stale ORBData — not a mis-sized one. `order_placed`
+        # and the engine re-read below kill it; this arithmetic never had to
+        # change, and changing it was fixing the same defect twice in two
+        # places, which is how a repair becomes a second defect.
         _orb_d = abs(float(getattr(signal, "underlying_entry", 0) or 0)
                      - float(getattr(signal, "underlying_stop", 0) or 0))
     sizing = risk_mgr.size_for(
