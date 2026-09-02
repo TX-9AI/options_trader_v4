@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.34
+# BACKLOG.md — v1.35
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -214,6 +214,16 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.35 — 2026-09-02 — r216 — THE P&L PERCENT COLUMN WAS OFF BY 100x SINCE
+r210.** `pnl_pct` is a FRACTION (`(exit - entry)/entry`), so a doubling is 1.07.
+r210 replaced `pct_str` — `f"{val:+.1%}"`, where the `%` spec multiplies by
+100 — with a bare `:.0f` while narrowing rows for the phone. SPX on 2026-09-02
+rendered a 9.15 -> 18.95 runaway as "+1%". The dollars were right throughout,
+which is why it survived a night: "+$1,960  +1%" reads as a strange percentage
+rather than a broken one. Q11 measured the row's WIDTH and never its VALUES —
+width and meaning are different properties and a row check needs both, which
+Q12/Q12b now do.
 
 **v1.34 — 2026-09-01 — r215 — THE PIN STRIKE IS BOUNDED TO SPOT; BFLY.11-13
 OPENED.** `pin_strike` was an unbounded argmax over the whole chain and

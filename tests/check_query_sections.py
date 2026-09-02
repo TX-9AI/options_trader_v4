@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_query_sections.py  v1.1
+tests/check_query_sections.py  v1.2
+v1.2  2026-09-02  r216 — Q12/Q12b: the percent column is in PERCENT. It was off
+      by 100x from r210 to r216 because `pnl_pct` is a fraction and the row
+      formatter dropped the `%` spec that multiplies by 100. Q11 measured the
+      row's WIDTH and never its VALUES, which is precisely how a units bug rode
+      along inside a formatting change.
 v1.1  2026-09-01  r210 (chunk B) — TODAY-SCOPING AND WIDTH. Operator: PLANS,
       GATES and the closed-trade table to TODAY only, abbreviated, "it's
       spanning multi-line". Q7-Q11 added.
@@ -194,6 +199,32 @@ def main():
                  contracts=n, entry_premium=e, exit_premium=x, pnl_usd=p,
                  pnl_pct=pc, exit_reason=w, is_butterfly=0, center_strike=0)
         widest = max(widest, len(_m.trade_row(row)))
+    # ── Q12 — THE PERCENT COLUMN IS IN PERCENT ──────────────────────────
+    # 🔴 OFF BY 100x FROM r210 TO r216. `pnl_pct` is a FRACTION
+    # (trade_logger:650 stores (exit - entry)/entry), so a doubling is 1.07.
+    # r210 replaced `pct_str` — `f"{val:+.1%}"`, which multiplies by 100 —
+    # with a bare `:.0f` while narrowing the row for the phone, and every
+    # closed trade since rendered its move as a rounding error. SPX on
+    # 2026-09-02 showed 9.15 -> 18.95 as "+1%".
+    # ⚠️ Q11 MEASURED THE WIDTH AND NEVER THE VALUE, which is how a units bug
+    # rode along inside a formatting change. Width and meaning are different
+    # properties and a row check needs both.
+    _dbl = _R(exit_time="2026-09-02 10:19:00", strategy="RunawayContinuation",
+              option_side="call", strike=7650, contracts=2, entry_premium=9.15,
+              exit_premium=18.95, pnl_usd=1960.0, pnl_pct=(18.95 - 9.15) / 9.15,
+              exit_reason="target_hit", is_butterfly=0, center_strike=0)
+    _row_dbl = _m.trade_row(_dbl)
+    check("Q12 a 107% move prints as +107%, not +1%",
+          "+107%" in _row_dbl, _row_dbl.strip())
+
+    _loss = _R(exit_time="2026-09-02 10:29:00", strategy="RunawayContinuation",
+               option_side="call", strike=7700, contracts=10,
+               entry_premium=2.02, exit_premium=1.50, pnl_usd=-520.0,
+               pnl_pct=(1.50 - 2.02) / 2.02, exit_reason="hard_stop_20%",
+               is_butterfly=0, center_strike=0)
+    check("Q12b and a -26% move prints as -26%, not -0%",
+          "-26%" in _m.trade_row(_loss), _m.trade_row(_loss).strip())
+
     check("Q11 a real trade row fits on one line (<= 60 chars)",
           widest <= 60, f"widest {widest}")
 

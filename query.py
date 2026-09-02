@@ -1,5 +1,18 @@
 """
-query.py  v4.7
+query.py  v4.8
+v4.8  2026-09-02  r216 — 🔴 THE P&L PERCENT COLUMN WAS OFF BY 100x SINCE r210.
+      `pnl_pct` is a FRACTION — trade_logger:650 stores
+      `(exit_price - entry_prem) / entry_prem` — so a doubling is 1.07. r210
+      replaced `pct_str`, which is `f"{val:+.1%}"` and multiplies by 100,
+      with a bare `:.0f` while narrowing the row for the phone. SPX on
+      2026-09-02 showed a 9.15 -> 18.95 runaway as "+1%".
+      ⚠️ THE DOLLARS WERE RIGHT THROUGHOUT, which is exactly why it survived:
+      "+$1,960  +1%" reads as a strange percentage, not a broken one, and
+      nothing else on the board contradicted it.
+      ⚠️ AND THE UNITS WERE READABLE THE WHOLE TIME. I narrowed a column and
+      swapped its formatter without checking what the old one was doing —
+      `%` in a format spec multiplies, and dropping it silently changes the
+      units of the number, not just its width.
 v4.7  2026-09-01  r214 — 🔴 THE UNREALIZED LINE WAS SIGN-INVERTED ON EVERY
       CREDIT SPREAD, and had been since the panel was written. It applied the
       DEBIT formula `(now - cost)` to every structure. A credit vertical's
@@ -309,7 +322,20 @@ def trade_row(r) -> str:
             f"{r['entry_premium'] or 0:>5.2f} "
             f"{r['exit_premium'] or 0:>5.2f} "
             f"{money:>8} "
-            f"{(r['pnl_pct'] or 0):>+4.0f}%  "
+            # 🔴 r216 — `pnl_pct` IS A FRACTION, NOT A PERCENTAGE.
+            # trade_logger:650 stores `(exit_price - entry_prem) / entry_prem`,
+            # so a doubling is 1.07 and not 107. r210 replaced `pct_str`, which
+            # is `f"{val:+.1%}"` and multiplies by 100, with a plain `:.0f` —
+            # and every closed trade since has rendered its move as a rounding
+            # error. SPX 2026-09-02: 9.15 -> 18.95 printed as "+1%".
+            # ⚠️ THE P&L COLUMN WAS RIGHT THE WHOLE TIME, which is what made it
+            # survive a night: a +$1,960 row beside "+1%" reads as an odd
+            # percentage rather than as a broken one.
+            # ⚠️ ONE SPACE, NOT TWO, BEFORE THE REASON. Correcting the units
+            # widened this column: "+1%" was 3 characters and "+107%" is 5, so
+            # the row went to 61 and Q11 caught it. The character comes back
+            # from the gap rather than from the width rule — 60 is the phone.
+            f"{(r['pnl_pct'] or 0) * 100:>+4.0f}% "
             f"{abbr_reason(r['exit_reason'])}")
 
 
