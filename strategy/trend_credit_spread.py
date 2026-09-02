@@ -1,5 +1,26 @@
 """
-strategy/trend_credit_spread.py  v4.6
+strategy/trend_credit_spread.py  v4.7
+v4.7  2026-09-02  r219 — 🔴 THE ENTRY AND THE MARK WERE ON DIFFERENT SIDES OF THE QUOTE.
+      `search_wing` priced the credit as short.BID - long.ASK and that number
+      became `sig.entry_premium` — the position's entry of record — while
+      `position_manager._fetch_current_premium` marks a credit vertical at
+      short.MARK - long.MARK. The gap is BOTH HALF-SPREADS, present the
+      instant the position opens, and for a credit vertical a higher mark is a
+      LOSS. Measured on the fleet's shape: judged $0.37, booked $0.97, gap
+      $0.60 — against a lone stop carrying 60.5 cents of room. The position
+      was born at its stop.
+      🔑 SWEEP FORENSICS 2026-08-25..09-02 SAYS THE UNDERLYING NEVER DID IT:
+      38 of 41 stopped, price NEVER reached the short strike on any of 22
+      measurable trades, and moved 0.63 points toward it — implying a spread
+      delta of 0.96, which a 5-wide cannot carry.
+      ⚠️ OPERATOR RULING 2026-09-02: "I have a ladder for live offers, all
+      paper needs to fill at mark, period." The MARK is booked. The BID/ASK
+      credit is kept for the R hurdle — deciding on the conservative number
+      and booking the mark refuses trades that only clear R when priced
+      optimistically, so the error runs in the safe direction.
+      ⚠️ AND THE OLD BEHAVIOUR HAD A PASSING TEST: check_plan_prepares S2
+      asserted net_credit == 1.30, the bid/ask figure, so the suite certified
+      the mismatch. Re-derived to 1.33.
 v4.6  2026-08-29  r176: mu measured over the last TCS_DRIFT_HORIZON_BARS
       (the same two hours pop_drift projects over), not since the open —
       since-open zeroed on V-shapes/late trends while the vote read ADX 50+
@@ -356,7 +377,10 @@ class TrendCreditSpread:
                             f"POP {pop:.2f} < {TCS_MIN_POP:.2f} at {bars:.1f} bars for "
                             f"strike {short.strike:.2f}"))
                     else:
-                        _best_r, long_c, credit, _bw = cv.search_wing(contracts, short, side, R_FLOOR)
+                        # 🔴 r219 — see credit_vertical.search_wing: `credit`
+                        # is JUDGED (bid/ask), `_fill` is BOOKED (mark).
+                        _best_r, long_c, credit, _bw, _fill = cv.search_wing(
+                            contracts, short, side, R_FLOOR)
                         if long_c is None:
                             prep.structural.append(("wing",
                                 f"no priceable wing beyond {short.strike:.2f} (undefined risk "
@@ -386,8 +410,21 @@ class TrendCreditSpread:
                                     prep.structural.append(("nickel_floor",
                                         f"credit {credit:.2f} below {TCS_MIN_CREDIT_NICKEL_MULT:.1f}x "
                                         f"nickel ({floor_n:.2f}) — no room to profit"))
+                                elif _fill is None:
+                                    # ⚠️ NO MARK ON A LEG IS NOT A REASON TO
+                                    # BOOK THE BID/ASK NUMBER — substituting it
+                                    # is the basis error r219 removes.
+                                    prep.structural.append((
+                                        "fill_mark",
+                                        f"{side} {short.strike:.2f}/"
+                                        f"{long_c.strike:.2f} has no usable "
+                                        f"mark on one leg — fill price unknown"))
                                 else:
-                                    prep.short, prep.long, prep.credit = short, long_c, credit
+                                    # ⚠️ EV, THE NICKEL FLOOR AND R ARE JUDGED
+                                    # ON THE BID/ASK CREDIT ABOVE — the
+                                    # conservative test is unchanged. Only what
+                                    # is BOOKED moves to the mark.
+                                    prep.short, prep.long, prep.credit = short, long_c, _fill
                                     prep.width, prep.pop, prep.r = width, pop, t.r
                                     prep.ready = True
 

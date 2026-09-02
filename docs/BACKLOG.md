@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.37
+# BACKLOG.md — v1.38
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -234,6 +234,17 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.38 — 2026-09-02 — r219 — 🔴 THE ENTRY AND THE MARK WERE ON DIFFERENT
+SIDES OF THE QUOTE.** Credit verticals were booked at `short.BID − long.ASK`
+and marked at `short.MARK − long.MARK` — a gap of both half-spreads, charged as
+a loss at the instant of fill, on a lone stop with 60.5 cents of room. Measured
+$0.37 judged vs $0.97 booked on the fleet's shape. Sweep forensics 08-25..09-02:
+38 of 41 stopped while price NEVER reached the short strike on 22 measurable
+trades. Operator ruling: paper fills at mark. R stays judged on bid/ask.
+**RPT.A's sweep result is void** — 3 GREEN of 41 measured a bookkeeping
+artefact, not the strategy. **And check_plan_prepares S2 asserted the old basis
+throughout**, so the suite certified the mismatch.
 
 **v1.37 — 2026-09-02 — r218 — MEM.1 AND OI.1 OPENED FROM A LIVE OOM.** MU was
 OOM-killed at 14:20 ET. MEM.1: the primary expiry publishes every listed strike

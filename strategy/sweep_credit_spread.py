@@ -1,5 +1,26 @@
 """
-strategy/sweep_credit_spread.py  v4.7
+strategy/sweep_credit_spread.py  v4.8
+v4.8  2026-09-02  r219 — 🔴 THE ENTRY AND THE MARK WERE ON DIFFERENT SIDES OF THE QUOTE.
+      `search_wing` priced the credit as short.BID - long.ASK and that number
+      became `sig.entry_premium` — the position's entry of record — while
+      `position_manager._fetch_current_premium` marks a credit vertical at
+      short.MARK - long.MARK. The gap is BOTH HALF-SPREADS, present the
+      instant the position opens, and for a credit vertical a higher mark is a
+      LOSS. Measured on the fleet's shape: judged $0.37, booked $0.97, gap
+      $0.60 — against a lone stop carrying 60.5 cents of room. The position
+      was born at its stop.
+      🔑 SWEEP FORENSICS 2026-08-25..09-02 SAYS THE UNDERLYING NEVER DID IT:
+      38 of 41 stopped, price NEVER reached the short strike on any of 22
+      measurable trades, and moved 0.63 points toward it — implying a spread
+      delta of 0.96, which a 5-wide cannot carry.
+      ⚠️ OPERATOR RULING 2026-09-02: "I have a ladder for live offers, all
+      paper needs to fill at mark, period." The MARK is booked. The BID/ASK
+      credit is kept for the R hurdle — deciding on the conservative number
+      and booking the mark refuses trades that only clear R when priced
+      optimistically, so the error runs in the safe direction.
+      ⚠️ AND THE OLD BEHAVIOUR HAD A PASSING TEST: check_plan_prepares S2
+      asserted net_credit == 1.30, the bid/ask figure, so the suite certified
+      the mismatch. Re-derived to 1.33.
 v4.7  2026-08-27  r163 — A FORK TINE IS A MOVING LEVEL THIS STRATEGY MAY USE,
       ON A TOUCH. Operator, 2026-08-27: *"it's basically a moving level that
       sweep is allowed to use, but with a touch, not a reject. The plan would
@@ -578,6 +599,12 @@ class SweepPreparation:
     """
     __slots__ = ("tick", "sweep", "name", "pool", "side", "boundary", "conditions",
                  "unmet", "structural", "starved", "short", "long", "credit",
+                 # r219 — `judged` is the BID/ASK credit R was tested on;
+                 # `credit` is the MARK credit that gets BOOKED. __slots__ is
+                 # why this needs declaring: assigning an undeclared attribute
+                 # raises rather than silently creating one, which is the slot
+                 # doing its job.
+                 "judged",
                  "width", "stop_prem", "stop_dist", "r", "r_min", "swept_px",
                  "age", "rej", "ready")
 
@@ -591,6 +618,7 @@ class SweepPreparation:
         self.starved = []         # inputs the plan could not find
         self.short = self.long = None
         self.credit = self.width = self.stop_prem = self.stop_dist = None
+        self.judged = None
         self.r, self.r_min = None, R_FLOOR
         self.swept_px, self.age, self.rej = 0.0, 0, 0.0
         self.ready = False
@@ -604,10 +632,16 @@ class SweepPreparation:
     def trade_line(self) -> str:
         if not self.ready:
             return "no trade prepared"
+        # 🔑 TWO CREDITS, BOTH NAMED. `credit` is what gets BOOKED (mark, the
+        # operator's fill ruling); `judged` is what R was tested on (bid/ask).
+        # Printing one and labelling it the other is how the basis mismatch
+        # stayed invisible for the life of the strategy.
+        _j = getattr(self, "judged", None)
+        _jtxt = f" (judged {_j:.2f} bid/ask)" if _j is not None else ""
         return (f"sell {self.short.strike:g}{self.side[0].upper()} / buy "
-                f"{self.long.strike:g}{self.side[0].upper()}  credit {self.credit:.2f} "
-                f"(bid/ask)  stop {self.stop_prem:.2f}  R {self.r:.2f} "
-                f"(min {self.r_min:.2f})")
+                f"{self.long.strike:g}{self.side[0].upper()}  credit "
+                f"{self.credit:.2f} (mark){_jtxt}  stop {self.stop_prem:.2f}"
+                f"  R {self.r:.2f} (min {self.r_min:.2f})")
 
 
 class SweepCreditSpreadStrategy:
@@ -781,7 +815,11 @@ class SweepCreditSpreadStrategy:
                             f"the anchor is the trade"))
                     else:
                         t.check("contract", _short.strike, True)
-                        _best_r, _long, _credit, _bw = cv.search_wing(
+                        # 🔴 r219 — TWO CREDITS. `_credit` (bid/ask) is what R
+                        # is JUDGED on; `_fill` (mark) is what gets BOOKED.
+                        # Operator ruling 2026-09-02: "I have a ladder for live
+                        # offers, all paper needs to fill at mark, period."
+                        _best_r, _long, _credit, _bw, _fill = cv.search_wing(
                             _contracts, _short, side, R_FLOOR)
                         t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
                         if _long is None:
@@ -799,9 +837,22 @@ class SweepCreditSpreadStrategy:
                             if _credit <= 0:
                                 prep.structural.append(("credit",
                                     f"{side} {_short.strike:.2f}/{_long.strike:.2f} pays no credit"))
+                            elif _fill is None:
+                                # ⚠️ NO MARK ON A LEG IS NOT A REASON TO BOOK
+                                # THE BID/ASK NUMBER. Substituting it is the
+                                # exact defect r219 removes, so refuse instead.
+                                prep.structural.append((
+                                    "fill_mark",
+                                    f"{side} {_short.strike:.2f}/"
+                                    f"{_long.strike:.2f} has no usable mark on "
+                                    f"one leg — the fill price is unknown"))
                             else:
-                                _stop_prem = _credit * (1.0 + MAX_LOSS_PCT)
-                                _stop_dist = _stop_prem - _credit
+                                # ⚠️ THE STOP IS DERIVED FROM WHAT WAS BOOKED,
+                                # not from the hurdle. A stop measured off a
+                                # credit the position never had is the same
+                                # basis error one layer down.
+                                _stop_prem = _fill * (1.0 + MAX_LOSS_PCT)
+                                _stop_dist = _stop_prem - _fill
                                 _sv_ok, _sv_why = stop_survivable(
                                     _stop_dist, getattr(_short, "bid", 0.0),
                                     getattr(_short, "ask", 0.0))
@@ -810,7 +861,15 @@ class SweepCreditSpreadStrategy:
                                     prep.structural.append(("stop_vs_spread", _sv_why))
                                 else:
                                     prep.short, prep.long = _short, _long
-                                    prep.credit, prep.width = _credit, _bw
+                                    # `prep.credit` becomes sig.entry_premium
+                                    # (line ~889) and therefore the booked
+                                    # fill. It is the MARK credit now.
+                                    prep.credit, prep.width = _fill, _bw
+                                    # ⚠️ BOTH NUMBERS RIDE THE PLAN. The line
+                                    # said "credit N (bid/ask)" and after r219
+                                    # N is the MARK — a label that is now a lie
+                                    # unless the judged credit travels with it.
+                                    prep.judged = _credit
                                     prep.stop_prem, prep.stop_dist = _stop_prem, _stop_dist
                                     prep.r = t.r
                                     prep.ready = True

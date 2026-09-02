@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-215 Python modules across 13 local packages.
+216 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -47,7 +47,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `utils/time_utils.py` | 35 | alert_manager.py, broker_reconcile.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/__init__.py` | 25 | check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py |
 | `strategy/plan.py` | 25 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
-| `utils/math_utils.py` | 14 | entry_ladder.py, exit_engine.py, gex_pin_butterfly.py, liquidity_mapper.py |
+| `utils/math_utils.py` | 15 | credit_vertical.py, entry_ladder.py, exit_engine.py, gex_pin_butterfly.py |
 | `database/trade_logger.py` | 13 | check_condor_pairing.py, check_condor_stop_suppression.py, check_one_per_session.py, check_orb_resume.py |
 | `derived/base.py` | 13 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
 | `analysis/orb_engine.py` | 12 | base_strategy.py, check_atr_units.py, check_orb_restart.py, check_orb_resume.py |
@@ -407,8 +407,8 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `main.py`, `strategy/iron_condor_strategy.py`, `tests/check_condor_spec.py`, `tests/check_tent.py`
 
 ### `strategy/credit_vertical.py`
-- **calls:** (none)
-- **called by:** `strategy/iron_condor_strategy.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_plan_prepares.py`
+- **calls:** `utils/math_utils.py`
+- **called by:** `strategy/iron_condor_strategy.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_fill_basis.py`, `tests/check_plan_prepares.py`
 
 ### `strategy/criteria.py`
 - **calls:** `strategy/__init__.py`, `strategy/relaxed.py`
@@ -584,6 +584,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_feed_always_on.py`
 - **calls:** `data/__init__.py`, `data/candle_feed.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_fill_basis.py`
+- **calls:** `strategy/credit_vertical.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_gates.py`
@@ -892,7 +896,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/math_utils.py`
 - **calls:** (none)
-- **called by:** `analysis/liquidity_mapper.py`, `analysis/orb_engine.py`, `analysis/pitchfork.py`, `analysis/structure_analyzer.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `data/options_chain.py`, `execution/entry_ladder.py`, `execution/exit_engine.py`, `risk/risk_manager.py`, `strategy/gex_pin_butterfly.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
+- **called by:** `analysis/liquidity_mapper.py`, `analysis/orb_engine.py`, `analysis/pitchfork.py`, `analysis/structure_analyzer.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `data/options_chain.py`, `execution/entry_ladder.py`, `execution/exit_engine.py`, `risk/risk_manager.py`, `strategy/credit_vertical.py`, `strategy/gex_pin_butterfly.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
 
 ### `utils/mem_trace.py`
 - **calls:** (none)

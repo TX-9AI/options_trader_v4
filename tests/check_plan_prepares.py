@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.5  (2026-09-01, r208)
+tests/check_plan_prepares.py  v1.6  (2026-09-02, r219)
+v1.6  r219 — 🔴 S2 ASSERTED THE BASIS MISMATCH AND SO CERTIFIED IT. It
+      required `net_credit == 1.30`, the BID/ASK credit, while
+      position_manager marks a credit vertical at MID — so this file passed on
+      every run while every credit vertical was booked on one side of the
+      quote and marked on the other, losing both half-spreads at fill. The
+      fixture's 95P is 1.40/1.44 and the 92.5P is 0.08/0.10: judged 1.30, mark
+      1.33. Re-derived to the MARK per the operator's ruling that paper fills
+      at mark, with S2b requiring the plan line to NAME BOTH — it read
+      "credit N (bid/ask)" and N is now the mark, so an unlabelled number
+      would carry the same lie forward.
 v1.5  r208 — THE BUTTERFLY HYPOTHETICALS ARE RE-DERIVED. `calls_good` WAS the
       2026-09-01 trade: penny legs on a 1-wide ladder, debit 0.18, R 4.6, and
       the old code took it. It is kept as `calls_unsurvivable` and B1b, the
@@ -168,11 +178,26 @@ def main():
     lm = _LM(_Sweep("low_sweep", 96.0, "NY Low", reclaimed=True))
     sig = S.generate_signal(liq_map=lm, chain=_Chain(good_puts), **common)
     r2 = _row(st, "SweepCreditSpread", 2.0)
-    check("S2 reclaimed -> STRATEGY fires with the plan's strikes, credit, stop",
+    # 🔴 RE-DERIVED AT r219. The fixture's 95P is 1.40/1.44 and the 92.5P is
+    # 0.08/0.10, so the BID/ASK credit is 1.40 - 0.10 = 1.30 and the MARK
+    # credit is 1.42 - 0.09 = 1.33. The signal now BOOKS the mark, per the
+    # operator's ruling that paper fills at mark; R is still JUDGED on 1.30.
+    # ⚠️ ASSERTING 1.30 HERE WAS ASSERTING THE BASIS MISMATCH ITSELF — the
+    # entry was recorded at bid/ask while position_manager marks the position
+    # at mid, and the difference (both half-spreads) was booked as an instant
+    # loss on every credit vertical. This check passed throughout.
+    check("S2 reclaimed -> STRATEGY fires, BOOKING the mark credit",
           sig is not None and sig.is_valid and sig.short_put_contract.strike == 95.0
-          and sig.long_put_contract.strike == 92.5 and abs(sig.net_credit - 1.30) < 1e-9
-          and abs(sig.stop_premium - 1.30 * 1.15) < 1e-9 and r2 and r2[0] == "TAKE",
+          and sig.long_put_contract.strike == 92.5
+          and abs(sig.net_credit - 1.33) < 1e-9
+          and abs(sig.stop_premium - 1.33 * 1.15) < 1e-9 and r2 and r2[0] == "TAKE",
           f"{r2} sig={sig and (sig.strike, sig.net_credit)}")
+
+    # ⚠️ AND THE NARRATION MUST NAME BOTH. "credit N (bid/ask)" printing the
+    # mark is how this stayed invisible.
+    check("S2b the plan line names the mark AND the judged bid/ask credit",
+          r2 and "1.33 (mark)" in r2[1] and "judged 1.30 bid/ask" in r2[1],
+          str(r2)[:150])
 
     # S3
     P.begin_tick(3.0)

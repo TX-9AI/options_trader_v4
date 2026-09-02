@@ -1,5 +1,26 @@
 """
-strategy/credit_vertical.py  v4.2
+strategy/credit_vertical.py  v4.3
+v4.3  2026-09-02  r219 — 🔴 THE ENTRY AND THE MARK WERE ON DIFFERENT SIDES OF THE QUOTE.
+      `search_wing` priced the credit as short.BID - long.ASK and that number
+      became `sig.entry_premium` — the position's entry of record — while
+      `position_manager._fetch_current_premium` marks a credit vertical at
+      short.MARK - long.MARK. The gap is BOTH HALF-SPREADS, present the
+      instant the position opens, and for a credit vertical a higher mark is a
+      LOSS. Measured on the fleet's shape: judged $0.37, booked $0.97, gap
+      $0.60 — against a lone stop carrying 60.5 cents of room. The position
+      was born at its stop.
+      🔑 SWEEP FORENSICS 2026-08-25..09-02 SAYS THE UNDERLYING NEVER DID IT:
+      38 of 41 stopped, price NEVER reached the short strike on any of 22
+      measurable trades, and moved 0.63 points toward it — implying a spread
+      delta of 0.96, which a 5-wide cannot carry.
+      ⚠️ OPERATOR RULING 2026-09-02: "I have a ladder for live offers, all
+      paper needs to fill at mark, period." The MARK is booked. The BID/ASK
+      credit is kept for the R hurdle — deciding on the conservative number
+      and booking the mark refuses trades that only clear R when priced
+      optimistically, so the error runs in the safe direction.
+      ⚠️ AND THE OLD BEHAVIOUR HAD A PASSING TEST: check_plan_prepares S2
+      asserted net_credit == 1.30, the bid/ask figure, so the suite certified
+      the mismatch. Re-derived to 1.33.
 v4.2  2026-08-28  r175: pop_drift() — POP with the session's measured drift,
       signed toward safety, horizon-bounded (operator: "You have to get it
       firing in ESPECIALLY this type of day … A trend day we should be
@@ -52,6 +73,8 @@ a test asserts the defaults still match.
 import logging
 import math
 from typing import List, Optional, Sequence
+
+from utils.math_utils import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -311,12 +334,32 @@ def leg_order_from_slope(slope: float, flat_eps: float):
 # hold rate); it does not waive economics. Routing this through the hurdle
 # would restore the exact hole that produced the loop.
 def search_wing(contracts, short_contract, side: str, r_floor: float):
-    """(best_r, long_contract, credit, width) or (best_r, None, 0, 0).
+    """(best_r, long_contract, credit, width, fill_credit).
 
     Prices every listed strike beyond the short on BID/ASK — never mark, because
     the credit has to be one the market would actually pay — and returns the
     highest-R candidate. The caller decides what to do when `best_r < r_floor`;
     this reports, it does not refuse.
+
+    🔴 r219 — AND IT NOW RETURNS A SECOND CREDIT, BECAUSE THE DECISION AND THE
+    FILL ARE DIFFERENT QUESTIONS AND WERE BEING ANSWERED WITH ONE NUMBER.
+      · `credit`      = short.BID - long.ASK. The ECONOMIC HURDLE. R is judged
+        on a credit the market would actually pay, and that is unchanged.
+      · `fill_credit` = short.MARK - long.MARK. The PRICE BOOKED. Operator
+        ruling, 2026-09-02: "I have a ladder for live offers, all paper needs
+        to fill at mark, period."
+    ⚠️ MEASURED CONSEQUENCE OF CONFLATING THEM. `entry_premium` was the bid/ask
+    credit while `position_manager._fetch_current_premium` marks a credit
+    vertical at `short.mark - long.mark` — two bases, differing by BOTH
+    half-spreads, charged as a loss at the instant of fill. Sweep forensics,
+    2026-08-25..09-02: 38 of 41 exited on the lone stop with 60.5 cents of
+    room, while price NEVER reached the short strike on any of 22 measurable
+    trades and moved only 0.63 points toward it — a move that implies a spread
+    delta of 0.96, which a 5-wide cannot carry. The underlying never explained
+    the loss; the basis mismatch did.
+    ⚠️ AND THE HURDLE STAYS ON BID/ASK DELIBERATELY. Deciding on the
+    conservative credit and booking at the mark refuses trades that only clear
+    R when priced optimistically — the error runs in the safe direction.
     """
     try:
         k_short = float(getattr(short_contract, "strike", 0) or 0)
@@ -347,7 +390,20 @@ def search_wing(contracts, short_contract, side: str, r_floor: float):
             continue
         r = credit / risk
         if best is None or r > best[0]:
-            best = (round(r, 4), c, round(credit, 4), width)
+            # ⚠️ THE MARK CREDIT IS CARRIED ALONGSIDE, NOT INSTEAD. It is what
+            # gets BOOKED; `credit` is what gets JUDGED. If either leg has no
+            # usable mark the fill credit is None and the caller must say so
+            # rather than substitute the bid/ask number — that substitution is
+            # the defect this return value exists to end.
+            # ⚠️ `safe_float`, NOT a local `_f` — this file has no such helper
+            # and inventing one is the §0.1 failure. utils.math_utils.safe_float
+            # is what the rest of the tree uses and it rejects NaN, which a
+            # bare float() would let through as a mark.
+            _sm = safe_float(getattr(short_contract, "mark", None))
+            _lm = safe_float(getattr(c, "mark", None))
+            _fill = (round(max(0.0, _sm - _lm), 4)
+                     if _sm is not None and _lm is not None else None)
+            best = (round(r, 4), c, round(credit, 4), width, _fill)
     if best is None:
-        return 0.0, None, 0.0, 0.0
+        return 0.0, None, 0.0, 0.0, None
     return best
