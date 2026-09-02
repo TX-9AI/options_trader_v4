@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.36
+# BACKLOG.md — v1.37
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -149,6 +149,13 @@ management, and no single number separates those.
 | **RPT.B** | **MFE/MAE — ARE THE STOPS TOO LOOSE OR TOO TIGHT, AND WHAT SIGNALS AN EXIT.** Comprehensive, **per stop TYPE** rather than per strategy. Two halves: (1) placement — the heat WINNERS survived is the strongest available evidence about where a stop belongs, and if winners routinely take more than the stop allows then the stop is manufacturing the left tail (measured 2026-09-02: 21 of 22 runaway losses fell between −20% and −32%, σ 4.4 points — that is a threshold, not a market outcome); (2) corroboration — vectors that signal *a move is exhausted* or *a breach is imminent*. 🔴 **THE HARD PART IS THAT THESE MUST MOVE WHILE THE TRADE IS OPEN**, and `fire_snapshot` is FILL-TIME ONLY. Candidates that actually change intra-trade: `price_vs_vwap` crossing back, `adx` rolling over, `charm` at the strike, and the **sign of `net_gex`** — the flip from dampening to amplifying, the closest thing on hand to "the reason for this trade stopped being true". Requires joining `surface_series` and `indicator_series` by timestamp BETWEEN entry and exit. That is a build, not a column read. | ⬜ |
 | **RPT.C** | **MANAGEMENT — THE CONDOR PLAN, WHICH IS NOT A STRATEGY.** Operator, 2026-09-02: the condor *"is not a standalone strategy, but more so a position management 'strategy' due to the special nature of how we intend to defend it"* — so it cannot be judged by the same measures as ORB or the runaway. 🔴 **AND NO CONDOR HAS FORMED TO DATE.** The question the study must answer is whether that is **the design protecting us** or **too strict to allow one to form**, and those two look identical from the outside — which is exactly why it needs a study rather than an opinion. Both halves are checkable: `plan_ledger` records every leg-one fill and its terminal state, and `gate_disposition` records which rung refused leg two, so "never got a first leg" and "got a leg and never paired" are distinguishable. ⚠️ Operator: *"that third one is going to take some teamwork and creativity"* — design it together before building. | ⬜ |
 
+### FLEET MEMORY AND OPEN INTEREST — measured 2026-09-02
+
+| id | finding | state |
+|---|---|---|
+| **MEM.1** | 🔴 **THE PRIMARY EXPIRY CHAIN IS NOT BANDED; THE AUX TENORS ARE.** `options_chain.publish` writes every listed `streamer_symbol` for the session expiry into `chain_subs`, while TERM.1 caps each aux tenor at ~9 strikes. MU lists **356 contracts spanning $450-$1370 against a $950 spot** — ±45%, most of it 30%+ OTM and untradeable by anything in the book. MEASURED 2026-09-02 against CVX, same uptime (5.96 h): MU `candle_feed` **117 MB vs CVX 28 MB — 4.2x**; MU bot 233 MB after 49 MINUTES vs CVX 180 MB after SIX HOURS. MU was OOM-killed at 14:20 ET (`Failed with result 'oom-kill'`, status 9/KILL). ⚠️ **AND THE CONSTRAINT WAS ALREADY UNDERSTOOD** — options_chain.py's own doctrine block says full chains would blow the subscription cap and *"SPX has already been OOM-KILLED at 419 MB on chain volume"*, then bands only the aux tenors. ⚠️ **NOT A LEAK — MEASURED AND REFUTED TWICE.** Twelve samples over 2.75 min: 242.7 → 244.2 MB, peak-to-trough 1.45 MB, drift 0.53 MB/min (~32 MB/h, ordinary heap growth). No spike, no runaway. A high baseline on the fleet's tightest margin (112 MB available vs 343-476 elsewhere) is the whole story. **OPERATOR RULING 2026-09-02: UPGRADE MU**, as SPX already was. Banding the primary chain stays open as a separate question — it would help every 951 MB box, and it risks hiding a strike the wing search legitimately walks out to. | ⬜ upgrade agreed |
+| **OI.1** | 🔴 **OPEN INTEREST HAS NEVER WORKED IN v4, IN TWO STAGES.** v4.0 called `get_market_data_by_type` — a coroutine function — WITHOUT `await`; `for r in rows` raised `'coroutine' object is not iterable`, the broad `except` logged it as a warning, and nobody chased it. v4.1 added the missing await via `_await`, which fixes the syntax and inherits a LIFECYCLE fault: `_await` calls **`asyncio.run`, which creates a NEW event loop and closes it**, while `session` is the long-lived SDK session created once at startup and holding loop-bound primitives. The log names one: `<asyncio.locks.Event object at 0x…> is bound to a different event loop`, then `Event loop is closed` once that first loop is gone. A session built in one loop and driven from N others cannot work by construction. ⚠️ **`_BATCH = 100`, so a 356-contract chain is FOUR calls** — which is why this is MU-only in the fleet (2 occurrences in 30 min on MU, **zero on all fourteen others**): a narrow chain makes one call and the 300 s `_RETRY_S` backoff hides the rest. 🔑 **CONSEQUENCE: GEX IS A GAMMA-SQUARED SURFACE, NOT DEALER POSITIONING**, on any box where those batches fail — the file's own header already says so. FIX: one loop for the session's lifetime (`run_until_complete`), or build the session inside the loop that drives it. ⚠️ Touches a live data path on all fifteen boxes — build it against a stubbed SDK session and land it deliberately, not mid-session. | ⬜ |
+
 ---
 
 ## PART 2 — CLOSED
@@ -227,6 +234,17 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.37 — 2026-09-02 — r218 — MEM.1 AND OI.1 OPENED FROM A LIVE OOM.** MU was
+OOM-killed at 14:20 ET. MEM.1: the primary expiry publishes every listed strike
+while the aux tenors are banded at ~9 — MU carries 356 contracts spanning
+±45% of spot and its `candle_feed` is 4.2x CVX's at the same uptime. Measured,
+and two theories of mine were refuted along the way: it is NOT a runaway leak
+(12 samples, 0.53 MB/min drift) and NOT a spike (peak-to-trough 1.45 MB).
+Operator ruled to upgrade MU. OI.1: `_await` calls `asyncio.run`, creating a
+new event loop per call, against a long-lived SDK session holding loop-bound
+primitives — so open interest has never worked in v4, and GEX is a
+gamma-squared surface wherever the batches fail.
 
 **v1.36 — 2026-09-02 — r217 — RPT.A / RPT.B / RPT.C OPENED: THE THREE REPORTS.**
 The operator's stated end state for the reporting side, recorded before any of
