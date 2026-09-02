@@ -1,5 +1,19 @@
 """
-strategy/gex_pin_butterfly.py  v4.8
+strategy/gex_pin_butterfly.py  v4.9
+v4.9  2026-09-01  r215 — RECORD-ONLY: `pin_dist_pct` and `pin_strike_raw` are
+      written to plan_check on every evaluation. `pin_strike` is now BOUNDED to
+      PIN_MAX_DIST_PCT of spot in compute_gex (see data/gex_data.py) because
+      the argmax was unbounded and wandered — GOOGL published twenty distinct
+      pins spanning 245-450 in one session against a ~345 price. That bound is
+      a PRIOR; these two checks put the evidence in the warehouse so it can be
+      fitted against outcomes rather than defended, the same discipline r208
+      applied to EM_MAX_FRAC. NEITHER GATES ANYTHING.
+      ⚠️ AND THE REACH GATE HAS BEEN DOING THIS JOB BY ACCIDENT. A wandering
+      pin lands far from spot, inflating `pin_em_fraction`, which EM_MAX_FRAC
+      then refuses — so EM_MAX_FRAC has been filtering mis-located pins as a
+      side effect, with no one aware of it. Anyone loosening that bound on
+      reachability grounds must know it was also the pin's sanity check.
+gex_pin_butterfly.py  v4.8
 v4.8  2026-09-01  r208 — THE WING IS SEARCHED, THE FLOOR MUST CLEAR THE
       SPREAD, AND RELAXED IS GONE FROM THIS STRATEGY.
       🔴 2026-09-01: five flies fired at 12:00:00 and three were stopped out
@@ -479,7 +493,8 @@ class GEXPinButterflyStrategy:
     STRUCTURAL = ("legs", "debit", "r", "pin_played", "stop_survivable")
     PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + ("gex", "wing_width", "width",
                                                     "debit_pct_width", "stop_vs_spread",
-                                                    "r_muted")
+                                                    "r_muted", "pin_dist_pct",
+                                                    "pin_strike_raw")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
@@ -548,6 +563,15 @@ class GEXPinButterflyStrategy:
             t.check("pin_played", pin, False)
         pinning = env == "PINNING" and pin > 0
         prep.cond("pinning", pin or None, f"PINNING (now {env or 'unknown'})", pinning)
+        # ⚠️ r215 — RECORDED, GATES NOTHING. `pin_strike` is now bounded to
+        # PIN_MAX_DIST_PCT of spot in compute_gex, because the argmax was
+        # unbounded and wandered (GOOGL published 20 distinct pins spanning
+        # 245-450 in one session against a ~345 price). That bound is a PRIOR.
+        # This writes the RAW argmax's distance to plan_check on every
+        # evaluation so the prior can be fitted against outcomes instead of
+        # defended — the same discipline r208 applied to EM_MAX_FRAC.
+        t.check("pin_dist_pct", getattr(gex, "pin_dist_pct", None))
+        t.check("pin_strike_raw", getattr(gex, "pin_strike_raw", None))
         # 🔴 r208 — BOTH BOUNDS ARE FOUNDATIONAL AND BOTH COME FROM ONE PLACE.
         # See relaxed_bounds(): pinned to themselves, so relaxation moves
         # neither, and a checker can execute the same function the strategy

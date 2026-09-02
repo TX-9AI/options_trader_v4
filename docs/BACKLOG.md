@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.33
+# BACKLOG.md — v1.34
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -214,6 +214,21 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.34 — 2026-09-01 — r215 — THE PIN STRIKE IS BOUNDED TO SPOT; BFLY.11-13
+OPENED.** `pin_strike` was an unbounded argmax over the whole chain and
+wandered: GOOGL published 20 distinct pins spanning 245-450 in one session
+against a ~345 price. Now bounded to 3% of spot (a PRIOR), with the raw argmax
+and its distance recorded so it can be fitted. Out of range = NO pin, never an
+ATM substitute. **BFLY.11: EM_MAX_FRAC has been filtering mis-located pins by
+accident** — a wandering pin inflates `pin_em_fraction` — so loosening it on
+reachability grounds would also remove the pin's sanity check. **BFLY.12: the
+charm question is NOT RESOLVED** — pooled correlations flip sign within a
+single day (charm vs crossings +0.27 pooled, -0.07 on 08-31 alone) because
+09-01 has ZERO crossing variance; `pin_concentration` held up better
+(crossings +0.40, |end-pin| -0.55 within 08-31). **BFLY.13: is
+`pin_concentration` computed off the same unbounded argmax?** If so the one
+signal that survived was measured at a possibly-wrong strike. UNEXAMINED.
 
 **v1.33 — 2026-09-01 — r214 — RPT.6 CLOSED; RPT.10 OPENED.**
 `query.py`'s unrealized line is signed by structure. Confirmed display-only:

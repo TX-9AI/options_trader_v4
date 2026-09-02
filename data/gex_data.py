@@ -1,5 +1,32 @@
 """
-data/gex_data.py  v4.0
+data/gex_data.py  v4.1
+v4.1  2026-09-01  r215 — 🔴 THE PIN STRIKE WAS A BARE ARGMAX OVER THE WHOLE
+      CHAIN, UNBOUNDED. `max(strikes_sorted, key=net_gex)` with nothing
+      constraining it to strikes near spot, so when net GEX is flat or noisy
+      the argmax WANDERS. Measured from the warehouse, 2026-08-31: GOOGL
+      published TWENTY distinct pins spanning 245-450 in a single session,
+      roughly bracketing a ~345 price, and AMZN twenty-six spanning 212-275.
+      Neither name moves 30% in a day — that is an argmax jumping as one
+      strike edges past another, not a magnet migrating.
+      🔑 A PIN IS A CLAIM THAT GAMMA WILL PULL PRICE TO A STRIKE, and a
+      strike 30% away cannot pull today's price anywhere, however large its
+      net GEX. Bounded to PIN_MAX_DIST_PCT of spot.
+      ⚠️ THE WALLS ARE LEFT UNBOUNDED DELIBERATELY. A wall IS allowed to be
+      far away — that is what makes it a wall — and the sweep reads them for
+      confluence. Only the PIN asserts something about today's price.
+      ⚠️ OUT OF RANGE MEANS NO PIN, NEVER A SUBSTITUTE. `pin_strike` stays
+      0.0, which every consumer already reads as absent. This deliberately
+      does NOT wire `best_butterfly_center()` — a guard that has existed all
+      along with ZERO callers — because its ATM fallback INVENTS a pin the
+      chain never published, against r208's "the apex IS the trade; a
+      nearest-strike substitute is a different one". Its `max_distance=5.0`
+      is also DOLLARS, meaningless across a fleet holding SPX at 7,700 and
+      NFLX at 83; this bound is relative.
+      ⚠️ 3% IS A PRIOR AND SAYS SO. Sized so every plausible pin in the
+      2026-08-31/09-01 sample survives (QQQ 710-724 on ~707, SPX 7675-7810 on
+      ~7700) and every implausible one does not. `pin_strike_raw` and
+      `pin_dist_pct` are recorded on the snapshot and written to plan_check
+      so it can be FITTED rather than defended.
 Gamma exposure, call/put walls, pin, from the live chain.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -66,6 +93,19 @@ MIN_OI_THRESHOLD = 10
 # Gate 5 could never open, on any box, since v3.0) ────────────────────────────
 import os as _os
 GEX_PIN_CONCENTRATION = float(_os.environ.get("OT_GEX_PIN_CONC", "0.15"))
+# 🔴 r215 — HOW FAR FROM SPOT A STRIKE MAY BE AND STILL BE CALLED A PIN.
+# ⚠️ RELATIVE, NEVER ABSOLUTE. The dead `best_butterfly_center()` used
+# `max_distance=5.0` DOLLARS, which is meaningless across this fleet: $5 is
+# 0.06% of SPX at 7,700 and 6% of NFLX at 83. One fleet-wide dollar figure
+# would be far too loose on the index and far too tight on the cheap names.
+# ⚠️ 3% IS A PRIOR AND IS LABELLED AS ONE (r208's category 1: set a baseline
+# where none exists, say it is a prior, do not pretend it is a fit). Sized from
+# the 2026-08-31/09-01 evidence: the pins that look right sit inside ~2.5% of
+# spot (QQQ 710-724 on ~707, SPX 7675-7810 on ~7700) while the wandering ones
+# are 29-30% away (GOOGL 245 and 450 against ~345). 3% keeps every plausible
+# pin in the sample and excludes every implausible one — but it has NOT been
+# fitted against outcomes, and `pin_dist_pct` is recorded so it can be.
+PIN_MAX_DIST_PCT = float(_os.environ.get("OT_GEX_PIN_MAX_DIST_PCT", "0.03"))
 #   PINNING additionally requires the pin strike to hold >= this share of gross |GEX|
 GEX_SIGN_RATIO        = float(_os.environ.get("OT_GEX_SIGN_RATIO", "0.20"))
 #   |net|/gross below this = NEUTRAL (no meaningful dealer-positioning signal)
@@ -96,7 +136,11 @@ class GEXSnapshot:
     # Key levels
     call_wall:          float = 0.0       # Strike with highest call GEX
     put_wall:           float = 0.0       # Strike with highest put GEX magnitude
-    pin_strike:         float = 0.0       # Strike with highest net GEX (price magnet)
+    pin_strike:         float = 0.0       # Strike with highest net GEX WITHIN
+                                           # PIN_MAX_DIST_PCT of spot; 0.0 = none
+    pin_strike_raw:     float = 0.0       # r215: the UNBOUNDED argmax, recorded
+                                           # so the bound can be fitted later
+    pin_dist_pct:       float = 0.0       # r215: |raw pin - spot| / spot
     flip_strike:        float = 0.0       # Strike where net GEX crosses zero
 
     # Per-strike breakdown (sorted by strike)
@@ -212,10 +256,40 @@ def compute_gex(chain: OptionsChain, spot_price: float) -> GEXSnapshot:
     if put_wall_strike:
         snapshot.put_wall = put_wall_strike.strike
 
-    # ── Pin strike — highest net GEX (strongest price magnet) ────────────────
+    # ── Pin strike — highest net GEX WITHIN REACH OF SPOT ────────────────────
+    # 🔴 r215 — THIS WAS A BARE ARGMAX OVER THE WHOLE CHAIN, UNBOUNDED. Nothing
+    # constrained it to strikes near price, so when net GEX is flat or noisy
+    # across the chain the argmax wanders: measured 2026-08-31, GOOGL published
+    # TWENTY distinct pins spanning 245-450 in one session, roughly bracketing
+    # a ~345 price, and AMZN twenty-six spanning 212-275. That is not a magnet
+    # migrating — it is an argmax jumping as one strike edges past another.
+    # 🔑 A PIN IS A CLAIM THAT GAMMA WILL PULL PRICE TO A STRIKE. A strike 30%
+    # away cannot pull today's price anywhere, so it is not a pin however large
+    # its net GEX. The walls are different and are deliberately left unbounded:
+    # a wall IS allowed to be far away — that is what makes it a wall.
+    # ⚠️ OUT OF RANGE MEANS NO PIN, NEVER A SUBSTITUTE PIN. `pin_strike` stays
+    # 0.0, which every consumer already reads as "no pin" (the butterfly's
+    # `pinning` condition requires pin > 0). This deliberately does NOT use
+    # `best_butterfly_center()`, which falls back to ATM — inventing a pin
+    # where the chain published none, against r208's ruling that "the apex IS
+    # the trade; a nearest-strike substitute is a different one".
+    # ⚠️ THE BOUND IS A PRIOR, NOT A FIT — nobody has measured this yet. The
+    # RAW argmax and its distance are recorded alongside so the distribution
+    # can be studied and the bound moved on evidence rather than on my guess.
     pin = max(strikes_sorted, key=lambda s: s.net_gex, default=None)
     if pin:
-        snapshot.pin_strike = pin.strike
+        snapshot.pin_strike_raw = pin.strike
+        if spot_price and spot_price > 0:
+            snapshot.pin_dist_pct = abs(pin.strike - spot_price) / spot_price
+            near = [s for s in strikes_sorted
+                    if abs(s.strike - spot_price) / spot_price
+                    <= PIN_MAX_DIST_PCT]
+            best = max(near, key=lambda s: s.net_gex, default=None)
+            snapshot.pin_strike = best.strike if best else 0.0
+        else:
+            # ⚠️ NO SPOT MEANS THE DISTANCE IS UNKNOWABLE, and an unknowable
+            # distance is not a passed check. Refuse rather than pass through.
+            snapshot.pin_strike = 0.0
 
     # ── Flip strike — where net GEX crosses zero ──────────────────────────────
     # Walk from low to high strikes, find where net GEX goes from negative to positive

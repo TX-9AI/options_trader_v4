@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-214 Python modules across 13 local packages.
+215 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -176,7 +176,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/__init__.py`
 - **calls:** (none)
-- **called by:** `tests/check_audit_20260823.py`, `tests/check_feed_always_on.py`
+- **called by:** `tests/check_audit_20260823.py`, `tests/check_feed_always_on.py`, `tests/check_pin_bounded.py`
 
 ### `data/candle_feed.py`
 - **calls:** `config.py`, `data/tasty_client.py`
@@ -196,7 +196,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/gex_data.py`
 - **calls:** `data/options_chain.py`
-- **called by:** `main.py`
+- **called by:** `main.py`, `tests/check_pin_bounded.py`
 
 ### `data/macro_data.py`
 - **calls:** `config.py`, `data/market_data.py`, `utils/time_utils.py`
@@ -668,6 +668,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_pairing_table.py`
 - **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_pin_bounded.py`
+- **calls:** `data/__init__.py`, `data/gex_data.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_plan_lifecycle.py`
