@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.35
+# BACKLOG.md — v1.36
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -136,6 +136,19 @@ against each box. That is right **during** a session and wrong after it.
 | **ASK.3** | Disposition of `AUDIT.md`, `AUDIT_HANDOFF.md`, `AUDIT_FINDINGS.md` and the four `HANDOFF_*` docs — spent thread contracts. Keep, archive, or delete? | ⬜ |
 | **ASK.4** | `debug_status.py` and `stress_theta_bleed.py` sit at repo root. Move to `tests/` per WA §28, or are they entry points? | ⬜ |
 
+### THE THREE REPORTS — operator's stated end state, 2026-09-02
+
+⚠️ **THESE THREE ARE THE DESTINATION, NOT THREE TICKETS.** Each answers a
+question the other two cannot, and the operator's framing is that conflating
+them is the failure — a "good trade" today is a compound of entry, stop and
+management, and no single number separates those.
+
+| id | goal | state |
+|---|---|---|
+| **RPT.A** | 🔑 **ENTRIES — WHAT SEPARATES A GOOD ENTRY FROM A BAD ONE, PER STRATEGY.** Operator, 2026-09-02: *"I want to be sure that we don't conflate success entirely on the work of our stops."* So the outcome variable is **NOT P&L**: it is whether the entry was **directionally correct long enough to start out in profit** — MFE above entry — and *"whether it remained there is a separate question entirely, not for this report to decide."* That is NF.1's never-favourable line used as the DEPENDENT variable rather than as a footnote, and it is the one outcome the stop cannot manufacture. ⚠️ **THE VECTORS ARE NOT CHOSEN YET AND MUST NOT BE ASSUMED.** Operator: *"could be a 1-hr pitchfork, or maybe ATR/ADX or VWAP — who knows?"* and he is prepared to query the bucket repeatedly to find candidates. Everything on `fire_snapshot` is available at fill: adx / primary_adx, atr / atr_normalized / bb_width_pct, realised_vol_cc / realised_vol_parkinson, atm_iv, variance_risk_premium, price_vs_vwap, levels, fork / fork_state, charm, vanna, gex / net_gex, iv_slope, expected_move_iv / expected_move_straddle, session_fraction_remaining, gap / gap_pct / gap_class, trend_direction, overall_direction. ⚠️ **AND THE SAMPLE CAPS THE SEARCH:** the limiting figure is the smaller outcome class, at 10-20 events per variable — the candidate hunt is legitimate, but the CONFIRMING set must be named before it is tested or it is a fishing licence. | ⬜ |
+| **RPT.B** | **MFE/MAE — ARE THE STOPS TOO LOOSE OR TOO TIGHT, AND WHAT SIGNALS AN EXIT.** Comprehensive, **per stop TYPE** rather than per strategy. Two halves: (1) placement — the heat WINNERS survived is the strongest available evidence about where a stop belongs, and if winners routinely take more than the stop allows then the stop is manufacturing the left tail (measured 2026-09-02: 21 of 22 runaway losses fell between −20% and −32%, σ 4.4 points — that is a threshold, not a market outcome); (2) corroboration — vectors that signal *a move is exhausted* or *a breach is imminent*. 🔴 **THE HARD PART IS THAT THESE MUST MOVE WHILE THE TRADE IS OPEN**, and `fire_snapshot` is FILL-TIME ONLY. Candidates that actually change intra-trade: `price_vs_vwap` crossing back, `adx` rolling over, `charm` at the strike, and the **sign of `net_gex`** — the flip from dampening to amplifying, the closest thing on hand to "the reason for this trade stopped being true". Requires joining `surface_series` and `indicator_series` by timestamp BETWEEN entry and exit. That is a build, not a column read. | ⬜ |
+| **RPT.C** | **MANAGEMENT — THE CONDOR PLAN, WHICH IS NOT A STRATEGY.** Operator, 2026-09-02: the condor *"is not a standalone strategy, but more so a position management 'strategy' due to the special nature of how we intend to defend it"* — so it cannot be judged by the same measures as ORB or the runaway. 🔴 **AND NO CONDOR HAS FORMED TO DATE.** The question the study must answer is whether that is **the design protecting us** or **too strict to allow one to form**, and those two look identical from the outside — which is exactly why it needs a study rather than an opinion. Both halves are checkable: `plan_ledger` records every leg-one fill and its terminal state, and `gate_disposition` records which rung refused leg two, so "never got a first leg" and "got a leg and never paired" are distinguishable. ⚠️ Operator: *"that third one is going to take some teamwork and creativity"* — design it together before building. | ⬜ |
+
 ---
 
 ## PART 2 — CLOSED
@@ -214,6 +227,18 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.36 — 2026-09-02 — r217 — RPT.A / RPT.B / RPT.C OPENED: THE THREE REPORTS.**
+The operator's stated end state for the reporting side, recorded before any of
+it is built. RPT.A (entries) turns on an outcome variable the STOP CANNOT
+MANUFACTURE — was the entry directionally correct long enough to start out in
+profit — because judging entries by P&L measures the exit too. Its vectors are
+NOT chosen and must not be assumed; the candidate hunt against the bucket is
+the next piece of work. RPT.B (MFE/MAE) is per stop TYPE and needs values that
+move WHILE THE TRADE IS OPEN, which `fire_snapshot` does not carry. RPT.C
+(management) is scoped to the condor, which has never formed — and whether that
+is protection or over-strictness is the study, since the two are
+indistinguishable from the outside.
 
 **v1.35 — 2026-09-02 — r216 — THE P&L PERCENT COLUMN WAS OFF BY 100x SINCE
 r210.** `pnl_pct` is a FRACTION (`(exit - entry)/entry`), so a doubling is 1.07.
