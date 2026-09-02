@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.38
+# BACKLOG.md — v1.39
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -234,6 +234,18 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.39 — 2026-09-02 — r220 — EVERY FILL PATH AUDITED: MARK ON PAPER, LADDER
+ON LIVE EXCEPT ORB.** Two gaps found by walking all six strategies.
+**TrendCreditSpread** still booked `short.bid − long.ask` — r219 fixed the
+prepare layer and `_build_signal` recomputed it at the signal layer, so the fix
+looked complete from either end. **Credit verticals posted a static limit** and
+never walked it; every other live entry prices through `ladder_registry`, and
+only ORB's standing offer is exempt by design. The spread walk runs from the
+best credit down to mark (operator: *"from the top. Best price that will
+fill."*), built from the four leg quotes — whose midpoint is exactly what paper
+books, so live and paper share a floor. `refuse` on a non-fill, `clear` only on
+a complete fill. check_fill_basis F5/F6/F7 keep the audit as checks.
 
 **v1.38 — 2026-09-02 — r219 — 🔴 THE ENTRY AND THE MARK WERE ON DIFFERENT
 SIDES OF THE QUOTE.** Credit verticals were booked at `short.BID − long.ASK`

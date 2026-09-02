@@ -1,5 +1,17 @@
 """
-strategy/trend_credit_spread.py  v4.7
+strategy/trend_credit_spread.py  v4.8
+v4.8  2026-09-02  r220 — 🔴 r219 FIXED THE PREPARE LAYER AND THIS FILE UNDID IT
+      AT THE SIGNAL LAYER. `_build_signal` had no credit in scope, so it
+      recomputed `short.bid - long.ask` three hundred lines below the fix —
+      and `main.py:2220` hands `sig.net_credit` to `paper_fill_credit`, whose
+      parameter is named `mark`. TCS kept booking the bid/ask credit while
+      position_manager marked it at mid: BOTH HALF-SPREADS charged as a loss
+      at fill, on every trade, exactly as the sweep did. `prep.credit` is
+      passed through now and `entry_premium` is set explicitly.
+      ⚠️ A FIX APPLIED AT ONE LAYER AND REVERSED AT ANOTHER LOOKS COMPLETE
+      FROM EITHER END — only walking every strategy's fill path found it,
+      which is what the operator asked for. check_fill_basis F5 is that walk,
+      kept as a check.
 v4.7  2026-09-02  r219 — 🔴 THE ENTRY AND THE MARK WERE ON DIFFERENT SIDES OF THE QUOTE.
       `search_wing` priced the credit as short.BID - long.ASK and that number
       became `sig.entry_premium` — the position's entry of record — while
@@ -476,12 +488,16 @@ class TrendCreditSpread:
                             now_et=now_et)
         if not prep.ready or prep.unmet or prep.structural or prep.starved:
             return prep.tick.already()
+        # ⚠️ `prep.credit` IS PASSED NOW. `_build_signal` had no credit in scope
+        # and so recomputed one from bid/ask — which is how r219's fix at the
+        # prepare layer was silently undone at the signal layer.
         return prep.tick.take(self._build_signal(prep.side, prep.short, prep.long,
                                                  prep.direction, prep.bound,
-                                                 current_price, ms, prep.bars))
+                                                 current_price, ms, prep.bars,
+                                                 prep.credit))
 
     def _build_signal(self, side, short, long_c, direction, boundary,
-                      current_price, ms, bars):
+                      current_price, ms, bars, fill_credit):
         """Condor-leg shape, so `_execute_condor_leg` runs it unchanged.
 
         `is_trend_credit` is the flag `exit_engine` keys on. WITHOUT IT this leg
@@ -512,7 +528,18 @@ class TrendCreditSpread:
         )
         sig.is_credit_vertical = True         # credit-spread math, not debit
         sig.is_trend_credit = True            # exit_engine: breach-or-nickel ONLY
-        sig.net_credit = max(0.0, (short.bid or 0.0) - (long_c.ask or 0.0))
+        # 🔴 r220 — THIS RECOMPUTED THE BID/ASK CREDIT AND BYPASSED r219. r219
+        # moved `prep.credit` to the mark, and this line then overwrote the
+        # decision three hundred lines later — `main.py:2220` hands
+        # `sig.net_credit` to `paper_fill_credit`, whose parameter is named
+        # `mark`. So TCS kept booking `short.bid - long.ask` while
+        # position_manager marked it at mid: both half-spreads charged as a
+        # loss at fill, on every trade, exactly as the sweep did.
+        # ⚠️ A FIX APPLIED AT THE PREPARE LAYER AND UNDONE AT THE SIGNAL LAYER
+        # LOOKS COMPLETE FROM EITHER END. Only walking every strategy's fill
+        # path found it, which is why the operator asked for that walk.
+        sig.net_credit = fill_credit
+        sig.entry_premium = fill_credit     # what the row records
         if side == "call":
             sig.short_call_contract, sig.long_call_contract = short, long_c
         else:

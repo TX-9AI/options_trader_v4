@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-tests/check_fill_basis.py  v1.0
+tests/check_fill_basis.py  v1.2
+v1.2  2026-09-02  r220 — F6/F7: every live entry walks a ladder EXCEPT ORB.
+      Credit verticals posted a static limit at `net_credit` and never walked
+      it — not exempt, just unwired. ORB's standing offer stays exempt by
+      design and F7 guards that carve-out.
+v1.1  2026-09-02  r220 — F5 WALKS EVERY STRATEGY'S FILL PATH. r219 fixed the
+      prepare layer and TrendCreditSpread undid it at the signal layer:
+      `_build_signal` had no credit in scope and recomputed bid/ask three
+      hundred lines below the fix. A fix applied at one layer and reversed at
+      another looks complete from either end.
 v1.0  2026-09-02  r219 — THE ENTRY AND THE MARK WERE ON DIFFERENT SIDES OF THE
       QUOTE, AND THE DIFFERENCE WAS BOOKED AS A LOSS AT FILL.
 
@@ -110,6 +119,92 @@ def main():
     nan.mark = float("nan")
     *_x, fill3 = search_wing([short, nan], short, "call", 1.0)
     check("F4 a NaN mark is not booked as a price", fill3 is None, str(fill3))
+
+    # ── F5 — EVERY FILL PATH BOOKS THE MARK ─────────────────────────────
+    # 🔴 r219 FIXED THE PREPARE LAYER AND TCS UNDID IT AT THE SIGNAL LAYER.
+    # `_build_signal` had no credit in scope, so it recomputed
+    # `short.bid - long.ask` three hundred lines below the fix — and
+    # `main.py:2220` hands that to `paper_fill_credit`, whose parameter is
+    # named `mark`. A fix applied at one layer and reversed at another looks
+    # complete from either end; only walking EVERY strategy's fill path finds
+    # it. This check is that walk, kept.
+    # ⚠️ SOURCE-LEVEL ON PURPOSE. Constructing six live signals needs six sets
+    # of chain, trend and market-state fixtures; the claim here is narrow —
+    # no strategy computes its booked price from bid/ask — and that is exactly
+    # what the source shows.
+    # ⚠️ LINE BY LINE, NO REGEX WITH ESCAPES. Two attempts at this check died
+    # on a backslash-n collapsing a level inside a generator — the same trap
+    # that broke a shell command earlier today. Iterating lines needs no
+    # escapes at all, so there is nothing to get wrong.
+    paths = ("orb_strategy.py", "runaway_continuation.py",
+             "gex_pin_butterfly.py", "sweep_credit_spread.py",
+             "trend_credit_spread.py")
+    bad = []
+    for fn in paths:
+        src = open(os.path.join(_root, "strategy", fn), encoding="utf-8")
+        for ln in src.read().splitlines():
+            t = ln.strip()
+            if t.startswith("#"):
+                continue
+            if ("net_credit" in t or "entry_premium" in t) and "=" in t \
+                    and ".bid" in t and ".ask" in t:
+                bad.append(f"{fn}: {t[:56]}")
+    check("F5 no strategy books its entry from bid/ask", not bad, "; ".join(bad))
+
+    # ⚠️ AND THE HURDLE MUST STILL USE IT — if bid/ask vanished from
+    # credit_vertical entirely, the conservative R test would have gone with it.
+    cvsrc = open(os.path.join(_root, "strategy", "credit_vertical.py"),
+                 encoding="utf-8").read()
+    check("F5b the R hurdle still prices on bid/ask",
+          "credit = max(0.0, bid - ask)" in cvsrc)
+
+    # ── F6 — EVERY LIVE ENTRY WALKS A LADDER, EXCEPT ORB ────────────────
+    # 🔴 CREDIT VERTICALS POSTED A STATIC LIMIT AND NEVER WALKED IT. Both
+    # entry_engine paths price through `_walk_price` -> `ladder_registry`, and
+    # ORB is exempt BY DESIGN — `_place_standing_offer`: "ORB only: ONE limit
+    # at the mark, posted once, left to rest." The credit verticals were not
+    # exempt, just unwired, so a spread that did not fill at `net_credit` sat
+    # there instead of conceding.
+    # ⚠️ OPERATOR, 2026-09-02: "everything but ORB using ladder entries", and
+    # the walk for a credit spread runs FROM THE TOP — best credit first,
+    # conceding toward mark, which is where the ladder's own "never posts worse
+    # than mark" rule stops it.
+    mainsrc = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
+    check("F6 the credit-vertical live order prices through the ladder",
+          "_lr.price_for(_lkey" in mainsrc and '"sell"' in mainsrc)
+
+    # 🔑 A LADDER THAT NEVER ADVANCES IS THE STATIC LIMIT WITH A NEW NAME.
+    # `refuse` on a non-fill, `clear` on a complete fill — and NOT on a
+    # partial, because the remainder is still an open intent.
+    check("F6b a non-fill advances the walk and a full fill ends it",
+          "_lr.refuse(_lkey" in mainsrc and "_lr.clear(_lkey)" in mainsrc
+          and "fill.quantity >= _req_contracts" in mainsrc)
+
+    # ⚠️ AND THE STRUCTURE QUOTE IS BUILT PER LEG. `short.ask - long.bid` is
+    # the best credit and `short.bid - long.ask` the worst; their midpoint is
+    # `short.mid - long.mid`, exactly what paper books — so live and paper
+    # share a floor. Building it from the combined mark plus a shade is
+    # limit_ladder v1.1's recorded mistake.
+    check("F6c the structure quote is built from the four leg quotes",
+          "_sa - _lb" in mainsrc and "_sb - _la" in mainsrc)
+
+    # ── F7 — ORB STAYS EXEMPT ───────────────────────────────────────────
+    # ⚠️ THE CARVE-OUT IS DELIBERATE AND MUST SURVIVE. A standing offer that
+    # walks is not a standing offer.
+    eesrc = open(os.path.join(_root, "execution", "entry_engine.py"),
+                 encoding="utf-8").read()
+    offer = eesrc[eesrc.index("def _place_standing_offer"):]
+    offer = offer[:offer.index("def _place_butterfly")]
+    # ⚠️ CODE LINES ONLY. The first draft matched the COMMENT that documents
+    # the carve-out — "NO `_walk_price`, NO `ladder_registry`" — and went red
+    # on the very prose asserting the property it was checking. Same class as
+    # the §20 canaries that keep matching changelog text.
+    _code = [l for l in offer.splitlines()
+             if l.strip() and not l.strip().startswith(("#", '"', "⚠", "🔑", "🔴"))]
+    _code = "\n".join(_code)
+    check("F7 ORB's standing offer still does NOT walk",
+          "self._walk_price(" not in _code and "_lr.price_for(" not in _code,
+          "the carve-out is deliberate: a standing offer that walks is not one")
 
     print()
     if _fails:

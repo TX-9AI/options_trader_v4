@@ -1,5 +1,24 @@
 """
-main.py  v4.34
+main.py  v4.35
+v4.35  2026-09-02  r220 — 🔴 CREDIT VERTICALS POSTED A STATIC LIMIT AND NEVER
+       WALKED IT. Every other live entry prices through `ladder_registry` —
+       `_place_single_leg` and `_place_butterfly` both call `_walk_price` —
+       and only ORB is exempt BY DESIGN (`_place_standing_offer`: "ORB only:
+       ONE limit at the mark, posted once, left to rest"). The credit
+       verticals were not exempt, just never wired: a spread that did not
+       fill at `net_credit` sat there instead of conceding.
+       ⚠️ OPERATOR 2026-09-02: "everything but ORB using ladder entries", and
+       on direction: "the walk for credit spreads is from the top. Best price
+       that will fill."
+       🔑 THE STRUCTURE QUOTE IS BUILT PER LEG, never the combined mark plus a
+       shade (limit_ladder v1.1's recorded mistake). Selling the spread, the
+       best credit is `short.ask - long.bid` and the worst `short.bid -
+       long.ask`; their midpoint is `short.mid - long.mid`, which is EXACTLY
+       what paper books — so live walks down from the best credit, stops at
+       mark by the ladder's own rule, and live and paper share a floor.
+       ⚠️ AND THE WALK IS ADVANCED: `refuse` on a non-fill (a PARTIAL counts,
+       per the operator's definition), `clear` only on a COMPLETE fill. A
+       ladder that never advances is the static limit with a new name.
 v4.34  2026-09-01  r213 (chunk E) — THE FLAT BRANCH SAYS WHY THE MANAGEMENT
        PLANS ARE QUIET. `_plan_skip_management("no open position — nothing to
        manage")` on the else side of the `has_open_position()` split. Until
@@ -2175,10 +2194,53 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
                     symbol=long_contract.symbol,
                     action=OrderAction.BUY_TO_OPEN, quantity=contracts),
             ]
+            # 🔴 r220 — THIS POSTED A STATIC LIMIT AND NEVER WALKED IT. Every
+            # other live entry path prices through `ladder_registry`:
+            # `_place_single_leg` and `_place_butterfly` both call
+            # `_walk_price`, and only ORB is exempt by design
+            # (`_place_standing_offer`: "ORB only: ONE limit at the mark,
+            # posted once, left to rest"). Credit verticals were not exempt —
+            # they were simply never wired, so a spread that did not fill at
+            # `net_credit` sat there instead of conceding.
+            # ⚠️ OPERATOR, 2026-09-02: "everything but ORB using ladder
+            # entries", and on direction: "the walk for credit spreads is from
+            # the top. Best price that will fill."
+            # 🔑 THE STRUCTURE'S QUOTE, BUILT PER LEG — never the combined mark
+            # plus a guess, which is limit_ladder v1.1's recorded lesson. We
+            # SELL the spread, so the best credit is `short.ask - long.bid` and
+            # the worst is `short.bid - long.ask`; their midpoint is
+            # `short.mid - long.mid`, which is EXACTLY the credit paper books.
+            # So live walks DOWN from the best credit and stops at mark, paper
+            # books mark, and the two share a floor — the ladder's own rule
+            # that it "never posts worse than mark" does the rest.
+            # ⚠️ CAPTURED BEFORE `contracts` IS REASSIGNED to the filled size —
+            # comparing the fill against a variable the fill already overwrote
+            # would make every partial look complete.
+            _req_contracts = contracts
+            _sb = float(getattr(short_contract, "bid", 0.0) or 0.0)
+            _sa = float(getattr(short_contract, "ask", 0.0) or 0.0)
+            _lb = float(getattr(long_contract, "bid", 0.0) or 0.0)
+            _la = float(getattr(long_contract, "ask", 0.0) or 0.0)
+            _st_bid, _st_ask = max(0.0, _sb - _la), max(0.0, _sa - _lb)
+            _lkey = f"cv:{INSTRUMENT}:{short_contract.symbol}:{long_contract.symbol}"
+            _limit, _lwhy = net_credit, "static (no usable structure quote)"
+            try:
+                from execution import ladder_registry as _lr
+                _got = _lr.price_for(_lkey, "sell", _st_bid, _st_ask, INSTRUMENT)
+                if _got:
+                    _limit, _lwhy = float(_got[0]), str(_got[1])
+            except Exception as _lexc:                          # noqa: BLE001
+                # ⚠️ FALLS BACK TO THE MARK CREDIT, NEVER TO A WORSE PRICE —
+                # the same fail direction `_walk_price` uses.
+                logger.warning("[ladder] credit-vertical pricing failed (%s) — "
+                               "posting at the mark credit", _lexc)
+            logger.info("[ladder] %s credit vertical: posting %.2f (%s) "
+                        "[structure %.2f/%.2f, mark %.2f]",
+                        INSTRUMENT, _limit, _lwhy, _st_bid, _st_ask, net_credit)
             order = NewOrder(
                 time_in_force = OrderTimeInForce.DAY,
                 order_type    = OrderType.LIMIT,
-                price         = Decimal(str(round(net_credit, 2))),  # + = credit
+                price         = Decimal(str(round(_limit, 2))),  # + = credit
                 legs          = legs,
             )
             response = account.place_order(session, order, dry_run=False)
@@ -2190,6 +2252,17 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
             fill = confirm_order_fill(session, account, response.order, basis,
                                       what="condor-leg entry")
             if not fill.filled or fill.quantity <= 0 or fill.net_price is None:
+                # ⚠️ r220 — A NON-FILL MUST ADVANCE THE WALK OR THE LADDER IS
+                # DECORATION: without this the next tick re-offers the same
+                # rung forever, which is the static limit this replaced wearing
+                # a ladder's name. `refuse` is also the right call on a PARTIAL
+                # — the operator's definition is "didn't completely fill at
+                # that price", and the filled part is booked separately.
+                try:
+                    from execution import ladder_registry as _lr
+                    _lr.refuse(_lkey, _limit)
+                except Exception as _rexc:                      # noqa: BLE001
+                    logger.debug("[ladder] refuse failed: %s", _rexc)
                 logger.warning(f"Condor leg entry NOT filled ({fill.detail}) — "
                                f"no position recorded")
                 if fill.working_order_id:
@@ -2204,6 +2277,17 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
             contracts   = fill.quantity          # book what ACTUALLY filled
             fill_credit = fill.net_price         # broker net, not our limit
             order_id    = fill.order_id or ""
+            # ⚠️ AND A COMPLETE FILL ENDS THE WALK. `ladder_registry.clear`:
+            # "Done with this intent — filled, or abandoned. Never leave a walk
+            # to rot." A PARTIAL is deliberately NOT cleared here: the
+            # remainder is still an open intent and must resume one rung
+            # further in, per the operator's definition of a refusal.
+            if fill.quantity >= _req_contracts:
+                try:
+                    from execution import ladder_registry as _lr
+                    _lr.clear(_lkey)
+                except Exception as _cexc:                      # noqa: BLE001
+                    logger.debug("[ladder] clear failed: %s", _cexc)
         except Exception as e:
             logger.error(f"Condor leg order failed: {e}")
             return
