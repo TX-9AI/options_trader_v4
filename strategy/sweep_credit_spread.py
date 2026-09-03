@@ -1,5 +1,46 @@
 """
-strategy/sweep_credit_spread.py  v5.0
+strategy/sweep_credit_spread.py  v5.1
+v5.1  2026-09-03  r233 — 🔴 THE STRIKE MUST CLEAR THE TESTED RANGE, AND THE
+      NEAREST LIVE LEVEL WINS. Operator, 2026-09-03: *"the strike cannot sit
+      at any level that is part of the testing range... I don't want to get
+      stopped out by another retest. It has to be just beyond that, if only a
+      little bit"*, and *"the level in question needs to be the closest to the
+      current price."*
+      🔴 THE HOLE r107 DID NOT SEE, AND ITS OWN DOCSTRING STATES BOTH SIDES OF
+      IT three paragraphs apart: *"it sits FURTHER from spot than anything
+      price reached"* (the intent) and *"nearest is 7635 — the strike price
+      traded THROUGH"* (the deep-pierce case, documented without noticing the
+      contradiction). PROVEN AT bd6f25e on the header's own example: pool
+      7639.01, wick 7633 gave 7635, which sits BETWEEN them. The candidate
+      bound was the POOL when it needed to be the WICK EXTREME; the intent was
+      right all along.
+      ⚠️ AND IT IS THE NEAREST OF WHAT IS BEYOND — `min(cand)` / `max(cand)`,
+      never `min(abs(k - sweep_price))`, which is precisely what let an inside
+      strike win. "Just beyond, if only a little bit."
+      ⚠️ THE POOL BOUND IS KEPT AND IS NOW IMPLIED — a wick is beyond its pool
+      by definition — because it DOCUMENTS the invariant. P4 pins that it never
+      binds, so it is known inert rather than assumed so.
+      🔑 SELECTION MOVES FROM RECENCY TO DISTANCE. Both branches picked the
+      freshest raid — this one by `min(bars_ago)`, the fallback by the map's
+      `recent_sweep` — so a level three points out beat one 0.6 points out if
+      it landed a bar sooner, and selling the cusp of a distant level is still
+      distant. Freshness survives as the TIE-BREAK, which is the only question
+      distance cannot answer. `level_rank` is EXTRACTED to module level so the
+      checker drives it and not a copy (C.23).
+      ⚠️ THE FALLBACK IS NO LONGER `recent_sweep`: leaving it would have put
+      leg two on distance and the primary entry on recency — one rule with two
+      answers. It survives only when NO candidate carries a usable pool price,
+      and says so at INFO.
+      ⚠️ THIS RETIRES THE CROSS-TIMEFRAME UNIT BUG AT THIS SITE rather than
+      fixing it; SWEEP.6 stays OPEN for the other selector and the mapper.
+      ⚠️ MEASURED SCOPE, STATED UP FRONT: `pierce_depth` ran a 0.0032 median
+      against a 0.5685 max, so shallow pierces dominate and this re-prices only
+      the deep tail. `pierce_pts`, `level_dist_pts` and `level_dist_pct` ride
+      the plan RECORD-ONLY so how often it fires is a query, not an argument.
+      ⚠️ AND IT DOES NOT FIX THE MEASURED LOSSES. Panel 1 of the 08-25..09-03
+      forensics: price never reached the strike on 22 of 22, and the stops were
+      mark-driven (r219). A real hole, correctly closed, on a failure mode this
+      sample never showed.
 v5.0  2026-09-03  r231 — 🔴 `or 999` MADE THE FRESHEST SWEEP THE STALEST.
       `bars_ago` is an int field defaulting to 0 and SWP.10 counts it from the
       RECLAIM bar, so a sweep that reclaimed on the CURRENT bar is 0 — and
@@ -369,6 +410,34 @@ GATES = {
 }
 
 
+def level_rank(sw, price_now: float):
+    """Sort key for choosing WHICH swept level to prepare, or None if unusable.
+
+    🔴 r233 — DISTANCE FROM SPOT FIRST, FRESHNESS ONLY AS THE TIE-BREAK.
+    Operator, 2026-09-03: *"the level in question needs to be the closest to
+    the current price."* Both selection branches used recency, so a raid on a
+    level three points out beat one 0.6 points out if it landed a bar sooner —
+    and selling the cusp of a distant level is still distant.
+
+    ⚠️ EXTRACTED TO MODULE LEVEL SO THE CHECKER DRIVES THIS AND NOT A COPY.
+    As a closure inside `prepare()` it was unimportable, and a test that
+    re-implements the ranking it pins tests itself — C.23, the r181 sizing
+    checker that stayed green for two days doing exactly that.
+
+    ⚠️ None IS UNUSABLE, NEVER A LARGE DISTANCE. A sweep with no pool price
+    must drop out of the ranking rather than sort last, or a missing field
+    becomes a far-away level and the caller cannot tell the two apart.
+    """
+    try:
+        _p = float(getattr(sw, "pool_price", 0.0) or 0.0)
+        _n = float(price_now or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if _p <= 0 or _n <= 0:
+        return None
+    return (abs(_p - _n), int(getattr(sw, "bars_ago", 999) or 0))
+
+
 def strike_beyond_sweep(sweep_price: float, pool_price: float, ceiling: bool,
                         contracts=None, increment: float = 0.0) -> Optional[float]:
     """🔴 r107 — THE FIRST STRIKE BEYOND THE SWEEP EXTREME. Operator's ruling,
@@ -433,12 +502,37 @@ def strike_beyond_sweep(sweep_price: float, pool_price: float, ceiling: bool,
     # level the sweep did not establish.
     def _pick(strikes):
         if ceiling:
-            cand = [k for k in strikes if k >= pool_price - 1e-9]
+            # \U0001f534 r233 - AT OR BEYOND THE **WICK EXTREME**, NOT MERELY THE POOL.
+            # Operator, 2026-09-03: *"the strike cannot sit at any level that is
+            # part of the testing range. I do not want to get stopped out by
+            # another retest. It has to be just beyond that, if only a little
+            # bit."*
+            # \u26a0\ufe0f THIS CLOSES A HOLE r107 DID NOT SEE, and its own docstring
+            # states BOTH sides of it three paragraphs apart: "it sits FURTHER
+            # from spot than anything price reached" (the intent) and "nearest
+            # is 7635 - the strike price traded THROUGH" (the deep-pierce case).
+            # PROVEN AT bd6f25e on the header's own two examples: pool 7639.01,
+            # shallow wick 7638.17 -> 7635, beyond the wick, correct; DEEP wick
+            # 7633.00 -> 7635, which sits BETWEEN the wick and the pool. Price
+            # traded clean through 7635 on its way to 7633, so a second test of
+            # the same size takes the position out. The intent was right; the
+            # candidate bound was the pool when it needed to be the extreme.
+            # \u26a0\ufe0f THE POOL BOUND IS KEPT AND IS NOW IMPLIED - a wick is beyond
+            # its pool by definition, so this can only ever narrow the set. It
+            # stays because it DOCUMENTS the invariant, and check_strike_beyond
+            # P3 pins that it never binds; a guard proven inert is different
+            # from one deleted on the assumption that it is.
+            cand = [k for k in strikes
+                    if k >= pool_price - 1e-9 and k >= sweep_price - 1e-9]
         else:
-            cand = [k for k in strikes if k <= pool_price + 1e-9]
+            cand = [k for k in strikes
+                    if k <= pool_price + 1e-9 and k <= sweep_price + 1e-9]
         if not cand:
             return None
-        best = min(cand, key=lambda k: abs(k - sweep_price))
+        # "just beyond, if only a little bit" - the NEAREST of what is beyond,
+        # never the nearest in absolute terms, which is what let an inside
+        # strike win on a deep pierce.
+        best = min(cand) if ceiling else max(cand)
         # ⚠️ A TRUNCATED CHAIN MUST NOT BECOME A WILD STRIKE. "Nearest" always
         # returns something; if the extreme lies past the end of the chain the
         # nearest strike can be hundreds of points away, and selling it would be
@@ -728,7 +822,9 @@ class SweepCreditSpreadStrategy:
     STRUCTURAL = ("geometry", "spent_level", "short_anchor", "wing_r_best",
                   "credit", "stop_vs_spread")
     PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + (
-        "sweep", "contract", "wing", "width", "risk", "r")
+        "sweep", "contract", "wing", "width", "risk", "r",
+        # r233 record-only telemetry - gates nothing, exists to be fitted
+        "pierce_pts", "level_dist_pts", "level_dist_pct")
 
     def __init__(self):
         self.planner = Plan(self.name, self.PLAN_CHECKS)
@@ -758,29 +854,61 @@ class SweepCreditSpreadStrategy:
         # may fire") the plan prepares the freshest sweep of THAT side; without
         # one, the map's most recent sweep. The plan chooses which level to
         # PREPARE; the strategy's conditions decide whether it FIRES.
-        sweep = None
-        if required_side:
-            # ⚠️ LEG TWO REQUIRES A REJECTION AT THE SITE. A tine TOUCH is not
-            # one (operator, 2026-08-27), so touch events are never selected
-            # here — only a real sweep of the authorized side.
-            want_kind = "low_sweep" if required_side == "put" else "high_sweep"
-            best = None
-            for sw in (getattr(liq_map, "sweeps", None) or []):
-                if str(getattr(sw, "kind", "") or "") != want_kind:
-                    continue
-                if getattr(sw, "touch", False):
-                    continue
-                if best is None or (getattr(sw, "bars_ago", 999) < getattr(best, "bars_ago", 999)):
-                    best = sw
-            sweep = best
-            t.direction = required_side
-        else:
-            sweep = getattr(liq_map, "recent_sweep", None)
+        # ⚠️ PRICE IS VALIDATED FIRST NOW: r233 selects the level BY DISTANCE
+        # from spot, so the selector cannot run before the thing it ranks on.
         price_now = safe_float(price_now)
         if not price_now or price_now <= 0 or price_now > 1e7:
             prep.starved.append("price_now")
             t.starved("price_now")
             return prep
+        # 🔴 r233 - THE NEAREST LIVE LEVEL WINS, NOT THE MOST RECENT RAID.
+        # Operator, 2026-09-03: *"the level in question needs to be the closest
+        # to the current price that's ever held."* Both branches used RECENCY:
+        # this one took min(bars_ago) across every level, and the fallback took
+        # `recent_sweep`, the map's minutes-normalised freshest. So a raid on a
+        # level three points out beat one 0.6 points out if it landed a bar
+        # sooner - and selling the cusp of a distant level is still distant,
+        # which is what makes this the change that gives the strike rule its
+        # meaning.
+        # ⚠️ RECENCY IS NOT DISCARDED, IT IS DEMOTED TO THE TIE-BREAK. Two
+        # levels at the same distance are separated by freshness, which is the
+        # only question distance cannot answer.
+        # ⚠️ AND THIS RETIRES THE CROSS-TIMEFRAME UNIT BUG AT THIS SITE RATHER
+        # THAN FIXING IT: `bars_ago` is counted in each sweep's OWN timeframe,
+        # so comparing a 15m sweep's 4 against a 5m sweep's 6 compared 60
+        # minutes against 30 (SWEEP.6). Distance carries no units problem.
+        # The tie-break can still see it, so SWEEP.6 stays OPEN for the other
+        # site and for liquidity_mapper.
+        sweep = None
+        if required_side:
+            # ⚠️ LEG TWO REQUIRES A REJECTION AT THE SITE. A tine TOUCH is not
+            # one (operator, 2026-08-27), so touch events are never selected
+            # here - only a real sweep of the authorized side.
+            want_kind = "low_sweep" if required_side == "put" else "high_sweep"
+            _cands = [sw for sw in (getattr(liq_map, "sweeps", None) or [])
+                      if str(getattr(sw, "kind", "") or "") == want_kind
+                      and not getattr(sw, "touch", False)]
+            t.direction = required_side
+        else:
+            # ⚠️ THE FALLBACK IS NO LONGER `recent_sweep`. That field is the
+            # MAP's pick and is chosen by minutes, so leaving it here would
+            # have left the primary entry path on recency while leg two moved
+            # to distance - one rule with two answers, which is the split this
+            # repo keeps finding. Touch events stay eligible here (a tine
+            # TOUCH is a valid trigger outside leg two, r163).
+            _cands = list(getattr(liq_map, "sweeps", None) or [])
+        _ranked = [(r, sw) for r, sw in
+                   ((level_rank(s, price_now), s) for s in _cands)
+                   if r is not None]
+        if _ranked:
+            sweep = min(_ranked, key=lambda rs: rs[0])[1]
+        elif not required_side:
+            # every candidate had an unusable pool price - fall back to the
+            # map's own pick rather than going blind, and say so.
+            sweep = getattr(liq_map, "recent_sweep", None)
+            if sweep is not None:
+                logger.info("[sweep_cs] no candidate carried a usable pool "
+                            "price; falling back to the map's recent_sweep")
         if not sweep:
             t.hold(f"no {required_side + ' ' if required_side else ''}sweep on the "
                    f"liquidity map to prepare — waiting for a named pool to be swept")
@@ -818,6 +946,24 @@ class SweepCreditSpreadStrategy:
         prep.cond("rejection", rej, self.CONDITIONS["rejection"], rej >= MIN_REJECTION_PCT)
         _max_rej = relaxed.widen(MAX_REJECTION_PCT, 3.0, name="pierce_ceiling")
         prep.cond("pierce_depth", rej, f"<= {_max_rej*100:.3f}%", rej <= _max_rej)
+        # \U0001f511 r233 RECORD-ONLY - HOW OFTEN THE DEEP CASE ACTUALLY FIRES, and
+        # how far the chosen level sat from spot. Both GATE NOTHING and are
+        # written so the r233 rulings can be FITTED against outcomes instead of
+        # defended (WA \u00a731; same shape as r198's wing_stretch and r215's
+        # pin_dist_pct). `pierce_pts` is the width of the TESTED RANGE the
+        # strike must now clear; `level_dist_pts` is what the nearest-level
+        # rule was chosen on. Points AND percent, because points alone are not
+        # comparable across an $83 NFLX and a $7,700 SPX.
+        try:
+            _pp = float(getattr(sweep, "pool_price", 0.0) or 0.0)
+            _sx = float(getattr(sweep, "sweep_price", 0.0) or 0.0)
+            if _pp > 0 and _sx > 0:
+                t.check("pierce_pts", round(abs(_pp - _sx), 4), None)
+                t.check("level_dist_pts", round(abs(_pp - price_now), 4), None)
+                t.check("level_dist_pct",
+                        round(abs(_pp - price_now) / price_now * 100.0, 4), None)
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
         b = boundary_from_sweep(getattr(sweep, "kind", ""))
         if not b:
             t.refuse("boundary", f"sweep kind '{getattr(sweep, 'kind', '')}' names no boundary")

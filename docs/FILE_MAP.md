@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-222 Python modules across 13 local packages.
+223 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -51,9 +51,9 @@ Change these with the most care; a break here reaches everything downstream.
 | `database/trade_logger.py` | 14 | check_condor_pairing.py, check_condor_stop_suppression.py, check_one_per_session.py, check_orb_resume.py |
 | `analysis/orb_engine.py` | 13 | base_strategy.py, check_atr_units.py, check_orb_rearm_zone.py, check_orb_restart.py |
 | `derived/base.py` | 13 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
+| `strategy/sweep_credit_spread.py` | 13 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
 | `strategy/base_strategy.py` | 12 | check_entry_gate.py, check_orb_geometry.py, check_signal_kwargs.py, check_sweep_spread.py |
 | `strategy/runaway_continuation.py` | 12 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
-| `strategy/sweep_credit_spread.py` | 12 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
 | `data/tasty_client.py` | 11 | candle_feed.py, check_standing_offer.py, condor_roll.py, entry_engine.py |
 
 ## Every module
@@ -452,7 +452,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/sweep_credit_spread.py`
 - **calls:** `analysis/gate_report.py`, `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`, `strategy/plan.py`, `strategy/relaxed.py`, `utils/math_utils.py`
-- **called by:** `database/trade_logger.py`, `main.py`, `tests/check_atr_units.py`, `tests/check_chain_ordering.py`, `tests/check_dispatch.py`, `tests/check_entry_windows.py`, `tests/check_plan_prepares.py`, `tests/check_pool_geometry.py`, `tests/check_structure_viable.py`, `tests/check_sweep_liveness.py`, `tests/check_sweep_spread.py`, `tests/stress_entry_path.py`
+- **called by:** `database/trade_logger.py`, `main.py`, `tests/check_atr_units.py`, `tests/check_chain_ordering.py`, `tests/check_dispatch.py`, `tests/check_entry_windows.py`, `tests/check_plan_prepares.py`, `tests/check_pool_geometry.py`, `tests/check_strike_beyond.py`, `tests/check_structure_viable.py`, `tests/check_sweep_liveness.py`, `tests/check_sweep_spread.py`, `tests/stress_entry_path.py`
 
 ### `strategy/trend_credit_spread.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`, `strategy/plan.py`
@@ -752,6 +752,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_status_panel.py`
 - **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_strike_beyond.py`
+- **calls:** `strategy/sweep_credit_spread.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_structure_viable.py`

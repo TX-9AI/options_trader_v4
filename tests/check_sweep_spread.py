@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-tests/check_sweep_spread.py  v1.0
+tests/check_sweep_spread.py  v1.1
+v1.1  2026-09-03  r233 — S7c RE-DERIVED, NOT PATCHED. It asserted
+      PARITY with the pre-r107 rule on every case that rule could answer,
+      which was right while r107 only claimed to WIDEN the strategy. r233
+      moves the candidate bound from the pool to the WICK EXTREME, so parity
+      now certifies the defect: on a deep pierce the old answer sat between
+      the wick and the pool, and price had already traded through it. The
+      invariant replacing it is that the strike never sits inside the tested
+      range, plus S7d that it is the NEAREST strike beyond the wick.
 
 r99 — THE SWEEP CREDIT SPREAD CAN FIRE, AND IT FIRES AS A CREDIT SPREAD.
 
@@ -110,15 +118,33 @@ check("S7a SPX shallow sweep (the operator's case) sells the 7635",
       f"{_S(7638.17, 7639.01, False, contracts=_spx)}")
 check("S7b and the OLD rule declined it outright",
       _P(7638.17, 7639.01, False, 5) is None)
-# every case the old rule COULD answer must be unchanged — this ruling widens
-# the strategy, it does not re-price the trades it was already taking.
+# 🔴 S7c RE-DERIVED AT r233, NOT PATCHED. It asserted parity with `_P`, the
+# PRE-r107 rule, on every case that rule could answer — correct when r107's
+# only claim was to widen the strategy. r233 changes the candidate bound from
+# the POOL to the WICK EXTREME (operator, 2026-09-03: the strike "cannot sit
+# at any level that is part of the testing range"), so parity is now the wrong
+# assertion: on a DEEP pierce the old answer sat between the wick and the pool
+# and price had already traded through it. Asserting parity here would
+# certify the defect on every run, which is what the OLD `check_plan_prepares`
+# S2 did for the r219 fill basis.
+# THE INVARIANT REPLACING PARITY: the strike is never inside the tested range.
 for name, sw, pool, ceil_, inc, chain in (
         ("deep floor",   7633.0, 7639.01, False, 5, _spx),
         ("deeper floor", 7628.0, 7639.01, False, 5, _spx),
         ("shallow ceil", 7661.2, 7660.0,  True,  5, _spx),
         ("deep ceil",    7667.0, 7660.0,  True,  5, _spx)):
-    _new, _old = _S(sw, pool, ceil_, contracts=chain), _P(sw, pool, ceil_, inc)
-    check(f"S7c {name}: unchanged from the old rule", _new == _old, f"{_new} vs {_old}")
+    _new = _S(sw, pool, ceil_, contracts=chain)
+    _inside = (_new is not None and
+               ((pool < _new < sw) if ceil_ else (sw < _new < pool)))
+    check(f"S7c {name}: the strike clears the tested range", not _inside,
+          f"{_new} (pool {pool}, wick {sw})")
+    # and it is the NEAREST beyond, not merely somewhere beyond
+    _grid = [c.strike for c in chain]
+    _beyond = [k for k in _grid if (k >= sw if ceil_ else k <= sw)]
+    if _beyond and _new is not None:
+        _want = min(_beyond) if ceil_ else max(_beyond)
+        check(f"S7d {name}: it is the nearest strike beyond the wick",
+              _new == _want, f"{_new} vs {_want}")
 
 check("S7d 1-wide symbols also resolve (they mostly did before)",
       _S(706.3, 706.8, False, contracts=_qqq) == 706.0)

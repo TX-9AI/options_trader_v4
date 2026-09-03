@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.50
+# BACKLOG.md — v1.51
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,57 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.51 — 2026-09-03 — r233 — 🔴 THE STRIKE MUST CLEAR THE TESTED RANGE, AND
+THE NEAREST LIVE LEVEL WINS.** Operator, 2026-09-03: *"the strike cannot sit at
+any level that is part of the testing range... I don't want to get stopped out
+by another retest. It has to be just beyond that, if only a little bit"*, and
+*"the level in question needs to be the closest to the current price."*
+🔴 **THE HOLE, AND r107's DOCSTRING STATES BOTH SIDES OF IT** three paragraphs
+apart — *"it sits FURTHER from spot than anything price reached"* (the intent)
+and *"nearest is 7635 — the strike price traded THROUGH"* (the deep-pierce case,
+documented without noticing the contradiction). **Proven at `bd6f25e` on the
+header's own example:** pool 7639.01, wick 7633 → **7635, which sits between
+them.** Price traded clean through it on the way down, so a second test of the
+same size takes the position out. The candidate bound was the POOL when it
+needed to be the WICK EXTREME — r107's intent was right, its bound was not.
+⚠️ And it is **the nearest of what is beyond** — `min(cand)`/`max(cand)`, never
+`min(abs(k - sweep_price))`, which is exactly what let an inside strike win.
+⚠️ The pool bound is **kept and now implied**; P4 pins it never binds, so it is
+known inert rather than assumed so.
+🔑 **SELECTION MOVES FROM RECENCY TO DISTANCE.** Both branches took the freshest
+raid — this one `min(bars_ago)`, the fallback the map's `recent_sweep` — so a
+level three points out beat one 0.6 points out if it landed a bar sooner.
+Freshness survives as the **tie-break**, the one question distance cannot
+answer. `level_rank` **extracted to module level so the checker drives it and
+not a copy** (C.23). The `recent_sweep` fallback survives only when no candidate
+carries a usable pool price, and says so at INFO — leaving it in place would
+have put leg two on distance and the primary entry on recency, one rule with
+two answers.
+⚠️ **RETIRES SWEEP.6 AT THIS SITE RATHER THAN FIXING IT** — distance carries no
+units problem. SWEEP.6 stays OPEN for the other selector and `liquidity_mapper`.
+⚠️ **SCOPE, MEASURED:** `pierce_depth` ran a **0.0032 median against a 0.5685
+max**, so shallow pierces dominate and only the deep tail re-prices. `pierce_pts`,
+`level_dist_pts` and `level_dist_pct` ride the plan **record-only** so how often
+it fires is a query rather than an argument (WA §31, same shape as r198's
+`wing_stretch`).
+🔴 **AND IT DOES NOT FIX THE MEASURED LOSSES.** Forensics 08-25..09-03: price
+never reached the strike on **22 of 22**, and the stops were mark-driven (r219).
+A real hole, correctly closed, on a failure mode this sample never showed.
+⚠️ **"EVER HELD" IS DEPRIORITISED** by operator ruling — a level is a point, not
+a range, so the prior-hold requirement matters less. `level_ledger.touch_count`
+stays recorded and ungated (SWEEP.8).
+`tests/check_strike_beyond.py` v1.0, 12 checks, **born red 3 + a named
+capability failure** at `bd6f25e`. `check_sweep_spread` v1.1 **re-derived**:
+its S7c asserted PARITY with the pre-r107 rule, which now certifies the defect
+— the same shape as the old `check_plan_prepares` S2 certifying the r219 fill
+basis. 77/77 checkers green.
+
+| id | question | state |
+|---|---|---|
+| **SWEEP.10** | Does the deep-pierce case fire often enough to matter, and does clearing the wick cost more credit than it saves in stop-outs? Answerable from `pierce_pts` + `level_dist_pts` once a session banks. | 🔲 OPEN |
+| **SWEEP.2** | Still the blocker. Moving the strike further out on deep pierces pushes credit **down**, against `R_FLOOR` 1.00. Consistent with §2 doctrine (*"a deep pierce means a WEAK level"*) but it does not help R. | 🔲 OPEN |
+| **SWEEP.6** | Cross-timeframe `bars_ago` — retired at the primary selector, still live in `_sweep_at_level` and `liquidity_mapper:~1057`. | 🔲 OPEN |
 
 **v1.50 — 2026-09-03 — r232 / dtp r265 — SWEEP.8 OPENED AND INSTRUMENTED: DOES
 A LEVEL'S DEFENDED COUNT PREDICT WHETHER IT HOLDS?** Operator, 2026-09-03:
