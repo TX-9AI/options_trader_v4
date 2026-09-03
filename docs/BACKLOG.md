@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.47
+# BACKLOG.md — v1.48
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,54 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.48 — 2026-09-03 — r230 — 🔴 SWP.5 WAS RULED ON 2026-08-11 AND NEVER
+REACHED THE CODE. SWEEP.1 CLOSED.** `sweep_credit_spread` read
+`SWEEP_CS_MAX_AGE_BARS`, **a name defined nowhere in the tree**, so
+`getattr(config, ..., 6)` made the ceiling its own hardcoded default — a
+quarter of the old `SWEEP_MAX_AGE_BARS` (8) and an **eighth** of SWP.5's ruled
+`SWEEP_STALE_HARD_BARS` (48). Three age constants exist in config; **the
+strategy read none of them.** SWP.5's measurement, unread for three weeks: over
+90 symbol-days, **32.9% of the stale sweeps the clock refused still had a LIVE
+thesis** — ~9.5 valid setups discarded per symbol-day.
+🔑 MEASURED 2026-09-03 from `plan_check`, not reasoned: `age` FAILED **761/761**
+on QQQ (33–48 bars) and **934/934** on SPX. Every QQQ evaluation clears at 48.
+⚠️ **THE OPERATIVE CEILING WAS 18, NOT 6.** The fleet is running RELAXED by
+operator decision to observe tick-by-tick progression, so `widen(6, 3.0)` gave
+18 — and 33–48 refused anyway. **Net effect on a relaxed fleet is 18 → 48, a
+LOOSENING of 2.7x**, even though relaxed no longer reaches this gate. Keeping
+×3 on 48 would give 144 bars against a 78-bar RTH session: unreachable, and an
+unreachable ceiling is not a backstop.
+⚠️ R IS NOT CONTAMINATED BY RELAXED, verified in source: `search_wing` reads
+`R_FLOOR` directly and never through `r_hurdle()`, which returns None under
+relaxed — *"relaxed widens EVIDENCE; it does not waive economics."* So the
+0.0–0.06 in SWEEP.2 is the real number, not a relaxed artefact.
+⚠️ OPERATOR RULING 2026-09-03: eliminate `relaxed` from the age question. The
+widen call is **removed, not pinned to factor 1.0** — `check_gates`'
+pinned-value idiom (r196) is implemented for `window()` ONLY and would have
+gone red on a pinned `widen()`. Removing the call and declaring the gate
+FOUNDATIONAL is **stronger**: the checker now refuses any future relax call on
+it. Verified by re-adding one — `check_gates` exits 1 and names it.
+⚠️ THE LIVENESS TEST IS `invalidated`, already wired and already correct (934/934
+on SPX today). Age becomes the backstop SWP.5 intended, not the primary filter.
+⚠️ **THIS UNBLOCKS ONE RUNG OF TWO AND DOES NOT MAKE THE SWEEP TRADE.** QQQ still
+fails `wing_r_best` 761/761 at 0.0–0.06 — SWEEP.2.
+`tests/check_sweep_liveness.py` v1.0, 8 checks, **born red 5 of 8 at `d680949`**
+with the resolved value reading 6. L2b/L4 parse the AST and L3 reads the
+resolved value, never the source text — the changelog above names both removed
+tokens, and a string canary would trip on the prose §5 requires (§20).
+75/75 checkers green before and after.
+
+## OPEN — SWEEP
+
+| id | question | state |
+|---|---|---|
+| **SWEEP.2** | `wing_r_best` FAILS 761/761 on QQQ at 0.0–0.06 against `R_FLOOR` 1.00. R ≥ 1.00 needs credit ≥ 50% of width; the short anchor sat 11 points OTM (705 vs 716 spot). **Liveness and richness pull opposite ways** — a pool still live and old is one price walked away from. Operator's intent: *"sell high volume, rich in premium, at a level we believe is just out of reach."* Requires separating the level's two jobs — confirmation/defence vs strike location. **Alters what gets traded: operator decides.** | 🔲 OPEN |
+| **SWEEP.3** | `search_wing` is a bare argmax on R with **no narrow-side bound**; `stop_vs_spread` is checked separately afterward. That is r208's C.43 — the selector optimises into the least survivable structure and a later gate refuses it. Measured 2026-09-03 on SPX: 5 rows cleared R at 1.00, then `stop_vs_spread` failed 2 of those 5. r208 fixed this shape for the butterfly and it was never carried to the verticals. | 🔲 OPEN |
+| **SWEEP.4** | `age = int(getattr(sweep, "bars_ago", 999) or 999)` — **999 is an ABSENT sentinel scored as maximally stale.** SPX's range topped out at exactly 999 today, so unmeasured is being counted as too old. Unreadable is not empty (C.26). | 🔲 OPEN |
+| **SWEEP.5** | `SWEEP_MAX_AGE_BARS = 8` (config:1032) has **zero readers tree-wide**, as does `SWEEP_LIVENESS_GATE`. r190's precedent: an orphaned constant is what the next person rewires. Delete or keep — **not folded into r230, operator has not ruled.** | 🔲 OPEN |
+| **C.44** | THE GENERAL LESSON. A `getattr(config, NAME, default)` is a policy the config cannot see and the checker cannot import — C.19 in a new costume, where a purge list hardcoded inside a function passed green while deleting unwarehoused data. **A constant read by fallback is a constant nobody chose.** Any ruling that lands a value in `config.py` without a reader is a ruling that did not ship. | 📌 RECORDED |
+| **LEDGER** | **r226 has a BACKLOG entry (v1.44) but NO GENESIS row and NO commit.** Either it never landed or §35 was skipped. Unresolved. | 🔲 OPEN |
 
 **v1.47 — 2026-09-03 — r229 — TWO NEW COMPONENT FAMILIES; MOM.1 STAGE 1's
 FIRST RUN WAS NEGATIVE AND THE DIAGNOSIS IS THE OUTCOME.** Best AUC 0.63 under

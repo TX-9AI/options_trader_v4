@@ -14,7 +14,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | table | created by | written by | read by |
 |---|---|---|---|
 | `gate_disposition` | `analysis/gate_report.py` | `analysis/gate_report.py` (insert) | `query.py`, `tests/check_audit_20260823.py` |
-| `plan_check` | `strategy/plan.py` | `strategy/plan.py` (insert) | `tests/check_chain_ordering.py`, `tests/check_plan_prepares.py`, `tests/check_plan_wiring.py`, `tests/check_tick_join.py` |
+| `plan_check` | `strategy/plan.py` | `strategy/plan.py` (insert) | `strategy/sweep_credit_spread.py`, `tests/check_chain_ordering.py`, `tests/check_plan_prepares.py`, `tests/check_plan_wiring.py`, `tests/check_sweep_liveness.py`, `tests/check_tick_join.py` |
 | `plan_tick` | `strategy/plan.py` | `strategy/plan.py` (insert), `tests/check_tick_join.py` (insert) | `main.py`, `query.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_chain_ordering.py`, `tests/check_management_plan.py`, `tests/check_not_asked_reasons.py`, `tests/check_orb_sequence.py`, `tests/check_plan_prepares.py`, `tests/check_plan_signal.py`, `tests/check_plan_wiring.py` |
 | `resting_orders` | `execution/resting_orders.py` | `execution/resting_orders.py` (insert/update) | — |
 

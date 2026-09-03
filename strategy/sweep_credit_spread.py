@@ -1,5 +1,37 @@
 """
-strategy/sweep_credit_spread.py  v4.8
+strategy/sweep_credit_spread.py  v4.9
+v4.9  2026-09-03  r230 — 🔴 SWP.5 WAS RULED ON 2026-08-11 AND NEVER REACHED
+      THIS FILE. Its ruling: "LIVENESS REPLACES THE CLOCK", measured over 90
+      symbol-days — of the stale sweeps the age gate refused, 32.9% still had
+      a LIVE thesis (price had never accepted back through the raided level),
+      ~9.5 valid setups discarded per symbol-day on a clock. It set a
+      deliberate 48-bar backstop and landed `SWEEP_STALE_HARD_BARS` in
+      config. This file never read it. It read `SWEEP_CS_MAX_AGE_BARS`, a
+      name defined NOWHERE in the tree, so the ceiling was the getattr
+      DEFAULT of 6 — a quarter of the old constant and an eighth of the ruled
+      one — for three weeks.
+      ⚠️ THE OPERATIVE CEILING WAS 18, NOT 6, AND THE DISTINCTION MATTERS.
+      The whole fleet is running RELAXED by operator decision (2026-09-03,
+      to observe tick-by-tick progression), so `widen(6, 3.0)` gave 18. Ages
+      of 33-48 refused ANYWAY. Recording 6 alone would have understated the
+      gate and left the next reader unable to reproduce the refusal.
+      🔑 NET EFFECT ON A RELAXED FLEET: 18 -> 48, a LOOSENING of 2.7x even
+      though relaxed no longer applies here. The alternative (keeping x3 on
+      48) gives 144 bars against a 78-bar RTH session - unreachable, which
+      is not a backstop at all.
+      🔑 MEASURED 2026-09-03 from plan_check: `age` FAILED 761/761 on QQQ
+      (33-48 bars) and 934/934 on SPX. Every QQQ evaluation clears at 48.
+      ⚠️ OPERATOR RULING 2026-09-03: eliminate `relaxed` entirely from the age
+      question. The widen call is GONE, not pinned to factor 1.0: the pinned
+      idiom `check_gates` recognises (r196) is implemented for `window()`
+      ONLY and would have gone red on a pinned `widen()`. Removing the call
+      and declaring MAX_AGE_BARS FOUNDATIONAL is STRONGER — the checker now
+      refuses any future relax call on it rather than tolerating a pinned
+      one. Matches r208, which removed relaxed from the butterfly outright.
+      ⚠️ THE LIVENESS TEST IS `invalidated`, ALREADY WIRED AND ALREADY
+      CORRECT — it fired 934/934 on SPX today. Age stops being the primary
+      filter and becomes the backstop SWP.5 intended. Nothing else moves;
+      the sweep's other dials stay loose per the r208 ruling.
 v4.8  2026-09-02  r219 — 🔴 THE ENTRY AND THE MARK WERE ON DIFFERENT SIDES OF THE QUOTE.
       `search_wing` priced the credit as short.BID - long.ASK and that number
       became `sig.entry_premium` — the position's entry of record — while
@@ -215,7 +247,11 @@ def _gate(name: str, reason: str) -> None:
 # thin to fit anything - so these are reasoned, not calibrated, and are
 # config-overridable. `tests/sweep_discriminator.py` is the tool that will
 # replace them with numbers.
-MAX_AGE_BARS = getattr(config, "SWEEP_CS_MAX_AGE_BARS", 6)
+# 🔴 r230 — SWP.5's OWN CONSTANT, IMPORTED DIRECTLY. NOT `getattr` WITH A
+# DEFAULT: a getattr default is exactly what let a name defined nowhere
+# govern fifteen boxes silently. A missing constant must raise at import on
+# the first box that pulls it, not fall back to a number nobody chose.
+MAX_AGE_BARS = config.SWEEP_STALE_HARD_BARS
 # ⚠️ WAS 0.002 (0.20%) - A PRE-MEASUREMENT GUESS THE DATA CONTRADICTS. Combined
 # with the new 0.25% ceiling it left a 0.20-0.25% sliver and EXCLUDED the
 # shallow bucket that measured BEST: <0.10% pierces survived on 33%, and
@@ -305,8 +341,12 @@ GATES = {
     "EARLIEST_ET":        "SELECTION",
     "LATEST_ET":          "SELECTION",
     "MAX_REJECTION_PCT":  "SELECTION",
-    "MAX_AGE_BARS":       "SELECTION",
     "MIN_REJECTION_PCT":  "SELECTION",
+    # FOUNDATIONAL - r230, operator ruling 2026-09-03. SWP.5's own words:
+    # "a level that still holds at 5 hours is a DIFFERENT trade from a fresh
+    # raid" - which is the §36 definition of foundational, not selection. It
+    # has NO relax call at all now, so the checker refuses any future one.
+    "MAX_AGE_BARS":       "FOUNDATIONAL",
     # FEASIBILITY - above 0.20% ATR the tape produced a 0.5% move on 92% of
     # 90-bar windows. A boundary does not hold in that.
     "ATR_MAX_PCT":        "FEASIBILITY",
@@ -665,7 +705,7 @@ class SweepCreditSpreadStrategy:
         "reclaimed":    "a bar has CLOSED back inside the pool (a wick is a touch) — "
                         "or the level is a MOVING tine, whose TOUCH is the trigger",
         "invalidated":  "price has NOT accepted through it after the reclaim",
-        "age":          f"reclaimed within MAX_AGE_BARS ({MAX_AGE_BARS}; relaxed x3)",
+        "age":          f"reclaimed within MAX_AGE_BARS ({MAX_AGE_BARS}; backstop only - liveness is `invalidated`)",
         "rejection":    f"rejection >= {MIN_REJECTION_PCT*100:.3f}%",
         "pierce_depth": f"pierce <= {MAX_REJECTION_PCT*100:.3f}% (relaxed x3)",
         "side_of_pool": "price is on the profitable side of the pool",
@@ -746,7 +786,9 @@ class SweepCreditSpreadStrategy:
         inval = bool(getattr(sweep, "invalidated", False))
         prep.cond("invalidated", 1.0 if inval else 0.0, self.CONDITIONS["invalidated"], not inval)
         age = int(getattr(sweep, "bars_ago", 999) or 999)
-        _max_age = relaxed.widen(MAX_AGE_BARS, 3.0, name="max_age_bars")
+        # 🔴 r230 - NO relax call. `invalidated` is the liveness test;
+        # this is SWP.5's bounded backstop and it does not widen.
+        _max_age = MAX_AGE_BARS
         prep.age = age
         prep.cond("age", age, f"<= {_max_age:g} bars", age <= _max_age)
         rej = float(getattr(sweep, "rejection_pct", 0.0) or 0.0)
