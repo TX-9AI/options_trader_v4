@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.42
+# BACKLOG.md — v1.43
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -157,6 +157,70 @@ management, and no single number separates those.
 | **MEM.1** | 🔴 **THE PRIMARY EXPIRY CHAIN IS NOT BANDED; THE AUX TENORS ARE.** `options_chain.publish` writes every listed `streamer_symbol` for the session expiry into `chain_subs`, while TERM.1 caps each aux tenor at ~9 strikes. MU lists **356 contracts spanning $450-$1370 against a $950 spot** — ±45%, most of it 30%+ OTM and untradeable by anything in the book. MEASURED 2026-09-02 against CVX, same uptime (5.96 h): MU `candle_feed` **117 MB vs CVX 28 MB — 4.2x**; MU bot 233 MB after 49 MINUTES vs CVX 180 MB after SIX HOURS. MU was OOM-killed at 14:20 ET (`Failed with result 'oom-kill'`, status 9/KILL). ⚠️ **AND THE CONSTRAINT WAS ALREADY UNDERSTOOD** — options_chain.py's own doctrine block says full chains would blow the subscription cap and *"SPX has already been OOM-KILLED at 419 MB on chain volume"*, then bands only the aux tenors. ⚠️ **NOT A LEAK — MEASURED AND REFUTED TWICE.** Twelve samples over 2.75 min: 242.7 → 244.2 MB, peak-to-trough 1.45 MB, drift 0.53 MB/min (~32 MB/h, ordinary heap growth). No spike, no runaway. A high baseline on the fleet's tightest margin (112 MB available vs 343-476 elsewhere) is the whole story. **OPERATOR RULING 2026-09-02: UPGRADE MU**, as SPX already was. Banding the primary chain stays open as a separate question — it would help every 951 MB box, and it risks hiding a strike the wing search legitimately walks out to. | ⬜ upgrade agreed |
 | **OI.1** | 🔴 **OPEN INTEREST HAS NEVER WORKED IN v4, IN TWO STAGES.** v4.0 called `get_market_data_by_type` — a coroutine function — WITHOUT `await`; `for r in rows` raised `'coroutine' object is not iterable`, the broad `except` logged it as a warning, and nobody chased it. v4.1 added the missing await via `_await`, which fixes the syntax and inherits a LIFECYCLE fault: `_await` calls **`asyncio.run`, which creates a NEW event loop and closes it**, while `session` is the long-lived SDK session created once at startup and holding loop-bound primitives. The log names one: `<asyncio.locks.Event object at 0x…> is bound to a different event loop`, then `Event loop is closed` once that first loop is gone. A session built in one loop and driven from N others cannot work by construction. ⚠️ **`_BATCH = 100`, so a 356-contract chain is FOUR calls** — which is why this is MU-only in the fleet (2 occurrences in 30 min on MU, **zero on all fourteen others**): a narrow chain makes one call and the 300 s `_RETRY_S` backoff hides the rest. 🔑 **CONSEQUENCE: GEX IS A GAMMA-SQUARED SURFACE, NOT DEALER POSITIONING**, on any box where those batches fail — the file's own header already says so. FIX: one loop for the session's lifetime (`run_until_complete`), or build the session inside the loop that drives it. ⚠️ Touches a live data path on all fifteen boxes — build it against a stubbed SDK session and land it deliberately, not mid-session. | ⬜ |
 
+### MOM.1 — MOMENTUM PARTICIPATION: THE STAGED BUILD (2026-09-03)
+
+🔑 **THE TRADE.** ONE position held through a decided trend, replacing N
+re-entries with one. Its bones are `RunawayContinuation`; the management plan
+that watches every tick and feeds execution is the new part. **Built INSIDE the
+runaway for now** — operator's ruling: designing for carryover first *"would
+constrain our creativity at the moment"*, and a thing that works once is easier
+to lift than an abstraction built for callers that do not exist.
+
+🔴 **THE EVIDENCE IT EXISTS.** QQQ 2026-09-03, 11:03-11:12: **+$1,098.50, +$42,
++$406, +$357 — four entries, four exits, one move.** Operator: *"we didn't have
+to exit any of those trades, in fact it should have been 1 entry on a strong
+trend."* FRC.1 puts the fleet's gross edge at ~2% of its own round-trip spread,
+so four entries pay the spread four times for one trend.
+
+🔑 **THE INSIGHT THAT ORDERS THE WHOLE BUILD.** Strength is not one dial. It
+sets the **entry gate**, the **strike (via delta)**, and the **initial stop
+width** — and **exhaustion**, a SEPARATE meter, contracts that stop while the
+position is open. Exhaustion is NOT the absence of strength: a tape can be
+strong and exhausting at once (efficiency 1.00, acceptance collapsing) which is
+exactly a top. One score averages those to "moderately strong" and says
+nothing; two meters DISAGREEING is the signal.
+
+🔑 **AND THE GREEKS CARRY THE ROLES.** Near the money is DELTA — converts now,
+participates linearly, does not need continuation. Further out is GAMMA —
+converts AS the move extends. That is the difference between "this might work"
+and "this has committed", which is what strength measures. **Strength selects
+the delta; gamma follows; theta is what exhaustion pays for.** Vega is ignored
+deliberately: small on 0DTE, and optimising against it fits IV rather than tape.
+⚠️ Further OTM is CHEAPER, so the same dollar budget buys MORE contracts —
+strength buys room and size TOGETHER instead of trading one for the other.
+⚠️ A barely-qualifying signal takes a near-the-money strike and so participates
+in a small move; the contract selection itself refuses to reward a weak read
+before any stop logic engages.
+⚠️ **THE PIN IS NOT THE TARGET** (considered and rejected): a destination is the
+wrong frame for a momentum trade. But the butterfly and this trade COMPETE FOR
+NOTHING — a gamma-squeezed run into a pin serves both, the call on the traverse
+and the fly on the settle. See stage 8.
+
+**STRICT DEPENDENCY ORDER. Each stage needs the one above it established.**
+
+| # | stage | needs | state |
+|---|---|---|---|
+| **1** | **STRENGTH, CALIBRATED.** Does any component discriminate; settle the leg definition. `trend_strength` (r224) + `calibrate_trend_strength` (dtp r257). **EVERYTHING BELOW ANCHORS HERE** — if it cannot discriminate, 2-9 are moot and the runaway needs a different idea. | — | ⬜ |
+| **2** | **GREEKS TRUST.** Is per-contract delta/gamma trustworthy? OI.1 says the GEX SURFACE is gamma-squared, which may or may not touch per-contract greeks. `greeks_series` is 4 GB, scopeable since dtp r253. **CAN INVALIDATE 3, 6 AND 7**, so it comes early. | 1 | ⬜ |
+| **3** | **STRENGTH → DELTA.** Recorder first: log the delta a strength WOULD have chosen, gate nothing, calibrate against outcomes. | 1, 2 | ⬜ |
+| **4** | **INITIAL STOP FROM STRENGTH.** The stop cannot be expressed until the contract is known — a 0.20-delta and a 0.45-delta strike need different units for the same underlying move. RPT.B already argues for it: 21 of 22 runaway losses fell between −20% and −32%, σ 4.4 — a fixed threshold defining the entire left tail. | 1, 3 | ⬜ |
+| **5** | **EXHAUSTION METER.** Four components, none overlapping strength's: acceptance decay, range expansion without progress, upper-wick growth, distance from anchor in ATR. NO oscillators — the screen killed that family at AUC 0.47-0.51. | 1, 4 | ⬜ |
+| **6** | **STOP CONTRACTION.** Per-tick, **RATCHETS IN ONLY, NEVER BACK OUT** — that is what stops a wide initial stop becoming a bigger loss. Open: may exhaustion force an exit, or only tighten toward one? | 4, 5 | ⬜ |
+| **7** | **THETA GATE.** "Am I still paid for the decay I am eating?" Most consequential on the far-OTM strikes stage 3 selects, and possibly more important than the stop. | 2, 3 | ⬜ |
+| **8** | **SLOT COMPATIBILITY.** Dispatch does not know the butterfly and this trade are the same bet — `GEXPinButterfly NOT ASKED — slot claimed by RunawayContinuation` on SPX and QQQ both. Two positions on one thesis is a PLAN-ARCHITECTURE change, not a strategy change. | trade fires | ⬜ |
+| **9** | **LIVE PATH.** Ladder, fill basis, sizing; inherits r220. **Last because it is the only stage where being wrong costs real money.** | all | ⬜ |
+
+⚠️ **WHY 5 SITS AFTER 4 AND NOT BEFORE.** Exhaustion calibrates against WHEN the
+favourable excursion peaked (`mfe_bars`). On trades cut at −20% by a fixed
+threshold, MFE peaks are truncated by the STOP rather than by the market —
+calibrating exhaustion on that sample would fit it to the stop being replaced.
+
+⚠️ **CARRYOVER IS DEFERRED, NOT FORGOTTEN.** Strength and exhaustion are
+management primitives: ORB wants strength for re-arm quality and exhaustion for
+the early exits (2026-09-03 NVDA); the condor is management by definition and
+exhaustion is when to defend a tested side; the butterfly wants exhaustion
+INVERTED — an exhausted move near a pin is a BETTER fly. Lift it once it works.
+
 ---
 
 ## PART 2 — CLOSED
@@ -249,6 +313,14 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.43 — 2026-09-03 — r225 — MOM.1 FILED: THE MOMENTUM PARTICIPATION BUILD.**
+Nine stages in strict dependency order, from the QQQ 2026-09-03 finding that
+four entries and four exits captured one move that wanted one position.
+Strength sets entry, strike and initial stop; a SEPARATE exhaustion meter
+contracts the stop while open. Strength selects the delta, gamma follows, theta
+is what exhaustion pays for. Built inside the runaway for now — carryover
+deferred deliberately.
 
 **v1.42 — 2026-09-03 — r224 — A TREND STRENGTH METER, AS A RECORDER.**
 `analysis/trend_strength.py`: four path components — efficiency, acceptance,
