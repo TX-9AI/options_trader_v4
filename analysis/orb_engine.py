@@ -1,5 +1,30 @@
 """
-analysis/orb_engine.py  v4.6
+analysis/orb_engine.py  v4.7
+v4.7  2026-09-03  r221 — 🔴 THE BAND BETWEEN THE BOUNDARY AND THE 50% HAD
+      NO OWNER. `notify_position_closed` always called `_rearm()`, which WIPES
+      ORBData — so the impulsive candle went with it and the engine sat in
+      AWAITING_RANGE_REENTRY, where a second retest of the boundary FROM
+      OUTSIDE could arm nothing. The runaway meanwhile will not take the move
+      until a 1m close beyond `target_50pct` HOLDS. Measured on NVDA
+      2026-09-03: broke 227.43, retested, entered, exited in profit, and
+      227.43 -> 228.77 was owned by NO strategy.
+      🔑 A RETEST AND A RE-ENTRY ARE DIFFERENT EVENTS — the operator's
+      correction, and the distinction everything here rests on:
+        · RETEST   = wick into the range, close back OUTSIDE. A TEST. Fires a
+                     trade and leaves the impulsive candle INTACT.
+        · RE-ENTRY = a CLOSE back INSIDE. ACCEPTANCE. Terminates the thesis;
+                     a fresh break must set a new impulsive candle.
+      So a resolved trade with price still outside keeps ARMED_LONG/SHORT and
+      the ORIGINAL break candle, firing again on each qualifying retest — "as
+      many times as the setup remains valid within the ORB trade window".
+      ⚠️ THE 50% HANDOFF USES THE RUNAWAY'S OWN TWO-PART TEST: a 1m CLOSE
+      beyond that still holds one tick later. Standing down on a mere TOUCH
+      would end the ORB thesis while the runaway never armed, re-opening the
+      same gap one level higher. Operator's doctrine: "wicks are tests &
+      closes are acceptance."
+      ⚠️ AND `_rearm()` IS NOT CALLED ON THE ARMED PATH. Calling it is what
+      destroyed the setup; the close-inside invalidation still re-arms
+      normally through the existing machinery.
 v4.6  2026-09-01  r207 — THE SEQUENCE IS THE GATE, AND THE GEOMETRY IS FROZEN
       AT THE BREAK. Three additions, all of them operator spec.
 
@@ -388,6 +413,17 @@ class ORBData:
     # the position. 0.0 means UNKNOWN, and the sizer's degenerate branch takes
     # it to a 1-lot loudly rather than guessing.
     stop_distance_px:   float = 0.0
+    # 🔴 r221 — THE 50% HANDOFF, ON ACCEPTANCE NOT ON A TOUCH. Operator's
+    # doctrine, 2026-09-03: "wicks are tests & closes are acceptance." The
+    # runaway arms on a 1m CLOSE beyond target_50pct that still holds one tick
+    # later; if the ORB stood down on a mere TOUCH of 50%, a wick through it
+    # would kill the ORB thesis while the runaway never armed — leaving the
+    # zone owned by nobody, which is the gap this revision closes.
+    # `fifty_pending` is a close awaiting its hold; `fifty_accepted` is the
+    # confirmed handoff. Same two-part test the runaway uses, so the boundary
+    # between them is exact.
+    fifty_pending:      bool  = False
+    fifty_accepted:     bool  = False
     # r207 — ONE CONFIRMATION, ONE ORDER. Set the moment an order is
     # CONSTRUCTED for this confirmation, in paper and live alike. `_rearm()`
     # builds a fresh ORBData, so the next attempt starts clean without anyone
@@ -1058,16 +1094,68 @@ class ORBEngine:
         return m
 
     def notify_position_closed(self):
+        """A trade resolved. Stay ARMED if the setup is still alive.
+
+        🔴 r221 — THIS ALWAYS DEMANDED RANGE RE-ENTRY, AND THAT LOST THE SETUP.
+        `_rearm()` wipes ORBData, so the impulsive candle went with it and the
+        engine sat in AWAITING_RANGE_REENTRY: a second retest of the boundary
+        from outside could not arm anything. Meanwhile the runaway will not
+        take the move until a 1m close beyond target_50pct holds — so the band
+        between the boundary and the 50% was owned by NO strategy. Measured on
+        NVDA 2026-09-03: broke 227.43, retested, entered, exited in profit, and
+        227.43 -> 228.77 had no owner.
+
+        🔑 A RETEST AND A RE-ENTRY ARE DIFFERENT EVENTS — the operator's
+        correction, and the distinction the whole change rests on:
+          · RETEST   = wick into the range, close back OUTSIDE. A TEST. It can
+                       fire a trade and it leaves the impulsive candle intact.
+          · RE-ENTRY = a CLOSE back INSIDE the range. ACCEPTANCE. It terminates
+                       the thesis; the impulsive candle is dead and a fresh
+                       break must set a new one.
+        So a resolved trade with price still outside the range keeps
+        ARMED_LONG / ARMED_SHORT and the ORIGINAL break candle, and fires again
+        on the next qualifying retest — "as many times as the setup remains
+        valid within the ORB trade window."
+
+        ⚠️ THREE OUTCOMES, IN PRECEDENCE ORDER:
+          1. 50% ACCEPTED -> the runaway owns the move unequivocally, and that
+             move itself invalidates the ORB. Stand down.
+          2. past the ORB entry cutoff -> EXPIRED, as before.
+          3. otherwise -> stay ARMED with the original impulse; `_rearm()` is
+             NOT called, because calling it is what destroys the setup.
+        ⚠️ AND THE CLOSE-INSIDE PATH IS UNTOUCHED. Re-entry still invalidates
+        through the normal machinery and still re-arms; this only changes what
+        happens when a TRADE ends while the structure is still standing.
+        """
         d = self._data
-        if d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT):
-            # r60: the re-arm window is ORB's OWN 11:00 cutoff — re-arming
-            # after it was always futile (entries are refused there), and the
-            # old 14:00 read was the deleted unauthorized global.
-            if now_et().time() >= _dtime(*_ORB_CUT):
-                d.state = ORBState.EXPIRED
-            else:
-                logger.info("ORB position closed — re-arming for next attempt")
-                self._rearm()
+        if d.state not in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT):
+            return
+        was_long = d.state == ORBState.OPEN_LONG
+        if d.fifty_accepted:
+            # ⚠️ NOT `_rearm()`. The runaway owns this move; re-arming would
+            # leave the ORB hunting a break it has been told to stand off.
+            d.state = ORBState.INVALIDATED
+            d.invalidation_reason = "runaway"
+            logger.info("ORB position closed — 50%% TP ACCEPTED (1m close held) "
+                        "so the runaway owns this move; ORB stands down")
+            return
+        if now_et().time() >= _dtime(*_ORB_CUT):
+            d.state = ORBState.EXPIRED
+            return
+        # 🔑 STAY ARMED. The impulsive candle, stop_distance_px and the targets
+        # all live on ORBData and survive precisely because nothing wipes them.
+        d.state = (ORBState.ARMED_LONG if was_long else ORBState.ARMED_SHORT)
+        d.attempt_number += 1
+        d.bars_since_break = 0
+        d.last_retest_bar_ts = ""
+        logger.info(
+            "ORB position closed — STILL ARMED (%s, attempt %d): impulsive "
+            "candle held at %.2f, stop distance %.2f, 50%% TP %.2f not yet "
+            "accepted. A qualifying retest fires again; a CLOSE inside "
+            "%.2f-%.2f terminates the thesis.",
+            d.state, d.attempt_number,
+            d.break_candle_low if was_long else d.break_candle_high,
+            d.stop_distance_px, d.target_50pct, d.orb_low, d.orb_high)
 
     def _update_break_latches(self, df_1m: pd.DataFrame):
         """Record, as a session-level fact, whether a 1-min candle has CLOSED
@@ -1109,6 +1197,55 @@ class ORBEngine:
                     f"ORB latch: 1-min CLOSE {close:.2f} below low "
                     f"{d.orb_low:.2f} — broke_low armed (session-level)"
                 )
+        self._track_fifty_acceptance(df_1m)
+
+    def _track_fifty_acceptance(self, df_1m):
+        """Has the 50% TP been ACCEPTED — a 1m close beyond, still holding?
+
+        🔴 r221 — THE SAME TWO-PART TEST THE RUNAWAY ARMS ON, deliberately.
+        `runaway_continuation._closed_beyond_and_held` requires a 1m CLOSE
+        beyond `target_50pct` and price still on the right side at the next
+        tick. If the ORB stood down on a mere TOUCH of the 50%, a wick through
+        it would end the ORB thesis while the runaway never armed — and the
+        band would be owned by nobody, which is the whole defect r221 closes.
+        Reproducing the condition here rather than importing it keeps
+        `analysis` from depending on `strategy`; C-note if the runaway's rule
+        ever moves, this must move with it.
+
+        ⚠️ WICKS ARE TESTS, CLOSES ARE ACCEPTANCE — operator's doctrine,
+        2026-09-03. This reads the CLOSED candle (iloc[-2]) like every other
+        latch in this file, so a wick through 50% arms nothing.
+        ⚠️ LATCH-ONLY. Once accepted it stays accepted for the session: the
+        runaway owns that move even if price falls back, and `reset_for_session`
+        is the sole reset — the same discipline as broke_high/broke_low.
+        """
+        d = self._data
+        if d.fifty_accepted or d.target_50pct <= 0 or not d.break_direction:
+            return
+        if df_1m is None or len(df_1m) < 2:
+            return
+        close = float(df_1m.iloc[-2]["close"])
+        long_side = d.break_direction.upper().startswith("L") or \
+            d.state in (ORBState.ARMED_LONG, ORBState.OPEN_LONG)
+        beyond = (close > d.target_50pct) if long_side else (close < d.target_50pct)
+        if not beyond:
+            # ⚠️ A PENDING CLOSE THAT DOES NOT HOLD IS DISCARDED, not carried.
+            # The runaway requires the hold at the NEXT tick; a close that
+            # reverses immediately is a wick with extra steps.
+            if d.fifty_pending:
+                logger.info("ORB: 50%% TP close did NOT hold (%.2f vs %.2f) — "
+                            "pending cleared, ORB setup stands", close,
+                            d.target_50pct)
+                d.fifty_pending = False
+            return
+        if not d.fifty_pending:
+            d.fifty_pending = True
+            logger.info("ORB: 1-min CLOSE %.2f beyond the 50%% TP %.2f — "
+                        "pending the hold", close, d.target_50pct)
+            return
+        d.fifty_accepted = True
+        logger.info("ORB: 50%% TP %.2f ACCEPTED (close beyond, held) — the "
+                    "runaway owns this move", d.target_50pct)
 
     def _check_for_break(self, df_1m: pd.DataFrame):
         d = self._data

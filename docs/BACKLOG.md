@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.39
+# BACKLOG.md — v1.40
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -185,6 +185,20 @@ management, and no single number separates those.
 
 ## PART 3 — STANDING CONSTRAINTS REGISTER
 
+**WICKS ARE TESTS, CLOSES ARE ACCEPTANCE** — operator's doctrine, 2026-09-03,
+applied repo-wide. A wick through a level TESTS it; a CLOSE beyond ACCEPTS it.
+Audited at r221: 17 candidate sites across `liquidity_mapper` and `orb_engine`,
+and both already honour it — sweep detection is wick-based **correctly** (a
+sweep IS a wick through liquidity), the ORB retest requires a wick in with the
+body outside, and the break latch is close-only. The 50% TP was the only place
+with NO test either way, which is what r221 adds.
+
+**A RETEST IS NOT A RE-ENTRY.** RETEST = wick into the range, close back
+OUTSIDE — a test, fires a trade, leaves the impulsive candle intact. RE-ENTRY =
+a CLOSE back inside — acceptance, terminates the thesis, a fresh break must set
+a new impulsive candle.
+
+
 Facts that are not tasks. They bound future work and are recorded so they are
 not rediscovered the expensive way.
 
@@ -234,6 +248,15 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.40 — 2026-09-03 — r221 — THE BAND BETWEEN THE ORB BOUNDARY AND THE 50%
+HAD NO OWNER.** `notify_position_closed` always called `_rearm()`, wiping the
+impulsive candle and parking the engine in AWAITING_RANGE_REENTRY where a
+retest from outside armed nothing; the runaway needs a held close beyond the
+50%. NVDA 2026-09-03: 227.43 -> 228.77 owned by nobody. A resolved trade with
+price still outside now stays ARMED with the original break candle and fires on
+each qualifying retest. The 50% handoff uses the runaway's own close-and-hold
+test, so there is no dead window between them.
 
 **v1.39 — 2026-09-02 — r220 — EVERY FILL PATH AUDITED: MARK ON PAPER, LADDER
 ON LIVE EXCEPT ORB.** Two gaps found by walking all six strategies.
