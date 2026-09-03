@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.49
+# BACKLOG.md — v1.50
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,67 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.50 — 2026-09-03 — r232 / dtp r265 — SWEEP.8 OPENED AND INSTRUMENTED: DOES
+A LEVEL'S DEFENDED COUNT PREDICT WHETHER IT HOLDS?** Operator, 2026-09-03:
+*"I'd rather have a handful of rare firing high quality reversals than a stack
+of lottery tickets"*, and **signal quality is the primary outcome, P&L second.**
+🔑 **THE COUNT THE STRATEGY USES IS NOT REAL AND THE REAL ONE IS UNUSED.**
+`LiquidityPool.touch_count` is `len(cluster)` from a map `analyze()` rebuilds
+every tick, and `_add_named_pool` hardcodes it to **1** — 44,450 of 44,890 ticks
+read exactly 1, which is why `level_strength` came back **94% ties on two
+values**. Consumers: `sweep_reversal`'s `level_strength` collapses to 0.7/0.3, a
+boolean wearing a float; and `trade_readiness` LEVEL QUALITY computes
+`ramp(1, TR_SWEEP_TOUCH_MIN=1.0, TR_SWEEP_TOUCH_FULL=4.0)` = **exactly 0.0**,
+which *multiplies* the proximity term, so that whole term has been zero on every
+tick (LOG-ONLY, so no trade was affected).
+⚠️ **AND r231 MADE IT STRUCTURAL.** The only pools that ever carried
+`touch_count >= 2` were the unnamed equal-high/low clusters r231 deleted at the
+operator's ruling. Post-r231 it is 1 for named pools and 0 for tines,
+universally. Nothing that worked stopped working; the last path to a non-zero
+value is gone. Recorded because it was not flagged when r231 shipped.
+🔑 **THE REAL COUNT EXISTS AND IS THE OPERATOR'S OWN MODEL.**
+`derived/levels.py` → `LevelEngine.walk(price, limit=3)` returns levels ordered
+by DISTANCE from spot, `WHERE retired_ts IS NULL`, carrying `touches`,
+`provenance` and `is_live_session` — *"the session is a label on the answer, not
+the query"*. Touch = HOLD per his 2026-08-22 ruling, a run that TERMINATES at the
+break. Its own docstring states the criterion: *"the nearest level may be a
+one-touch artifact while the one 0.4% beyond has held five times — that is the
+whole distinction between trading into something and trading into noise."*
+🔴 **AND ITS ONLY CONSUMERS ARE RECORDERS.** `ctx["levels"]` is read by
+`plan_ledger`, `notes`, `snapshot` and `liquidity_ledger`. **No strategy reads it
+for a decision.** Two level systems: the one with memory records, the one without
+memory trades.
+⚠️ **THE COUNTERWEIGHT, STATED SO IT IS NOT RE-LITIGATED.** The sweep's own
+header records that grading by level TYPE is **measured null** — *"POOL TYPE DID
+NOTHING: PDH 32%, PDL 28%, both at base"* — so wiring `level_grade.py` would not
+help. Grading by DEFENDED COUNT has never been tested, because the number was
+never available to the strategy. That is the one quality signal still standing.
+**INSTRUMENTED, NOT GATED (WA §31).** dtp r265 extends
+`tests/screen_sweep_forensics.py` to v1.6 with **panel 8** rather than building a
+second lineage (§7/§25) — it already owns the join, the outcome, and the
+corrections (`entry_time` is UTC; `plan_check` keys on `direction`). It costs **no
+extra S3 objects**: panel 6 already loads `fire_snapshot`, whose
+`payload["levels"]` is the walk AT THE FILL.
+🔴 **THE OUTCOME IS PANEL 1'S, DELIBERATELY** — `pen` (did price trade beyond the
+short anchor) and `acc` (longest run of closes beyond it). A stop cannot
+manufacture either, and both are unaffected by the r219 fill-basis artefact. P&L
+prints beside them and is **not** the split key; grading levels on this book's
+P&L would fit the artefact.
+🔴 **A DEGENERATE DISTRIBUTION IS REPORTED AS DEGENERATE.** If every joined level
+reads one touch the panel says the sample **CANNOT test** the hypothesis, rather
+than printing a flat table that would read as *"defended count does not matter"*.
+And a pool outside the 3-rung walk is **UNMEASURED, not one-touch** — coverage is
+printed with its three causes kept distinct. Both are the plausible-silence class.
+`tests/test_level_quality.py` v1.0, 8 checks, born red at HEAD with a **named**
+failure via a capability probe. `_level_join` / `_level_report` are EXTRACTED so
+the selftest drives the real code (C.23).
+
+| id | question | state |
+|---|---|---|
+| **SWEEP.8** | Does defended count separate held levels from broken ones? Instrumented at dtp r265; **no dial moves on it** until read against a real range. n≈41 finds a mechanism, not a conclusion (§12). | ◐ **INSTRUMENTED** |
+| **SWEEP.9** | If it separates: wire `LevelEngine.walk()` into the sweep's candidate selection **LOG-ONLY** first, then gate. Alters what gets traded — operator's call. | 🔲 OPEN |
+| **LVL.1** | `level_strength` and `trade_readiness` LEVEL QUALITY both read the dead `LiquidityPool.touch_count`. Repoint at `level_ledger` or delete — two dead consumers is worse than one. | 🔲 OPEN |
 
 **v1.49 — 2026-09-03 — r231 — 🔴 THE LEVEL MODEL, CORRECTED TO THE OPERATOR'S
 INTENT. SWEEP.4 CLOSED; SWEEP.6/7 OPENED.** Five rulings, 2026-09-03. **Two were
