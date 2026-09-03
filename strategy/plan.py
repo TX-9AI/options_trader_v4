@@ -1,5 +1,10 @@
 """
-strategy/plan.py  v1.7
+strategy/plan.py  v1.8
+v1.8  2026-09-03  r231 — `PlanTick.level()` takes `spot` and passes it to
+      `classify()`, which now requires it. Geometry asks role-vs-PRICE as well
+      as role-vs-range (operator, 2026-09-03), and a level price has already
+      traversed is invalidated. Required, not optional: an optional parameter
+      is an invalidation a caller can omit without anything saying so.
 v1.7  2026-09-01  r213 (chunk E) — EVERY SKIP NAMES ITSELF. Operator,
       2026-09-01: *"I don't like 'NOT ASKED' as a reason. It makes no sense.
       Not asked? why or Why not?"*
@@ -97,7 +102,7 @@ THE SHAPE OF A STRATEGY'S TICK, and every strategy is written this way
     t = self.planner.tick(price_now, direction=...)
     if <spec gate fails>:            return t.refuse("gate_name", "why")
     if <input missing>:              return t.starved("chain")
-    ok = t.level(level_price, role, name, orb_high, orb_low)   # geometry
+    ok = t.level(level_price, role, name, orb_high, orb_low, price_now)  # geometry
     if not ok:                        return t.refuse("geometry", t.last_why)
     t.credit_spread(short_k, long_k, credit, invalidation=...)  # the what-if
     ok, why = t.executable()          # the R hurdle, strict/relaxed aware
@@ -431,7 +436,7 @@ class PlanTick:
 
     # ── geometry: the session-map deconfliction ────────────────────────
     def level(self, price, role_or_kind: str, name: str,
-              orb_high, orb_low) -> Optional[bool]:
+              orb_high, orb_low, spot) -> Optional[bool]:
         """Is this level usable for the side its SOURCE says? Records the
         check. Returns True / False / None (unmeasured — no opening range).
 
@@ -443,7 +448,11 @@ class PlanTick:
         from analysis.session_map import classify, role_of, CEILING, FLOOR
         role = role_or_kind if role_or_kind in (CEILING, FLOOR) \
             else role_of(role_or_kind)
-        ok, why = classify(price, role or "", orb_high, orb_low, name)
+        # 🔴 r231 — `spot` is REQUIRED. Geometry now asks role-vs-PRICE as
+        # well as role-vs-range (operator, 2026-09-03), and an optional
+        # parameter is an invalidation a caller can drop in silence.
+        ok, why = classify(price, role or "", orb_high, orb_low, name,
+                           spot=spot)
         self.last_why = why
         self.check("geometry", price, ok, why)
         return ok

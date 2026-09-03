@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_wiring.py  v1.3  (2026-08-27)
+tests/check_plan_wiring.py  v1.4  (2026-09-03)
+v1.4  2026-09-03  r231 — W6 RE-DERIVED, NOT PATCHED. `classify()` requires
+      `spot`; each fixture carries one chosen so the case it was written for
+      is still the case being tested, rather than one that merely compiles
+      (the r155 trap). New W6g pins r231's own rule where the range tests
+      cannot reach it: a CEILING above the opening range but BELOW spot.
 v1.3  r168: W9b re-pinned — the runaway carries no price invalidation.
 v1.2  r160: W2 accepts `self.prepare(` as the plan entry (the sweep's
       generate_signal delegates to its plan and executes what it prepared).
@@ -176,19 +181,31 @@ def main():
 
     # W6 — geometry
     from analysis.session_map import classify, CEILING, FLOOR
-    ok_a, _ = classify(349.0, CEILING, 351.88, 349.20, "upper tine")
-    ok_b, _ = classify(350.5, FLOOR, 351.88, 349.20, "session low")
-    ok_c, _ = classify(355.0, CEILING, 351.88, 349.20, "session high")
-    ok_d, _ = classify(355.0, CEILING, None, None, "session high")
-    ok_e, _ = classify(340.0, CEILING, 351.88, 349.20, "upper tine")
+    # ⚠️ RE-DERIVED AT r231, NOT PATCHED. `classify` now requires `spot`
+    # because role must agree with PRICE as well as with the opening range
+    # (operator, 2026-09-03). Every fixture below carries a spot chosen so the
+    # case it was written for is still the case being tested — a fixture
+    # updated to merely compile would silently start measuring something else,
+    # which is the r155 trap.
+    ok_a, _ = classify(349.0, CEILING, 351.88, 349.20, "upper tine", spot=350.0)
+    ok_b, _ = classify(350.5, FLOOR, 351.88, 349.20, "session low", spot=352.0)
+    ok_c, _ = classify(355.0, CEILING, 351.88, 349.20, "session high", spot=352.0)
+    ok_d, _ = classify(355.0, CEILING, None, None, "session high", spot=352.0)
+    ok_e, _ = classify(340.0, CEILING, 351.88, 349.20, "upper tine", spot=350.0)
     check("W6a a CEILING below the opening range is INVALID", ok_a is False)
     check("W6b a level INSIDE the opening range is INVALID", ok_b is False)
     check("W6c a CEILING above the range is valid", ok_c is True)
     check("W6d no opening range -> UNMEASURED (None), never a pass", ok_d is None)
     check("W6e a displaced upper tine is NOT re-cast as a floor", ok_e is False)
+    # W6g — r231's own rule, pinned HERE too so the range tests above cannot
+    # be read as covering it: this level clears every range test and is still
+    # invalid because price has traversed it.
+    ok_g, _ = classify(352.5, CEILING, 351.88, 349.20, "upper tine", spot=355.0)
+    check("W6g a CEILING above the range but BELOW spot is INVALID",
+          ok_g is False)
     P.begin_tick(1002.0)
     t3 = pl.tick(350.0, "call")
-    g = t3.level(349.0, CEILING, "upper tine", 351.88, 349.20)
+    g = t3.level(349.0, CEILING, "upper tine", 351.88, 349.20, 350.0)
     t3.refuse("geometry", t3.last_why)
     r3 = st.conn.execute("SELECT verdict FROM plan_check WHERE strategy='TestStrat' "
                          "AND ts_epoch=1002.0 AND check_name='geometry'").fetchone()

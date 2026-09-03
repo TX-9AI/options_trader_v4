@@ -1,5 +1,29 @@
 """
-analysis/liquidity_mapper.py  v4.2
+analysis/liquidity_mapper.py  v4.3
+v4.3  2026-09-03  r231 — EQUAL HIGHS/LOWS ARE GONE; NEAREST REPLACES LAST.
+      Operator, 2026-09-03: *"I don't want equal highs/lows identified at all.
+      Those are not reliable enough."* The map is NAMED LEVELS and FORK TINES,
+      nothing else. `_find_pools` is DELETED rather than left uncalled (r190 —
+      an orphaned producer is what the next reader re-wires).
+      ⚠️ VERIFIED BEFORE REMOVAL (§23): every external reader of `lmap.pools`
+      already filtered them out — `orb_strategy:499`, `main.py:1267`,
+      `shadow/primitives.py:167`. One external reader in the tree, and it
+      already ignored them.
+      🔑 AND THEY COULD COST A TRADE: an unnamed sweep can WIN the
+      freshest-sweep selection in `sweep_credit_spread` (that loop does not
+      filter on name) and then FAIL the `named` condition on the next line —
+      taking the slot and declining while a valid named sweep sat unselected.
+      🔴 `_flag_nearby_pools` WAS LAST-MATCH-WINS, NOT NEAREST. Every pool
+      inside the buffer overwrote the field, so it held whichever came LAST in
+      list order — and the list is ordered by producer, not by distance.
+      Measured at HEAD on a farthest-first fixture: 115.00 and 85.00 where the
+      nearest levels were 112.00 and 88.00.
+      ⚠️ v3.1's named-precedence filter is REMOVED, not orphaned: with
+      `_find_pools` gone every producer names its pool, so `named` was always
+      the whole list and the `else` branch was unreachable.
+      ⚠️ NOT TOUCHED, filed SWEEP.6: line ~1057 compares a 1m tine touch's
+      `bars_ago` against a possibly-15m sweep's, and the two `min(bars_ago)`
+      selections compare across timeframes. Units, not identity — unruled.
 v4.2  2026-08-27  r163 — THE FORK'S TINES ARE MOVING LIQUIDITY LEVELS, AND A
       TOUCH IS THEIR EVENT. Operator, 2026-08-27: *"it's basically a moving
       level that sweep is allowed to use, but with a touch, not a reject. The
@@ -403,10 +427,21 @@ class LiquidityMapper:
         if primary is None or primary.empty:
             return lmap
 
-        # Standard equal high/low pools
-        self._find_pools(lmap, primary, "15m")
-        if df_5m is not None and not df_5m.empty:
-            self._find_pools(lmap, df_5m, "5m")
+        # 🔴 r231 — EQUAL HIGHS/LOWS ARE NO LONGER IDENTIFIED AT ALL.
+        # Operator, 2026-09-03: "I don't want equal highs/lows identified at
+        # all. Those are not reliable enough." The map is now NAMED LEVELS
+        # (PDH/PDL, the session ladder) and FORK TINES, nothing else.
+        # ⚠️ VERIFIED BEFORE REMOVAL, NOT ASSUMED (WA §23): every external
+        # reader of `lmap.pools` already discarded them — orb_strategy:499
+        # (`if is_named and prox <= ...`), main.py:1267 and
+        # shadow/primitives.py:167 both filter on `is_named`. One external
+        # reader of `.pools` in the tree and it already ignored these.
+        # 🔑 AND THEY COULD COST A TRADE, WHICH IS THE ARGUMENT FOR REMOVING
+        # RATHER THAN FILTERING: an unnamed sweep can WIN the freshest-sweep
+        # selection in sweep_credit_spread (that loop does not filter on name)
+        # and then FAIL the `named` condition on the very next line — taking
+        # the slot and declining, while a valid named sweep sat unselected.
+        # Removing the population removes the only candidates that can do it.
 
         # Named key levels (PDH/PDL, session ladder). Deep frame when the
         # caller has one (A2.1); otherwise the live frame, guarded.
@@ -450,8 +485,18 @@ class LiquidityMapper:
             # across 3 symbols × 26 sessions. The freshness gate (age ≤ 8)
             # still applies downstream — this only stops noise from evicting
             # the signal.
-            named = [s for s in deduped if s.swept_named_level]
-            pick_from = named if named else deduped
+            # ⚠️ r231 — v3.1's named-precedence filter is REMOVED, not left
+            # orphaned. It existed because unnamed equal-high/low clusters are
+            # swept every few minutes and evicted genuine PDH/PDL raids
+            # (measured: sweep_is_named 0% across 3 symbols x 26 sessions).
+            # With `_find_pools` gone every pool is named — `_add_named_pool`
+            # and the tines are the only producers, and both set the name — so
+            # `named` was always the whole list and the `else` branch was
+            # unreachable. r190's precedent: an orphaned tie-break is what the
+            # next person re-wires. `tests/check_pool_geometry.py` P1 pins that
+            # every pool the map emits is named, which is what makes this safe
+            # by construction rather than by inspection.
+            pick_from = deduped
             recent = min(pick_from, key=lambda s: s.bars_ago * self._tf_minutes(s.timeframe))
             minutes_ago = recent.bars_ago * self._tf_minutes(recent.timeframe)
             lmap.recent_sweep   = recent
@@ -788,49 +833,12 @@ class LiquidityMapper:
             is_named=True
         ))
 
-    def _find_pools(self, lmap: LiquidityMap, df: pd.DataFrame, tf: str):
-        """Find equal highs and equal lows."""
-        highs = df["high"].tolist()
-        lows  = df["low"].tolist()
-        n     = min(len(highs), EQUAL_HIGH_LOW_LOOKBACK)
-
-        used_h = [False] * n
-        for i in range(n - 1, 0, -1):
-            if used_h[i]:
-                continue
-            cluster = [highs[-(n) + i]]
-            for j in range(i - 1, max(i - 20, -1), -1):
-                if not used_h[j] and within_pct(highs[-(n)+i], highs[-(n)+j], EQUAL_LEVEL_PCT):
-                    cluster.append(highs[-(n)+j])
-                    used_h[j] = True
-            used_h[i] = True
-            if len(cluster) >= 2:
-                avg = sum(cluster) / len(cluster)
-                if not any(within_pct(p.price, avg, EQUAL_LEVEL_PCT)
-                           for p in lmap.pools if p.kind == "high"):
-                    lmap.pools.append(LiquidityPool(
-                        price=avg, kind="high",
-                        touch_count=len(cluster), timeframe=tf
-                    ))
-
-        used_l = [False] * n
-        for i in range(n - 1, 0, -1):
-            if used_l[i]:
-                continue
-            cluster = [lows[-(n) + i]]
-            for j in range(i - 1, max(i - 20, -1), -1):
-                if not used_l[j] and within_pct(lows[-(n)+i], lows[-(n)+j], EQUAL_LEVEL_PCT):
-                    cluster.append(lows[-(n)+j])
-                    used_l[j] = True
-            used_l[i] = True
-            if len(cluster) >= 2:
-                avg = sum(cluster) / len(cluster)
-                if not any(within_pct(p.price, avg, EQUAL_LEVEL_PCT)
-                           for p in lmap.pools if p.kind == "low"):
-                    lmap.pools.append(LiquidityPool(
-                        price=avg, kind="low",
-                        touch_count=len(cluster), timeframe=tf
-                    ))
+    # 🔴 r231 — THE EQUAL-HIGH/LOW FINDER IS DELETED, NOT LEFT UNCALLED.
+    # Operator, 2026-09-03: those levels "are not reliable enough" and are
+    # not to be identified at all. An uncalled producer is what the next
+    # reader re-wires when the map looks thin (r190). `EQUAL_HIGH_LOW_LOOKBACK`
+    # is left in config deliberately — it is a stated prior, not a policy, and
+    # deleting a constant nobody reads is a separate decision (SWEEP.5).
 
     def _detect_sweeps(self, lmap: LiquidityMap, df: pd.DataFrame, tf: str):
         """Detect sweep events with named level tagging."""
@@ -966,16 +974,37 @@ class LiquidityMapper:
                                           reverse=True)[:5]
 
     def _flag_nearby_pools(self, lmap: LiquidityMap, price: float):
+        """The NEAREST unswept level above and below spot, within the buffer.
+
+        🔴 r231 — THIS WAS LAST-MATCH-WINS, NOT NEAREST. Every pool inside
+        the buffer overwrote `near_pool_above`, so the field ended up holding
+        whichever pool came LAST in list order — and the list is ordered by
+        producer, not by distance. Operator, 2026-09-03: "there should be,
+        from our present spot price, a previously held high above and low
+        below... those are the highest available candidates to sweep."
+        Nearest is the whole meaning of the field; list order is an accident.
+        ⚠️ DISTANCE IS THE ONLY KEY. The timeframe that produced a level is
+        provenance and is deliberately not consulted — same doctrine as
+        `level_ledger`, whose id is `symbol:provenance:price` with no
+        timeframe in it because "a level is a zone, not a float".
+        """
         buffer = price * lmap.near_pool_pct / 100
+        _above = _below = None
         for pool in lmap.pools:
             if pool.swept:
                 continue
             if pool.kind == "high" and pool.price > price:
                 if pool.price - price < buffer:
-                    lmap.near_pool_above = pool.price
+                    if _above is None or pool.price < _above:
+                        _above = pool.price
             elif pool.kind == "low" and pool.price < price:
                 if price - pool.price < buffer:
-                    lmap.near_pool_below = pool.price
+                    if _below is None or pool.price > _below:
+                        _below = pool.price
+        if _above is not None:
+            lmap.near_pool_above = _above
+        if _below is not None:
+            lmap.near_pool_below = _below
 
     def is_near_pool(self, lmap: LiquidityMap, price: float,
                      direction: str, buffer_pct: float = 0.003) -> bool:

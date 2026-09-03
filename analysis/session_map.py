@@ -1,5 +1,23 @@
 """
-analysis/session_map.py  v1.0
+analysis/session_map.py  v1.1
+v1.1  2026-09-03  r231 — 🔴 GEOMETRY NOW ASKS ROLE-vs-PRICE, NOT ONLY
+      ROLE-vs-RANGE. Operator, 2026-09-03: *"an upper tine can only be
+      resistance and a lower tine can only be support. Therefore an upper tine
+      below the current price cannot be resistance, and a lower tine above
+      price can never be support. Those are invalidated by geometry."*
+      ⚠️ THE RANGE TESTS DID NOT COVER THIS. A ceiling between `orb_high` and
+      spot passed every one of them — not inside the range, not below
+      `orb_low` — while price had already traded through it. The range asks
+      where a level sits relative to 09:35; this asks where it sits relative
+      to NOW, and only the second can invalidate a level price has traversed.
+      🔑 `spot` IS A REQUIRED KEYWORD. An optional one is a rule a caller can
+      drop in silence — r230's getattr default wearing a signature. Missing or
+      unusable spot returns None (unmeasured), and None is never a pass.
+      ⚠️ The in-range rule the operator also asked for was ALREADY HERE and is
+      unchanged — *"neither above nor below it, so it is neither a ceiling nor
+      a floor this session"* — reported rather than rebuilt.
+      `check_geometry` and `build_session_map` thread `spot` through; neither
+      has a production caller outside this file, so the change is contained.
 v1.0  2026-08-26  r146 — MIGRATED out of `derived/plans.py` (r126-r145), where
       the operator's ruling lived inside a mirror of the strategies that no
       strategy ever read. It now lives where the strategies can call it, and
@@ -90,8 +108,8 @@ def role_of(kind: str) -> Optional[str]:
 
 
 def classify(price: float, role: str, orb_high: Optional[float],
-             orb_low: Optional[float], name: str = "level"
-             ) -> Tuple[Optional[bool], str]:
+             orb_low: Optional[float], name: str = "level", *,
+             spot: Optional[float]) -> Tuple[Optional[bool], str]:
     """(valid, why) for ONE level against the opening range.
 
     valid is True / False / None:
@@ -126,6 +144,39 @@ def classify(price: float, role: str, orb_high: Optional[float],
                        f"opening range high {orb_high:.2f} — invalidated by "
                        f"geometry; a floor can only be sold as a put credit "
                        f"spread")
+    # 🔴 r231 — ROLE MUST ALSO AGREE WITH SPOT, NOT ONLY WITH THE RANGE.
+    # Operator, 2026-09-03: "an upper tine below the current price cannot be
+    # resistance, and a lower tine above price can never be support. Those are
+    # invalidated by geometry."
+    # ⚠️ THE RANGE TESTS ABOVE DO NOT COVER THIS. A ceiling sitting between
+    # `orb_high` and spot passes every test above — it is not inside the range
+    # and it is not below `orb_low` — while price has already traded through
+    # it. Anchoring only to the opening range asks where the level sits
+    # relative to 09:35; this asks where it sits relative to NOW.
+    # ⚠️ SPOT IS A REQUIRED KEYWORD, NOT AN OPTIONAL ONE. An optional
+    # parameter is a rule a caller can silently omit, which is r230's getattr
+    # default wearing a signature: the invalidation would vanish for that
+    # caller and nothing would say so. Missing spot returns None (unmeasured),
+    # and None is never a pass.
+    _sp = None
+    try:
+        _sp = float(spot) if spot is not None else None
+    except (TypeError, ValueError):
+        _sp = None
+    if _sp is None or _sp <= 0:
+        return None, (f"{name} at {px:.2f}: no spot to classify against — "
+                      f"role-vs-price geometry is unmeasured")
+    if role == CEILING and _sp > px:
+        return False, (f"{name} is a CEILING at {px:.2f} but price is ALREADY "
+                       f"ABOVE it at {_sp:.2f} — invalidated by geometry. An "
+                       f"upper level can only be resistance; price has "
+                       f"traversed it, so it is not resistance now and is "
+                       f"never re-cast as support")
+    if role == FLOOR and _sp < px:
+        return False, (f"{name} is a FLOOR at {px:.2f} but price is ALREADY "
+                       f"BELOW it at {_sp:.2f} — invalidated by geometry. A "
+                       f"lower level can only be support; price has traversed "
+                       f"it, so it is not support now")
     side = "above" if role == CEILING else "below"
     return True, (f"{name} at {px:.2f} is a {role} {side} the opening range "
                   f"{orb_low:.2f}-{orb_high:.2f} — geometry agrees")
@@ -153,14 +204,15 @@ class MapLevel:
     def option_side(self):
         return option_side(self.role)
 
-    def check_geometry(self, orb_high, orb_low):
-        ok, why = classify(self.price, self.role, orb_high, orb_low, self.name)
+    def check_geometry(self, orb_high, orb_low, spot):
+        ok, why = classify(self.price, self.role, orb_high, orb_low, self.name,
+                           spot=spot)
         self.valid = bool(ok)
         self.why = why
         return self.valid
 
 
-def build_session_map(orb_high, orb_low, ledger=None, ctm=None):
+def build_session_map(orb_high, orb_low, spot, ledger=None, ctm=None):
     """Every credit-spread candidate this session, on ONE map, centered on the
     5-MINUTE OPENING RANGE. Returns (ceilings, floors, invalid) — all three,
     because the eliminated ones are evidence too.
@@ -205,7 +257,7 @@ def build_session_map(orb_high, orb_low, ledger=None, ctm=None):
     for c in cands:
         if c.price <= 0:
             continue
-        if not c.check_geometry(orb_high, orb_low):
+        if not c.check_geometry(orb_high, orb_low, spot):
             invalid.append(c)
         elif c.role == CEILING:
             ceilings.append(c)

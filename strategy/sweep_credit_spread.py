@@ -1,5 +1,17 @@
 """
-strategy/sweep_credit_spread.py  v4.9
+strategy/sweep_credit_spread.py  v5.0
+v5.0  2026-09-03  r231 — 🔴 `or 999` MADE THE FRESHEST SWEEP THE STALEST.
+      `bars_ago` is an int field defaulting to 0 and SWP.10 counts it from the
+      RECLAIM bar, so a sweep that reclaimed on the CURRENT bar is 0 — and
+      `0 or 999` is 999. Twenty-six lines above, the selection loop takes
+      `min(bars_ago)`: it hunts the freshest sweep on the board and this line
+      converted exactly that winner into the stale sentinel and refused it.
+      One function contradicting itself, invisibly — 999 reads as missing data
+      rather than as the best setup there was. Absent stays 999; ZERO stays 0.
+      Also: the geometry call now passes `price_now`, so a pool price has
+      already traversed is invalidated rather than merely failing a soft
+      condition. `side_of_pool` is UNTOUCHED and now tests the same fact
+      twice — recorded as SWEEP.7, not folded in unruled.
 v4.9  2026-09-03  r230 — 🔴 SWP.5 WAS RULED ON 2026-08-11 AND NEVER REACHED
       THIS FILE. Its ruling: "LIVENESS REPLACES THE CLOCK", measured over 90
       symbol-days — of the stale sweeps the age gate refused, 32.9% still had
@@ -785,7 +797,17 @@ class SweepCreditSpreadStrategy:
         prep.cond("reclaimed", 1.0 if reclaimed else 0.0, self.CONDITIONS["reclaimed"], reclaimed)
         inval = bool(getattr(sweep, "invalidated", False))
         prep.cond("invalidated", 1.0 if inval else 0.0, self.CONDITIONS["invalidated"], not inval)
-        age = int(getattr(sweep, "bars_ago", 999) or 999)
+        # 🔴 r231 — `or 999` MADE THE FRESHEST SWEEP THE STALEST. `bars_ago`
+        # is an int field defaulting to 0 and SWP.10 counts it from the
+        # RECLAIM bar, so a sweep that reclaimed on the CURRENT bar is 0 —
+        # and `0 or 999` is 999. Twenty-six lines above, the selection loop
+        # takes `min(bars_ago)`: it hunts the freshest sweep on the board and
+        # this line converted exactly that winner into the stale sentinel and
+        # refused it. The two halves of one function contradicted each other,
+        # and 999 reads as missing data rather than as the best setup there
+        # was. Absent stays 999; ZERO now stays zero.
+        _ba = getattr(sweep, "bars_ago", None)
+        age = 999 if _ba is None else int(_ba)
         # 🔴 r230 - NO relax call. `invalidated` is the liveness test;
         # this is SWP.5's bounded backstop and it does not widen.
         _max_age = MAX_AGE_BARS
@@ -824,7 +846,8 @@ class SweepCreditSpreadStrategy:
         t.check("spent_level", 1.0 if _spent else 0.0, not _spent)
         if _spent:
             prep.structural.append(("spent_level", f"{name} {pool:.2f} is SPENT — {_spent_why}"))
-        _geo = t.level(pool, boundary, name or "pool", orb_high, orb_low)
+        _geo = t.level(pool, boundary, name or "pool", orb_high, orb_low,
+                       price_now)
         if _geo is False:
             prep.structural.append(("geometry", t.last_why))
 

@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.48
+# BACKLOG.md — v1.49
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,69 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.49 — 2026-09-03 — r231 — 🔴 THE LEVEL MODEL, CORRECTED TO THE OPERATOR'S
+INTENT. SWEEP.4 CLOSED; SWEEP.6/7 OPENED.** Five rulings, 2026-09-03. **Two were
+already built and are reported rather than rebuilt:** named precedence (v3.1),
+and *"nothing inside the ORB range is actionable"* — `session_map.classify()`
+has refused those since it was written, in almost his words, and SPX failed it
+88 times today.
+🔴 **THE `or 999`.** `age = int(getattr(sweep, "bars_ago", 999) or 999)`.
+`bars_ago` is an int field defaulting to 0 and SWP.10 counts it from the
+**reclaim** bar, so a sweep that reclaimed on the current bar is `0` — and
+**`0 or 999` is 999.** Twenty-six lines above, the selection loop takes
+`min(bars_ago)`: it hunts the freshest sweep on the board, and this line turned
+exactly that winner into the stale sentinel and refused it. One function
+contradicting itself, and invisibly — 999 reads as missing data, not as the best
+setup available. Absent stays 999; **zero stays zero.**
+🔴 **GEOMETRY NOW ASKS ROLE-vs-PRICE.** Operator: *"an upper tine below the
+current price cannot be resistance, and a lower tine above price can never be
+support — invalidated by geometry."* The range tests did **not** cover this: a
+ceiling between `orb_high` and spot passed every one of them while price had
+already traded through it. `spot` is a **required keyword** — an optional one is
+r230's getattr default wearing a signature. Missing spot → None (unmeasured),
+never a pass. Threaded through `PlanTick.level`, `check_geometry` and
+`build_session_map`; no production caller outside `session_map.py`.
+🔴 **EQUAL HIGHS/LOWS ARE NOT IDENTIFIED AT ALL** — *"not reliable enough."*
+`_find_pools` **deleted**, not left uncalled (r190). Verified before removal
+(§23): every external reader of `lmap.pools` already filtered them —
+`orb_strategy:499`, `main.py:1267`, `shadow/primitives.py:167`. **One external
+reader in the tree and it already ignored them.** And they could cost a trade:
+an unnamed sweep can WIN the freshest-sweep selection (that loop does not filter
+on name) then FAIL the `named` condition on the next line — taking the slot and
+declining while a valid named sweep sat unselected. v3.1's named-precedence
+filter comes out with them: every remaining producer names its pool, so the
+`else` branch was unreachable.
+🔴 **`_flag_nearby_pools` WAS LAST-MATCH-WINS.** Every pool inside the buffer
+overwrote the field, so it held whichever came **last in list order** — ordered
+by producer, not distance. **Measured at HEAD on a farthest-first fixture: 115.00
+and 85.00 where the nearest were 112.00 and 88.00.** Distance is now the only
+key; the timeframe that produced a level is never consulted, matching
+`level_ledger`, whose id is `symbol:provenance:price` with no timeframe in it.
+⚠️ **CONSEQUENCE UP FRONT:** a box whose only nearby structure was an unnamed
+cluster now produces **no sweep candidate at all** rather than a bad one. Fewer
+plans, and the DECISIONS panel will say so.
+⚠️ **LANDS AFTER r230, NOT INSTEAD OF IT.** `sweep_credit_spread.py` v5.0
+carries r230's changes as well, so landing this first would put r230's code in
+the tree with no r230 GENESIS row.
+`tests/check_pool_geometry.py` v1.0, 16 checks, **born red 13 of 16** at
+`d680949` with **named** failures — a capability probe degrades a missing `spot`
+kwarg to a named FAIL rather than one TypeError killing every G-check (r206/r212).
+`check_plan_wiring` v1.4 **re-derived**, not patched, with W6g pinning the new
+rule where the range tests cannot reach it. **Two faults caught in my own
+checker, both C.23:** P1 first read the `.append()` call's keywords instead of
+the `LiquidityPool(...)` being appended, so every site looked unnamed; and G7
+went red against *correct* code because the degrade-wrapper swallowed the very
+TypeError G7 asserts. 76/76 checkers green before and after.
+
+| id | question | state |
+|---|---|---|
+| **SWEEP.4** | `0 or 999` scored the freshest sweep as maximally stale. | ✅ **CLOSED r231** |
+| **SWEEP.6** | `bars_ago` is compared **across timeframes**: `min(bars_ago)` at two selection sites, and `liquidity_mapper:~1057` compares a **1m** tine touch against a possibly-**15m** sweep — a 15x unit error that can overwrite the correctly-computed `recent_sweep` without updating `sweep_age_bars`. The mapper already computes the 5m-equivalent and says why: *"so the downstream thresholds stay consistent across timeframes."* Fix shape: an `age_5m` property on `SweepEvent` so no consumer can get it wrong. **Alters selection — unruled.** | 🔲 OPEN |
+| **SWEEP.7** | With geometry enforcing role-vs-spot, `side_of_pool` now tests the same fact a second time as a soft condition. Two rules for one thing is the rot §35 names. **Remove or keep — unruled.** | 🔲 OPEN |
+| **SWEEP.2** | Unchanged and still the blocker: `wing_r_best` 761/761 at 0.0–0.06 against `R_FLOOR` 1.00. | 🔲 OPEN |
+| **SWEEP.3** | `search_wing` is a bare argmax on R with no narrow-side bound; `stop_vs_spread` checked after. r208's C.43, never carried to the verticals. | 🔲 OPEN |
+| **C.45** | THE GENERAL LESSON. **`x or DEFAULT` is not a null check.** Zero, empty string and empty list are all falsy, so the idiom silently rewrites the most extreme *valid* reading into the sentinel for "absent" — and the sentinel is exactly the value a staleness gate refuses. Sibling of C.44: both are fallbacks standing in for a value nobody chose. Use an explicit `is None`. | 📌 RECORDED |
 
 **v1.48 — 2026-09-03 — r230 — 🔴 SWP.5 WAS RULED ON 2026-08-11 AND NEVER
 REACHED THE CODE. SWEEP.1 CLOSED.** `sweep_credit_spread` read
