@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_trend_strength.py  v1.0
+tests/check_trend_strength.py  v1.1
+v1.1  2026-09-03  r229 — T10-T12: the acceptance TRAJECTORY separates a tape
+      the mean cannot (efficiency 1.00, closes fading), the FVG component
+      counts respected pullbacks and returns None when no gap was tested, and
+      the composite is UNCHANGED — nothing unproven earns weight.
 v1.0  2026-09-03  r224 — THE METER SEPARATES A RIP FROM A CREEP, OR IT IS DEAD
       WEIGHT.
 
@@ -151,6 +155,53 @@ def main():
     # ── T9 — the line() summary states a refusal as a refusal ───────────
     check("T9 line() names a no-reading rather than printing a number",
           "NO READING" in short_win.line(), short_win.line())
+
+    # ── T10 — THE ACCEPTANCE TRAJECTORY SEES WHAT THE MEAN CANNOT ───────
+    # 🔴 THE MEAN WAS THE STRONGEST COMPONENT IN THE FIRST CALIBRATION AND
+    # STILL DID NOT CLEAR THE NOISE FLOOR. It is blind to DIRECTION: 0.4
+    # building to 0.7 and 0.7 decaying to 0.4 average the same, and they are
+    # opposite tapes. This plants a straight advance whose closes drift off
+    # the highs — EFFICIENCY 1.00, a textbook "healthy trend" — and requires
+    # the trajectory to call it deteriorating.
+    n = 24
+    dec = [{"open": 100 + i * .20, "high": 100 + i * .20 + .03 + .02 * i,
+            "low": 100 + i * .20 - .15, "close": 100 + i * .20}
+           for i in range(n)]
+    r_dec = measure(dec, "long")
+    check("T10 a straight advance with fading closes reads as deteriorating",
+          r_dec.efficiency > 0.95 and r_dec.acc_slope < 0
+          and r_dec.acc_delta < 0 and r_dec.acc_run == 0.0,
+          f"eff {r_dec.efficiency} slope {r_dec.acc_slope} "
+          f"delta {r_dec.acc_delta} run {r_dec.acc_run}")
+    check("T10b while a genuine rip trajectories UP or holds",
+          r_rip.acc_run > 0.5 and (r_rip.acc_delta or 0) >= -0.05,
+          f"run {r_rip.acc_run} delta {r_rip.acc_delta}")
+
+    # ── T11 — FVG: A PULLBACK THAT FILLS AND CONTINUES ──────────────────
+    # 🔑 The first component measuring WHY a pullback ended. Mechanical fill
+    # and continuation vs a fill that keeps going through.
+    up = [100 + i * .20 for i in range(12)]
+    held = _bars(up + [102.0, 101.6] + [101.8 + i * .22 for i in range(10)],
+                 .03, .15)
+    r_held = measure(held, "long")
+    check("T11 gaps tested and respected are counted",
+          r_held.fvg_tested > 0 and r_held.fvg_respect == 1.0,
+          f"tested {r_held.fvg_tested} respect {r_held.fvg_respect}")
+
+    # ⚠️ NO GAP TESTED IS None, NOT 0.0. "No imbalance was retested" and
+    # "every retest failed" are different facts; scoring the first as the
+    # second would read a clean, gapless trend as a broken one.
+    flatish = _bars([100 + i * .02 for i in range(24)], .30, .30)
+    check("T11b an untested imbalance yields None, not 0.0",
+          measure(flatish, "long").fvg_respect is None,
+          str(measure(flatish, "long").fvg_respect))
+
+    # ── T12 — THE COMPOSITE IS UNCHANGED ────────────────────────────────
+    # 🔴 NOTHING NEW IS WEIGHTED. Adding an unproven component to the score
+    # moves the gate on a guess; the calibration decides what earns weight.
+    check("T12 the new components are recorded but NOT in the score",
+          abs(r_rip.score - 0.9196) < 0.02,
+          f"score {r_rip.score} — unchanged from v1.0's fixture")
 
     print()
     if _fails:

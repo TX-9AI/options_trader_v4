@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.46
+# BACKLOG.md — v1.47
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -200,7 +200,7 @@ and the fly on the settle. See stage 8.
 
 | # | stage | needs | state |
 |---|---|---|---|
-| **1** | **STRENGTH, CALIBRATED.** Does any component discriminate; settle the leg definition. `trend_strength` (r224) + `calibrate_trend_strength` (dtp r257). **EVERYTHING BELOW ANCHORS HERE** — if it cannot discriminate, 2-9 are moot and the runaway needs a different idea. | — | ⬜ |
+| **1** | **STRENGTH, CALIBRATED.** 🔴 **FIRST RUN NEGATIVE (2026-09-03, 183 runaway trades):** every component under the noise floor — best AUC **0.63** against 0.65 guidance; at a 0.40 gate you refuse 109 of 183 to move the green rate **3 points**, and at 0.50 the rate is BELOW baseline. **DIAGNOSIS: the outcome was wrong, not necessarily the meter.** "Went 5% green" had a **74% base rate** (136/183) — a near-universal event leaves nothing to separate — and it is the wrong question for MOM.1 anyway, since five trades made 97% of the runaway P&L and going 5% green is not what those five did. **r229/r259 re-run:** outcome is now a sample QUANTILE ("did it run"), plus acceptance TRAJECTORY (slope / recent-vs-whole / consecutive) and FVG CONTINUATION. Does any component discriminate; settle the leg definition. `trend_strength` (r224) + `calibrate_trend_strength` (dtp r257). **EVERYTHING BELOW ANCHORS HERE** — if it cannot discriminate, 2-9 are moot and the runaway needs a different idea. | — | ⬜ |
 | **2** | **GREEKS TRUST.** Is per-contract delta/gamma trustworthy? OI.1 says the GEX SURFACE is gamma-squared, which may or may not touch per-contract greeks. `greeks_series` is 4 GB, scopeable since dtp r253. **CAN INVALIDATE 3, 6 AND 7**, so it comes early. | 1 | ⬜ |
 | **3** | **STRENGTH → DELTA.** Recorder first: log the delta a strength WOULD have chosen, gate nothing, calibrate against outcomes. | 1, 2 | ⬜ |
 | **4** | **INITIAL STOP FROM STRENGTH.** The stop cannot be expressed until the contract is known — a 0.20-delta and a 0.45-delta strike need different units for the same underlying move. RPT.B already argues for it: 21 of 22 runaway losses fell between −20% and −32%, σ 4.4 — a fixed threshold defining the entire left tail. | 1, 3 | ⬜ |
@@ -313,6 +313,17 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.47 — 2026-09-03 — r229 — TWO NEW COMPONENT FAMILIES; MOM.1 STAGE 1's
+FIRST RUN WAS NEGATIVE AND THE DIAGNOSIS IS THE OUTCOME.** Best AUC 0.63 under
+a 0.65 floor, on a 74% base rate — predicting a near-universal event. Acceptance
+was strongest at every window and the MEAN is blind to direction, so
+`acc_slope` / `acc_delta` / `acc_run` are recorded; the same measure read
+backward is stage 5's exhaustion signal. `fvg_respect` measures WHY a pullback
+ended — mechanical fill and continuation vs distribution — detected from the
+window's own bars to keep `measure()` pure, and BACKWARD-LOOKING because the
+post-entry version would calibrate beautifully and be unusable as a gate.
+**Nothing new is weighted**: the calibration decides.
 
 **v1.46 — 2026-09-03 — r228 — r221 ARMED UNCONDITIONALLY.** It never consulted
 where price was — three branches, none of them the zone test the operator's rule

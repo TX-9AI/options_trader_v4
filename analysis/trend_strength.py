@@ -1,5 +1,34 @@
 """
-analysis/trend_strength.py  v1.0
+analysis/trend_strength.py  v1.1
+v1.1  2026-09-03  r229 — TWO NEW COMPONENT FAMILIES, RECORDED NOT WEIGHTED.
+      The first calibration (182 runaway trades, 2026-08-25..09-03) put every
+      component under the noise floor — best 0.63 against a 0.65 guidance —
+      and ACCEPTANCE was the strongest at every window (0.63/0.62/0.58).
+      🔑 OPERATOR: "a continuing degree of acceptance may be the right
+      signal." The MEAN is blind to DIRECTION — 0.4 building to 0.7 and 0.7
+      decaying to 0.4 average the same and are opposite tapes. Three
+      expressions are now recorded: `acc_slope` (fit across the window),
+      `acc_delta` (recent vs whole — "is it STILL happening"), and `acc_run`
+      (consecutive closes in the upper third, closest to the doctrine).
+      Measured on a fixture: a straight advance with closes drifting off the
+      highs scores EFFICIENCY 1.00 while slope -0.023, delta -0.164 and run
+      0.00 all say deteriorating.
+      🔑 AND THE SAME MEASURE READ BACKWARD IS EXHAUSTION — one measure in two
+      directions rather than two meters (MOM.1 stage 5).
+      🔑 FVG CONTINUATION, operator: "whether pullbacks filled at FVG and
+      continued onwards." The first component that measures WHY a pullback
+      ended rather than how deep it was: filling an imbalance and continuing
+      is MECHANICAL, filling it and carrying on through is DISTRIBUTION.
+      ⚠️ DETECTED FROM THE WINDOW'S OWN BARS, not from `trades.entry_snapshot`
+      — which does hold the gaps at every fill and would be good
+      corroboration, but reading it would make `measure()` depend on a trade
+      row, and its purity as a function of bars is what lets the calibrator
+      score the SAME code that trades.
+      🔴 BACKWARD-LOOKING BY CONSTRUCTION: whether the pullback AFTER entry
+      filled and continued is a POST-ENTRY fact — it would calibrate
+      beautifully and be unusable as a gate.
+      ⚠️ NOTHING NEW IS IN THE COMPOSITE. Adding an unproven component to the
+      score moves the gate on a guess; the calibration decides.
 v1.0  2026-09-03  r224 — A TREND STRENGTH METER BUILT FROM THE PATH.
 
 Operator, 2026-09-03: what combination of vectors defines a healthy trend from
@@ -77,6 +106,15 @@ class TrendStrength:
     acceptance:   Optional[float] = None
     shallowness:  Optional[float] = None
     pace:         Optional[float] = None
+    # r229 — recorded, NOT weighted. The composite is unchanged until the
+    # calibration says which of these carries anything; adding an unproven
+    # component to the score would move the gate on a guess.
+    acc_slope:    Optional[float] = None
+    acc_recent:   Optional[float] = None
+    acc_delta:    Optional[float] = None
+    acc_run:      Optional[float] = None
+    fvg_respect:  Optional[float] = None
+    fvg_tested:   int = 0
     bars:         int = 0
     reason:       str = ""
     parts:        dict = field(default_factory=dict)
@@ -173,6 +211,81 @@ def measure(bars, direction: str, *, min_bars: int = MIN_BARS) -> TrendStrength:
         return TrendStrength(bars=len(rows), reason="every bar had zero range")
     acceptance = sum(clvs) / len(clvs)
 
+    # ── 2b. ACCEPTANCE TRAJECTORY — is it STILL happening? ──────────────
+    # 🔑 OPERATOR, 2026-09-03: "a continuing degree of acceptance may be the
+    # right signal." The MEAN was the strongest component in the first
+    # calibration (AUC 0.63/0.62/0.58 across windows) and it is still blind to
+    # DIRECTION: 0.4 building to 0.7 and 0.7 decaying to 0.4 average the same,
+    # and they are opposite tapes. That blindness is a candidate explanation
+    # for why nothing cleared the noise floor.
+    # ⚠️ THREE EXPRESSIONS, RECORDED SEPARATELY, because they disagree
+    # informatively: a late collapse after a strong start still slopes up.
+    # 🔑 AND THE SAME MEASURE READ BACKWARD IS EXHAUSTION. If continuing
+    # acceptance is strength, DECAYING acceptance is the exhaustion signal —
+    # one measure in two directions rather than two meters (MOM.1 stage 5).
+    n_c = len(clvs)
+    acc_slope = None
+    if n_c >= 4:
+        xm = (n_c - 1) / 2.0
+        ym = acceptance
+        den = sum((i - xm) ** 2 for i in range(n_c))
+        if den > 0:
+            acc_slope = sum((i - xm) * (v - ym)
+                            for i, v in enumerate(clvs)) / den
+    # recent vs whole — "is it still happening", the shape that flags a
+    # reversal while the earlier bars still look good
+    _tail = max(3, n_c // 4)
+    acc_recent = (sum(clvs[-_tail:]) / _tail) if n_c >= 6 else None
+    acc_delta = (None if acc_recent is None else acc_recent - acceptance)
+    # consecutive count — closest to the doctrine: acceptance REPEATED is a
+    # decision, acceptance once is a bar
+    _run = 0
+    for v in reversed(clvs):
+        if v >= 2.0 / 3.0:
+            _run += 1
+        else:
+            break
+    acc_run = _run / n_c
+
+    # ── 2c. FVG CONTINUATION — did pullbacks fill an imbalance and go on? ─
+    # 🔑 OPERATOR: "whether pullbacks filled at FVG and continued onwards." The
+    # first component that measures WHY a pullback ended rather than how deep
+    # it was. A pullback that fills an imbalance and continues is MECHANICAL;
+    # one that fills it and keeps going is DISTRIBUTION.
+    # ⚠️ DETECTED FROM THE WINDOW'S OWN BARS, not read from
+    # `trades.entry_snapshot`. entry_snapshot holds the gaps at the fill and
+    # would be excellent corroboration, but reading it would make `measure()`
+    # depend on a trade row — and its purity as a function of bars is exactly
+    # what lets the calibrator score the SAME code that trades.
+    # 🔴 BACKWARD-LOOKING BY CONSTRUCTION. Whether the pullback AFTER entry
+    # filled and continued is a post-entry fact: it would calibrate beautifully
+    # and be unusable as a gate. This asks only about gaps already COMPLETED
+    # inside the window, which is what a decision at the fill can actually see.
+    fvg_tested = fvg_held = 0
+    for i in range(2, len(rows)):
+        if long_side:
+            gap_lo, gap_hi = highs[i - 2], lows[i]      # bullish imbalance
+        else:
+            gap_lo, gap_hi = highs[i], lows[i - 2]      # bearish imbalance
+        if gap_hi <= gap_lo:
+            continue                                    # no gap on these three
+        extreme = max(highs[:i + 1]) if long_side else min(lows[:i + 1])
+        for j in range(i + 1, len(rows)):
+            touched = (lows[j] <= gap_hi) if long_side else (highs[j] >= gap_lo)
+            if not touched:
+                continue
+            fvg_tested += 1
+            # continuation = a LATER bar exceeded the pre-pullback extreme
+            went_on = any((highs[k] > extreme) if long_side
+                          else (lows[k] < extreme)
+                          for k in range(j + 1, len(rows)))
+            fvg_held += 1 if went_on else 0
+            break
+    # ⚠️ None WHEN NO GAP WAS TESTED — not 0.0. "No imbalance was retested" and
+    # "every retest failed" are different facts, and scoring the first as the
+    # second would read a clean trend as a broken one.
+    fvg_respect = (fvg_held / fvg_tested) if fvg_tested else None
+
     # ── 3. SHALLOWNESS — 1 - deepest pullback / move so far ─────────────
     # ⚠️ MEASURED AGAINST THE MOVE AT THAT MOMENT, not the final move: a
     # pullback is only deep relative to what had been gained when it happened.
@@ -219,6 +332,12 @@ def measure(bars, direction: str, *, min_bars: int = MIN_BARS) -> TrendStrength:
     return TrendStrength(
         score=round(score, 4), efficiency=round(efficiency, 4),
         acceptance=round(acceptance, 4), shallowness=round(shallowness, 4),
+        acc_slope=None if acc_slope is None else round(acc_slope, 5),
+        acc_recent=None if acc_recent is None else round(acc_recent, 4),
+        acc_delta=None if acc_delta is None else round(acc_delta, 4),
+        acc_run=round(acc_run, 4),
+        fvg_respect=None if fvg_respect is None else round(fvg_respect, 4),
+        fvg_tested=fvg_tested,
         pace=round(pace, 4), bars=len(rows), reason="",
         parts={"net": round(net, 4), "travelled": round(travelled, 4),
                "atr_bar": round(atr_bar, 4), "worst_retrace": round(worst, 4),
