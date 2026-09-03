@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""check_wing_search.py
+"""check_wing_search.py  v1.2
+v1.2  2026-09-03  r234 — W2 RE-DERIVED. It matched the SOURCE TEXT
+      `r > best[0]`, which r234's NamedTuple refactor legitimately removed —
+      §21: a check that reads source proves nothing about runtime and goes
+      RED on a correct change. It now EXECUTES the search and asserts which
+      wing won.
 v1.1  2026-08-27  r160: W18 re-pinned — plan_second_leg deleted; authorize()/manage() build nothing. — v1.0
 
 🔴 R IS A CONSTRUCTION TARGET, NOT A FILTER. THE WING IS SEARCHED.
@@ -85,8 +90,25 @@ def main():
         l for l in open(os.path.join(_root, "strategy", "credit_vertical.py"),
                         encoding="utf-8").read().split("\n")
         if not l.strip().startswith("#"))
-    check("W2 every strike beyond the short is a candidate",
-          "def search_wing" in cvsrc and "r > best[0]" in cvsrc)
+    # 🔴 RE-DERIVED AT r234. This matched the SOURCE TEXT `r > best[0]`, which
+    # r234's NamedTuple refactor legitimately removed — WORKING_AGREEMENT §21,
+    # a check that reads source proves nothing about runtime and goes red on a
+    # correct change. It now EXECUTES: every strike beyond the short is
+    # considered, and the winner is the best of them on the gated basis.
+    from strategy import credit_vertical as cv
+
+    class _K:
+        def __init__(self, k, b, a, m):
+            self.strike, self.bid, self.ask, self.mark = k, b, a, m
+    _sh = _K(100.0, 1.20, 1.24, 1.22)
+    _wings = [_K(95.0, 0.20, 0.23, 0.215), _K(97.0, 0.50, 0.55, 0.525),
+              _K(99.0, 0.95, 1.00, 0.975)]
+    _res = cv.search_wing([_sh] + _wings, _sh, "put", 1.0)
+    _best = max((c for c in _wings),
+                key=lambda c: (1.20 - c.ask) / (abs(100.0 - c.strike) - (1.20 - c.ask)))
+    check("W2 every strike beyond the short is considered, best wins",
+          _res.long is not None and _res.long.strike == _best.strike,
+          f"{_res.long and _res.long.strike} vs {_best.strike}")
     check("W2b the sweep calls the SHARED searcher",
           "cv.search_wing(" in code)
 

@@ -1,5 +1,15 @@
 """
-strategy/credit_vertical.py  v4.3
+strategy/credit_vertical.py  v4.4
+v4.4  2026-09-03  r234 — `search_wing` RETURNS A NAMEDTUPLE AND IS
+      BRACKETED FROM BOTH ENDS. r219 added a fifth value and MISSED two guard
+      returns still returning four; both callers unpacked five, so a short leg
+      with no bid raised ValueError into `_safe_strategy` and read as a clean
+      DECLINE. `WingResult` makes that unrepresentable. And the search now has
+      a NARROW-side bound — `stop_survivable` — because R rises as the wing
+      narrows while the stop narrows with it, so a selector that only
+      maximises R optimises INTO the least survivable structure (r208 C.43,
+      found in the butterfly and never carried here). `why_key` names which
+      rung refused, as a FIELD rather than prose a caller would sniff.
 v4.3  2026-09-02  r219 — 🔴 THE ENTRY AND THE MARK WERE ON DIFFERENT SIDES OF THE QUOTE.
       `search_wing` priced the credit as short.BID - long.ASK and that number
       became `sig.entry_premium` — the position's entry of record — while
@@ -72,7 +82,7 @@ a test asserts the defaults still match.
 
 import logging
 import math
-from typing import List, Optional, Sequence
+from typing import List, NamedTuple, Optional, Sequence
 
 from utils.math_utils import safe_float
 
@@ -333,8 +343,41 @@ def leg_order_from_slope(slope: float, flat_eps: float):
 # None under relaxed. Relaxed widens EVIDENCE (sweep age, pierce depth, level
 # hold rate); it does not waive economics. Routing this through the hurdle
 # would restore the exact hole that produced the loop.
-def search_wing(contracts, short_contract, side: str, r_floor: float):
-    """(best_r, long_contract, credit, width, fill_credit).
+class WingResult(NamedTuple):
+    """What the wing search found. 🔴 r234 - A NAMEDTUPLE, NOT A BARE TUPLE.
+
+    r219 added a FIFTH value and updated the success path and the no-candidate
+    path - and MISSED the two guard returns, which kept returning FOUR. Both
+    callers unpack five names, so a short leg with `bid <= 0` raised
+    `ValueError: not enough values to unpack`, was swallowed by
+    `_safe_strategy` into a clean-looking DECLINE, and recorded the strategy as
+    never asked. Proven by execution at HEAD; it has never fired on the fleet
+    (0 raises on 15 boxes) purely because that guard rarely trips.
+    ⚠️ THE FIX IS THE SHAPE, NOT THE PATCH. Fields have defaults and callers
+    read by NAME, so adding a value can never again change what a return path
+    unpacks to. `_none()` gives every guard one spelling of "nothing found".
+    """
+    r: float = 0.0                 # credit / (width - credit) - EXPIRY basis
+    long: object = None
+    credit: float = 0.0            # bid/ask - the economic hurdle (r219)
+    width: float = 0.0
+    fill: Optional[float] = None   # mark - what gets BOOKED (r219)
+    r_stop: Optional[float] = None # credit / stop distance - r234
+    stop_dist: Optional[float] = None
+    why: str = ""                  # why nothing qualified, when nothing did
+    why_key: str = ""              # WHICH check refused - never sniffed
+                                   # from the prose (§20 one level over)
+
+
+def _none(why: str = "") -> WingResult:
+    return WingResult(why=why)
+
+
+def search_wing(contracts, short_contract, side: str, r_floor: float,
+                r_floor_stop: float = None, short_bid=None, short_ask=None):
+    """WingResult. Read by NAME - see the class docstring for why.
+
+    \U0001f534 r234 - BRACKETED FROM BOTH ENDS, AND SCORED ON THE STOP.
 
     Prices every listed strike beyond the short on BID/ASK — never mark, because
     the credit has to be one the market would actually pay — and returns the
@@ -365,11 +408,19 @@ def search_wing(contracts, short_contract, side: str, r_floor: float):
         k_short = float(getattr(short_contract, "strike", 0) or 0)
         bid = float(getattr(short_contract, "bid", 0.0) or 0.0)
     except (TypeError, ValueError):
-        return 0.0, None, 0.0, 0.0
+        return _none("short contract strike/bid unreadable")
     if k_short <= 0 or bid <= 0:
-        return 0.0, None, 0.0, 0.0
+        return _none(f"short leg has no usable bid (strike {k_short:g})")
 
-    best = None
+    from strategy.criteria import (stop_distance as _stop_distance,
+                                   stop_survivable, R_FLOOR_STOP)
+    _floor_stop = R_FLOOR_STOP if r_floor_stop is None else r_floor_stop
+    # \u26a0\ufe0f SURVIVABILITY IS MEASURED ON THE SHORT LEG'S QUOTE, which the
+    # caller may already hold; falling back to the contract keeps one source.
+    _sbid = safe_float(short_bid) if short_bid is not None else bid
+    _sask = safe_float(short_ask) if short_ask is not None else \
+        safe_float(getattr(short_contract, "ask", None))
+    best, _why, _key = None, "", ""
     for c in (contracts or []):
         try:
             k = float(getattr(c, "strike", 0) or 0)
@@ -389,7 +440,34 @@ def search_wing(contracts, short_contract, side: str, r_floor: float):
         if credit <= 0 or risk <= 0:
             continue
         r = credit / risk
-        if best is None or r > best[0]:
+        # \U0001f534 r234 - SCORED ON THE STOP, AND BRACKETED FROM BOTH ENDS. R rises
+        # as the wing narrows while the STOP narrows with it, so a selector
+        # that only maximises R walks straight into the least survivable
+        # structure and lets a later gate refuse it. That is r208's C.43 -
+        # *"the selector does not merely allow the bad case, it OPTIMISES INTO
+        # IT"* - found in the butterfly and never carried to the verticals.
+        # The butterfly's own fix is the pattern: R on the wide side,
+        # survivability on the narrow side.
+        _sd = _stop_distance(width, credit)
+        _rs = (credit / _sd) if (_sd and _sd > 0) else None
+        if _rs is None:
+            _why, _key = (_why or "stop distance unpriceable"), (_key or "wing")
+            continue
+        _ok, _svwhy = stop_survivable(_sd, _sbid, _sask)
+        if not _ok:
+            # \u26a0\ufe0f NAMED, NOT SILENT. "No wing qualified" and "every wing was
+            # too fragile" are different answers and the caller reports which.
+            _why, _key = f"narrowest wings refused: {_svwhy}", "stop_vs_spread"
+            continue
+        if _floor_stop is not None and _rs < _floor_stop:
+            if _key != "stop_vs_spread" or _rs > 0:
+                _why = f"best stop-basis R {_rs:.2f} < {_floor_stop:.2f}"
+                _key = "wing_r_best"
+            continue
+        # \u26a0\ufe0f RANKED ON THE STOP BASIS. `r_stop = r / LONE_STOP_PCT_OF_RISK`
+        # is a MONOTONE transform of `r`, so the winner is the same strike
+        # either way - ranking on it changes nothing and says what it means.
+        if best is None or _rs > (best.r_stop or -1.0):
             # ⚠️ THE MARK CREDIT IS CARRIED ALONGSIDE, NOT INSTEAD. It is what
             # gets BOOKED; `credit` is what gets JUDGED. If either leg has no
             # usable mark the fill credit is None and the caller must say so
@@ -403,7 +481,10 @@ def search_wing(contracts, short_contract, side: str, r_floor: float):
             _lm = safe_float(getattr(c, "mark", None))
             _fill = (round(max(0.0, _sm - _lm), 4)
                      if _sm is not None and _lm is not None else None)
-            best = (round(r, 4), c, round(credit, 4), width, _fill)
+            best = WingResult(r=round(r, 4), long=c, credit=round(credit, 4),
+                              width=width, fill=_fill,
+                              r_stop=round(_rs, 4), stop_dist=round(_sd, 4))
     if best is None:
-        return 0.0, None, 0.0, 0.0, None
+        return WingResult(why=(_why or "no strike beyond the short prices a "
+                                       "credit"), why_key=(_key or "wing"))
     return best

@@ -1,5 +1,11 @@
 """
-strategy/criteria.py  v1.3
+strategy/criteria.py  v1.4
+v1.4  2026-09-03  r234 — THE STOP BASIS. `R_FLOOR_STOP`, plus
+      `stop_distance()` and `r_on_stop()` — ONE definition of the stop, read
+      from the engine's own `LONE_STOP_PCT_OF_RISK`. R was judged against max
+      loss at EXPIRY while the stop takes 15% of it, so the gate read 6.67x
+      worse than the risk actually taken. Threshold: credit/width >= 13.04%.
+      `R_FLOOR` is untouched and keeps the expiry basis for the debit fly.
 v1.3  2026-09-01  r208 — `butterfly_reach_max` REMOVED. The butterfly relaxes
       nothing now: reach, strength and both window bounds are strict, and its
       wing is SEARCHED over listed strikes rather than widened. Operator,
@@ -89,6 +95,11 @@ from __future__ import annotations
 
 import logging
 import os
+
+# ⚠️ r234 — THE ENGINE'S OWN CONSTANT, IMPORTED. `exit_engine` fires the lone
+# stop at `risk * LONE_STOP_PCT_OF_RISK`; declaring a second 0.15 here is how
+# two spellings of one number drift (r211).
+from config import LONE_STOP_PCT_OF_RISK
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -126,6 +137,74 @@ def mode() -> str:
 
 # ── the R hurdle: the ONLY thing relaxed changes by default ─────────────
 R_FLOOR = float(os.environ.get("OT_PLAN_R_FLOOR", "1.00"))
+
+# ── r234 — THE STOP BASIS, FOR STRUCTURES WHOSE STOP IS THE PLANNED EXIT ────
+# 🔴 R WAS JUDGED AGAINST A LOSS THE STOP EXISTS TO PREVENT. `search_wing`
+# computes `credit / (width - credit)` — MAX LOSS AT EXPIRY — while
+# `exit_engine:1818` fires at `entry + (width - entry) * LONE_STOP_PCT_OF_RISK`.
+# Same denominator, and the stop takes 15% of it, so the gate read 6.67x worse
+# than the risk actually taken. On the fleet's own measured median (credit
+# $0.97 on $5.00 of width, 2026-08-25..09-03) that is R 0.241 against R 1.605.
+#
+# 🔑 THE THRESHOLD, EXACTLY: R_stop >= 1 <=> credit/width >= 13.04%. Panel 6
+# measured richness at a 19.4% median (10.8% min, 24.2% max), so most of the
+# book already cleared 1:1 on the risk it was actually taking.
+#
+# ⚠️ IT DOES NOT APPLY TO EVERY STRUCTURE, and the operator's own exit rulings
+# draw the line. A CREDIT VERTICAL's stop IS the designed exit — *"the only 2
+# ways I want out of this trade is a 15% loss (thesis invalidated) or a session
+# hard close"* — so the risk accepted is the stop distance. The GEX PIN
+# BUTTERFLY is a debit paid up front and HELD TO THE CLOSE for the pin; its 25%
+# floor is a disaster backstop, not the plan, so `R = (width-debit)/debit`
+# already has the right denominator and keeps `R_FLOOR` untouched. The MANAGED
+# ROLL never opted in at all — `condor_roll` judges on
+# `banked_credit + roll_credit - close_cost`, a risk-free-roll test, which is
+# the right question for a position you are already in.
+#
+# ⚠️ BOTH CONSTANTS CARRY THEIR BASIS IN THE NAME so a later reader cannot
+# collapse them back into one number with two meanings (§35).
+R_FLOOR_STOP = float(os.environ.get("OT_PLAN_R_FLOOR_STOP", "1.00"))
+
+
+def stop_distance(width, credit) -> Optional[float]:
+    """The stop distance a credit vertical ACTUALLY carries, in premium.
+
+    🔴 r234 — ONE DEFINITION, BECAUSE THERE WERE TWO AND THEY DISAGREED 4.15x.
+    `sweep_credit_spread` computed `credit * MAX_LOSS_PCT` — 15% OF CREDIT —
+    and fed that to `stop_survivable`, while `exit_engine` fires at
+    `risk * LONE_STOP_PCT_OF_RISK` — 15% OF RISK. On the measured median that
+    is 0.1455 against 0.6045, and the forensics' own "risk-anchored room:
+    median $0.605" matches the ENGINE. So survivability was judged against a
+    stop 4x tighter than the one that exists, refusing structures that were
+    survivable.
+    ⚠️ AND THE CREDIT-ANCHORED FORM IS THE RULE r155 DELETED. exit_engine's own
+    fallback warning names it: *"15% OF CREDIT, which is the inverted rule r155
+    replaced. The trade will stop on noise."* The strategy was still computing
+    it.
+    ⚠️ IT READS THE ENGINE'S OWN CONSTANT rather than declaring a second 0.15.
+    Two spellings of one number is how the first rots unnoticed (r211).
+    """
+    try:
+        w = float(width or 0.0)
+        c = float(credit or 0.0)
+    except (TypeError, ValueError):
+        return None
+    risk = w - c
+    if w <= 0 or c <= 0 or risk <= 0:
+        return None                      # unmeasurable, never a permissive 0.0
+    return risk * LONE_STOP_PCT_OF_RISK
+
+
+def r_on_stop(width, credit) -> Optional[float]:
+    """credit / stop_distance — reward against the risk ACTUALLY taken.
+
+    None when the structure is unpriceable, never 0.0: a missing quote is not
+    a bad ratio, and scoring it as one would refuse on absent data (r205).
+    """
+    sd = stop_distance(width, credit)
+    if sd is None or sd <= 0:
+        return None
+    return float(credit) / sd
 
 
 def r_hurdle() -> Optional[float]:

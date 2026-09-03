@@ -1,5 +1,15 @@
 """
-strategy/sweep_credit_spread.py  v5.1
+strategy/sweep_credit_spread.py  v5.2
+v5.2  2026-09-03  r234 — GATED ON THE STOP BASIS, AND THE
+      SURVIVABILITY DENOMINATOR WAS 4.15x WRONG. This computed
+      `credit * MAX_LOSS_PCT` — 15% OF CREDIT, the inverted rule r155 deleted —
+      and fed it to `stop_survivable`, while `exit_engine:1818` fires at 15%
+      OF RISK. 0.1455 against 0.6045 on the measured median, and the
+      forensics' own "risk-anchored room: median $0.605" matches the ENGINE.
+      Survivability was judged against a stop four times tighter than the one
+      that exists. Both now read `criteria.stop_distance`. `r_expiry` rides
+      record-only and the narration names BOTH bases (r219's lesson: printing
+      one and labelling it the other is how it stays invisible).
 v5.1  2026-09-03  r233 — 🔴 THE STRIKE MUST CLEAR THE TESTED RANGE, AND THE
       NEAREST LIVE LEVEL WINS. Operator, 2026-09-03: *"the strike cannot sit
       at any level that is part of the testing range... I don't want to get
@@ -273,7 +283,8 @@ import config
 from strategy import relaxed
 from strategy import credit_vertical as cv     # r97 — shared spread math
 from strategy.base_strategy import OptionsSignal as Signal
-from strategy.criteria import stop_survivable, R_FLOOR
+from strategy.criteria import (stop_survivable, R_FLOOR, R_FLOOR_STOP,
+                              stop_distance as _stop_distance_of)
 from strategy.plan import Plan, _n
 from utils.math_utils import safe_float
 
@@ -751,7 +762,7 @@ class SweepPreparation:
                  # raises rather than silently creating one, which is the slot
                  # doing its job.
                  "judged",
-                 "width", "stop_prem", "stop_dist", "r", "r_min", "swept_px",
+                 "width", "stop_prem", "stop_dist", "r", "r_min", "r_stop_disp", "swept_px",
                  "age", "rej", "ready")
 
     def __init__(self, tick):
@@ -765,7 +776,13 @@ class SweepPreparation:
         self.short = self.long = None
         self.credit = self.width = self.stop_prem = self.stop_dist = None
         self.judged = None
-        self.r, self.r_min = None, R_FLOOR
+        # \U0001f534 r234 - THE NARRATION NAMES THE BASIS IT WAS GATED ON. r219's
+        # lesson one layer over: the plan line printed `credit N (bid/ask)`
+        # while N had become the mark, and *"printing one and labelling it the
+        # other is how this stayed invisible for the life of the strategy."*
+        # The gate moved to the stop basis; the line said R and meant expiry.
+        self.r, self.r_min = None, R_FLOOR_STOP
+        self.r_stop_disp = None
         self.swept_px, self.age, self.rej = 0.0, 0, 0.0
         self.ready = False
 
@@ -787,7 +804,10 @@ class SweepPreparation:
         return (f"sell {self.short.strike:g}{self.side[0].upper()} / buy "
                 f"{self.long.strike:g}{self.side[0].upper()}  credit "
                 f"{self.credit:.2f} (mark){_jtxt}  stop {self.stop_prem:.2f}"
-                f"  R {self.r:.2f} (min {self.r_min:.2f})")
+                f"  R {self.r_stop_disp:.2f} on the stop "
+                f"(min {self.r_min:.2f}; {self.r:.2f} at expiry)"
+                if self.r_stop_disp is not None else
+                f"  R {self.r:.2f} at expiry (stop basis unpriceable)")
 
 
 class SweepCreditSpreadStrategy:
@@ -822,7 +842,7 @@ class SweepCreditSpreadStrategy:
     STRUCTURAL = ("geometry", "spent_level", "short_anchor", "wing_r_best",
                   "credit", "stop_vs_spread")
     PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + (
-        "sweep", "contract", "wing", "width", "risk", "r",
+        "sweep", "contract", "wing", "width", "risk", "r", "r_expiry",
         # r233 record-only telemetry - gates nothing, exists to be fitted
         "pierce_pts", "level_dist_pts", "level_dist_pct")
 
@@ -1030,16 +1050,40 @@ class SweepCreditSpreadStrategy:
                         # is JUDGED on; `_fill` (mark) is what gets BOOKED.
                         # Operator ruling 2026-09-02: "I have a ladder for live
                         # offers, all paper needs to fill at mark, period."
-                        _best_r, _long, _credit, _bw, _fill = cv.search_wing(
-                            _contracts, _short, side, R_FLOOR)
-                        t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
+                        # \U0001f534 r234 - READ BY NAME. r219 added a fifth value and
+                        # missed two guard returns that still returned four,
+                        # so a short leg with no bid raised ValueError into
+                        # `_safe_strategy` and read as a clean DECLINE. A
+                        # NamedTuple makes that unrepresentable.
+                        _w = cv.search_wing(_contracts, _short, side, R_FLOOR,
+                                            r_floor_stop=R_FLOOR_STOP)
+                        _best_r, _long, _credit = _w.r, _w.long, _w.credit
+                        _bw, _fill = _w.width, _w.fill
+                        # \U0001f511 GATED ON THE STOP BASIS. The stop IS this trade's
+                        # designed exit (operator: "the only 2 ways I want out
+                        # is a 15% loss or a session hard close"), so R is
+                        # judged against the risk actually taken. `r_expiry`
+                        # rides alongside, record-only, so the basis change is
+                        # auditable from the tape rather than argued.
+                        t.check("r_expiry", _best_r, None)
+                        t.check("wing_r_best", _w.r_stop,
+                                _w.r_stop is not None and _w.r_stop >= R_FLOOR_STOP)
                         if _long is None:
-                            prep.structural.append(("wing",
-                                f"no priceable protective wing beyond {_short.strike:.2f}"))
-                        elif _best_r < R_FLOOR:
+                            # \u26a0\ufe0f r234 - NAME WHICH RUNG REFUSED IT. The bracket
+                            # can reject every candidate for SURVIVABILITY or
+                            # for the stop floor, and reporting that as "no
+                            # priceable wing" would blame the chain for a
+                            # decision the gate made.
+                            prep.structural.append(
+                                (_w.why_key or "wing",
+                                 (_w.why or f"no priceable protective wing beyond "
+                                            f"{_short.strike:.2f}")))
+                        elif _w.r_stop is None or _w.r_stop < R_FLOOR_STOP:
                             prep.structural.append(("wing_r_best",
-                                f"no wing clears R {R_FLOOR:.2f} — best is {_best_r:.2f} "
-                                f"({_bw:.2f} wide, credit ${_credit:.2f}); "
+                                f"no wing clears stop-basis R {R_FLOOR_STOP:.2f} — best is "
+                                f"{('n/a' if _w.r_stop is None else f'{_w.r_stop:.2f}')} "
+                                f"({_bw:.2f} wide, credit ${_credit:.2f}, expiry-basis R "
+                                f"{_best_r:.2f}){(' — ' + _w.why) if _w.why else ''}; "
                                 f"structure, not selection — relaxed does not waive it"))
                         else:
                             t.check("wing", _long.strike, True)
@@ -1062,8 +1106,25 @@ class SweepCreditSpreadStrategy:
                                 # not from the hurdle. A stop measured off a
                                 # credit the position never had is the same
                                 # basis error one layer down.
-                                _stop_prem = _fill * (1.0 + MAX_LOSS_PCT)
-                                _stop_dist = _stop_prem - _fill
+                                # \U0001f534 r234 - THE ENGINE'S STOP, NOT A SECOND ONE.
+                                # This computed `credit * MAX_LOSS_PCT` - 15%
+                                # OF CREDIT - and fed it to stop_survivable,
+                                # while exit_engine:1818 fires at 15% OF RISK.
+                                # On the measured median that is 0.1455 against
+                                # 0.6045, 4.15x apart, and the forensics'
+                                # "risk-anchored room: median $0.605" matches
+                                # the ENGINE. Survivability was judged against
+                                # a stop four times tighter than the one that
+                                # exists, refusing structures that survive.
+                                # \u26a0\ufe0f AND THE CREDIT-ANCHORED FORM IS THE RULE
+                                # r155 DELETED - exit_engine's own fallback
+                                # warning names it: "15% OF CREDIT, which is
+                                # the inverted rule r155 replaced. The trade
+                                # will stop on noise."
+                                _stop_dist = _stop_distance_of(_bw, _fill)
+                                if _stop_dist is None:
+                                    _stop_dist = 0.0
+                                _stop_prem = _fill + _stop_dist
                                 _sv_ok, _sv_why = stop_survivable(
                                     _stop_dist, getattr(_short, "bid", 0.0),
                                     getattr(_short, "ask", 0.0))
@@ -1083,6 +1144,7 @@ class SweepCreditSpreadStrategy:
                                     prep.judged = _credit
                                     prep.stop_prem, prep.stop_dist = _stop_prem, _stop_dist
                                     prep.r = t.r
+                                    prep.r_stop_disp = _w.r_stop
                                     prep.ready = True
 
         # ── the narration: which of the three states is this tick ──────────

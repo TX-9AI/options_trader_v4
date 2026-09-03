@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.6  (2026-09-02, r219)
+tests/check_plan_prepares.py  v1.7
+v1.7  2026-09-03  r234 — S2 RE-DERIVED. It asserted
+      `stop_premium == credit * 1.15` — 15% OF CREDIT, the inverted rule r155
+      deleted — so the suite was CERTIFYING a stop 4x tighter than the one the
+      engine fires. Third time a fixture in this file has certified the defect
+      it was meant to pin; r219 did it for the fill basis.  (2026-09-02, r219)
 v1.6  r219 — 🔴 S2 ASSERTED THE BASIS MISMATCH AND SO CERTIFIED IT. It
       required `net_credit == 1.30`, the BID/ASK credit, while
       position_manager marks a credit vertical at MID — so this file passed on
@@ -190,7 +195,15 @@ def main():
           sig is not None and sig.is_valid and sig.short_put_contract.strike == 95.0
           and sig.long_put_contract.strike == 92.5
           and abs(sig.net_credit - 1.33) < 1e-9
-          and abs(sig.stop_premium - 1.33 * 1.15) < 1e-9 and r2 and r2[0] == "TAKE",
+          # 🔴 RE-DERIVED AT r234. This asserted `1.33 * 1.15` — 15% OF CREDIT,
+          # the inverted rule r155 deleted and exit_engine's own fallback
+          # warns about ("the trade will stop on noise"). The engine fires at
+          # 15% OF RISK, so the suite was CERTIFYING a stop four times tighter
+          # than the real one — the third time a fixture in this file has
+          # certified the defect it was meant to pin (r219 did it for the fill
+          # basis). The stop is now `fill + 0.15*(width - fill)`.
+          and abs(sig.stop_premium - (1.33 + 0.15 * (2.5 - 1.33))) < 1e-9
+          and r2 and r2[0] == "TAKE",
           f"{r2} sig={sig and (sig.strike, sig.net_credit)}")
 
     # ⚠️ AND THE NARRATION MUST NAME BOTH. "credit N (bid/ask)" printing the

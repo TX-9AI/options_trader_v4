@@ -1,5 +1,8 @@
 """
-strategy/trend_credit_spread.py  v4.8
+strategy/trend_credit_spread.py  v4.9
+v4.9  2026-09-03  r234 — GATED ON THE STOP BASIS. TCS stops
+      through the same lone stop at 15% of risk, so it is judged the same way.
+      Reads `WingResult` BY NAME. `r_expiry` recorded.
 v4.8  2026-09-02  r220 — 🔴 r219 FIXED THE PREPARE LAYER AND THIS FILE UNDID IT
       AT THE SIGNAL LAYER. `_build_signal` had no credit in scope, so it
       recomputed `short.bid - long.ask` three hundred lines below the fix —
@@ -193,7 +196,7 @@ from config import (
 # retune the other by accident — and TC.6 no longer needs the condor to exist.
 from strategy import credit_vertical as cv
 # r157 — the R floor is read DIRECTLY; r_hurdle() returns None under relaxed.
-from strategy.criteria import R_FLOOR
+from strategy.criteria import R_FLOOR, R_FLOOR_STOP
 from strategy.plan import Plan, _n
 
 logger = logging.getLogger(__name__)
@@ -272,7 +275,7 @@ class TrendCreditSpread:
     STRUCTURAL = ("strike_inside_range", "contract", "pop", "wing", "wing_r_best",
                   "ev", "nickel_floor")
     PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + ("bound", "credit", "width",
-                                                    "risk", "r")
+                                                    "risk", "r", "r_expiry")
 
     # ══════════════════════════════════════════════════════════════════════
     # THE PLAN — evaluates the declared conditions, SELECTS the spread.
@@ -391,19 +394,34 @@ class TrendCreditSpread:
                     else:
                         # 🔴 r219 — see credit_vertical.search_wing: `credit`
                         # is JUDGED (bid/ask), `_fill` is BOOKED (mark).
-                        _best_r, long_c, credit, _bw, _fill = cv.search_wing(
-                            contracts, short, side, R_FLOOR)
+                        # \U0001f534 r234 - READ BY NAME (see credit_vertical.WingResult:
+                        # r219's fifth value missed two guard returns that
+                        # still returned four).
+                        _w = cv.search_wing(contracts, short, side, R_FLOOR,
+                                            r_floor_stop=R_FLOOR_STOP)
+                        _best_r, long_c, credit = _w.r, _w.long, _w.credit
+                        _bw, _fill = _w.width, _w.fill
                         if long_c is None:
-                            prep.structural.append(("wing",
-                                f"no priceable wing beyond {short.strike:.2f} (undefined risk "
-                                f"is never sold)"))
+                            # \u26a0\ufe0f r234 - name which rung refused it (see the sweep).
+                            prep.structural.append(
+                                (_w.why_key or "wing",
+                                 (_w.why or f"no priceable wing beyond {short.strike:.2f} "
+                                            f"(undefined risk is never sold)")))
                         else:
                             t.check("wing", long_c.strike, True)
-                            t.check("wing_r_best", _best_r, _best_r >= R_FLOOR)
-                            if _best_r < R_FLOOR:
+                            # \U0001f511 STOP BASIS - TCS stops the same way the sweep
+                            # does, through the lone stop at 15% OF RISK, so
+                            # it is judged the same way. `r_expiry` records.
+                            t.check("r_expiry", _best_r, None)
+                            t.check("wing_r_best", _w.r_stop,
+                                    _w.r_stop is not None and _w.r_stop >= R_FLOOR_STOP)
+                            if _w.r_stop is None or _w.r_stop < R_FLOOR_STOP:
                                 prep.structural.append(("wing_r_best",
-                                    f"no wing clears R {R_FLOOR:.2f} — best is {_best_r:.2f} at "
-                                    f"{long_c.strike:.2f} ({_bw:g} wide, credit ${credit:.2f}); "
+                                    f"no wing clears stop-basis R {R_FLOOR_STOP:.2f} — best is "
+                                    f"{('n/a' if _w.r_stop is None else f'{_w.r_stop:.2f}')} at "
+                                    f"{long_c.strike:.2f} ({_bw:g} wide, credit ${credit:.2f}, "
+                                    f"expiry-basis R {_best_r:.2f})"
+                                    f"{(' — ' + _w.why) if _w.why else ''}; "
                                     f"structure, not selection — relaxed does not waive it"))
                             else:
                                 t.credit_spread(short.strike, long_c.strike, credit,

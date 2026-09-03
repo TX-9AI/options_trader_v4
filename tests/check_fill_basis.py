@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-tests/check_fill_basis.py  v1.2
+tests/check_fill_basis.py  v1.3
+v1.3  2026-09-03  r234 — RE-DERIVED. F0 asserted "five values" — the
+      exact invariant r219 broke by adding a fifth and missing two guard
+      returns, which this check could not see because it only drove the
+      success path. It now pins the SHAPE, read by name, on the guard path
+      too. And the 0.60-wide fixture r219 called "the shape the fleet trades"
+      is now REFUSED by the narrow-side bracket, which is r219's own verdict
+      ("born at its stop") enforced at selection; F1c pins that refusal and
+      names the rung, F1/F1b move to a surviving shape.
 v1.2  2026-09-02  r220 — F6/F7: every live entry walks a ladder EXCEPT ORB.
       Credit verticals posted a static limit at `net_credit` and never walked
       it — not exempt, just unwired. ORB's standing offer stays exempt by
@@ -64,22 +72,57 @@ class _C:
 def main():
     from strategy.credit_vertical import search_wing
 
-    # a 0.60-wide short and a 0.60-wide long — the shape the fleet trades
-    short = _C(100.0, 1.20, 1.80)
-    long_ = _C(105.0, 0.23, 0.83)
-    out = search_wing([short, long_], short, "call", 1.0)
+    # ⚠️ r234 — THE LEGS NARROW FROM 0.60 TO 0.10, AND THAT IS A FINDING, NOT
+    # A CONVENIENCE. r219's original fixture was "the shape the fleet trades":
+    # a 0.60-wide short and a 0.60-wide long. Under r234's narrow-side bracket
+    # that shape is now REFUSED — stop room 0.69 against a 0.60 short spread
+    # needs 1.20 to clear `stop_survivable`'s 2x — which is the correct answer
+    # and exactly r219's own conclusion ("the position was born at its stop"),
+    # now enforced at selection instead of discovered at the exit. F1/F1b are
+    # about the CREDIT BASIS, so they use a shape that survives; F1c pins that
+    # the wide one is refused, and names which rung did it.
+    short = _C(100.0, 1.20, 1.30)
+    long_ = _C(105.0, 0.23, 0.33)
+    out = search_wing([short, long_], short, "call", 1.0, r_floor_stop=0.0)
 
-    check("F0 search_wing returns five values", len(out) == 5, str(len(out)))
-    if len(out) != 5:
+    # 🔴 RE-DERIVED AT r234. "Five values" was the invariant precisely because
+    # r219 added a fifth and MISSED two guard returns that still returned four
+    # — and this check could not see it, because it only ever drove the
+    # success path. A NamedTuple makes arity unrepresentable as a bug: F0 now
+    # pins that EVERY return path, including the guards, yields the same type
+    # read BY NAME.
+    check("F0 search_wing returns a WingResult read by name",
+          hasattr(out, "credit") and hasattr(out, "fill")
+          and hasattr(out, "r_stop"), type(out).__name__)
+    _bad = type(short)(0.0, short.ask, getattr(short, "mark", 0.0), short.strike) \
+        if False else None
+    class _NoBid:
+        strike, bid, ask, mark = 100.0, 0.0, 1.10, 1.05
+    _g = search_wing([_NoBid(), long_], _NoBid(), "call", 1.0, r_floor_stop=0.0)
+    check("F0b the no-bid GUARD returns the same shape, not a short tuple",
+          type(_g) is type(out) and _g.long is None and _g.why,
+          f"{type(_g).__name__}: {_g.why}")
+    if not hasattr(out, "fill"):
         print()
-        print("FAILED 1: pre-r219 signature — the fill credit does not exist")
+        print("FAILED 1: pre-r219 shape — the fill credit does not exist")
         return 1
-    r, wing, judged, width, fill = out
+    r, wing, judged = out.r, out.long, out.credit
+    width, fill = out.width, out.fill
+    # F1c — the wide-spread shape r219 measured is now refused AT SELECTION,
+    # by the rung that owns the decision rather than by a later gate.
+    _ws, _wl = _C(100.0, 1.20, 1.80), _C(105.0, 0.23, 0.83)
+    _wide = search_wing([_ws, _wl], _ws, "call", 1.0, r_floor_stop=0.0)
+    check("F1c a stop that cannot clear 2x the short spread is refused",
+          _wide.long is None and _wide.why_key == "stop_vs_spread",
+          f"{_wide.why_key}: {_wide.why}")
 
     # ── F1 — THE TWO CREDITS ARE DIFFERENT AND BOTH ARE RETURNED ────────
     check("F1 the booked (mark) credit differs from the judged (bid/ask) one",
+          # r234 — the narrower fixture: judged 1.20-0.33 = 0.87 (bid/ask),
+          # booked 1.25-0.28 = 0.97 (mark). The GAP is unchanged in meaning,
+          # only in size: still exactly the two half-spreads.
           fill is not None and abs(fill - 0.97) < 1e-9
-          and abs(judged - 0.37) < 1e-9,
+          and abs(judged - 0.87) < 1e-9,
           f"judged {judged} / booked {fill}")
 
     # 🔑 THE GAP IS EXACTLY BOTH HALF-SPREADS. That is the quantity that was
@@ -108,7 +151,8 @@ def main():
     # and "use the other basis" are different facts; the callers refuse.
     nm = _C(105.0, 0.23, 0.83)
     nm.mark = None
-    _r2, _w2, _j2, _wd2, fill2 = search_wing([short, nm], short, "call", 1.0)
+    # r234 — by NAME, so a future field can never break this line again.
+    fill2 = search_wing([short, nm], short, "call", 1.0, r_floor_stop=0.0).fill
     check("F3 a leg without a usable mark returns NO fill credit",
           fill2 is None, str(fill2))
 
@@ -117,7 +161,7 @@ def main():
     # bare conversion would let it through and book a NaN entry premium.
     nan = _C(105.0, 0.23, 0.83)
     nan.mark = float("nan")
-    *_x, fill3 = search_wing([short, nan], short, "call", 1.0)
+    fill3 = search_wing([short, nan], short, "call", 1.0, r_floor_stop=0.0).fill
     check("F4 a NaN mark is not booked as a price", fill3 is None, str(fill3))
 
     # ── F5 — EVERY FILL PATH BOOKS THE MARK ─────────────────────────────

@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.51
+# BACKLOG.md — v1.52
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,70 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.52 — 2026-09-03 — r234 — 🔴 R WAS JUDGED AGAINST A LOSS THE STOP EXISTS
+TO PREVENT. SWEEP.2 and SWEEP.3 CLOSED.** Operator, 2026-09-03: *"are we
+calculating R with the stop placement at 15% of credit received?"* No — against
+**max loss at expiry**, while `exit_engine:1818` fires at 15% of that same
+number. **6.67× apart.** On the measured median (credit $0.97 on $5.00 width,
+08-25..09-03): R **0.241** as gated, **1.605** against the risk actually taken.
+🔑 **THE THRESHOLD, EXACTLY: `R_stop ≥ 1 ⟺ credit/width ≥ 13.04%`**, against a
+measured richness median of **19.4%** (min 10.8%, max 24.2%). Most of the book
+already cleared 1:1 on the risk it was taking.
+🔴 **AND A SECOND DENOMINATOR ERROR IN THE SAME PATH.** `sweep_credit_spread`
+computed `credit * MAX_LOSS_PCT` — **15% of CREDIT** — and fed it to
+`stop_survivable`, while the engine uses 15% of RISK. **0.1455 against 0.6045,
+4.15×**, and the forensics' own *"risk-anchored room: median $0.605"* matches
+the ENGINE. Survivability was judged against a stop four times tighter than the
+one that exists. The credit-anchored form is the rule **r155 deleted** —
+exit_engine's own fallback warns *"the trade will stop on noise."* One
+definition now: `criteria.stop_distance`, reading the engine's own constant.
+⚠️ **THE BASIS SPLITS BY THE OPERATOR'S OWN EXIT RULINGS, not by taste.** A
+credit vertical's stop **is** the designed exit (*"the only 2 ways I want out is
+a 15% loss or a session hard close"*), so the risk accepted is the stop. The
+**GEX pin butterfly** is a debit paid up front and **held to the close** for the
+pin — its 25% floor is a disaster backstop, not the plan — so
+`R = (width−debit)/debit` already had the right denominator and keeps `R_FLOOR`.
+The **managed roll** never opted in: `condor_roll` judges on
+`banked_credit + roll_credit − close_cost`, a risk-free-roll test, which is the
+right question for a position you are already in. Both constants carry their
+basis in the name so they cannot collapse into one (§35).
+🔑 **SWEEP.3 CLOSED — r208's C.43 carried to the verticals.** R rises as the wing
+narrows while the **stop narrows with it**, so a selector that only maximises R
+*optimises into* the least survivable structure. `search_wing` is now bracketed
+by `R_FLOOR_STOP` on the wide side and `stop_survivable` on the narrow side, the
+same shape r208 built for the butterfly.
+🔴 **AND THE r219 ARITY BUG IS RETIRED BY CONSTRUCTION.** r219 added a fifth
+return value and **missed two guard returns still returning four**; both callers
+unpacked five, so a short leg with `bid <= 0` raised `ValueError` into
+`_safe_strategy`, read as a clean DECLINE, and never recorded the strategy as
+asked. `WingResult` is a NamedTuple with defaults read by name — adding a field
+can never again change what a return path unpacks to. `why_key` names the
+refusing rung as a **field**, not prose a caller would sniff (§20 one layer up),
+so a bracket refusal reports `stop_vs_spread` instead of blaming the chain.
+⚠️ **NARRATION NAMES BOTH BASES** — *"R 7.22 on the stop (min 1.00; 1.08 at
+expiry)"* — r219's lesson one layer over: printing one and labelling it the other
+is how it stays invisible.
+⚠️ **THREE CHECKERS RE-DERIVED, EACH CERTIFYING THE DEFECT IT PINNED.**
+`check_plan_prepares` S2 asserted `stop_premium == credit * 1.15`, the
+r155-inverted stop — the **third** time a fixture in that file has certified the
+thing it was meant to catch. `check_fill_basis` F0 asserted "five values", the
+exact invariant r219 broke, and could not see it because it only drove the
+success path. `check_wing_search` W2 matched source text a correct refactor
+removed (§21).
+⚠️ **AND r219's OWN FIXTURE IS NOW REFUSED** — its 0.60-wide legs give 0.69 of
+stop room against a 0.60 spread, needing 1.20 to clear 2×. That is r219's own
+verdict (*"the position was born at its stop"*) enforced at selection instead of
+discovered at the exit. F1c pins it.
+`tests/check_r_basis.py` v1.0, 15 checks, born red with a **named** failure.
+78/78 checkers green.
+
+| id | question | state |
+|---|---|---|
+| **SWEEP.2** | R basis — closed. Whether fills actually arrive is the live test. | ✅ **CLOSED r234** |
+| **SWEEP.3** | Narrow-side bracket — closed, r208's pattern ported. | ✅ **CLOSED r234** |
+| **SWEEP.11** | **Watch the first session.** 13.04% is the bar and 19.4% was the median — if fills cluster below 13% the median was flattering us. `r_expiry` rides every row beside `r_stop`, so the basis change is auditable from the tape. | 🔲 OPEN |
+| **ROLL.1** | The managed roll has **never run live** (no condor has formed). Its `new_maxloss = (new_width − roll_credit) × qty × 100` is untested arithmetic for a deliberately INVERTED structure. Operator, 2026-09-03: the condor is a **permissive plan, not a required one** — two contested levels must be traversed in one session with one leg already open — so non-formation is rarity, not defect. | 🔲 OPEN |
 
 **v1.51 — 2026-09-03 — r233 — 🔴 THE STRIKE MUST CLEAR THE TESTED RANGE, AND
 THE NEAREST LIVE LEVEL WINS.** Operator, 2026-09-03: *"the strike cannot sit at
