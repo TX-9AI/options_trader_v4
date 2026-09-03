@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.41
+# BACKLOG.md — v1.42
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -249,6 +249,19 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.42 — 2026-09-03 — r224 — A TREND STRENGTH METER, AS A RECORDER.**
+`analysis/trend_strength.py`: four path components — efficiency, acceptance,
+shallowness, pace — chosen because every point-in-time vector failed the screen
+(adx AUC 0.47 over 152 runaway trades, strongest of sixteen 0.07 from chance,
+pure-noise floor 0.19). **It gates nothing**: the weights are a declared prior
+and `calibrate_trend_strength` (dtp r257) scores each component against the
+5%-green outcome over the existing sample before any threshold is set. Refuses
+rather than guessing — a degenerate window returns `score=None` with a reason,
+because a 0.0 on missing data reads as "flaccid" and vetoes good trades.
+⚠️ `MIN_BARS = 8` while `character.py` holds that an efficiency ratio is noise
+below 20 — pragmatic for the runaway's break-to-50% window, and the calibration
+is what will show whether 8-bar readings are stable.
 
 **v1.41 — 2026-09-03 — r223 — THE ONE-RUNAWAY-PER-BREAK GUARD HAS NEVER
 FIRED.** `trades.direction` is a declared column nothing writes, so the

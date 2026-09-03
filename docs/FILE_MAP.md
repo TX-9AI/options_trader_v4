@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-218 Python modules across 13 local packages.
+220 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -161,6 +161,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `analysis/trend_engine.py`
 - **calls:** `config.py`, `utils/math_utils.py`, `utils/time_utils.py`
 - **called by:** `main.py`, `shadow/observer.py`
+
+### `analysis/trend_strength.py`
+- **calls:** (none)
+- **called by:** `tests/check_trend_strength.py`
 
 ### `analysis/volatility_engine.py`
 - **calls:** `config.py`, `utils/math_utils.py`
@@ -760,6 +764,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_tick_join.py`
 - **calls:** `data/options_chain.py`, `derived/notes.py`, `strategy/__init__.py`, `strategy/plan.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_trend_strength.py`
+- **calls:** `analysis/trend_strength.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_unrealized_sign.py`
