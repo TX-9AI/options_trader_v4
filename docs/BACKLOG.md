@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.45
+# BACKLOG.md — v1.46
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,16 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.46 — 2026-09-03 — r228 — r221 ARMED UNCONDITIONALLY.** It never consulted
+where price was — three branches, none of them the zone test the operator's rule
+requires. `last_close_inside` is recorded per tick from the last CLOSED bar; a
+close back inside is a RE-ENTRY and ends the thesis. Without it, ARMED would
+have overwritten a `close_inside` invalidation already applied. **And
+`fifty_accepted` was only read at trade close**, so an already-ARMED engine
+stayed armed through acceptance and would fire on a boundary the move had left;
+it stands down at acceptance now, from ARMED only — a live position belongs to
+the exit engine. Verified on both sides.
 
 **v1.45 — 2026-09-03 — r227 — r221 WOULD HAVE MADE THE ORB GO QUIET.**
 `order_placed` is the one-confirmation-one-order latch, cleared by `_rearm()`

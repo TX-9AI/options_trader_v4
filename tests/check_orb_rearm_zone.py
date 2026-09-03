@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_orb_rearm_zone.py  v1.3
+tests/check_orb_rearm_zone.py  v1.4
+v1.4  2026-09-03  r228 — Z1g-Z1j: a 1m CLOSE back INSIDE the range ends the
+      thesis. r221 armed UNCONDITIONALLY — it never consulted where price was
+      — so a trade resolving after a re-entry would have stayed armed on a
+      dead impulsive candle, and would have overwritten a `close_inside`
+      invalidation the tick machinery had already applied. Mirrored on both
+      sides.
 v1.3  2026-09-03  r227 — Z1d/Z1e/Z1f: the per-confirmation latches are cleared
       and the impulsive candle is not. Without the clear, `order_placed`
       survives and orb_strategy refuses every subsequent retest — verified by
@@ -163,6 +169,42 @@ def main():
           f"candle {d2.break_candle_low} dist {d2.stop_distance_px} "
           f"tp50 {d2.target_50pct}")
 
+    # ── Z1g — A CLOSE BACK INSIDE THE RANGE ENDS THE THESIS ─────────────
+    # 🔴 r221 SHIPPED WITHOUT THIS TEST AND ARMED UNCONDITIONALLY. The
+    # operator's rule is explicit: the setup survives a resolved trade ONLY IF
+    # PRICE IS STILL OUTSIDE. A 1m CLOSE back inside is a RE-ENTRY —
+    # ACCEPTANCE, not a test — so the impulsive candle is dead and a fresh
+    # break must set a new one.
+    # ⚠️ AND UNCONDITIONAL ARMING WOULD HAVE OVERWRITTEN a `close_inside`
+    # invalidation the tick machinery had already applied, resurrecting a
+    # thesis the tape had just killed.
+    e3, _ = armed_long_engine()
+    e3._update_break_latches(_bars(226.80))     # closed INSIDE 226.23-227.43
+    check("Z1g the engine records that the close was inside the range",
+          e3._data.last_close_inside is True, str(e3._data.last_close_inside))
+    e3.notify_position_closed()
+    check("Z1h a trade resolving after a close INSIDE does not stay armed",
+          e3._data.state != OE.ORBState.ARMED_LONG, e3._data.state)
+    check("Z1i and the impulsive candle is GONE — a fresh break must set one",
+          e3._data.break_candle_low == 0.0 and e3._data.stop_distance_px == 0.0,
+          f"candle {e3._data.break_candle_low} dist {e3._data.stop_distance_px}")
+
+    # ⚠️ MIRRORED: for a SHORT the range is above, and the same close is inside.
+    e4 = OE.ORBEngine() if hasattr(OE, "ORBEngine") else OE.get_orb_engine()
+    d4 = OE.ORBData()
+    d4.state = OE.ORBState.OPEN_SHORT
+    d4.orb_high, d4.orb_low = 227.43, 226.23
+    d4.orb_width = 1.20
+    d4.break_candle_high, d4.break_candle_low = 226.76, 226.10
+    d4.break_direction = "short"
+    d4.stop_distance_px = 0.53
+    d4.target_50pct = 225.63
+    e4._data = d4
+    e4._update_break_latches(_bars(226.80))
+    e4.notify_position_closed()
+    check("Z1j the same rule holds on the SHORT side",
+          e4._data.state != OE.ORBState.ARMED_SHORT, e4._data.state)
+
     # ── Z2 — A WICK THROUGH THE 50% ARMS NOTHING ────────────────────────
     # ⚠️ Wicks are tests. The tracker reads the CLOSED candle, so a bar whose
     # HIGH pierces 228.03 while its CLOSE sits below must not hand the move to
@@ -204,6 +246,29 @@ def main():
           e._data.state == OE.ORBState.INVALIDATED
           and e._data.invalidation_reason == "runaway",
           f"{e._data.state}/{e._data.invalidation_reason}")
+
+    # ── Z4c — AN ALREADY-ARMED ENGINE STANDS DOWN ON ACCEPTANCE ─────────
+    # 🔴 `fifty_accepted` WAS ONLY CONSULTED IN `notify_position_closed`, so an
+    # engine ARMED at the moment acceptance landed stayed armed — and would
+    # still fire on a retest of a boundary the move had long since left behind.
+    # Operator: "if it reaches the 50, then the runaway owns it unequivocally —
+    # that move in itself invalidates an ORB trade."
+    e5, _ = armed_long_engine()
+    e5._data.state = OE.ORBState.ARMED_LONG
+    e5._update_break_latches(_bars(228.40))
+    e5._update_break_latches(_bars(228.50))
+    check("Z4c an ARMED engine stands down when the 50% is accepted",
+          e5._data.state == OE.ORBState.INVALIDATED
+          and e5._data.invalidation_reason == "runaway",
+          f"{e5._data.state}/{e5._data.invalidation_reason}")
+
+    # ⚠️ BUT A LIVE POSITION IS NEVER TOUCHED. The exit engine manages an open
+    # trade; standing the ENGINE down must not reach into one that is running.
+    e6, _ = armed_long_engine()          # state is OPEN_LONG
+    e6._update_break_latches(_bars(228.40))
+    e6._update_break_latches(_bars(228.50))
+    check("Z4d a LIVE position is left alone by the stand-down",
+          e6._data.state == OE.ORBState.OPEN_LONG, e6._data.state)
 
     # ── Z5 — ACCEPTANCE IS A LATCH ──────────────────────────────────────
     # ⚠️ Once the runaway owns the move it keeps it for the session, even if

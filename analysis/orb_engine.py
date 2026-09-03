@@ -1,5 +1,26 @@
 """
-analysis/orb_engine.py  v4.9
+analysis/orb_engine.py  v4.10
+v4.10 2026-09-03  r228 — 🔴 r221 ARMED UNCONDITIONALLY: IT NEVER CHECKED WHERE
+      PRICE WAS. Operator: "just making sure that a close in that area between
+      the boundary & the 50 changes the state to armed, and nothing other
+      than that." It did not — the path had three branches (50% accepted,
+      past cutoff, else ARMED) and consulted price in none of them, because
+      `notify_position_closed` has no price in scope and I shipped it anyway
+      after noting exactly that.
+      🔑 `last_close_inside` IS NOW RECORDED PER TICK from the last CLOSED
+      bar, like every other latch here — wicks are tests, closes are
+      acceptance. A close back INSIDE the range is a RE-ENTRY: the thesis
+      ends, `_rearm(reentered=True)` runs and the impulsive candle dies.
+      ⚠️ WITHOUT IT, ARMED WOULD HAVE OVERWRITTEN a `close_inside`
+      invalidation the tick machinery had already applied — resurrecting a
+      thesis the tape had just killed.
+      🔴 AND `fifty_accepted` WAS ONLY CONSULTED AT TRADE CLOSE, so an engine
+      already ARMED when acceptance landed STAYED armed and would still fire
+      on a retest of a boundary the move had left behind. It now stands down
+      at the moment of acceptance — but ONLY from ARMED. OPEN_LONG/SHORT are
+      untouched: a live position belongs to the exit engine.
+      Verified on BOTH sides: in-zone -> ARMED with the candle kept; inside ->
+      WAITING_FOR_BREAK with the candle gone; accepted -> INVALIDATED.
 v4.9  2026-09-03  r227 — 🔴 r221 WOULD HAVE MADE THE ORB GO QUIET, NOT WRONG.
       Operator caught it: "you didn't brick my ORB trade with bad follow-up
       retest logic, did you?" `order_placed` is r207's
@@ -457,6 +478,14 @@ class ORBData:
     # between them is exact.
     fifty_pending:      bool  = False
     fifty_accepted:     bool  = False
+    # 🔴 r228 — WHERE PRICE CLOSED, RECORDED PER TICK. `notify_position_closed`
+    # has no price in scope (its two callers — position_manager:719 and
+    # resting_orders:571 — pass none), and the operator's rule is explicit:
+    # stay ARMED **only if price is in that zone when the trade closes**. A
+    # CLOSE back inside the range is a RE-ENTRY and terminates the thesis.
+    # ⚠️ FROM THE LAST CLOSED BAR, like every other latch in this file — not
+    # from a tick price, because "wicks are tests, closes are acceptance".
+    last_close_inside:  bool  = False
     # r207 — ONE CONFIRMATION, ONE ORDER. Set the moment an order is
     # CONSTRUCTED for this confirmation, in paper and live alike. `_rearm()`
     # builds a fresh ORBData, so the next attempt starts clean without anyone
@@ -1175,6 +1204,21 @@ class ORBEngine:
         if now_et().time() >= _dtime(*_ORB_CUT):
             d.state = ORBState.EXPIRED
             return
+        # 🔴 r228 — THE ZONE TEST, WHICH r221 SHIPPED WITHOUT. The operator's
+        # rule is that the setup survives a resolved trade ONLY IF PRICE IS
+        # STILL OUTSIDE THE RANGE. A 1m CLOSE back inside is a RE-ENTRY —
+        # acceptance, not a test — and it terminates the thesis: the impulsive
+        # candle is dead and a fresh break must set a new one.
+        # ⚠️ WITHOUT THIS, ARMED WAS UNCONDITIONAL and would have OVERWRITTEN
+        # a `close_inside` invalidation the tick machinery had already applied
+        # — resurrecting a thesis the tape had just killed.
+        if d.last_close_inside:
+            logger.info("ORB position closed with price back INSIDE "
+                        "%.2f-%.2f — that close is a RE-ENTRY and ends this "
+                        "thesis; awaiting a fresh break",
+                        d.orb_low, d.orb_high)
+            self._rearm(reentered=True)
+            return
         # 🔑 STAY ARMED. The impulsive candle, stop_distance_px and the targets
         # all live on ORBData and survive precisely because nothing wipes them.
         d.state = (ORBState.ARMED_LONG if was_long else ORBState.ARMED_SHORT)
@@ -1249,6 +1293,9 @@ class ORBEngine:
                     f"ORB latch: 1-min CLOSE {close:.2f} below low "
                     f"{d.orb_low:.2f} — broke_low armed (session-level)"
                 )
+        # r228 — the same closed bar answers "is price still out there?"
+        if d.orb_low > 0 and d.orb_high > 0:
+            d.last_close_inside = bool(d.orb_low <= close <= d.orb_high)
         self._track_fifty_acceptance(df_1m)
 
     def _track_fifty_acceptance(self, df_1m):
@@ -1303,6 +1350,21 @@ class ORBEngine:
         d.fifty_accepted = True
         logger.info("ORB: 50%% TP %.2f ACCEPTED (close beyond, held) — the "
                     "runaway owns this move", d.target_50pct)
+        # 🔴 r228 — AND AN ALREADY-ARMED ENGINE MUST STAND DOWN HERE. The latch
+        # was only ever consulted in `notify_position_closed`, so an engine
+        # that was ARMED when acceptance landed stayed armed — and would still
+        # fire on a retest of a boundary the move had long since left behind.
+        # Operator's rule: "if it reaches the 50, then the runaway owns it
+        # unequivocally — that move in itself invalidates an ORB trade."
+        # ⚠️ OPEN_LONG/OPEN_SHORT ARE LEFT ALONE. A live position is managed by
+        # the exit engine; standing the ENGINE down must never touch a trade
+        # that is still running, and `notify_position_closed` handles it when
+        # the trade actually resolves.
+        if d.state in (ORBState.ARMED_LONG, ORBState.ARMED_SHORT):
+            d.state = ORBState.INVALIDATED
+            d.invalidation_reason = "runaway"
+            logger.info("ORB: was ARMED when the 50%% was accepted — standing "
+                        "down, the runaway owns this move")
 
     def _check_for_break(self, df_1m: pd.DataFrame):
         d = self._data
