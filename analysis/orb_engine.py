@@ -1,5 +1,24 @@
 """
-analysis/orb_engine.py  v4.8
+analysis/orb_engine.py  v4.9
+v4.9  2026-09-03  r227 — 🔴 r221 WOULD HAVE MADE THE ORB GO QUIET, NOT WRONG.
+      Operator caught it: "you didn't brick my ORB trade with bad follow-up
+      retest logic, did you?" `order_placed` is r207's
+      one-confirmation-one-order latch and its own comment reads "`_rearm()`
+      builds a fresh ORBData, so the next attempt starts clean WITHOUT ANYONE
+      CLEARING IT" — true until r221 deliberately STOPPED calling `_rearm()`
+      on the armed path in order to keep the impulsive candle. The flag then
+      survived the trade, and `orb_strategy` refuses on it with "this
+      confirmation is SPENT", so the engine would return to ARMED_LONG and
+      DECLINE EVERY RETEST for the rest of the session.
+      ⚠️ QUIET, NOT LOUD — an armed engine that never fires is
+      indistinguishable from a market with no setups, which is why it would
+      have taken days to notice.
+      🔑 THE GENERAL RULE, RECORDED: NOT rebuilding ORBData means every field
+      scoped to ONE CONFIRMATION must be cleared BY NAME — `order_placed`,
+      `confirmed_at`, `retest_depth_px`. `_rearm()` cleared them by
+      construction; this path cannot. The impulsive candle, stop_distance_px,
+      the targets and the 50% latches are KEPT deliberately, which is the
+      entire point of the armed path. Z1d/Z1e/Z1f pin both halves.
 v4.8  2026-09-03  r222 — SHORT SIDE CONFIRMED MIRRORED, and one shortcut
       tightened. `break_direction` is exactly "long"/"short" (set at
       1275/1301) and the rest of this file compares it with `== "long"`;
@@ -1162,6 +1181,25 @@ class ORBEngine:
         d.attempt_number += 1
         d.bars_since_break = 0
         d.last_retest_bar_ts = ""
+        # 🔴 r227 — `order_placed` MUST BE CLEARED HERE OR THE ENGINE GOES
+        # QUIET. It is r207's one-confirmation-one-order latch, and its own
+        # comment says "`_rearm()` builds a fresh ORBData, so the next attempt
+        # starts clean WITHOUT ANYONE CLEARING IT" — which was true until r221
+        # deliberately stopped calling `_rearm()` on this path in order to keep
+        # the impulsive candle. The flag then survived the trade, and
+        # `orb_strategy` refuses on it with "this confirmation is SPENT", so
+        # the engine would sit in ARMED_LONG and decline EVERY retest for the
+        # rest of the session.
+        # ⚠️ NOT BROKEN LOUDLY — BROKEN QUIETLY, which is worse. An armed
+        # engine that never fires looks like a market with no setups.
+        # 🔑 THIS IS THE COST OF NOT REBUILDING ORBData: `_rearm()` cleared
+        # these by construction, so every field a NEW ATTEMPT needs fresh now
+        # has to be cleared BY NAME. The impulsive candle, stop_distance_px,
+        # the targets and the 50% latches are deliberately KEPT — that is the
+        # whole point — but anything scoped to ONE CONFIRMATION goes.
+        d.order_placed = False
+        d.confirmed_at = ""
+        d.retest_depth_px = 0.0
         logger.info(
             "ORB position closed — STILL ARMED (%s, attempt %d): impulsive "
             "candle held at %.2f, stop distance %.2f, 50%% TP %.2f not yet "

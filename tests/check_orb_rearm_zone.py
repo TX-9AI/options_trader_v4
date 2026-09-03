@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-tests/check_orb_rearm_zone.py  v1.1
+tests/check_orb_rearm_zone.py  v1.3
+v1.3  2026-09-03  r227 — Z1d/Z1e/Z1f: the per-confirmation latches are cleared
+      and the impulsive candle is not. Without the clear, `order_placed`
+      survives and orb_strategy refuses every subsequent retest — verified by
+      deleting the line and watching Z1d go red.
+v1.2  2026-09-03  r226 — 🔴 THIS FILE WAS WALL-CLOCK DEPENDENT AND WOULD HAVE
+      GONE RED EVERY AFTERNOON. `notify_position_closed` compares `now_et()`
+      against ORB's own entry cutoff and returns EXPIRED past it, so Z1, Z1c
+      and Z3c passed before 11:00 ET and failed after — caught at 11:51 on
+      the day it was written. A check whose verdict depends on WHEN it runs
+      teaches the suite to be ignored in the afternoon. The clock is frozen
+      inside orb_engine's own namespace, since that is where `now_et` is
+      resolved.
 v1.1  2026-09-03  r222 — S1-S5 MIRROR EVERY CHECK ON THE SHORT SIDE. The
       operator's example was a long and so was every original check; the
       engine's geometry is symmetric but r221's `long_side` flag decides the
@@ -68,6 +80,20 @@ def _bars(closed_bar_close, forming=None, closed_high=None):
 def main():
     from analysis import orb_engine as OE
 
+    # 🔴 THIS SUITE WAS WALL-CLOCK DEPENDENT AND WOULD HAVE GONE RED EVERY
+    # AFTERNOON. `notify_position_closed` compares `now_et()` against ORB's own
+    # cutoff and returns EXPIRED past it, so Z1/Z1c/Z3c passed before 11:00 ET
+    # and failed after — caught at 11:51 on 2026-09-03, hours after the file
+    # was written and "green". A check whose verdict depends on when it runs is
+    # worse than no check: it teaches the suite to be ignored in the afternoon.
+    # ⚠️ FROZEN INSIDE THE ENGINE'S MODULE, not globally — the engine resolves
+    # `now_et` from its own namespace, and patching anywhere else would leave
+    # the real clock in play.
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    _FROZEN = _dt(2026, 9, 3, 10, 15, tzinfo=_ZI("US/Eastern"))
+    OE.now_et = lambda: _FROZEN
+
     def armed_long_engine():
         """An engine mid-setup: broke 227.43 long, impulse candle recorded."""
         e = OE.ORBEngine() if hasattr(OE, "ORBEngine") else OE.get_orb_engine()
@@ -104,6 +130,38 @@ def main():
           f"candle {d.break_candle_low} dist {d.stop_distance_px}")
     check("Z1c the attempt number advances",
           d.attempt_number == 2, str(d.attempt_number))
+
+    # ── Z1d — THE PER-CONFIRMATION LATCHES ARE CLEARED ──────────────────
+    # 🔴 THE FAILURE r221 WOULD HAVE SHIPPED, AND IT IS A QUIET ONE.
+    # `order_placed` is r207's one-confirmation-one-order latch, and its own
+    # comment reads "`_rearm()` builds a fresh ORBData, so the next attempt
+    # starts clean WITHOUT ANYONE CLEARING IT" — true until r221 stopped
+    # calling `_rearm()` on this path to keep the impulsive candle. The flag
+    # then survives, `orb_strategy` refuses on it with "this confirmation is
+    # SPENT", and the engine sits ARMED and declines EVERY retest for the rest
+    # of the session. An armed engine that never fires looks exactly like a
+    # market with no setups.
+    # 🔑 THE GENERAL RULE THIS PINS: not rebuilding ORBData means every field
+    # scoped to ONE CONFIRMATION must be cleared BY NAME. The impulsive candle
+    # and the 50% latches are kept deliberately; these are not.
+    e2, _ = armed_long_engine()
+    e2._data.order_placed = True
+    e2._data.confirmed_at = "2026-09-03T10:05:00"
+    e2._data.retest_depth_px = 0.42
+    e2.notify_position_closed()
+    d2 = e2._data
+    check("Z1d order_placed is cleared so the next retest can fire",
+          d2.order_placed is False and not e2.order_already_placed,
+          f"order_placed={d2.order_placed}")
+    check("Z1e and the other per-confirmation fields reset",
+          d2.confirmed_at == "" and d2.retest_depth_px == 0.0,
+          f"confirmed_at={d2.confirmed_at!r} depth={d2.retest_depth_px}")
+    check("Z1f while the impulsive candle and 50% latches SURVIVE",
+          abs(d2.break_candle_low - 226.90) < 1e-9
+          and abs(d2.stop_distance_px - 0.53) < 1e-9
+          and abs(d2.target_50pct - 228.03) < 1e-9,
+          f"candle {d2.break_candle_low} dist {d2.stop_distance_px} "
+          f"tp50 {d2.target_50pct}")
 
     # ── Z2 — A WICK THROUGH THE 50% ARMS NOTHING ────────────────────────
     # ⚠️ Wicks are tests. The tracker reads the CLOSED candle, so a bar whose

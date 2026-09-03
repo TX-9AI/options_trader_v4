@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.43
+# BACKLOG.md — v1.45
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,29 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.45 — 2026-09-03 — r227 — r221 WOULD HAVE MADE THE ORB GO QUIET.**
+`order_placed` is the one-confirmation-one-order latch, cleared by `_rearm()`
+building a fresh ORBData — and r221 deliberately stopped calling `_rearm()` on
+the armed path to keep the impulsive candle. The flag survived, and
+`orb_strategy` refuses on it ("this confirmation is SPENT"), so the engine would
+sit ARMED and decline every retest for the session. **Quiet, not wrong** — an
+armed engine that never fires looks like a market with no setups.
+🔑 Rule recorded: not rebuilding ORBData means every ONE-CONFIRMATION field must
+be cleared BY NAME. Caught by the operator asking before the bake.
+
+**v1.44 — 2026-09-03 — r226 — 🔴 A NAME CHECK THREW AWAY THE RUNAWAY'S ORB
+BOUNDS, AND IT BLOCKED MOM.1 STAGE 1.** `entry_engine` wrote
+`orb_range_high/low` only `if signal.is_orb`, which is literally
+`strategy_name == "ORBStrategy"`. The runaway populates those fields and the
+name check discarded them on every fill. Measured: `calibrate_trend_strength`
+reported **"no ORB boundary on the row : 182"** — all 182 runaway trades
+unmeasurable. It is also why r223's guard still could not key: the boundary
+half was empty regardless. **r223's header claim is corrected** — `direction`
+IS written (`runaway_continuation:574`), the guard failed on the boundary alone.
+Now a capability check, not an identity check.
+⚠️ `check_orb_rearm_zone` was WALL-CLOCK DEPENDENT and would have gone red
+every afternoon; the clock is frozen in the engine's namespace.
 
 **v1.43 — 2026-09-03 — r225 — MOM.1 FILED: THE MOMENTUM PARTICIPATION BUILD.**
 Nine stages in strict dependency order, from the QQQ 2026-09-03 finding that
