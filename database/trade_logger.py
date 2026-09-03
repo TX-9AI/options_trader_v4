@@ -1,5 +1,24 @@
 """
-database/trade_logger.py  v4.9
+database/trade_logger.py  v4.10
+v4.10  2026-09-03  r223 — 🔴 THE ONE-RUNAWAY-PER-BREAK GUARD HAS NEVER FIRED.
+      `direction` is a DECLARED COLUMN THAT NOTHING WRITES (line 261; the only
+      other reference in this file was the losing-exit hook READING it), so
+      `_dir` was always "" — which broke the guard twice: `_dir == "long"` was
+      False so the hook took `orb_range_LOW` as a LONG break's boundary, and
+      it keyed `("", <low>)` while `prepare()` checks `("long", <high>)`. The
+      keys could never match, so no runaway break has been finished since
+      r174 introduced the rule.
+      🔑 MEASURED: QQQ 2026-09-03, FIVE runaway entries between 09:52 and
+      10:21 with stops at -21%, -21% and -32%, net -$530 by 10:22 — every
+      re-entry following an exit that should have closed the break.
+      🔑 DIRECTION IS DERIVED FROM `option_side`, which the runaway DOES set
+      (runaway_continuation:575): a call is a long break, a put a short one.
+      `orb_range_high/low` were already set (581/582); `direction` was the one
+      field the hook needed and the one nobody wrote.
+      ⚠️ AND `except Exception: pass` GUARANTEED THE SILENCE. The success path
+      logged; the failure path said nothing, for every stop-out for a week.
+      An unkeyable exit is now NAMED and states plainly that another entry on
+      that break is still possible.
 v4.9  2026-09-01  r212 (chunk D) — `log_exit` CLOSES THE PLAN THAT PRODUCED
       THE TRADE. Hooked here for the same reason r154's spent lock is: this is
       the ONE choke point every close passes through, and a rule with a hole in
@@ -728,18 +747,53 @@ class TradeLogger:
                 # r174 — a runaway floor stop-out FINISHES its break for the
                 # session (operator: one runaway per break, even on relaxed).
                 if "Runaway" in _strat:
+                    # 🔴 r223 — THIS GUARD HAS NEVER FIRED. `direction` is a
+                    # DECLARED COLUMN THAT NOTHING WRITES (trade_logger:261;
+                    # the only other reference in this file is this read), so
+                    # `_dir` was always "" — which meant (a) `_dir == "long"`
+                    # was False and the hook took `orb_range_LOW` as a LONG's
+                    # boundary, and (b) it keyed `("", 710.20)` while
+                    # `prepare()` checks `("long", 711.66)`. The keys could
+                    # never match. Measured on QQQ 2026-09-03: FIVE runaway
+                    # entries in 29 minutes, three stopping at -21%, -21% and
+                    # -32%, every one after a stop that should have finished
+                    # the break.
+                    # ⚠️ AND `except Exception: pass` GUARANTEED THE SILENCE.
+                    # The success path logs; the failure path said nothing for
+                    # a week. The except now names the fault.
+                    # 🔑 DIRECTION COMES FROM `option_side`, WHICH THE RUNAWAY
+                    # ACTUALLY SETS (runaway_continuation:575) — a call is a
+                    # long break, a put is a short one. `orb_range_high/low`
+                    # are set too (581/582); only `direction` was missing.
                     try:
-                        _dir = self._get_field(trade_id, "direction") or ""
+                        _side = str(self._get_field(trade_id, "option_side")
+                                    or "").lower()
+                        _dir = "long" if _side.startswith("c") else (
+                            "short" if _side.startswith("p") else "")
+                        if not _dir:
+                            logger.warning(
+                                "[spent] runaway %s stopped out but option_side "
+                                "is %r — CANNOT key the break, so it is NOT "
+                                "finished and another entry is possible",
+                                trade_id, _side)
+                            raise ValueError("no option_side")
                         _bnd = (self._get_field(trade_id, "orb_range_high")
                                 if _dir == "long"
                                 else self._get_field(trade_id, "orb_range_low"))
-                        if _bnd:
-                            from strategy.runaway_continuation import finish_break
-                            finish_break(_dir, _bnd)
-                            logger.info(f"[spent] runaway break FINISHED "
-                                        f"{_dir} @ {float(_bnd):.2f} — one per break")
-                    except Exception:                           # noqa: BLE001
-                        pass
+                        if not _bnd:
+                            logger.warning(
+                                "[spent] runaway %s stopped out but its ORB "
+                                "boundary is empty — break NOT finished",
+                                trade_id)
+                            raise ValueError("no boundary")
+                        from strategy.runaway_continuation import finish_break
+                        finish_break(_dir, _bnd)
+                        logger.info(f"[spent] runaway break FINISHED "
+                                    f"{_dir} @ {float(_bnd):.2f} — one per break")
+                    except Exception as _fbexc:                 # noqa: BLE001
+                        logger.warning("[spent] could NOT finish the runaway "
+                                       "break (%s) — another entry on this "
+                                       "break is still possible", _fbexc)
                 _is_cv = bool(self._get_field(trade_id, "is_credit_vertical")) \
                     or "Sweep" in _strat or "TrendCredit" in _strat
                 if _is_cv:

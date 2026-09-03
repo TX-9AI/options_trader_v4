@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.40
+# BACKLOG.md — v1.41
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -134,6 +134,7 @@ against each box. That is right **during** a session and wrong after it.
 | **ASK.1** | `character_axis_sample` — include in S3.1's push, or leave it on the box? | ⬜ |
 | **ASK.2** | `shadow/` still ships to the boxes and `s3_push` still runs a shadow stage, but shadow was never installed on the v4 fleet. Cut both, or leave? | ⬜ |
 | **ASK.3** | Disposition of `AUDIT.md`, `AUDIT_HANDOFF.md`, `AUDIT_FINDINGS.md` and the four `HANDOFF_*` docs — spent thread contracts. Keep, archive, or delete? | ⬜ |
+| **RUN.1** | 🔴 **IS ONE RUNAWAY PER BREAK MEANT TO INCLUDE WINNERS?** r174's ruling reads *"one runaway per break, even on relaxed"*, but `finish_break` is called ONLY from the losing-exit hook — so a WINNING exit leaves the break live and the next tick re-enters. QQQ 2026-09-03 shows both halves: 09:52 trail **+$96**, then 09:53 re-entry stopping **−$204**; 10:16 trail, then 10:21 re-entry. ⚠️ **AND THE UNDERLYING CONDITION IS A STATE, NOT AN EVENT** — `_closed_beyond_and_held` is `prev_close > tp50 and price_now > tp50`, which stays true for as long as price remains beyond the 50%, so the trigger re-qualifies on every tick. Operator, 2026-09-03: *"the condition to enter is so loose that it will reenter a position as soon as the previous one closes, as long as it closes beyond the 50% boundary."* Options: (a) finish the break on ANY resolved runaway, win or lose; (b) require a fresh event — a pullback and a new close-and-hold — rather than the standing state; (c) cap attempts per break. **This alters what gets traded, so it is the operator's call**; r223 fixed only the key defect that was masking it. | ⬜ |
 | **ASK.4** | `debug_status.py` and `stress_theta_bleed.py` sit at repo root. Move to `tests/` per WA §28, or are they entry points? | ⬜ |
 
 ### THE THREE REPORTS — operator's stated end state, 2026-09-02
@@ -248,6 +249,16 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.41 — 2026-09-03 — r223 — THE ONE-RUNAWAY-PER-BREAK GUARD HAS NEVER
+FIRED.** `trades.direction` is a declared column nothing writes, so the
+losing-exit hook keyed `("", orb_low)` while `prepare()` checks
+`("long", orb_high)` — never a match, since r174. Direction is derived from
+`option_side` now, and an unkeyable exit is logged instead of swallowed by
+`except Exception: pass`. QQQ 2026-09-03: five runaway entries in 29 minutes,
+net −$530. **RUN.1 opened** for the part that is a decision rather than a
+defect: whether a WINNING exit should also finish the break, and whether the
+50%-held condition should be an event rather than a standing state.
 
 **v1.40 — 2026-09-03 — r221 — THE BAND BETWEEN THE ORB BOUNDARY AND THE 50%
 HAD NO OWNER.** `notify_position_closed` always called `_rearm()`, wiping the

@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-217 Python modules across 13 local packages.
+218 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -45,16 +45,16 @@ Change these with the most care; a break here reaches everything downstream.
 |---|---|---|
 | `config.py` | 61 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
 | `utils/time_utils.py` | 35 | alert_manager.py, broker_reconcile.py, check_butterfly_foundational.py, check_butterfly_legs.py |
-| `strategy/__init__.py` | 25 | check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py |
+| `strategy/__init__.py` | 26 | check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py |
 | `strategy/plan.py` | 25 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
 | `utils/math_utils.py` | 15 | credit_vertical.py, entry_ladder.py, exit_engine.py, gex_pin_butterfly.py |
+| `database/trade_logger.py` | 14 | check_condor_pairing.py, check_condor_stop_suppression.py, check_one_per_session.py, check_orb_resume.py |
 | `analysis/orb_engine.py` | 13 | base_strategy.py, check_atr_units.py, check_orb_rearm_zone.py, check_orb_restart.py |
-| `database/trade_logger.py` | 13 | check_condor_pairing.py, check_condor_stop_suppression.py, check_one_per_session.py, check_orb_resume.py |
 | `derived/base.py` | 13 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
 | `strategy/base_strategy.py` | 12 | check_entry_gate.py, check_orb_geometry.py, check_signal_kwargs.py, check_sweep_spread.py |
+| `strategy/runaway_continuation.py` | 12 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
 | `data/tasty_client.py` | 11 | candle_feed.py, check_standing_offer.py, condor_roll.py, entry_engine.py |
 | `execution/exit_engine.py` | 11 | check_condor_spec.py, check_condor_stop_suppression.py, check_exit_executes.py, check_ladder_wired.py |
-| `strategy/runaway_continuation.py` | 11 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
 
 ## Every module
 
@@ -220,11 +220,11 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `database/__init__.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** `tests/check_runaway_break_key.py`
 
 ### `database/trade_logger.py`
 - **calls:** `config.py`, `derived/registry.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `utils/time_utils.py`
-- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_condor_pairing.py`, `tests/check_condor_stop_suppression.py`, `tests/check_one_per_session.py`, `tests/check_orb_resume.py`, `tests/check_standing_offer.py`
+- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_condor_pairing.py`, `tests/check_condor_stop_suppression.py`, `tests/check_one_per_session.py`, `tests/check_orb_resume.py`, `tests/check_runaway_break_key.py`, `tests/check_standing_offer.py`
 
 ### `debug_status.py`
 - **calls:** `config.py`
@@ -396,7 +396,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/__init__.py`
 - **calls:** (none)
-- **called by:** `derived/plans.py`, `main.py`, `strategy/criteria.py`, `strategy/iron_condor_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_audit_20260823.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_butterfly_wing_grid.py`, `tests/check_chain_ordering.py`, `tests/check_condor_spec.py`, `tests/check_criteria.py`, `tests/check_management_plan.py`, `tests/check_not_asked_reasons.py`, `tests/check_orb_sequence.py`, `tests/check_plan_prepares.py`, `tests/check_plan_signal.py`, `tests/check_plan_wiring.py`, `tests/check_runaway_handoff.py`, `tests/check_signal_numeric_tail.py`, `tests/check_tick_join.py`, `tests/check_unrealized_sign.py`, `tests/stress_entry_path.py`
+- **called by:** `derived/plans.py`, `main.py`, `strategy/criteria.py`, `strategy/iron_condor_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_audit_20260823.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_butterfly_wing_grid.py`, `tests/check_chain_ordering.py`, `tests/check_condor_spec.py`, `tests/check_criteria.py`, `tests/check_management_plan.py`, `tests/check_not_asked_reasons.py`, `tests/check_orb_sequence.py`, `tests/check_plan_prepares.py`, `tests/check_plan_signal.py`, `tests/check_plan_wiring.py`, `tests/check_runaway_break_key.py`, `tests/check_runaway_handoff.py`, `tests/check_signal_numeric_tail.py`, `tests/check_tick_join.py`, `tests/check_unrealized_sign.py`, `tests/stress_entry_path.py`
 
 ### `strategy/base_strategy.py`
 - **calls:** `analysis/orb_engine.py`, `data/options_chain.py`
@@ -440,7 +440,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/runaway_continuation.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/plan.py`, `strategy/relaxed.py`, `utils/math_utils.py`
-- **called by:** `database/trade_logger.py`, `main.py`, `tests/check_atr_units.py`, `tests/check_chain_ordering.py`, `tests/check_dispatch.py`, `tests/check_entry_windows.py`, `tests/check_plan_prepares.py`, `tests/check_plan_wiring.py`, `tests/check_runaway_handoff.py`, `tests/check_signal_numeric_tail.py`, `tests/stress_entry_path.py`
+- **called by:** `database/trade_logger.py`, `main.py`, `tests/check_atr_units.py`, `tests/check_chain_ordering.py`, `tests/check_dispatch.py`, `tests/check_entry_windows.py`, `tests/check_plan_prepares.py`, `tests/check_plan_wiring.py`, `tests/check_runaway_break_key.py`, `tests/check_runaway_handoff.py`, `tests/check_signal_numeric_tail.py`, `tests/stress_entry_path.py`
 
 ### `strategy/structure.py`
 - **calls:** (none)
@@ -712,6 +712,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_retention_armed.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_runaway_break_key.py`
+- **calls:** `database/__init__.py`, `database/trade_logger.py`, `strategy/__init__.py`, `strategy/runaway_continuation.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_runaway_handoff.py`
