@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_orb_rearm_zone.py  v1.0
+tests/check_orb_rearm_zone.py  v1.1
+v1.1  2026-09-03  r222 — S1-S5 MIRROR EVERY CHECK ON THE SHORT SIDE. The
+      operator's example was a long and so was every original check; the
+      engine's geometry is symmetric but r221's `long_side` flag decides the
+      DIRECTION of the `beyond` comparison, and a flipped comparison would
+      accept a short's 50% the instant price ROSE — handing every short to
+      the runaway immediately. S2 is that check.
 v1.0  2026-09-03  r221 — THE BAND BETWEEN THE BOUNDARY AND THE 50% HAD NO OWNER.
 
 🔴 `notify_position_closed` ALWAYS CALLED `_rearm()`, WHICH WIPES ORBData. The
@@ -150,6 +156,76 @@ def main():
     e._update_break_latches(_bars(227.50))              # well back below
     check("Z5 acceptance does not clear when price falls back",
           d.fifty_accepted)
+
+    # ══ THE SHORT SIDE, MIRRORED ════════════════════════════════════════
+    # ⚠️ EVERY CHECK ABOVE USED A LONG BECAUSE THE OPERATOR'S EXAMPLE WAS ONE.
+    # Symmetry in the engine's geometry (target_50pct = orb_low - width/2,
+    # stop = break_candle_high) does NOT prove symmetry in r221's additions:
+    # `long_side` decides the direction of the `beyond` comparison, and getting
+    # it wrong makes a SHORT accept the 50% the instant price rises — handing
+    # every short to the runaway immediately.
+    def armed_short_engine():
+        e2 = OE.ORBEngine() if hasattr(OE, "ORBEngine") else OE.get_orb_engine()
+        d2 = OE.ORBData()
+        d2.state = OE.ORBState.OPEN_SHORT
+        d2.orb_high, d2.orb_low = 227.43, 226.23
+        d2.orb_width = d2.orb_high - d2.orb_low
+        d2.break_candle_low, d2.break_candle_high = 226.10, 226.76
+        d2.break_direction = "short"
+        d2.stop_distance_px = 0.53
+        d2.target_50pct = d2.orb_low - d2.orb_width * 0.5      # 225.63
+        d2.attempt_number = 1
+        e2._data = d2
+        return e2, d2
+
+    # ── S1 — a resolved SHORT in the zone stays ARMED_SHORT ─────────────
+    e, _ = armed_short_engine()
+    e.notify_position_closed()
+    d = e._data
+    check("S1 a resolved SHORT stays ARMED_SHORT",
+          d.state == OE.ORBState.ARMED_SHORT, d.state)
+    check("S1b the short's impulsive candle (the HIGH) survives",
+          abs(d.break_candle_high - 226.76) < 1e-9
+          and abs(d.stop_distance_px - 0.53) < 1e-9,
+          f"candle {d.break_candle_high} dist {d.stop_distance_px}")
+
+    # ── S2 — price RISING must not accept a short's 50% ─────────────────
+    # 🔴 THE CHECK THAT CATCHES A FLIPPED COMPARISON. A short's 50% is BELOW
+    # the range at 225.63. If `beyond` used `>` for a short, a close at 228
+    # would "accept" it and hand every short to the runaway at once.
+    e, _ = armed_short_engine()
+    e._update_break_latches(_bars(228.00))
+    check("S2 a close far ABOVE does not accept a SHORT's 50%",
+          not e._data.fifty_pending and not e._data.fifty_accepted,
+          f"pending={e._data.fifty_pending} accepted={e._data.fifty_accepted}")
+
+    # ── S3 — a wick BELOW the short's 50% tests, does not accept ────────
+    e, _ = armed_short_engine()
+    e._update_break_latches(_bars(225.80, forming=225.85, closed_high=226.0))
+    # the closed bar's LOW is 225.75 — through 225.63 — but it CLOSED at 225.80
+    check("S3 a wick through a SHORT's 50% does not accept it",
+          not e._data.fifty_accepted, str(e._data.fifty_accepted))
+
+    # ── S4 — close BELOW that holds accepts, and stands the ORB down ────
+    e, _ = armed_short_engine()
+    e._update_break_latches(_bars(225.40))      # closed beyond -> pending
+    check("S4 a SHORT close below the 50% is pending",
+          e._data.fifty_pending and not e._data.fifty_accepted)
+    e._update_break_latches(_bars(225.30))      # held
+    check("S4b and holding accepts it",
+          e._data.fifty_accepted, str(e._data.fifty_accepted))
+    e.notify_position_closed()
+    check("S4c an accepted SHORT 50% stands the ORB down as 'runaway'",
+          e._data.state == OE.ORBState.INVALIDATED
+          and e._data.invalidation_reason == "runaway",
+          f"{e._data.state}/{e._data.invalidation_reason}")
+
+    # ── S5 — a pending SHORT close that reverses is cleared ─────────────
+    e, _ = armed_short_engine()
+    e._update_break_latches(_bars(225.40))
+    e._update_break_latches(_bars(225.90))      # back above the 50%
+    check("S5 a SHORT pending close that does not hold is cleared",
+          not e._data.fifty_pending and not e._data.fifty_accepted)
 
     print()
     if _fails:

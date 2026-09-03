@@ -1,5 +1,19 @@
 """
-analysis/orb_engine.py  v4.7
+analysis/orb_engine.py  v4.8
+v4.8  2026-09-03  r222 — SHORT SIDE CONFIRMED MIRRORED, and one shortcut
+      tightened. `break_direction` is exactly "long"/"short" (set at
+      1275/1301) and the rest of this file compares it with `== "long"`;
+      r221's `long_side` used `.upper().startswith("L")`, which works today
+      and would silently flip the WHOLE test to the SHORT branch the day
+      anyone writes "up"/"down" or "LONG_BREAK". Now matches the file's own
+      convention.
+      🔑 THE GEOMETRY WAS ALREADY SYMMETRIC — target_50pct = orb_low -
+      width/2, stop = break_candle_high, distance = |break_candle_high -
+      orb_low| — but symmetry in the ENGINE does not prove symmetry in r221's
+      ADDITIONS: `long_side` decides the direction of the `beyond`
+      comparison, and a flipped comparison would accept a short's 50% the
+      instant price ROSE, handing every short to the runaway at once.
+      Verified by flipping it: S2, S4, S4b, S4c and S5 all go red.
 v4.7  2026-09-03  r221 — 🔴 THE BAND BETWEEN THE BOUNDARY AND THE 50% HAD
       NO OWNER. `notify_position_closed` always called `_rearm()`, which WIPES
       ORBData — so the impulsive candle went with it and the engine sat in
@@ -1225,8 +1239,13 @@ class ORBEngine:
         if df_1m is None or len(df_1m) < 2:
             return
         close = float(df_1m.iloc[-2]["close"])
-        long_side = d.break_direction.upper().startswith("L") or \
-            d.state in (ORBState.ARMED_LONG, ORBState.OPEN_LONG)
+        # ⚠️ `break_direction` IS EXACTLY "long"/"short" (set at 1275/1301) and
+        # the rest of this file compares it with `== "long"`. Matching that
+        # convention rather than a `startswith("L")` shortcut: the shortcut
+        # works today and silently flips the whole test to the SHORT branch the
+        # day anyone writes "up"/"down" or "LONG_BREAK".
+        long_side = (d.break_direction == "long"
+                     or d.state in (ORBState.ARMED_LONG, ORBState.OPEN_LONG))
         beyond = (close > d.target_50pct) if long_side else (close < d.target_50pct)
         if not beyond:
             # ⚠️ A PENDING CLOSE THAT DOES NOT HOLD IS DISCARDED, not carried.
