@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.52
+# BACKLOG.md — v1.53
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,56 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.53 — 2026-09-04 — r235 — 🔴 ONE RETEST FIRED THREE ORDERS, AND THE LATCH
+THAT SHOULD HAVE STOPPED IT WAS NEVER SET.** Operator, from the tape: META
+entered **09:39, 09:40 and 09:43** off a SINGLE 09:38 retest, with only one
+further qualifying retest all session (09:54). *"It would need a qualifying
+retest to enter again."*
+🔴 **THE CALL SITE, NOT THE FLAG.** r207 installed
+`_mark_orb_confirmation_spent()` inside `_place_standing_offer` — twice — and
+its own note says the latch is *"a property of the CONFIRMATION, so it is
+mode-independent."* True of the flag; **false of the call site.**
+`_place_single_leg` is the DEFAULT placer and never called it, so
+`order_placed` was **False for the life of every session**, the engine sat in
+`OPEN_*` after the retest, and both fire gates passed on every tick.
+⚠️ **C.40 A THIRD TIME.** r195's `_orb_offer_working()` read a table paper never
+writes; r207 replaced it with a flag set on one of two placement paths. A guard
+in the order plumbing cannot protect a path that does not run that plumbing.
+⚠️ **AND IT EXPLAINS WHY r221 AND r227 BOTH MISSED IT.** Both reasoned at length
+about whether `order_placed` survived a close or went quiet — about a flag that
+had never been set on this path. r227's hazard (*"decline EVERY retest for the
+rest of the session"*) could not occur, and its fix was inert.
+🔑 **THE LATCH IS NOW PER-CONFIRMATION.** A bare boolean can only say "an order
+happened", which is why the armed path had to clear it globally — and a global
+clear is indistinguishable from never having been set. `confirmation_seq` bumps
+at each qualifying retest, `order_placed_seq` records which one fired, and
+`notify_position_closed` now clears **neither**. `confirmation_spent()` is
+extracted to module level so the checker drives it and not a copy (C.23); `>=`
+not `==` so an out-of-order restore fails **shut**.
+⚠️ **RESTORE FAILS SHUT.** A pre-r235 snapshot carries `order_placed` and no
+seqs, so a naive restore would let a spent confirmation fire on the first tick
+after a restart. A legacy True with no seq reads as *confirmation 1, already
+spent*. Both seqs persist.
+⚠️ **CLOSE-INSIDE IS UNTOUCHED** — operator: *"a close inside the range during
+the retest hunt kills the thesis and it starts back at square 1 waiting for a
+break."* Still `_rearm(reentered=True)`. No expiry on a live confirmation, per
+the same ruling; only geometry invalidates.
+⚠️ **AND THE STOPS WERE THE OTHER HALF.** `exit_engine`'s own comment: the −25%
+premium floor *"is independent and still fires first... the two are an AND, not
+an OR"*, so the structure stop the operator expected (a 1m close beyond the
+impulsive candle's origin) never got the chance. The three META losers exited at
+−28.5%, −28.2% and −19.3% of premium. **Recorded, not fixed — the ordering of
+those two stops is the operator's call and is filed as ORB.7.**
+`tests/check_orb_one_order.py` v1.0, 14 checks, born red with a named failure.
+`check_orb_rearm_zone` Z1d **re-derived** — it asserted the global clear, which
+is the behaviour r235 removes. `check_orb_sequence` fixtures re-derived to the
+seqs. **79/79 green.**
+
+| id | question | state |
+|---|---|---|
+| **ORB.6** | Does the same missing latch affect `_place_butterfly`, and can `resting_orders` double-notify a close? Named at r235, deliberately not touched. | 🔲 OPEN |
+| **ORB.7** | The −25% premium floor fires **before** the structure stop, so the ORB rarely reaches its own invalidation level. Operator's intended exit was the 1m close beyond the impulsive candle. Ordering is a what-gets-traded call. | 🔲 OPEN |
 
 **v1.52 — 2026-09-03 — r234 — 🔴 R WAS JUDGED AGAINST A LOSS THE STOP EXISTS
 TO PREVENT. SWEEP.2 and SWEEP.3 CLOSED.** Operator, 2026-09-03: *"are we

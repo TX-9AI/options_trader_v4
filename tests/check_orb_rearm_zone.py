@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_orb_rearm_zone.py  v1.4
+tests/check_orb_rearm_zone.py  v1.5
+v1.5  2026-09-04  r235 — Z1d RE-DERIVED. It asserted `order_placed` is
+      CLEARED on the armed path — r227's fix against a GLOBAL latch, and the
+      very behaviour that let ONE retest fire three times once the flag turned
+      out never to be set on the single-leg path. Z1d now pins that the SPENT
+      confirmation survives the close, and Z1d2 that a fresh retest re-opens
+      the gate.
 v1.4  2026-09-03  r228 — Z1g-Z1j: a 1m CLOSE back INSIDE the range ends the
       thesis. r221 armed UNCONDITIONALLY — it never consulted where price was
       — so a trade resolving after a re-entry would have stayed armed on a
@@ -150,15 +156,31 @@ def main():
     # 🔑 THE GENERAL RULE THIS PINS: not rebuilding ORBData means every field
     # scoped to ONE CONFIRMATION must be cleared BY NAME. The impulsive candle
     # and the 50% latches are kept deliberately; these are not.
+    # 🔴 Z1d RE-DERIVED AT r235. It asserted `order_placed` is CLEARED here —
+    # r227's fix against a GLOBAL latch, and the very behaviour that let ONE
+    # retest fire three times once the flag turned out never to be set on the
+    # single-leg path. The latch is now per-confirmation: the seq is what
+    # re-opens the gate, so clearing the flag here would restore the defect.
     e2, _ = armed_long_engine()
+    e2._data.confirmation_seq = 1
     e2._data.order_placed = True
+    e2._data.order_placed_seq = 1
     e2._data.confirmed_at = "2026-09-03T10:05:00"
     e2._data.retest_depth_px = 0.42
     e2.notify_position_closed()
     d2 = e2._data
-    check("Z1d order_placed is cleared so the next retest can fire",
-          d2.order_placed is False and not e2.order_already_placed,
-          f"order_placed={d2.order_placed}")
+    check("Z1d the SPENT confirmation survives the close (r235)",
+          # spent stays spent across the close, AND a fresh retest re-opens it
+          d2.order_placed_seq == d2.confirmation_seq == 1
+          and __import__("strategy.orb_strategy", fromlist=["x"]
+                         ).confirmation_spent(d2),
+          f"cseq={d2.confirmation_seq} oseq={d2.order_placed_seq}")
+    d2.confirmation_seq += 1                      # a genuinely new retest
+    check("Z1d2 and a FRESH qualifying retest re-opens the gate",
+          not __import__("strategy.orb_strategy", fromlist=["x"]
+                         ).confirmation_spent(d2),
+          f"cseq={d2.confirmation_seq} oseq={d2.order_placed_seq}")
+    d2.confirmation_seq -= 1
     check("Z1e and the other per-confirmation fields reset",
           d2.confirmed_at == "" and d2.retest_depth_px == 0.0,
           f"confirmed_at={d2.confirmed_at!r} depth={d2.retest_depth_px}")

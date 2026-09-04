@@ -1,5 +1,21 @@
 """
-analysis/orb_engine.py  v4.10
+analysis/orb_engine.py  v4.11
+v4.11  2026-09-04  r235 — 🔴 THE LATCH IS PER-CONFIRMATION NOW.
+      `order_placed` was a bare boolean that could only say "an order happened
+      at some point", so `notify_position_closed` had to CLEAR it (r227) for a
+      surviving setup to fire again — and a global clear is indistinguishable
+      from never having been set, which is exactly what was happening.
+      `confirmation_seq` bumps at every qualifying retest; `order_placed_seq`
+      records which one produced an order. Staleness is answered by COMPARISON,
+      so the armed path clears NEITHER and the gate re-opens only on a genuinely
+      new retest. Measured: META 2026-09-04 entered 09:39, 09:40 and 09:43 off
+      a SINGLE 09:38 retest.
+      ⚠️ RESTORE FAILS SHUT. A pre-r235 snapshot has `order_placed` and no seqs,
+      so a naive restore would let a SPENT confirmation fire on the first tick
+      after a restart; a legacy True with no seq is read as "confirmation 1,
+      already spent". Both seqs persist.
+      ⚠️ AND THE CLOSE-INSIDE PATH IS UNTOUCHED — still `_rearm(reentered=True)`,
+      still square one waiting for a fresh break.
 v4.10 2026-09-03  r228 — 🔴 r221 ARMED UNCONDITIONALLY: IT NEVER CHECKED WHERE
       PRICE WAS. Operator: "just making sure that a close in that area between
       the boundary & the 50 changes the state to armed, and nothing other
@@ -457,6 +473,17 @@ class ORBData:
     stop_level:         float = 0.0
     target_strike:      int   = 0
     confirmed_at:       str   = ""
+    # 🔴 r235 - THE CONFIRMATION'S IDENTITY, NOT A TIMESTAMP. `confirmed_at`
+    # is `str(now_et())` and is CLEARED on the armed path, so it cannot answer
+    # "did THIS retest already fire" - a cleared field and a fresh one look
+    # alike, and two retests inside one second would collide. A monotone
+    # counter bumped at each confirmation answers it unambiguously and
+    # survives persistence.
+    confirmation_seq:   int   = 0
+    # The `confirmation_seq` that produced an order. Spent means THIS
+    # confirmation, never "any confirmation ever" - which is what let a
+    # resolved trade re-fire, and what made r227's global clear necessary.
+    order_placed_seq:   int   = 0
     attempt_number:     int   = 0
     entries_expired:    bool  = False
     invalidation_reason: str  = ""   # 'runaway' | 'close_inside' (v3.8: 'timeout' removed)
@@ -753,6 +780,8 @@ class ORBEngine:
             # mid-setup re-fires a trigger that already produced an order.
             "stop_distance_px": d.stop_distance_px,
             "order_placed": d.order_placed,
+            "confirmation_seq": d.confirmation_seq,
+            "order_placed_seq": d.order_placed_seq,
             "last_bar_ts": self._last_bar_ts or "",
         }
 
@@ -806,6 +835,19 @@ class ORBEngine:
             d.confirmed_at       = str(data.get("confirmed_at") or "")
             d.invalidation_reason = str(data.get("reason") or "")
             d.order_placed       = bool(data.get("order_placed"))
+            # \U0001f534 r235 - RESTORE THE SEQS, AND FAIL SHUT ON A PRE-r235 SNAPSHOT.
+            # A file written before this revision has `order_placed` and no
+            # seqs, so a naive restore would give confirmation_seq=0 and
+            # order_placed_seq=0 - and the gate would let a SPENT confirmation
+            # fire again on the first tick after a restart. A legacy True with
+            # no seq is treated as "confirmation 1, already spent", which is
+            # the safe reading: a real fresh retest bumps the seq past it.
+            d.confirmation_seq   = int(data.get("confirmation_seq") or 0)
+            d.order_placed_seq   = int(data.get("order_placed_seq") or 0)
+            if d.order_placed and d.confirmation_seq == 0:
+                d.confirmation_seq = d.order_placed_seq = 1
+                logger.info("ORB STATE: pre-r235 snapshot with order_placed set "
+                            "\u2014 treating the restored confirmation as SPENT")
             self._broke_high = bool(data.get("broke_high"))
             self._broke_low  = bool(data.get("broke_low"))
             self._range_date = today if d.orb_high > 0 else None
@@ -1241,7 +1283,13 @@ class ORBEngine:
         # has to be cleared BY NAME. The impulsive candle, stop_distance_px,
         # the targets and the 50% latches are deliberately KEPT — that is the
         # whole point — but anything scoped to ONE CONFIRMATION goes.
-        d.order_placed = False
+        # 🔴 r235 - `order_placed` IS NO LONGER CLEARED HERE. r227 cleared it
+        # to stop the engine going quiet, which was the right call against a
+        # GLOBAL latch. With `order_placed_seq` the staleness is answered by
+        # COMPARISON instead: the state returns to ARMED, `confirmation_seq`
+        # is unchanged, and the next qualifying retest bumps it - so the gate
+        # re-opens on a NEW retest and stays shut without one. Clearing it
+        # here would restore exactly the behaviour this revision removes.
         d.confirmed_at = ""
         d.retest_depth_px = 0.0
         logger.info(
@@ -1525,6 +1573,7 @@ class ORBEngine:
                 # anyway. A confirmed break+retest is self-validating.
                 d.state           = ORBState.OPEN_LONG
                 d.confirmed_at    = str(now_et())
+                d.confirmation_seq += 1          # r235 - a NEW retest
                 d.retest_depth_px = round(d.orb_high - low, 4)   # v3.7 defect G
                 logger.info(f"ORB CONFIRMED LONG (attempt #{d.attempt_number}): wick={low:.2f} body_low={body_low:.2f}")
             # (b) Retrace into range — 1m candle closes back inside the ORB range.
@@ -1550,6 +1599,7 @@ class ORBEngine:
                 # v4.1 — mirror of the long side; same deletion.
                 d.state           = ORBState.OPEN_SHORT
                 d.confirmed_at    = str(now_et())
+                d.confirmation_seq += 1          # r235 - a NEW retest
                 d.retest_depth_px = round(high - d.orb_low, 4)   # v3.7 defect G
                 logger.info(f"ORB CONFIRMED SHORT (attempt #{d.attempt_number}): wick={high:.2f} body_high={body_high:.2f}")
             # (b) Retrace into range — 1m candle closes back inside the ORB range.
@@ -1575,9 +1625,16 @@ class ORBEngine:
         re-fireable, which is the failure it exists to prevent.
         """
         self._data.order_placed = True
-        logger.info("ORB order placed for attempt #%d — this confirmation is "
-                    "SPENT; a new order needs a new break+retest",
-                    self._data.attempt_number)
+        # 🔴 r235 - RECORD WHICH CONFIRMATION IS SPENT. The bare boolean could
+        # only say "an order happened", so `notify_position_closed` had to
+        # clear it globally (r227) to let the setup fire again - and clearing
+        # it is what let ONE retest fire repeatedly once the flag was never
+        # set in the first place.
+        self._data.order_placed_seq = self._data.confirmation_seq
+        logger.info("ORB order placed for attempt #%d, confirmation #%d — THIS "
+                    "confirmation is SPENT; the next order needs a fresh "
+                    "qualifying retest",
+                    self._data.attempt_number, self._data.confirmation_seq)
 
     @property
     def order_already_placed(self) -> bool:

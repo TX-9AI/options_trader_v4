@@ -1,5 +1,10 @@
 """
-strategy/orb_strategy.py  v4.4
+strategy/orb_strategy.py  v4.5
+v4.5  2026-09-04  r235 — 🔴 THE GATE ASKS "HAS THIS CONFIRMATION
+      FIRED", NOT "HAS ANY". `confirmation_spent()` is EXTRACTED to module
+      level so the checker drives it rather than a copy (C.23). `>=` not `==`,
+      so an out-of-order restore fails SHUT; and the `_c > 0` guard means the
+      latch does not depend on the state gate for its correctness.
 v4.4  2026-09-01  r207 — ONE CONFIRMATION, ONE ORDER, AND THE GEOMETRY COMES
       FROM THE ENGINE. This file gated on `orb.state` ALONE, so anything
       holding an OPEN_* object fired every tick it was asked. On 2026-09-01
@@ -120,6 +125,25 @@ NAMED_IN_PATH_ORB_WIDTHS    = 1.5
 BEYOND_TP_ADJUSTMENT_WIDTHS = 0.5
 
 
+def confirmation_spent(orb) -> bool:
+    """Has THIS confirmation already produced an order?
+
+    🔴 r235 — EXTRACTED SO THE CHECKER DRIVES IT AND NOT A COPY (C.23). As
+    an inline comparison it was untestable, and a test that re-implements the
+    arithmetic it pins tests itself — the r181 sizing checker stayed green for
+    two days doing exactly that.
+    ⚠️ `>=`, NOT `==`. If a seq were ever restored out of order from a
+    persisted snapshot, `==` would fail OPEN and re-fire; `>=` fails shut.
+    ⚠️ AND `_c > 0` MATTERS: before any confirmation both are 0, and 0 >= 0
+    would refuse a setup that has never fired. The state gate already blocks
+    that case, but a latch that depends on ANOTHER gate for its correctness is
+    one refactor away from being wrong.
+    """
+    _c = int(getattr(orb, "confirmation_seq", 0) or 0)
+    _o = int(getattr(orb, "order_placed_seq", 0) or 0)
+    return _c > 0 and _o >= _c
+
+
 def _confirmed_epoch(orb) -> float:
     """`confirmed_at` as an epoch, or 0.0. Never raises: this feeds an
     observation, and an observation must not break an entry."""
@@ -235,14 +259,25 @@ class ORBStrategy(BaseOptionsStrategy):
         # suppressor at all. This latch is a property of the CONFIRMATION, so
         # it is mode-independent — and `_rearm()` replaces ORBData wholesale,
         # so a genuine next attempt is unaffected by construction.
-        if getattr(orb, "order_placed", False):
+        # 🔴 r235 — KEYED TO THE CONFIRMATION, NOT TO THE SESSION. The bare
+        # boolean could only say "an order happened at some point", so the
+        # armed path had to clear it globally (r227) for the setup to fire
+        # again — and a global clear is indistinguishable from never having
+        # been set. Comparing sequences answers the real question: has THIS
+        # retest already produced an order? A fresh retest bumps
+        # `confirmation_seq` and re-opens the gate by construction; a resolved
+        # trade with no new retest leaves them equal and stays shut.
+        _cseq = int(getattr(orb, "confirmation_seq", 0) or 0)
+        if confirmation_spent(orb):
             return t.refuse(
                 "order_already_placed",
-                f"attempt #{getattr(orb, 'attempt_number', '?')} has already "
-                f"produced an order — this confirmation is SPENT. A new order "
-                f"needs price back inside {_n(getattr(orb, 'orb_low', None))}-"
-                f"{_n(getattr(orb, 'orb_high', None))}, a fresh break and a "
-                f"fresh retest.")
+                f"attempt #{getattr(orb, 'attempt_number', '?')}, confirmation "
+                f"#{_cseq} has already produced an order — THIS confirmation is "
+                f"SPENT. The next order needs a fresh qualifying retest (wick "
+                f"into {_n(getattr(orb, 'orb_low', None))}-"
+                f"{_n(getattr(orb, 'orb_high', None))}, close back outside); a "
+                f"CLOSE inside the range ends the thesis and waits for a new "
+                f"break.")
         t.check("order_already_placed", None, True)
 
         direction   = orb.break_direction

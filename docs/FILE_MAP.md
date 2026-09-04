@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-224 Python modules across 13 local packages.
+225 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -48,8 +48,8 @@ Change these with the most care; a break here reaches everything downstream.
 | `strategy/__init__.py` | 30 | check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py |
 | `strategy/plan.py` | 25 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
 | `utils/math_utils.py` | 15 | credit_vertical.py, entry_ladder.py, exit_engine.py, gex_pin_butterfly.py |
+| `analysis/orb_engine.py` | 14 | base_strategy.py, check_atr_units.py, check_orb_one_order.py, check_orb_rearm_zone.py |
 | `database/trade_logger.py` | 14 | check_condor_pairing.py, check_condor_stop_suppression.py, check_one_per_session.py, check_orb_resume.py |
-| `analysis/orb_engine.py` | 13 | base_strategy.py, check_atr_units.py, check_orb_rearm_zone.py, check_orb_restart.py |
 | `derived/base.py` | 13 | __init__.py, character_engine.py, check_derived_layer.py, check_engine_status.py |
 | `strategy/sweep_credit_spread.py` | 13 | check_atr_units.py, check_chain_ordering.py, check_dispatch.py, check_entry_windows.py |
 | `strategy/base_strategy.py` | 12 | check_entry_gate.py, check_orb_geometry.py, check_signal_kwargs.py, check_sweep_spread.py |
@@ -60,7 +60,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/__init__.py`
 - **calls:** (none)
-- **called by:** `derived/forks.py`, `main.py`, `tests/check_audit_20260823.py`, `tests/check_condor_rails.py`, `tests/check_derived_layer.py`, `tests/check_orb_rearm_zone.py`, `tests/check_plan_wiring.py`, `tests/check_pool_geometry.py`
+- **called by:** `derived/forks.py`, `main.py`, `tests/check_audit_20260823.py`, `tests/check_condor_rails.py`, `tests/check_derived_layer.py`, `tests/check_orb_one_order.py`, `tests/check_orb_rearm_zone.py`, `tests/check_plan_wiring.py`, `tests/check_pool_geometry.py`
 
 ### `analysis/chain_snapshot.py`
 - **calls:** `config.py`
@@ -108,7 +108,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/orb_engine.py`
 - **calls:** `analysis/signal_journal.py`, `config.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `execution/entry_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `strategy/base_strategy.py`, `strategy/orb_strategy.py`, `tests/check_atr_units.py`, `tests/check_orb_rearm_zone.py`, `tests/check_orb_restart.py`, `tests/check_orb_resume.py`, `tests/check_orb_sequence.py`, `tests/check_plan_signal.py`, `tests/check_standing_offer.py`
+- **called by:** `execution/entry_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `strategy/base_strategy.py`, `strategy/orb_strategy.py`, `tests/check_atr_units.py`, `tests/check_orb_one_order.py`, `tests/check_orb_rearm_zone.py`, `tests/check_orb_restart.py`, `tests/check_orb_resume.py`, `tests/check_orb_sequence.py`, `tests/check_plan_signal.py`, `tests/check_standing_offer.py`
 
 ### `analysis/order_flow.py`
 - **calls:** (none)
@@ -432,7 +432,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/orb_strategy.py`
 - **calls:** `analysis/liquidity_mapper.py`, `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `strategy/base_strategy.py`, `strategy/plan.py`, `utils/math_utils.py`
-- **called by:** `main.py`, `tests/check_atr_units.py`, `tests/check_orb_sequence.py`, `tests/check_plan_signal.py`
+- **called by:** `main.py`, `tests/check_atr_units.py`, `tests/check_orb_one_order.py`, `tests/check_orb_sequence.py`, `tests/check_plan_signal.py`
 
 ### `strategy/plan.py`
 - **calls:** `analysis/gate_report.py`, `analysis/session_map.py`, `config.py`, `data/derived_store.py`, `derived/registry.py`, `strategy/criteria.py`
@@ -656,6 +656,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_orb_geometry_size.py`
 - **calls:** `execution/__init__.py`, `execution/entry_engine.py`, `risk/risk_manager.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_orb_one_order.py`
+- **calls:** `analysis/__init__.py`, `analysis/orb_engine.py`, `strategy/orb_strategy.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_orb_rearm_zone.py`

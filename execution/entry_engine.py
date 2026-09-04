@@ -1,5 +1,16 @@
 """
-execution/entry_engine.py  v4.6
+execution/entry_engine.py  v4.7
+v4.7  2026-09-04  r235 — 🔴 THE ORB LATCH WAS ONLY EVER SET ON THE
+      STANDING-OFFER PATH. r207 installed `_mark_orb_confirmation_spent()`
+      inside `_place_standing_offer` and its note says the latch is "a property
+      of the CONFIRMATION, so it is mode-independent" — true of the FLAG, false
+      of the CALL SITE. `_place_single_leg` is the DEFAULT placer and never
+      called it, so `order_placed` stayed False for the life of the session,
+      the engine sat in OPEN_* after the retest, and BOTH fire gates passed on
+      every tick. C.40 A THIRD TIME: r195's `_orb_offer_working()` read a table
+      paper never writes; this read a call site only one of two paths runs.
+      Keyed on `order_id` (the placement) and `signal.is_orb`, matching r207's
+      own rule that a placed-but-unfilled order still spends the confirmation.
 v4.6  2026-09-01  r207 — PAPER GOES THROUGH THE SAME DOOR, AND THE
       CONFIRMATION IS SPENT AT PLACEMENT. `_place_single_leg` tested
       `self.paper_trading` ABOVE `_is_standing_offer`, so on a paper box the
@@ -229,6 +240,26 @@ class EntryEngine:
             )
             fill_premium, order_id, filled_qty = self._place_single_leg(
                 signal, sizing.contracts)
+            # 🔴 r235 — THE LATCH WAS ONLY EVER SET ON THE STANDING-OFFER PATH.
+            # r207 installed `_mark_orb_confirmation_spent()` inside
+            # `_place_standing_offer` (twice) and its own note says the latch is
+            # "a property of the CONFIRMATION, so it is mode-independent" — true
+            # of the FLAG, false of the CALL SITE. `_place_single_leg` is the
+            # default placer and never marked anything, so `order_placed` was
+            # False for the life of the session, the engine sat in OPEN_* after
+            # the retest, and BOTH fire gates passed on every tick. Measured on
+            # META 2026-09-04: entries at 09:39, 09:40 and 09:43 off ONE 09:38
+            # retest.
+            # ⚠️ THIS IS C.40 A THIRD TIME. r195's `_orb_offer_working()` read a
+            # table paper never writes; r207 replaced it with a flag set on one
+            # of two placement paths. A guard in the order plumbing cannot
+            # protect a path that does not run that plumbing.
+            # ⚠️ AT THE PLACEMENT SITE, NOT THE FILL SITE, matching r207's own
+            # rule: an order that is placed and does not fill has still spent
+            # the confirmation. `order_id` is the placement, `fill_premium` is
+            # the fill — this keys on the former.
+            if order_id and getattr(signal, "is_orb", False):
+                _mark_orb_confirmation_spent()
 
         if fill_premium is None or filled_qty <= 0:
             if order_id and _is_standing_offer(signal):

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_orb_sequence.py  v1.0
+tests/check_orb_sequence.py  v1.1
+v1.1  2026-09-04  r235 — S4's fixtures set the SEQS, not the bare
+      boolean. Setting only `order_placed` no longer refuses, so the check
+      would fall through to the liquidity analysis and die on a None map — a
+      red for the wrong reason, which is the CV.1 failure.
 v1.0  2026-09-01  r207 — THE ORB FIRING SEQUENCE, PINNED BY EXECUTION.
 
 Born red at f74818b (r206), where S1/S2/S3/S5/S6/S7/S8/S9/S10 all fail.
@@ -171,7 +175,9 @@ def main() -> int:
         eng._check_for_retest(_frame([(705.90, 706.21, 705.80, 706.00),
                                       (706.00, 706.10, 705.90, 706.05)]))
         d = eng._data
+        d.confirmation_seq = 1        # r235 — a retest happened
         d.order_placed = True
+        d.order_placed_seq = 1        # …and it already fired
         P.begin_tick()
         sig = strat.generate_signal(orb=d, ms=None, vol_state=None,
                                     liq_map=None, chain=None, macro=None,
@@ -186,6 +192,10 @@ def main() -> int:
             "SELECT verdict, reason FROM plan_tick ORDER BY ts_epoch DESC "
             "LIMIT 1").fetchone()
         why = (row["reason"] or "") if row else ""
+        # ⚠️ r235 — the fixture must set the SEQS, not the bare boolean. Setting
+        # only `order_placed` no longer refuses, and the check would then fall
+        # through to the liquidity analysis and die on a None map — a red for
+        # the wrong reason, which is the CV.1 failure.
         check("S4 a spent confirmation is refused AT THAT GATE, not incidentally",
               sig is None and why.startswith("order_already_placed"),
               f"signal={sig!r} verdict={row['verdict'] if row else None} why={why!r}")
@@ -197,7 +207,9 @@ def main() -> int:
 
     # ── S5 — a re-arm clears the latch AND the geometry ──────────────────
     eng = _armed_engine("short")
+    eng._data.confirmation_seq = 1        # r235
     eng._data.order_placed = True
+    eng._data.order_placed_seq = 1        # r235
     eng._rearm()
     check("S5 _rearm clears the spent latch so the next attempt is clean",
           getattr(eng._data, "order_placed", None) is False
@@ -221,7 +233,9 @@ def main() -> int:
     eng = _armed_engine("short")
     eng._check_for_retest(_frame([(705.90, 706.21, 705.80, 706.00),
                                   (706.00, 706.10, 705.90, 706.05)]))
+    eng._data.confirmation_seq = 1        # r235
     eng._data.order_placed = True
+    eng._data.order_placed_seq = 1        # r235
     snap = eng.state_snapshot(705.9)
     from analysis.orb_engine import ORBEngine
     with tempfile.TemporaryDirectory() as td:
