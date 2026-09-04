@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.7
+tests/check_plan_prepares.py  v1.9
+v1.9  2026-09-04  r237 — C1–C5 RESTORE `TCS_ENTRY_END_ET` FOR THEIR
+      DURATION. TCS is parked at (0,0) in production, but these exercise the
+      strategy's INTERNALS — the ADX floor, the range test, the POP fault, the
+      wing search — which tomorrow's rewrite starts from. Patches the MODULE
+      not config, restores after, and the production value is pinned by
+      `check_tcs_parked` P5 so this file can never be what claims TCS is
+      parked (§20: the canary cannot live in the file doing the patching).
+v1.8  2026-09-04  r237 — C1–C5 patch `TCS_ENTRY_END_ET` back to (14,0)
+      for their duration so the strategy's INTERNALS stay covered while it is
+      parked — the rewrite starts from them tomorrow. Patches the MODULE not
+      config, restores after, and the production value is pinned by
+      `check_tcs_parked` P5 so this file can never be what says TCS is parked.
 v1.7  2026-09-03  r234 — S2 RE-DERIVED. It asserted
       `stop_premium == credit * 1.15` — 15% OF CREDIT, the inverted rule r155
       deleted — so the suite was CERTIFYING a stop 4x tighter than the one the
@@ -568,6 +580,21 @@ def main():
     tcs.TREND_CREDIT_ACTIVE = True
     TC = tcs.TrendCreditSpread(); TC.planner.symbol = "TST"
     from datetime import datetime as _dt
+    # 🔴 r237 — THE WINDOW IS RESTORED FOR THE DURATION OF THESE CHECKS, AND
+    # THAT IS DELIBERATE. `TCS_ENTRY_END_ET` is (0,0) in production so TCS
+    # parks at its first gate (operator ruling 2026-09-04). C1-C5 exercise the
+    # strategy's INTERNALS — the ADX floor, the range test, the POP fault, the
+    # wing search — which the rewrite starts from tomorrow, and losing that
+    # coverage the day before a rewrite is the wrong trade.
+    # ⚠️ IT PATCHES THE MODULE, NOT config, so nothing else in this process
+    # sees a different window; and it restores in a `finally` so a failing
+    # check cannot leak an unparked TCS into the checks that follow.
+    # ⚠️ THE PRODUCTION VALUE IS PINNED SEPARATELY by check_tcs_parked P5 —
+    # this file must never be the thing that says TCS is parked, or a patch
+    # here would silently unpark it (§20: the canary cannot live in the file
+    # that does the patching).
+    _real_end = tcs.TCS_ENTRY_END_ET
+    tcs.TCS_ENTRY_END_ET = (14, 0)
     _noon = tcs.ET.localize(_dt(2026, 8, 27, 12, 0))
 
     class _Trend:
@@ -855,6 +882,13 @@ def main():
           "mark_pin_played" in msrc2
           and msrc2.index("_execute_entry_signal(bf_sig") < msrc2.index("mark_pin_played"))
     bfmod.GEXPinButterflyStrategy.PLAYED_PINS.clear()
+
+    # r237 — restore the parked window; see the note at _real_end above.
+    try:
+        import strategy.trend_credit_spread as _t
+        _t.TCS_ENTRY_END_ET = _real_end
+    except Exception:                                           # noqa: BLE001
+        pass
 
     print()
     if _fails:

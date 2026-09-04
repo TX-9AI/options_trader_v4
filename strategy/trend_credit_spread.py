@@ -1,5 +1,39 @@
 """
-strategy/trend_credit_spread.py  v4.9
+strategy/trend_credit_spread.py  v4.11
+v4.11  2026-09-04  r237 — 🔴 PARKED. `TCS_ENTRY_END_ET` is (0,0), so
+      the window gate fires at every tick and TCS goes DORMANT before a chain
+      is read. Operator, 2026-09-04: *"I don't know how TCS has cleared the bar
+      to fire. It looks like I do need it disabled."*
+      🔑 WHY IT CLEARED: r234 moved R to the stop basis and TCS passed HONESTLY
+      — UNH sold 398/402 for $0.84, credit/width 21.0% against a 13.04% bar,
+      r_stop 1.77. My "TCS still fails" note was measured on SPX and QQQ at
+      0.04–0.09 and I let it stand for the fleet.
+      🔴 AND IT CHURNED: 11:40, 11:42, 11:42 on identical strikes for -$2.00,
+      -$2.00, -$0.00. TCS has NO re-entry latch of any kind — the shape r235
+      fixed for the ORB, which this never had — and `exit=breach@397.07` is the
+      ORB LOW, the same bound it anchors its short strike to, so price sitting
+      ON the boundary makes it enter and exit on alternating ticks.
+      ⚠️ THE DORMANT MESSAGE NAMES THE PARK. The generic text would read "past
+      00:00 — dormant until tomorrow", a refusal describing the wrong thing:
+      tomorrow never arrives. A panel line nobody can act on is the
+      plausible-silence class this repo keeps paying for.
+v4.10  2026-09-04  r237 — 🔴 PARKED. `TCS_ENTRY_END_ET` is (0,0), so
+      the FIRST gate is dormant at every tick of every session — before a
+      chain is read or a strike is chosen. The dormant message NAMES THE PARK
+      rather than printing "past 00:00 — dormant until tomorrow", which would
+      describe the wrong thing: tomorrow never arrives, and a panel line
+      nobody can act on is worse than none.
+      ⚠️ WHY IT FIRED AT ALL: r234 moved R to the stop basis and TCS cleared it
+      HONESTLY — UNH sold 398/402 for $0.84, credit/width 21.0% against a
+      13.04% bar, r_stop 1.77. My "TCS still fails" note was measured on SPX
+      and QQQ at 0.04–0.09 and I let it stand for the fleet.
+      ⚠️ AND IT CHURNED — 11:40, 11:42, 11:42 on identical strikes closing at
+      −$2.00, −$2.00, −$0.00. TCS has NO re-entry latch of any kind, the shape
+      r235 fixed for the ORB and TCS never had; and `exit=breach@397.07` is the
+      ORB LOW, the same bound it anchors its short strike to, so price sitting
+      ON the boundary makes it enter and exit on alternating ticks.
+      🔑 Rewrite spec is TCS.7. Re-enable needs BOTH a real window here AND
+      clearing `OT_TCS_ACTIVE=0` from the boxes.
 v4.9  2026-09-03  r234 — GATED ON THE STOP BASIS. TCS stops
       through the same lone stop at 15% of risk, so it is judged the same way.
       Reads `WingResult` BY NAME. `r_expiry` recorded.
@@ -288,9 +322,24 @@ class TrendCreditSpread:
         try:
             now = now_et or datetime.now(ET)
             if (now.hour, now.minute) >= TCS_ENTRY_END_ET:
-                t.dormant("entry_window", f"past TCS_ENTRY_END_ET "
-                                          f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}"
-                                          f" — dormant until tomorrow")
+                # ⚠️ r237 — NAME THE PARK, DO NOT LET IT READ AS A CLOCK. With
+                # `TCS_ENTRY_END_ET = (0, 0)` the generic message would say
+                # "past 00:00 — dormant until tomorrow", which is a refusal
+                # that describes the wrong thing: tomorrow never arrives. A
+                # panel line nobody can act on is the plausible-silence class
+                # this repo keeps paying for, so the parked case says so.
+                if TCS_ENTRY_END_ET <= (0, 0):
+                    t.dormant("entry_window",
+                              "TCS is PARKED — TCS_ENTRY_END_ET is (0,0) by "
+                              "operator ruling 2026-09-04, not a clock. The "
+                              "strategy is awaiting a rewrite (BACKLOG TCS.7); "
+                              "it is not being out-priced. Re-enable by "
+                              "restoring a real window AND clearing "
+                              "OT_TCS_ACTIVE=0 on the boxes.")
+                else:
+                    t.dormant("entry_window", f"past TCS_ENTRY_END_ET "
+                                              f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}"
+                                              f" — dormant until tomorrow")
                 return prep
             if (now.hour, now.minute) < TCS_START_ET:
                 t.dormant("entry_window", f"before TCS_START_ET "

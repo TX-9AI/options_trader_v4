@@ -1,5 +1,21 @@
 """
-config.py  v4.12
+config.py  v4.13
+v4.13 2026-09-04  r237 — 🔴 TCS_ENTRY_END_ET SET OUT OF REACH: (14, 0) -> (0, 0).
+      Operator, mid-session 2026-09-04, after UNH fired three times in three
+      minutes on identical strikes: *"set the impossible variable and comment
+      it in the changelog. We're doing a rewrite tomorrow anyways."*
+      🔑 WHY THIS CONSTANT: it is TCS-ONLY, and it fires at the FIRST gate so
+      nothing downstream is even priced. A quality bar would also have stopped
+      it and would have LIED about why — `wing_r_best FAIL` forever, and a
+      future reader losing a session to "why does UNH never clear R".
+      `TCS_START_ET` was not touched because `check_entry_windows` pins it
+      equal to `CREDIT_ENTRY_START_ET`, so moving it would have moved the
+      SWEEP.
+      ⚠️ It cleared the bar HONESTLY under r234's stop basis — UNH 398/402 for
+      $0.84 is credit/width 21.0% against a 13.04% bar. The gate was right.
+      ⚠️ Belt and braces with `OT_TCS_ACTIVE=0`, already in a systemd drop-in
+      on all 15 boxes; the env flag dies with the file, this survives in the
+      repo. BACKLOG TCS.7 holds the rewrite.
 v4.12  2026-08-31  r201 — ORB_BUDGET_USD: the ceiling on what one ORB setup
       may deploy, defaulting to RISK_PER_TRADE_USD and overridable by
       OT_ORB_BUDGET_USD. ORB was the only strategy with no budget at all — an
@@ -851,7 +867,40 @@ DEBIT_BLOCK_ACTIVE          = os.environ.get("OT_DEBIT_BLOCK_ACTIVE", "1") == "1
 # operator-set window (ORB 11:00, butterfly cutoff, TCS below, the
 # 15:40/15:45 flatten ladder) bounds the day; a redundant global veto is the
 # guard-outlives-decision shape this repo keeps finding.
-TCS_ENTRY_END_ET            = (14, 0)   # ⚠️ PROVISIONAL, INERT: TC.6's window
+# 🔴 r237 — SET OUT OF REACH ON PURPOSE. OPERATOR, 2026-09-04: *"I don't
+# know how TCS has cleared the bar to fire. It looks like I do need it
+# disabled."* (00, 00) makes `(now.hour, now.minute) >= TCS_ENTRY_END_ET` true
+# at every tick of every session, so TCS goes DORMANT at its FIRST gate —
+# before a chain is read, before a strike is chosen, before anything is priced.
+#
+# 🔑 WHY THIS CONSTANT AND NOT A QUALITY BAR. Raising `R_FLOOR_STOP` or
+# `TCS_MIN_POP` would also stop it, and would LIE about why: the plan board
+# would read `wing_r_best FAIL` forever and the next reader would spend a
+# session working out why UNH never clears R. A closed window is the truth —
+# the strategy is parked, not out-priced. And this constant is TCS-ONLY;
+# `TCS_START_ET` is pinned equal to `CREDIT_ENTRY_START_ET` by
+# `check_entry_windows`, so touching THAT would have moved the sweep too.
+#
+# ⚠️ BELT AND BRACES WITH `OT_TCS_ACTIVE=0`, which is already in a systemd
+# drop-in on all 15 boxes (verified 2026-09-04 11:47, 15/15). The env flag
+# dies with the drop-in file; this survives in the repo.
+#
+# ⚠️ WHY IT FIRED AT ALL, so the rewrite does not re-derive it: r234 moved R
+# to the stop basis and TCS cleared it HONESTLY. UNH sold 398/402 for $0.84 —
+# credit/width 21.0% against a 13.04% bar, r_stop 1.77. My "TCS still fails"
+# note was measured on SPX and QQQ at 0.04-0.09 and I let it stand for the
+# fleet; UNH is a different chain and sails through. The gate was right; the
+# trade behind it should not have been taking the offer.
+#
+# ⚠️ AND IT CHURNED: 11:40, 11:42 and 11:42 on identical strikes, closing at
+# -$2.00, -$2.00, -$0.00. TCS has NO re-entry latch of any kind — no
+# `order_placed`, no confirmation sequence — the same shape r235 fixed for the
+# ORB, which TCS never had. And `exit=breach@397.07` is the ORB LOW, the very
+# bound it anchors its short strike to, so price sitting ON the boundary makes
+# it enter and exit on alternating ticks. TCS.7 in BACKLOG holds the rewrite.
+#
+# The original note, still true and now acted on:
+TCS_ENTRY_END_ET            = (0, 0)    # ⚠️ PARKED r237. Was (14, 0), itself
                                         #   end, inherited verbatim from the
                                         #   deleted global cutoff so behaviour
                                         #   is unchanged while TCS is OFF.

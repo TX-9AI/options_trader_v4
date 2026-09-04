@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.54
+# BACKLOG.md — v1.55
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,43 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.55 — 2026-09-04 — r237 — 🔴 TCS PARKED AT ITS FIRST GATE.** Operator, mid-session:
+*"I don't know how TCS has cleared the bar to fire... set the impossible variable and
+comment it in the changelog. We're doing a rewrite tomorrow anyways."*
+🔑 **WHY IT CLEARED, so the rewrite does not re-derive it:** r234 moved R to the stop
+basis and **TCS passed honestly** — UNH sold 398/402 for $0.84, `credit/width 21.0%`
+against the 13.04% bar, `r_stop 1.77`. **My "TCS still fails" note was measured on SPX
+and QQQ at 0.04–0.09 and I let it stand for the fleet.** UNH is a different chain and
+sails through. The gate was right; the trade behind it should not have been taking the
+offer.
+🔴 **AND IT CHURNED:** 11:40, 11:42, 11:42 on identical strikes, closing −$2.00, −$2.00,
+−$0.00. **TCS has no re-entry latch of any kind** — no `order_placed`, no confirmation
+sequence — the exact shape r235 fixed for the ORB, which TCS never had. And
+`exit=breach@397.07` is the **ORB low**, the same bound it anchors its short strike to,
+so price sitting ON the boundary makes it enter and exit on alternating ticks.
+🔑 **THE LEVER: `TCS_ENTRY_END_ET = (0, 0)`.** `(now.hour, now.minute) >= (0,0)` is true
+at every tick, so TCS is DORMANT before a chain is read.
+⚠️ **WHY THIS CONSTANT AND NOT A QUALITY BAR.** Raising `R_FLOOR_STOP` or `TCS_MIN_POP`
+would also stop it and would **lie about why** — the plan board would read `wing_r_best
+FAIL` forever and the next reader would spend a session working out why UNH never clears
+R. A closed window is the truth: parked, not out-priced. And it is **TCS-only** —
+`TCS_START_ET` is pinned equal to `CREDIT_ENTRY_START_ET` by `check_entry_windows`, so
+touching that would have moved the **sweep**. P3/P4 pin both.
+⚠️ **BELT AND BRACES:** `OT_TCS_ACTIVE=0` is in a systemd drop-in on all 15 boxes
+(verified 11:47, 15/15). The env flag dies with the file; this survives in the repo.
+⚠️ **THE DORMANT MESSAGE NAMES THE PARK** rather than reading "past 00:00 — dormant until
+tomorrow", which describes the wrong thing: tomorrow never arrives.
+⚠️ **`check_plan_prepares` C1–C5 RESTORE THE WINDOW for their duration** — they exercise
+the internals tomorrow's rewrite starts from, and losing that coverage the day before a
+rewrite is the wrong trade. Patches the module, restores after, and the production value
+is pinned in `check_tcs_parked` so this file can never be what claims TCS is parked.
+`tests/check_tcs_parked.py` v1.0, 6 checks, born red 3 at `88bac2c`. **80/80 green.**
+
+| id | question | state |
+|---|---|---|
+| **TCS.8** | The rewrite must add a re-entry latch. r235's `confirmation_seq`/`order_placed_seq` is the pattern; TCS has no confirmation concept at all to hang it on. | 🔲 OPEN |
+| **TCS.9** | `cascade_harness.py:49` and `cascade_real.py:56` hardcode their own `TCS_ENTRY_END_ET = (14, 0)`, so they now model a TCS that still trades. Not in the `check_*` glob, so nothing went red. Pre-existing drift, named not fixed. | 🔲 OPEN |
 
 **v1.54 — 2026-09-04 — r236 — 📌 DOCS ONLY. THE TCS's ACTUAL INTENT, THE VOL
 SENSORS NOBODY READS, AND THREE DISPOSITIONS.** No code. Recorded because all
