@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-227 Python modules across 13 local packages.
+228 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -46,7 +46,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `config.py` | 66 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
 | `utils/time_utils.py` | 37 | alert_manager.py, broker_reconcile.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/__init__.py` | 30 | check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py |
-| `strategy/plan.py` | 25 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
+| `strategy/plan.py` | 26 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
 | `utils/math_utils.py` | 16 | credit_vertical.py, entry_ladder.py, exit_engine.py, gex_pin_butterfly.py |
 | `analysis/orb_engine.py` | 14 | base_strategy.py, check_atr_units.py, check_orb_one_order.py, check_orb_rearm_zone.py |
 | `database/trade_logger.py` | 14 | check_condor_pairing.py, check_condor_stop_suppression.py, check_one_per_session.py, check_orb_resume.py |
@@ -436,7 +436,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/plan.py`
 - **calls:** `analysis/gate_report.py`, `analysis/session_map.py`, `config.py`, `data/derived_store.py`, `derived/registry.py`, `strategy/criteria.py`
-- **called by:** `derived/notes.py`, `derived/plans.py`, `main.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/management.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_butterfly_wing_grid.py`, `tests/check_chain_ordering.py`, `tests/check_management_plan.py`, `tests/check_not_asked_reasons.py`, `tests/check_orb_sequence.py`, `tests/check_plan_prepares.py`, `tests/check_plan_signal.py`, `tests/check_plan_wiring.py`, `tests/check_runaway_handoff.py`, `tests/check_signal_numeric_tail.py`, `tests/check_tick_join.py`, `tests/check_wing_search.py`
+- **called by:** `derived/notes.py`, `derived/plans.py`, `main.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/management.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_butterfly_wing_grid.py`, `tests/check_chain_ordering.py`, `tests/check_management_plan.py`, `tests/check_not_asked_reasons.py`, `tests/check_note_label.py`, `tests/check_orb_sequence.py`, `tests/check_plan_prepares.py`, `tests/check_plan_signal.py`, `tests/check_plan_wiring.py`, `tests/check_runaway_handoff.py`, `tests/check_signal_numeric_tail.py`, `tests/check_tick_join.py`, `tests/check_wing_search.py`
 
 ### `strategy/relaxed.py`
 - **calls:** `config.py`
@@ -636,6 +636,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_not_asked_reasons.py`
 - **calls:** `strategy/__init__.py`, `strategy/plan.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_note_label.py`
+- **calls:** `strategy/plan.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_observe_always.py`

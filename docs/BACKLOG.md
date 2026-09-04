@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.56
+# BACKLOG.md — v1.57
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,44 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.57 — 2026-09-04 — r239 / dtp r267 — 🔴 THE FIT REPORT WAS READING TWO
+WRONG POPULATIONS, AND NEITHER WAS A DATA PROBLEM.** Both surfaced only once
+dtp r266 stopped the CDC collapse from hiding them.
+🔴 **ONE STRATEGY, TWO ROWS.** `_note_evaluation` is the only writer of
+`strategy_note` and it stamped the raw `_safe_strategy` label, while the plan
+ledger and gate rows use the class name. Result over 08-31..09-04:
+**`ORB` — 78 fired, ZERO declined. `ORBStrategy` — zero fired, 4,260 declined.**
+Neither arm could ever be fittable, and the report said NOT READY for both, for
+opposite reasons.
+🔑 **`DISPATCH_ALIAS` HAS EXISTED SINCE r147** and was already applied by the
+plan board (`plan.py:791`, `:833`) and by `gate_report` (`:118`). This was the
+one writer that never consulted it. **The fix is a lookup, not a rename** — a
+rename fixes tomorrow and leaves five sessions of history split. `SweepForLeg2
+→ SweepCreditSpread` comes along with it (r160's ruling, already true of the
+plan board and silently untrue of the notes).
+🔴 **`manage` IS NOT AN ENTRY RUNG.** It is the management path declining to act
+on an **open** position, and it held **70%** of the butterfly's refusals, **89%**
+of the runaway's, and **100%** of `IronCondorStrategy`'s and `ORBStrategy`'s. The
+verdict then read *"one rung dominates, so there is no surface to fit"* — a true
+sentence about the wrong population. The butterfly's real entry story was
+underneath it: `wing_search` 461, `entry_window` 296, `legs` 152.
+⚠️ **SPLIT, NOT DROPPED.** A management decline is a real event; its count still
+prints, on its own line, where it cannot share a denominator with an entry gate.
+The readiness verdict now computes its dominance share over entry rungs only.
+⚠️ **AND THE REPORT CANONICALISES ON READ** (`STRATEGY_ALIAS`), because r239 only
+helps rows written from now on, and a report that cannot read its own history is
+not a fix.
+`tests/check_note_label.py` v1.0, 5 checks — N3 pins the general invariant that
+no dispatch label may resolve both to itself and to something else, so the next
+strategy with a mismatched label is caught rather than silently splitting its own
+arms. `dtp tests/test_fit_rungs.py` v1.0, 8 checks. Both born red. **82/82 otv4,
+no new dtp reds** (7 were already red at HEAD).
+
+| id | question | state |
+|---|---|---|
+| **FIT.1** | `RunawayContinuation declined 37,412` prints next to a rung distribution summing to **1,650**. They come from different streams — declines from `strategy_note`, rungs from `gate_disposition` — and were never comparable, but printing them adjacently invites the misread. | 🔲 OPEN |
+| **FIT.2** | `analysis/gate_report.py:58` keeps its **own copy** of `DISPATCH_ALIAS`. Two copies of one map is how the first rots; r239 did not merge them. | 🔲 OPEN |
 
 **v1.56 — 2026-09-04 — r238 — 🔴 TCS REBUILT: THE CREDIT VERSION OF THE RUNAWAY,
 ANCHORED TO THE 50.** Operator's spec, 2026-09-04, six parameters, all quoted in

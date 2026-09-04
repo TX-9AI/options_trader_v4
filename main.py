@@ -1,5 +1,17 @@
 """
-main.py  v4.36
+main.py  v4.37
+v4.37  2026-09-04  r239 — 🔴 `_note_evaluation` CANONICALISES THE DISPATCH
+      LABEL. `DISPATCH_ALIAS` has existed since r147 and is applied by the plan
+      board (plan.py:791, :833) and by `gate_report` (:118) — and NOT by the
+      one writer of `strategy_note`. So the ORB's fires were stamped "ORB"
+      while its plan and gate rows used "ORBStrategy", and the fit report saw
+      TWO strategies: one with 78 fires and ZERO declines, one with zero fires
+      and 4,260 declines. Neither arm could ever be fittable and the report
+      said NOT READY for both, for opposite reasons.
+      ⚠️ A LOOKUP, NOT A RENAME. Renaming the dispatch label would fix tomorrow
+      and leave five sessions of history split; the alias reads both.
+      ⚠️ `SweepForLeg2 -> SweepCreditSpread` comes along with it, which is
+      r160's ruling — already true of the plan board, silently untrue here.
 v4.36  2026-09-04  r238 — THE TCS DISPATCH NOW PASSES `orb`. Its
       trigger is the ORB engine's `fifty_accepted` and its level is
       `target_50pct`, so the strategy needs the engine it was explicitly
@@ -2525,7 +2537,22 @@ def _note_evaluation(name: str, ctx, signal) -> None:
                 break
         if w is None:
             return
-        w.writer.write(name, ctx, fired=signal is not None)
+        # 🔴 r239 — CANONICALISE THE DISPATCH LABEL. `DISPATCH_ALIAS` has
+        # existed since r147 and is applied by the plan board (plan.py:791,
+        # 833) and by `gate_report` (:118) — and NOT here, which is the only
+        # writer of `strategy_note`. So the ORB's fires were stamped "ORB"
+        # (the `_safe_strategy` label) while its plan and gate rows used
+        # "ORBStrategy", and the fit report saw TWO strategies: one with 78
+        # fires and ZERO declines, one with zero fires and 4,260 declines.
+        # Neither arm could ever be fittable, and the report said NOT READY
+        # for both, for opposite reasons.
+        # ⚠️ THE SAME MAP, NOT A SECOND ONE. `SweepForLeg2 -> SweepCreditSpread`
+        # comes along with it, which is r160's ruling that the second-leg
+        # window "is asked under the condor's authorization and writes under
+        # its own name" — it was already true of the plan board and silently
+        # untrue of the notes.
+        from strategy.plan import DISPATCH_ALIAS as _DA
+        w.writer.write(_DA.get(name, name), ctx, fired=signal is not None)
     except Exception:                                          # noqa: BLE001
         pass
 
