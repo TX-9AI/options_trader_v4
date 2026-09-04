@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.57
+# BACKLOG.md — v1.58
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -314,6 +314,68 @@ not rediscovered the expensive way.
 
 ## PART 4 — CHANGELOG
 
+**v1.58 — 2026-09-04 — r240 — 🔴 r226 WAS CUT AND NEVER LANDED, AND THE CHANGE
+IT DESCRIBED IS THE ONE BLOCKING MOM.1. PLUS: THE BACKLOG COULD NO LONGER
+ANSWER "WHAT IS OPEN".**
+
+## THE r226 FORENSICS
+
+🔑 **No commit for r226 exists on any branch** — `git log --all --grep=r226` is
+empty and the sequence runs r225 → r227. Its BACKLOG entry (v1.44) reached git
+inside the **r227** commit, because `docs/BACKLOG.md` ships in every archive: the
+r226 archive was cut, its entry written, and then the operator's *"you didn't
+brick my ORB trade with bad follow-up retest logic, did you?"* made r227 urgent.
+r227 shipped on top and **carried r226's already-written paperwork with it.**
+Operator, 2026-09-04, guessing correctly before the check: *"that might be an
+occasion where you told me not to land."*
+🔴 **AND THE CHANGE IS STILL MISSING AND STILL COSTLY.** `entry_engine` wrote
+`orb_range_high/low` only `if signal.is_orb` — literally
+`strategy_name == "ORBStrategy"`. The **runaway populates those fields**
+(`runaway_continuation:581`) because it is a continuation of the same break, and
+the name check discarded them on every runaway fill. Measured:
+`calibrate_trend_strength` reported **"no ORB boundary on the row : 182"** — all
+182 runaway trades unmeasurable, on the largest strategy in the book by count
+and by net.
+🔑 **IT BLOCKS MOM.1 STAGE 1**, which r225 filed as the stage every other stage
+anchors on — *"strength calibrated… which if it cannot discriminate makes 2
+through 9 moot."* Stage 1 calibrates against the break-to-50 path, and the
+boundary is exactly what was thrown away.
+⚠️ **AND IT EXPLAINS ORB.7 ON THE RUNAWAY.** `exit_engine`'s structure stop
+needs a bound on the record and skips silently without one, so *"the −25% floor
+fires before the structure stop"* is, for the runaway, *"the structure stop had
+nothing to fire against."*
+⚠️ **A NAME CHECK IS A LIST** (r35's allow-list rot). The next strategy that
+computes an ORB boundary is covered by **having** one. Both bounds required —
+one bound is not geometry.
+⚠️ **r235's CONFIRMATION LATCH KEEPS `is_orb`, deliberately** — only the ORB
+engine has a confirmation to spend, so that one IS an identity question. B3 pins
+it, because removing `is_orb` wholesale would have broken the fix that stopped
+one retest firing three orders.
+
+## THE LEDGER AUDIT
+
+🔴 **25 rows read `🔲 OPEN` and 7 of them were already done.** Entries are
+prepended per revision, so closing an item leaves its earlier OPEN row in place:
+`SWEEP.2` sat on **four** rows, and SWEEP.3, SWEEP.4, TCS.8, ORB.6 and ORB.7 all
+carried a stale OPEN alongside a later CLOSED. **The true open list is 19.**
+⚠️ **STRUCK IN PLACE, NOT DELETED.** The superseded rows now read
+`⬛ superseded — see rNNN`. The entries are a per-revision record and rewriting
+them rewrites history; a row whose state a later entry contradicts is not
+history, it is a wrong answer.
+⚠️ **AND I MADE THE SAME ERROR WHILE CATCHING IT** — `open_items` took the
+*last* row per id, but the file is newest-first, so the first row is
+authoritative. It reported SWEEP.2/3/4 as open when they had been closed at
+r231/r234.
+`tests/check_ledger_parity.py` v1.0, 5 checks, prints the computed open list on
+every run. `tests/check_orb_bounds_capability.py` v1.0, 5 checks, born red 2.
+**84/84 green.**
+
+| id | question | state |
+|---|---|---|
+| **DOC.13** | **r110, r141 and r159 are cited in GENESIS prose by later revisions and have no row of their own.** Either three rows were lost or three citations point at revisions that never existed; the ledger cannot say which. Allowed by name in `check_ledger_parity` L3 (DOC.13) — a **fourth** such citation fails, because that would be a new loss rather than an old one. | 🔲 OPEN |
+| **DOC.14** | Nine revision numbers are absent everywhere (r42, 49, 89, 97, 109, 111, 117, 123, 151) — allocated and abandoned. Reported by L4, not failed: §26 says numbering never resets, not that it is contiguous. | 📌 RECORDED |
+| **MOM.1** | **Stage 1 is now unblocked.** `calibrate_trend_strength` can see the boundary on runaway rows from the next session that banks. Nothing is calibrated yet. | 🔲 OPEN |
+
 **v1.57 — 2026-09-04 — r239 / dtp r267 — 🔴 THE FIT REPORT WAS READING TWO
 WRONG POPULATIONS, AND NEITHER WAS A DATA PROBLEM.** Both surfaced only once
 dtp r266 stopped the CDC collapse from hiding them.
@@ -446,7 +508,7 @@ is pinned in `check_tcs_parked` so this file can never be what claims TCS is par
 
 | id | question | state |
 |---|---|---|
-| **TCS.8** | The rewrite must add a re-entry latch. r235's `confirmation_seq`/`order_placed_seq` is the pattern; TCS has no confirmation concept at all to hang it on. | 🔲 OPEN |
+| **TCS.8** | The rewrite must add a re-entry latch. r235's `confirmation_seq`/`order_placed_seq` is the pattern; TCS has no confirmation concept at all to hang it on. | ⬛ superseded — see r238 |
 | **TCS.9** | `cascade_harness.py:49` and `cascade_real.py:56` hardcode their own `TCS_ENTRY_END_ET = (14, 0)`, so they now model a TCS that still trades. Not in the `check_*` glob, so nothing went red. Pre-existing drift, named not fixed. | 🔲 OPEN |
 
 **v1.54 — 2026-09-04 — r236 — 📌 DOCS ONLY. THE TCS's ACTUAL INTENT, THE VOL
@@ -756,7 +818,7 @@ basis. 77/77 checkers green.
 | id | question | state |
 |---|---|---|
 | **SWEEP.10** | Does the deep-pierce case fire often enough to matter, and does clearing the wick cost more credit than it saves in stop-outs? Answerable from `pierce_pts` + `level_dist_pts` once a session banks. | 🔲 OPEN |
-| **SWEEP.2** | Still the blocker. Moving the strike further out on deep pierces pushes credit **down**, against `R_FLOOR` 1.00. Consistent with §2 doctrine (*"a deep pierce means a WEAK level"*) but it does not help R. | 🔲 OPEN |
+| **SWEEP.2** | Still the blocker. Moving the strike further out on deep pierces pushes credit **down**, against `R_FLOOR` 1.00. Consistent with §2 doctrine (*"a deep pierce means a WEAK level"*) but it does not help R. | ⬛ superseded — see r234 |
 | **SWEEP.6** | Cross-timeframe `bars_ago` — retired at the primary selector, still live in `_sweep_at_level` and `liquidity_mapper:~1057`. | 🔲 OPEN |
 
 **v1.50 — 2026-09-03 — r232 / dtp r265 — SWEEP.8 OPENED AND INSTRUMENTED: DOES
@@ -879,8 +941,8 @@ TypeError G7 asserts. 76/76 checkers green before and after.
 | **SWEEP.4** | `0 or 999` scored the freshest sweep as maximally stale. | ✅ **CLOSED r231** |
 | **SWEEP.6** | `bars_ago` is compared **across timeframes**: `min(bars_ago)` at two selection sites, and `liquidity_mapper:~1057` compares a **1m** tine touch against a possibly-**15m** sweep — a 15x unit error that can overwrite the correctly-computed `recent_sweep` without updating `sweep_age_bars`. The mapper already computes the 5m-equivalent and says why: *"so the downstream thresholds stay consistent across timeframes."* Fix shape: an `age_5m` property on `SweepEvent` so no consumer can get it wrong. **Alters selection — unruled.** | 🔲 OPEN |
 | **SWEEP.7** | With geometry enforcing role-vs-spot, `side_of_pool` now tests the same fact a second time as a soft condition. Two rules for one thing is the rot §35 names. **Remove or keep — unruled.** | 🔲 OPEN |
-| **SWEEP.2** | Unchanged and still the blocker: `wing_r_best` 761/761 at 0.0–0.06 against `R_FLOOR` 1.00. | 🔲 OPEN |
-| **SWEEP.3** | `search_wing` is a bare argmax on R with no narrow-side bound; `stop_vs_spread` checked after. r208's C.43, never carried to the verticals. | 🔲 OPEN |
+| **SWEEP.2** | Unchanged and still the blocker: `wing_r_best` 761/761 at 0.0–0.06 against `R_FLOOR` 1.00. | ⬛ superseded — see r234 |
+| **SWEEP.3** | `search_wing` is a bare argmax on R with no narrow-side bound; `stop_vs_spread` checked after. r208's C.43, never carried to the verticals. | ⬛ superseded — see r234 |
 | **C.45** | THE GENERAL LESSON. **`x or DEFAULT` is not a null check.** Zero, empty string and empty list are all falsy, so the idiom silently rewrites the most extreme *valid* reading into the sentinel for "absent" — and the sentinel is exactly the value a staleness gate refuses. Sibling of C.44: both are fallbacks standing in for a value nobody chose. Use an explicit `is None`. | 📌 RECORDED |
 
 **v1.48 — 2026-09-03 — r230 — 🔴 SWP.5 WAS RULED ON 2026-08-11 AND NEVER
@@ -924,9 +986,9 @@ tokens, and a string canary would trip on the prose §5 requires (§20).
 
 | id | question | state |
 |---|---|---|
-| **SWEEP.2** | `wing_r_best` FAILS 761/761 on QQQ at 0.0–0.06 against `R_FLOOR` 1.00. R ≥ 1.00 needs credit ≥ 50% of width; the short anchor sat 11 points OTM (705 vs 716 spot). **Liveness and richness pull opposite ways** — a pool still live and old is one price walked away from. Operator's intent: *"sell high volume, rich in premium, at a level we believe is just out of reach."* Requires separating the level's two jobs — confirmation/defence vs strike location. **Alters what gets traded: operator decides.** | 🔲 OPEN |
-| **SWEEP.3** | `search_wing` is a bare argmax on R with **no narrow-side bound**; `stop_vs_spread` is checked separately afterward. That is r208's C.43 — the selector optimises into the least survivable structure and a later gate refuses it. Measured 2026-09-03 on SPX: 5 rows cleared R at 1.00, then `stop_vs_spread` failed 2 of those 5. r208 fixed this shape for the butterfly and it was never carried to the verticals. | 🔲 OPEN |
-| **SWEEP.4** | `age = int(getattr(sweep, "bars_ago", 999) or 999)` — **999 is an ABSENT sentinel scored as maximally stale.** SPX's range topped out at exactly 999 today, so unmeasured is being counted as too old. Unreadable is not empty (C.26). | 🔲 OPEN |
+| **SWEEP.2** | `wing_r_best` FAILS 761/761 on QQQ at 0.0–0.06 against `R_FLOOR` 1.00. R ≥ 1.00 needs credit ≥ 50% of width; the short anchor sat 11 points OTM (705 vs 716 spot). **Liveness and richness pull opposite ways** — a pool still live and old is one price walked away from. Operator's intent: *"sell high volume, rich in premium, at a level we believe is just out of reach."* Requires separating the level's two jobs — confirmation/defence vs strike location. **Alters what gets traded: operator decides.** | ⬛ superseded — see r234 |
+| **SWEEP.3** | `search_wing` is a bare argmax on R with **no narrow-side bound**; `stop_vs_spread` is checked separately afterward. That is r208's C.43 — the selector optimises into the least survivable structure and a later gate refuses it. Measured 2026-09-03 on SPX: 5 rows cleared R at 1.00, then `stop_vs_spread` failed 2 of those 5. r208 fixed this shape for the butterfly and it was never carried to the verticals. | ⬛ superseded — see r234 |
+| **SWEEP.4** | `age = int(getattr(sweep, "bars_ago", 999) or 999)` — **999 is an ABSENT sentinel scored as maximally stale.** SPX's range topped out at exactly 999 today, so unmeasured is being counted as too old. Unreadable is not empty (C.26). | ⬛ superseded — see r231 |
 | **SWEEP.5** | `SWEEP_MAX_AGE_BARS = 8` (config:1032) has **zero readers tree-wide**, as does `SWEEP_LIVENESS_GATE`. r190's precedent: an orphaned constant is what the next person rewires. Delete or keep — **not folded into r230, operator has not ruled.** | 🔲 OPEN |
 | **C.44** | THE GENERAL LESSON. A `getattr(config, NAME, default)` is a policy the config cannot see and the checker cannot import — C.19 in a new costume, where a purge list hardcoded inside a function passed green while deleting unwarehoused data. **A constant read by fallback is a constant nobody chose.** Any ruling that lands a value in `config.py` without a reader is a ruling that did not ship. | 📌 RECORDED |
 | **LEDGER** | **r226 has a BACKLOG entry (v1.44) but NO GENESIS row and NO commit.** Either it never landed or §35 was skipped. Unresolved. | 🔲 OPEN |

@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-228 Python modules across 13 local packages.
+230 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -606,6 +606,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `config.py`, `execution/__init__.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`, `execution/order_confirm.py`
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/check_ledger_parity.py`
+- **calls:** (none)
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/check_ledger_paths.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
@@ -648,6 +652,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_one_per_session.py`
 - **calls:** `database/trade_logger.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_orb_bounds_capability.py`
+- **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_orb_budget.py`

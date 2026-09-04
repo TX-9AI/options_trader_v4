@@ -1,5 +1,25 @@
 """
-execution/entry_engine.py  v4.7
+execution/entry_engine.py  v4.8
+v4.8  2026-09-04  r240 — 🔴 THE ORB BOUNDS ARE WRITTEN BY CAPABILITY,
+      NOT BY NAME — rebuilding r226, which was cut on 2026-09-03 and NEVER
+      LANDED (no commit on any branch; its BACKLOG entry reached git only
+      because the backlog ships in every archive and r227 carried it).
+      This read `if signal.is_orb`, literally `strategy_name == "ORBStrategy"`.
+      The RUNAWAY populates `orb_range_high/low` too — it is a continuation of
+      the same break — and the name check discarded them on every runaway fill.
+      🔑 MEASURED: `calibrate_trend_strength` reported "no ORB boundary on the
+      row : 182" — ALL 182 runaway trades unmeasurable, on the largest strategy
+      in the book by count and by net. It blocks MOM.1 Stage 1, which r225
+      filed as the stage every other stage anchors on.
+      ⚠️ AND IT IS WHY THE STRUCTURE STOP LOOKS ABSENT ON THE RUNAWAY:
+      `exit_engine`'s structure stop needs a bound on the record and skips
+      silently without one, so ORB.7's "the -25% floor fires first" is, for the
+      runaway, "the structure stop had nothing to fire against."
+      ⚠️ BOTH BOUNDS REQUIRED, never one — a single bound is not geometry.
+      ⚠️ r235's CONFIRMATION LATCH STILL KEYS ON `is_orb`, deliberately: only
+      the ORB engine has a confirmation to spend, so that one IS an identity
+      question. B3 pins it, because removing `is_orb` wholesale would have
+      broken the fix that stopped one retest firing three orders.
 v4.7  2026-09-04  r235 — 🔴 THE ORB LATCH WAS ONLY EVER SET ON THE
       STANDING-OFFER PATH. r207 installed `_mark_orb_confirmation_spent()`
       inside `_place_standing_offer` and its note says the latch is "a property
@@ -330,9 +350,30 @@ class EntryEngine:
 
         # ── ORB range boundaries — persisted for exit_engine range violation ──
         # exit_engine checks if 1-min close goes back inside the ORB range
-        if signal.is_orb:
-            record["orb_range_high"] = signal.orb_range_high
-            record["orb_range_low"]  = signal.orb_range_low
+        # 🔴 r240 (rebuilding r226, which was cut and NEVER LANDED) — A
+        # CAPABILITY CHECK, NOT AN IDENTITY CHECK. This read `signal.is_orb`,
+        # which is literally `strategy_name == "ORBStrategy"`. The RUNAWAY
+        # populates `orb_range_high/low` too — it is a continuation of the same
+        # break — and the name check discarded them on every runaway fill.
+        # 🔴 MEASURED: `calibrate_trend_strength` reported "no ORB boundary on
+        # the row : 182" — ALL 182 runaway trades unmeasurable, on the largest
+        # strategy in the book by both count and net.
+        # ⚠️ IT BLOCKS MOM.1 STAGE 1, which r225 filed as the stage every other
+        # stage anchors on: strength calibrates against the break-to-50 path,
+        # and the boundary is exactly what was being thrown away.
+        # ⚠️ AND IT IS WHY THE ORB STRUCTURE STOP LOOKS ABSENT ON THE RUNAWAY.
+        # `exit_engine`'s structure stop needs a bound on the record and skips
+        # silently without one, so ORB.7's "the -25% floor fires first" is, for
+        # the runaway, "the structure stop had nothing to fire against."
+        # 🔑 THE TEST IS WHETHER THE SIGNAL CARRIES THE GEOMETRY, not what it is
+        # called. A name check is a list, and r35's allow-list rot is what
+        # happens to lists: the next strategy that computes an ORB boundary is
+        # covered by HAVING one, not by being remembered here.
+        _orb_hi = getattr(signal, "orb_range_high", None)
+        _orb_lo = getattr(signal, "orb_range_low", None)
+        if _orb_hi and _orb_lo:
+            record["orb_range_high"] = _orb_hi
+            record["orb_range_low"]  = _orb_lo
             # ── r119 — THE SETUP'S GEOMETRY, MEASURED AT FIRE ──────────────
             # Operator, 2026-08-25, watching TSLA and PLTR stop out structurally
             # within five minutes: "the closer to the range boundary the
