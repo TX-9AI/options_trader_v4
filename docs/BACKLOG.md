@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.53
+# BACKLOG.md — v1.54
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,151 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.54 — 2026-09-04 — r236 — 📌 DOCS ONLY. THE TCS's ACTUAL INTENT, THE VOL
+SENSORS NOBODY READS, AND THREE DISPOSITIONS.** No code. Recorded because all
+of it existed only in one chat, and a weekend TCS rebuild that starts from a
+spec is a different project from one that starts by re-deriving a conversation.
+
+## TCS.7 — WHAT THE TREND CREDIT SPREAD IS ACTUALLY FOR
+
+🔑 **OPERATOR, 2026-09-04, first statement of intent on the record:** *"The
+intent of the TCS was to capture a big afternoon move... an afternoon
+characterized by expanding IV in some macro catalyst... without buying rapidly
+evaporating premium."* The credit structure is the point — it is the way to be
+positioned for a catalyst **without paying theta on a 0DTE debit**, which is
+also why the window opens at 11:31, the moment `DEBIT_DIRECTIONAL_CUTOFF_ET`
+closes the debit door.
+
+🔴 **THE CODE IMPLEMENTS A DIFFERENT TRADE, AND SAYS SO.** `trend_credit_spread`
+sells the **ORB boundary strike, frozen at 09:35**, gated on `trend_vote` and
+`adx >= 25` — trend continuation off the morning range. A 14:00 catalyst has no
+relationship to the 09:30–09:35 range. Four inherited pieces, none of them
+chosen for this trade:
+
+| piece | is | should be |
+|---|---|---|
+| anchor | ORB boundary, fixed 09:35 | something the MOVE creates |
+| window | 11:31 → **14:00** | spec'd for the event |
+| trigger | `adx >= 25` | a pre-catalyst tape is COILED, not trending |
+| side | direction of the vote | where premium actually is |
+
+🔴 **`TCS_ENTRY_END_ET = (14, 0)` IS A PLACEHOLDER THAT IS ENFORCED.** config's
+own comment calls it *"PROVISIONAL, INERT — inherited verbatim from the deleted
+global cutoff... Operator specs TC.6's real v4 window before any activation"* —
+and `trend_credit_spread:287` enforces it. That stopped being inert when TCS was
+unparked. **The strategy shuts at 14:00, which is when an FOMC statement drops.**
+Same class as r230's `getattr` default: a live gate nobody chose.
+
+🔴 **AND IT IS HANDED THE FED CALENDAR AND NEVER OPENS IT.** `macro` appears in
+`trend_credit_spread` **three times — all signatures or pass-throughs, never a
+read.** Meanwhile `macro_data` pulls high-impact Fed events from a live
+calendar, `orb_strategy:359` reads `macro.is_fed_day` for confluence, and the
+butterfly disables itself on Fed days. The fleet knows when FOMC is; the one
+strategy built for it is the one that does not look. Same shape as r205's
+`atm_iv` — computed, passed, discarded.
+
+🔴 **THE MEASURED VERDICT, FROM THE OPERATOR:** *"The ORB range is so far OTM
+when we sell it, there's no juice to squeeze."* `plan_check` 2026-09-03 agrees
+from both ends: `pop` **PASSED 596/596** at 0.87–1.00 while `wing_r_best`
+**FAILED 596/596** at 0.0–0.09. Safe and worthless on the same rows. And the gap
+between boundary and price **IS** the move — SPX ran 27–40 points past its ORB
+low on an ordinary day — so **the credit shrinks as the opportunity grows**,
+which is backwards for a trade whose purpose is the big day.
+⚠️ **AND IT SELLS THE CHEAP SIDE.** On a violent drop TCS sells CALLS, where
+skew steepens toward puts and premium collapses. Expanding IV does not rescue
+it: a parallel lift raises the long leg too. **A credit spread needs steep SKEW,
+not high IV.**
+
+⚠️ **PARKED, NOT DISABLED.** Operator: *"live but rarely fires and it's not
+hurting anything. I will disable it prior to live trading if we don't end up
+remastering it."* `TREND_CREDIT_ACTIVE` defaults on; `OT_TCS_ACTIVE=0` parks it
+per box with no deploy.
+⚠️ **AND DISABLING IS NOT NEUTRAL:** TCS is the only **leg-one** trigger for a
+trend-shaped condor (Rule 4 — a trend CS may never FOLLOW anything). Turning it
+off removes that path on a book where no condor has yet formed.
+⚠️ **CORRECTION ON THE RECORD:** I claimed a TCS fill competes with the sweep
+for a slot. Wrong twice. Rule 4 names the operator's exact sequence — *"TREND CS
+first → ONLY a SWEEP completes it"* — so a bearish TCS taking the call side is
+what LETS a put-side sweep form the condor. And the residual I retreated to (an
+open TCS call spread blocking a later HIGH sweep) cannot occur: **price must
+travel through the short call to reach that high, and the 15% stop resolves the
+position first.** TCS costs the sweep nothing.
+
+## IV.2 — EVERY VOLATILITY-EXPANSION SENSOR IS READ BY NOTHING
+
+🔴 Traced 2026-09-04. Each is computed and recorded; **none gates any decision.**
+
+| measure | computed | read by a strategy |
+|---|---|---|
+| `variance_risk_premium` | ✓ | **nothing** |
+| `expected_move_iv` | ✓ | **nothing** |
+| `iv_slope` | ✓ `second_order.py` → `greeks_series` | **nothing** |
+| `is_expanding` | ✓ `volatility_engine:172` | **logged only** (`:248`) |
+| `atm_iv` | ✓ since r205 | butterfly sizing only |
+
+🔴 **AND THE TWO IMPLIED MEASURES WERE NULL UNTIL 2026-08-31.** Both derive from
+`atm_iv`, which r205 found computed into a local and never stored — *"31/31 rows
+across 13 symbols carried a null."* So VRP and `expected_move_iv` have been
+computed from `None` for the life of the project and have **three sessions** of
+real history. Operator: *"we had nothing available to exploit it."* Literally
+true — the sensor existed, was wired to nothing, and the IV half returned nulls.
+⚠️ **SAMPLE ASYMMETRY FOR ANY FUTURE STUDY:** realized expansion
+(`is_expanding`, ATR, `bb_width_pct`) has **full history** in `indicator_series`,
+warehoused since r191. Implied has three days. A screen can answer the realized
+question now and only find a mechanism on the implied one (§12).
+
+## SWAN.1 — THE BLACK-SWAN WATCHER IS AN OBSERVER, NOT A STRATEGY
+
+🔑 Operator: *"I would love to have a black swan type trade there, watching just
+in case we ever caught such a move."* A rare event cannot be fitted after the
+fact — you cannot build the trade and then wait for a sample. `shadow/` is the
+existing home and §34 carves it out by name: *"Observers are the exception and
+DO ship — `shadow/` collects in-session, which is the data a future scorer is
+earned from."* `install.sh:49` already ships it; `primitives.py` already carries
+`is_expanding`.
+🔑 **AND IT SEPARATES TWO FACTS THAT LOOK IDENTICAL FROM OUTSIDE** — *never
+fired* vs *never would have fired*. The same distinction r217 draws for the
+condor. r208's butterfly is the precedent: it went its whole life without a
+survivability check because nothing was watching it.
+⚠️ **TWO OPEN QUESTIONS, BOTH UNANSWERED ON PURPOSE.** (1) What counts as the
+event? `atm_iv` rising, VRP widening, realized `is_expanding`, range compression
+breaking — they disagree, and an observer recording all of them is honest while
+one picking a definition now is a guess wearing a sensor's clothing. (2)
+Continuous or latched? Continuous is many rows for something rare; a latch needs
+a threshold nobody has yet.
+⚠️ **AND I WITHDREW AN ARGUMENT HERE.** I argued armed-and-instrumented was the
+conservative default for a rare-event trade. That holds for a trade that would
+CAPTURE the move. TCS would fire and collect pennies, so leaving it on is not
+insurance — it only looks like insurance from the flag's point of view.
+
+## ORB.6 / ORB.7 — CLOSED
+
+⚠️ **ORB.6a — `_place_butterfly` needs no latch.** `is_orb` is
+`strategy_name == "ORBStrategy"`; reaching that placer requires
+`signal.is_butterfly`, a separate field the ORB never sets. Unreachable.
+⚠️ **ORB.6b — the double-notify is real and now benign.** `resting_orders:571`
+and `position_manager:719` can both fire for one setup. Post-r235 the latch and
+seqs are untouched and the rest is idempotent; the only effect is
+`attempt_number` incrementing twice, so *"attempt #4"* can mean two attempts.
+Cosmetic — **filed, not fixed**, rather than touch the exit path with five
+revisions already in flight.
+🔑 **AND IT WAS A SECOND PATH TO THE r235 BUG.** Before r235 a double-notify
+cleared `order_placed` twice, which on the standing-offer path (where the latch
+WAS set) bought a free second entry off one confirmation. r235 closed it as a
+side effect, not by design.
+⚠️ **A WORRY I CHECKED AND DISPROVED, recorded so nobody re-checks it:** I
+expected the ordinary close never to notify, which would have made r235's latch
+a **one-trade-per-session** regression — r227's quiet failure reintroduced. It
+does notify: `position_manager:719` sits in `_execute_exit` gated on the
+strategy name, not on the offer. Paper included.
+✅ **ORB.7 — CLOSED, WORKING AS INTENDED.** Operator: *"we don't need to wait for
+a structure stop if the position has already turned on us."* The −25% floor and
+the structure stop answer different questions — is the money gone, is the thesis
+dead — and there is no reason to keep paying for an answer already in hand.
+🔑 **THE FLOOR WAS NEVER THE EXPENSE.** META 2026-09-04 lost **$332 across four
+entries**; the first was **−$49**. The floor was firing three times for one
+setup, and r235 stops the multiplication.
 
 **v1.53 — 2026-09-04 — r235 — 🔴 ONE RETEST FIRED THREE ORDERS, AND THE LATCH
 THAT SHOULD HAVE STOPPED IT WAS NEVER SET.** Operator, from the tape: META
