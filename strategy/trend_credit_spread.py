@@ -1,5 +1,24 @@
 """
-strategy/trend_credit_spread.py  v4.11
+strategy/trend_credit_spread.py  v4.12
+v4.12  2026-09-04  r238 — 🔴 THE CREDIT VERSION OF THE RUNAWAY. Operator's
+      spec, 2026-09-04. TRIGGER is `fifty_accepted` — a 1m close beyond
+      `target_50pct` HELD at the next tick — reused from the ORB engine rather
+      than rebuilt, because it is a dated latched event and this strategy has
+      never had one. ANCHOR is the nearest OTM strike from CURRENT PRICE on the
+      floor side: *"the ORB boundary is incorrect as an anchor."* The 50 is the
+      trigger, spot is the anchor, and `holds_fifty` keeps a sticky latch from
+      selling into a level price has retaken.
+      🔑 THE WING IS THE WIDEST CLEARING 1:1 ON THE EXPIRY BASIS, not the
+      best-R one — so it does NOT call `search_wing`, which maximises R and
+      drives the wing narrow. Wider means more credit and more absolute stop
+      room. 1:1 must be the expiry basis because with the stop at 15% OF CREDIT
+      `credit/stop` is 1/0.15 for every wing — a constant, with nothing to
+      solve for.
+      ⚠️ `adx`, `trend_vote`, `outside_range`, `pop` and `drift_bar` are GONE.
+      All were inherited for a continuation trade this is not.
+      ⚠️ THREE FAULTS CAUGHT BY THE SUITE ON THE FIRST RUN, all mine: a ghost
+      `chain.contracts` (OptionsChain has `.calls`/`.puts`), `safe_float` used
+      six times and never imported, and an invented `cv.fill_credit`.
 v4.11  2026-09-04  r237 — 🔴 PARKED. `TCS_ENTRY_END_ET` is (0,0), so
       the window gate fires at every tick and TCS goes DORMANT before a chain
       is read. Operator, 2026-09-04: *"I don't know how TCS has cleared the bar
@@ -220,6 +239,7 @@ from config import (
     TCS_MIN_POP, TCS_MAX_QUOTE_WIDTH, TCS_POP_BAR_MIN, TCS_NICKEL_REF,
     TCS_WING_WIDTH_SPX, TCS_WING_WIDTH_QQQ,
     TREND_CREDIT_ACTIVE, TCS_START_ET, TCS_MIN_CREDIT_NICKEL_MULT,
+    TCS_R_FLOOR_EXPIRY, TCS_STOP_PCT_OF_CREDIT,
     TCS_DRIFT_HORIZON_BARS,
     TCS_LOSS_GIVEN_BREACH, CONT_BREAKOUT_MIN_ADX,
     TCS_ENTRY_END_ET, INSTRUMENT, HARD_CLOSE_ET,
@@ -230,7 +250,13 @@ from config import (
 # retune the other by accident — and TC.6 no longer needs the condor to exist.
 from strategy import credit_vertical as cv
 # r157 — the R floor is read DIRECTLY; r_hurdle() returns None under relaxed.
-from strategy.criteria import R_FLOOR, R_FLOOR_STOP
+# ⚠️ r238 — `safe_float` was USED SIX TIMES AND NEVER IMPORTED. It parsed,
+# imported and would have raised NameError on the first tick past the
+# window; `check_singletons` caught it, which is exactly the class it
+# exists for: "a global declared but never bound raises only when the line
+# RUNS."
+from utils.math_utils import safe_float
+from strategy.criteria import R_FLOOR, R_FLOOR_STOP, stop_survivable
 from strategy.plan import Plan, _n
 
 logger = logging.getLogger(__name__)
@@ -298,48 +324,42 @@ class TrendCreditSpread:
                 else TCS_WING_WIDTH_QQQ)
 
     # ── THE DECLARED CONDITIONS — what must be true for this spec to fire ──
+    # 🔴 r238 — REBUILT TO THE OPERATOR'S SPEC, 2026-09-04. The old set gated on
+    # `trend_vote`, `adx` and `outside_range` and anchored the short strike to
+    # the ORB BOUNDARY, frozen at 09:35. Operator: *"the ORB boundary is
+    # incorrect as an anchor. The sale and the stop should be much more
+    # aggressive than that"*, and *"if we made it the credit version of the
+    # runaway, and anchored to the 50, I think the data would tell a completely
+    # different story."* ADX and the trend vote are GONE — both were inherited
+    # for a continuation trade this is not.
     CONDITIONS = {
         "active":        "TREND_CREDIT_ACTIVE is on",
         "entry_window":  "inside TCS_START_ET-TCS_ENTRY_END_ET",
         "condor_active": "no condor plan holds this symbol",
-        "trend_vote":    "the trend engine's overall_direction is BULLISH or BEARISH",
-        "adx":           f"primary ADX >= {CONT_BREAKOUT_MIN_ADX:.1f}",
-        "outside_range": "price is still OUTSIDE the opening range on the trend side",
+        "fifty_accepted": "a 1m close beyond the 50, HELD at the next tick",
+        "holds_fifty":   "price is still on the traded side of the 50",
     }
-    STRUCTURAL = ("strike_inside_range", "contract", "pop", "wing", "wing_r_best",
-                  "ev", "nickel_floor")
-    PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + ("bound", "credit", "width",
-                                                    "risk", "r", "r_expiry")
+    STRUCTURAL = ("contract", "wing", "wing_r_best", "stop_vs_spread",
+                  "nickel_floor")
+    PLAN_CHECKS = tuple(CONDITIONS) + STRUCTURAL + (
+        "fifty", "credit", "width", "risk", "r", "r_expiry", "stop_dist",
+        "dist_from_fifty_pts")
 
     # ══════════════════════════════════════════════════════════════════════
-    # THE PLAN — evaluates the declared conditions, SELECTS the spread.
+    # THE PLAN — the credit version of the runaway, anchored to the 50.
     # ══════════════════════════════════════════════════════════════════════
     def prepare(self, ms, vol_state, chain, macro, current_price: float, trend=None,
                 orb_high=None, orb_low=None, session_high=None, session_low=None,
-                condor_active: bool = False, now_et=None):
+                condor_active: bool = False, now_et=None, orb=None):
         t = self.planner.tick(current_price)
         prep = _TCSPreparation(t)
         try:
             now = now_et or datetime.now(ET)
             if (now.hour, now.minute) >= TCS_ENTRY_END_ET:
-                # ⚠️ r237 — NAME THE PARK, DO NOT LET IT READ AS A CLOCK. With
-                # `TCS_ENTRY_END_ET = (0, 0)` the generic message would say
-                # "past 00:00 — dormant until tomorrow", which is a refusal
-                # that describes the wrong thing: tomorrow never arrives. A
-                # panel line nobody can act on is the plausible-silence class
-                # this repo keeps paying for, so the parked case says so.
-                if TCS_ENTRY_END_ET <= (0, 0):
-                    t.dormant("entry_window",
-                              "TCS is PARKED — TCS_ENTRY_END_ET is (0,0) by "
-                              "operator ruling 2026-09-04, not a clock. The "
-                              "strategy is awaiting a rewrite (BACKLOG TCS.7); "
-                              "it is not being out-priced. Re-enable by "
-                              "restoring a real window AND clearing "
-                              "OT_TCS_ACTIVE=0 on the boxes.")
-                else:
-                    t.dormant("entry_window", f"past TCS_ENTRY_END_ET "
-                                              f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}"
-                                              f" — dormant until tomorrow")
+                t.dormant("entry_window",
+                          f"past TCS_ENTRY_END_ET "
+                          f"{TCS_ENTRY_END_ET[0]:02d}:{TCS_ENTRY_END_ET[1]:02d}"
+                          f" — no NEW positions; management runs to the flatten")
                 return prep
             if (now.hour, now.minute) < TCS_START_ET:
                 t.dormant("entry_window", f"before TCS_START_ET "
@@ -351,189 +371,173 @@ class TrendCreditSpread:
                       self.CONDITIONS["active"], TREND_CREDIT_ACTIVE)
             prep.cond("condor_active", 1.0 if condor_active else 0.0,
                       self.CONDITIONS["condor_active"], not condor_active)
-            _dir = str(getattr(trend, "overall_direction", "NEUTRAL") or "NEUTRAL").upper()
-            _adx = float(getattr(trend, "primary_adx", 0.0) or 0.0)
-            directional = _dir in ("BULLISH", "BEARISH")
-            prep.cond("trend_vote", (1.0 if _dir == "BULLISH" else -1.0) if directional else 0.0,
-                      f"BULLISH or BEARISH (now {_dir})", directional)
-            prep.cond("adx", _adx, self.CONDITIONS["adx"], _adx >= CONT_BREAKOUT_MIN_ADX)
-            if not directional:
-                # no side to prepare: the vote decides which bound is the level
-                t.hold(f"trend vote {_dir}, ADX {_adx:.1f}: no side to prepare — "
-                       f"waiting on a directional vote")
+
+            # ── THE TRIGGER: the runaway's own acceptance test ──────────────
+            # 🔑 `fifty_accepted` is 1m close beyond `target_50pct` THEN a hold
+            # at the next tick, with the pending state discarded if it reverses
+            # ("a close that reverses immediately is a wick with extra steps").
+            # Reused rather than rebuilt: it is a dated, latched, falsifiable
+            # event, which is exactly what this strategy has never had.
+            _acc = bool(getattr(orb, "fifty_accepted", False))
+            _fifty = safe_float(getattr(orb, "target_50pct", 0.0)) or 0.0
+            _bdir = str(getattr(orb, "break_direction", "") or "")
+            prep.cond("fifty_accepted", 1.0 if _acc else 0.0,
+                      self.CONDITIONS["fifty_accepted"], _acc)
+            if not _acc or _fifty <= 0 or _bdir not in ("long", "short"):
+                if _acc and (_fifty <= 0 or not _bdir):
+                    prep.starved.append("target_50pct")
+                    t.starved("target_50pct")
                 return prep
-            if _dir == "BULLISH":
-                side, bound, direction = "put", orb_high, "long"
-            else:
-                side, bound, direction = "call", orb_low, "short"
-            prep.side, prep.direction, prep.bound = side, direction, bound
+            t.check("fifty", round(_fifty, 4), True)
+
+            # ── SIDE: sell the FLOOR side of a long break, the ceiling of a
+            # short one. The 50 is the level the move proved by accepting
+            # through it, so the credit sits behind it.
+            long_side = (_bdir == "long")
+            side = "put" if long_side else "call"
+            direction = "long" if long_side else "short"
+            prep.side, prep.direction, prep.bound = side, direction, _fifty
             t.direction = direction
-            if not bound or bound <= 0:
-                prep.starved.append("bound")
-                t.starved("bound")
-                return prep
-            t.anchor(trigger=bound, invalidation=bound)
-            t.check("bound", bound, True)
-            _outside = (current_price > bound if side == "put" else current_price < bound)
-            prep.cond("outside_range", current_price - bound, self.CONDITIONS["outside_range"],
-                      _outside)
+            t.anchor(trigger=_fifty, invalidation=_fifty)
 
-            # ── SELECTION — the spread, if the conditions hold next tick ──
-            if chain is None:
-                prep.starved.append("chain")
-                t.starved("chain")
-                return prep
-            sigma = float(getattr(vol_state, "atr_current", 0.0) or 0.0)
-            bars = cv.bars_left(now, TCS_POP_BAR_MIN, HARD_CLOSE_ET)
-            prep.bars = bars
-            # ── r175 — THE SESSION'S MEASURED DRIFT (operator: "A trend day
-            # we should be killing it & on chop we stay out"). Realized
-            # per-5m-bar drift since the RTH open, taken from the same df_5m
-            # the ATR reads. SIGNED toward the short strike's safety inside
-            # pop_drift: a put spread below a rising tape gains; below a
-            # falling tape it loses MORE than driftless. Chop -> mu ~ 0 ->
-            # exactly the old model.
-            drift_bar = 0.0
-            try:
-                # r176 — measure mu over the LAST horizon bars, not since the
-                # open. Since-open zeroed out on V-shapes and late trends: MU
-                # 2026-08-29 read drift +0.18 while the vote saw BEARISH ADX
-                # 52 — the vote and the drift must read the same clock.
-                # Symmetric with the projection: two hours back, credited two
-                # hours forward.
-                _df5 = getattr(vol_state, "df_5m", None)
-                if _df5 is not None and len(_df5) >= 2:
-                    _nb = int(min(len(_df5) - 1, TCS_DRIFT_HORIZON_BARS))
-                    _ref = float(_df5["close"].iloc[-1 - _nb])
-                    drift_bar = (float(current_price) - _ref) / float(_nb)
-            except Exception:                                  # noqa: BLE001
-                drift_bar = 0.0
-            t.check("drift_bar", round(drift_bar, 4), None)
-            contracts = chain.puts if side == "put" else chain.calls
-            _lo, _hi = (orb_low, orb_high)
-            _inside = sorted({float(c.strike) for c in contracts
-                              if _lo is not None and _hi is not None
-                              and _lo <= float(c.strike) <= _hi})
-            if not _inside:
-                prep.structural.append(("strike_inside_range",
-                    f"no strike inside the opening range {_n(_lo)}–{_n(_hi)} "
-                    f"(increments too wide)"))
-            else:
-                target = _inside[0] if side == "call" else _inside[-1]
-                t.check("strike_inside_range", target, True)
-                short = cv.find_contract_at_strike(contracts, target)
-                if short is None:
-                    prep.structural.append(("contract", f"first-inside strike {target:.2f} has no contract"))
-                else:
-                    t.check("contract", short.strike, True)
-                    # drift AWAY from a sold-under strike is +mu on a rising
-                    # tape (put side) and on a falling tape for the call side
-                    _mu_safe = drift_bar if side == "put" else -drift_bar
-                    pop = cv.pop_drift(abs(short.strike - current_price), sigma,
-                                       bars, _mu_safe, TCS_DRIFT_HORIZON_BARS)
-                    t.check("pop", pop, pop >= TCS_MIN_POP)
-                    if pop <= 0.0:
-                        prep.structural.append(("pop",
-                            f"POP unresolvable (sigma {sigma:.4f}, bars {bars:.1f}) — a "
-                            f"missing input is not a safe trade"))
-                    elif pop < TCS_MIN_POP:
-                        prep.structural.append(("pop",
-                            f"POP {pop:.2f} < {TCS_MIN_POP:.2f} at {bars:.1f} bars for "
-                            f"strike {short.strike:.2f}"))
-                    else:
-                        # 🔴 r219 — see credit_vertical.search_wing: `credit`
-                        # is JUDGED (bid/ask), `_fill` is BOOKED (mark).
-                        # \U0001f534 r234 - READ BY NAME (see credit_vertical.WingResult:
-                        # r219's fifth value missed two guard returns that
-                        # still returned four).
-                        _w = cv.search_wing(contracts, short, side, R_FLOOR,
-                                            r_floor_stop=R_FLOOR_STOP)
-                        _best_r, long_c, credit = _w.r, _w.long, _w.credit
-                        _bw, _fill = _w.width, _w.fill
-                        if long_c is None:
-                            # \u26a0\ufe0f r234 - name which rung refused it (see the sweep).
-                            prep.structural.append(
-                                (_w.why_key or "wing",
-                                 (_w.why or f"no priceable wing beyond {short.strike:.2f} "
-                                            f"(undefined risk is never sold)")))
-                        else:
-                            t.check("wing", long_c.strike, True)
-                            # \U0001f511 STOP BASIS - TCS stops the same way the sweep
-                            # does, through the lone stop at 15% OF RISK, so
-                            # it is judged the same way. `r_expiry` records.
-                            t.check("r_expiry", _best_r, None)
-                            t.check("wing_r_best", _w.r_stop,
-                                    _w.r_stop is not None and _w.r_stop >= R_FLOOR_STOP)
-                            if _w.r_stop is None or _w.r_stop < R_FLOOR_STOP:
-                                prep.structural.append(("wing_r_best",
-                                    f"no wing clears stop-basis R {R_FLOOR_STOP:.2f} — best is "
-                                    f"{('n/a' if _w.r_stop is None else f'{_w.r_stop:.2f}')} at "
-                                    f"{long_c.strike:.2f} ({_bw:g} wide, credit ${credit:.2f}, "
-                                    f"expiry-basis R {_best_r:.2f})"
-                                    f"{(' — ' + _w.why) if _w.why else ''}; "
-                                    f"structure, not selection — relaxed does not waive it"))
-                            else:
-                                t.credit_spread(short.strike, long_c.strike, credit,
-                                                invalidation=bound, trigger=bound)
-                                width = _bw
-                                req = TCS_LOSS_GIVEN_BREACH * (1.0 - pop) / pop
-                                t.check("ev", credit / width - req, credit / width > req)
-                                floor_n = TCS_MIN_CREDIT_NICKEL_MULT * TCS_NICKEL_REF
-                                t.check("nickel_floor", credit - floor_n, credit >= floor_n)
-                                if credit / width <= req:
-                                    prep.structural.append(("ev",
-                                        f"negative EV — credit {credit:.2f} = "
-                                        f"{100.0 * credit / width:.1f}% of width {width:.0f}, "
-                                        f"needs > {100.0 * req:.1f}% at POP {pop:.2f}"))
-                                elif credit < floor_n:
-                                    prep.structural.append(("nickel_floor",
-                                        f"credit {credit:.2f} below {TCS_MIN_CREDIT_NICKEL_MULT:.1f}x "
-                                        f"nickel ({floor_n:.2f}) — no room to profit"))
-                                elif _fill is None:
-                                    # ⚠️ NO MARK ON A LEG IS NOT A REASON TO
-                                    # BOOK THE BID/ASK NUMBER — substituting it
-                                    # is the basis error r219 removes.
-                                    prep.structural.append((
-                                        "fill_mark",
-                                        f"{side} {short.strike:.2f}/"
-                                        f"{long_c.strike:.2f} has no usable "
-                                        f"mark on one leg — fill price unknown"))
-                                else:
-                                    # ⚠️ EV, THE NICKEL FLOOR AND R ARE JUDGED
-                                    # ON THE BID/ASK CREDIT ABOVE — the
-                                    # conservative test is unchanged. Only what
-                                    # is BOOKED moves to the mark.
-                                    prep.short, prep.long, prep.credit = short, long_c, _fill
-                                    prep.width, prep.pop, prep.r = width, pop, t.r
-                                    prep.ready = True
-
-            head = (f"{'BULLISH' if side == 'put' else 'BEARISH'} vote ADX {_adx:.1f}, "
-                    f"{side} spread off the ORB {'high' if side == 'put' else 'low'} "
-                    f"{bound:.2f}")
-            if prep.starved:
-                t.starved(*prep.starved)
-                return prep
-            if prep.structural:
-                gate, why = prep.structural[0]
-                t.refuse(gate, f"{head}: {why}")
-                return prep
+            # ── THE 50 MUST STILL HOLD ──────────────────────────────────────
+            # 🔴 OPERATOR: *"the 50 is still the lowest bar for entry after the
+            # clock."* `fifty_accepted` is LATCHED for the session, and the
+            # strike is anchored to SPOT — so without this, an acceptance at
+            # 947 followed by a collapse to 930 would sell the 925 put into a
+            # level price had already retaken. The latch says the move
+            # happened; this says it is still true.
+            _holds = (current_price > _fifty) if long_side else (current_price < _fifty)
+            prep.cond("holds_fifty", round(current_price - _fifty, 4),
+                      self.CONDITIONS["holds_fifty"], _holds)
+            t.check("dist_from_fifty_pts", round(abs(current_price - _fifty), 4), None)
             if prep.unmet:
-                cur = "; ".join(f"{n}={_n(prep.conditions[n][0]) if isinstance(prep.conditions[n][0], (int, float)) else 'no'}"
-                                f" (need {prep.conditions[n][1]})" for n in prep.unmet)
-                t.hold(f"{head}: PREPARED — {prep.trade_line()}. Waiting on: {cur}")
                 return prep
-            t.note(f"{head}: all {len(self.CONDITIONS)} conditions true — {prep.trade_line()}")
-            return prep
-        except Exception as exc:                               # noqa: BLE001
-            logger.warning("[tcs] prepare failed: %s", exc)
-            if not t.closed:
-                t.refuse("raised", f"{type(exc).__name__}: {exc}", verdict="NO PLAN")
-            prep.starved.append("raised")
-            return prep
 
-    # ══════════════════════════════════════════════════════════════════════
-    # THE STRATEGY — conditions true -> execute the plan's spread.
-    # ══════════════════════════════════════════════════════════════════════
+            # ── THE SHORT: NEAREST OTM FROM CURRENT PRICE ────────────────────
+            # 🔴 OPERATOR: *"the short should be the nearest OTM strike from the
+            # current price on the floor side."* SPOT, not the 50 — at the
+            # moment of acceptance they coincide, but the debit block (r197)
+            # can delay entry, and when it lifts the sale must be aggressive
+            # relative to where price IS, not where it was.
+            # ⚠️ `.calls` / `.puts` — OptionsChain HAS NO `.contracts`, and
+            # check_attr_fidelity caught the ghost attribute on the first run.
+            if isinstance(chain, (list, tuple)):
+                contracts = list(chain)
+            else:
+                contracts = list(getattr(chain, "puts" if side == "put" else "calls",
+                                         None) or [])
+            strikes = sorted({safe_float(getattr(c, "strike", 0)) or 0.0
+                              for c in contracts} - {0.0})
+            _otm = [k for k in strikes if k < current_price] if side == "put" \
+                else [k for k in strikes if k > current_price]
+            if not _otm:
+                prep.structural.append(("contract",
+                    f"no OTM {side} strike from {current_price:.2f}"))
+                return prep
+            target = max(_otm) if side == "put" else min(_otm)
+            short = cv.find_contract_at_strike(contracts, target)
+            if short is None:
+                prep.structural.append(("contract",
+                    f"nearest OTM strike {target:.2f} has no contract"))
+                return prep
+            t.check("contract", short.strike, True)
+            prep.short = short
+
+            # ── THE WING: WIDEST THAT STILL CLEARS 1:1 ──────────────────────
+            # 🔴 OPERATOR: *"a 1:1R minimum required, so set the protective wing
+            # accordingly"*, taking the MOST AGGRESSIVE reading — 1:1 on the
+            # EXPIRY basis, `credit / (width - credit) >= 1`, i.e. credit >= 50%
+            # of width. NOT r234's stop basis, and that is deliberate: with the
+            # stop at 15% OF CREDIT, `credit / stop` is 1/0.15 = 6.67 for every
+            # credit and every wing, so R on the stop basis is a CONSTANT and
+            # the wing would have nothing to solve for. Only the expiry basis
+            # makes "set the wing accordingly" mean anything.
+            # 🔑 WIDEST, NOT BEST. `search_wing` maximises R, which drives the
+            # wing NARROW. Here a wider wing collects more credit and buys more
+            # absolute room, so the best qualifying wing is the WIDEST one that
+            # still clears the floor — the opposite search, and the reason this
+            # does not call `cv.search_wing`.
+            best = None
+            _sb = safe_float(getattr(short, "bid", 0.0)) or 0.0
+            _sa = safe_float(getattr(short, "ask", 0.0)) or 0.0
+            _why = ""
+            for c in contracts:
+                k = safe_float(getattr(c, "strike", 0)) or 0.0
+                if k <= 0 or (k >= target if side == "put" else k <= target):
+                    continue
+                ask = safe_float(getattr(c, "ask", None))
+                if ask is None or ask < 0:
+                    continue
+                width = abs(target - k)
+                credit = _sb - ask                     # judged bid/ask (r219)
+                if width <= 0 or credit <= 0 or credit >= width:
+                    continue
+                r_expiry = credit / (width - credit)
+                if r_expiry < TCS_R_FLOOR_EXPIRY:
+                    _why = _why or (f"widest wing clearing 1:1 not found — best "
+                                    f"R {r_expiry:.2f} at {width:g} wide")
+                    continue
+                # 🔴 THE STOP IS 15% OF CREDIT, and it must still clear twice
+                # the short leg's quote. A stop inside the spread fires on a
+                # quote update, not on the trade being wrong — exit_engine
+                # calls this exact form "the inverted rule r155 replaced. The
+                # trade will stop on noise."
+                _sd = credit * TCS_STOP_PCT_OF_CREDIT
+                _ok, _svwhy = stop_survivable(_sd, _sb, _sa)
+                if not _ok:
+                    _why = f"15%-of-credit stop is unsurvivable: {_svwhy}"
+                    continue
+                if best is None or width > best[0]:
+                    best = (width, c, credit, r_expiry, _sd)
+            if best is None:
+                prep.structural.append(
+                    ("wing_r_best" if "1:1" in _why else "stop_vs_spread",
+                     _why or f"no wing beyond {target:.2f} prices a credit"))
+                return prep
+            _bw, long_c, credit, r_expiry, _sd = best
+            t.check("wing", long_c.strike, True)
+            t.check("width", _bw, True)
+            t.check("credit", round(credit, 4), True)
+            t.check("r_expiry", round(r_expiry, 4), r_expiry >= TCS_R_FLOOR_EXPIRY)
+            t.check("wing_r_best", round(r_expiry, 4), True)
+            t.check("stop_vs_spread", round(_sd, 4), True)
+            t.check("stop_dist", round(_sd, 4), None)
+            t.check("risk", round(_bw - credit, 4), None)
+            t.check("r", round(r_expiry, 4), True)
+
+            # ── THE NICKEL FLOOR: a credit worth collecting ─────────────────
+            _nick = TCS_NICKEL_REF * TCS_MIN_CREDIT_NICKEL_MULT
+            if credit < _nick:
+                prep.structural.append(("nickel_floor",
+                    f"credit ${credit:.2f} below the nickel floor ${_nick:.2f}"))
+                return prep
+            t.check("nickel_floor", round(credit, 4), True)
+
+            # 🔑 BOOK THE MARK, JUDGE ON BID/ASK (r219). The economics above are
+            # decided on the conservative number; what gets RECORDED is what a
+            # mid fill actually pays.
+            # ⚠️ `cv.fill_credit` DOES NOT EXIST — the first draft invented it,
+            # which is the §0.1 failure this repo names. The mark credit is
+            # computed the same way `search_wing` does it, with `safe_float`
+            # so a NaN mark is None rather than a number.
+            _sm = safe_float(getattr(short, "mark", None))
+            _lm = safe_float(getattr(long_c, "mark", None))
+            _fill = (round(max(0.0, _sm - _lm), 4)
+                     if _sm is not None and _lm is not None else None)
+            if _fill is None:
+                prep.structural.append(("contract",
+                    "a leg has no usable mark — no fill credit to book"))
+                return prep
+            prep.long, prep.credit, prep.width = long_c, _fill, _bw
+            prep.r = round(r_expiry, 4)
+            prep.ready = not (prep.unmet or prep.structural or prep.starved)
+        except Exception as exc:                                # noqa: BLE001
+            logger.error("[tcs] prepare raised: %s", exc, exc_info=True)
+            prep.starved.append("exception")
+            t.starved("exception")
+        return prep
+
     def generate_signal(self, ms, vol_state, chain, macro,
                         current_price: float, trend=None,
                         orb_high: Optional[float] = None,
@@ -541,7 +545,8 @@ class TrendCreditSpread:
                         session_high: Optional[float] = None,
                         session_low: Optional[float] = None,
                         condor_active: bool = False,
-                        now_et: Optional[datetime] = None):
+                        now_et: Optional[datetime] = None,
+                        orb=None):
         """Returns a condor-leg-shaped OptionsSignal, or None.
 
         ⚠️ NO `orb` PARAMETER. v1.x took one and gated on
@@ -552,7 +557,7 @@ class TrendCreditSpread:
         prep = self.prepare(ms, vol_state, chain, macro, current_price, trend=trend,
                             orb_high=orb_high, orb_low=orb_low, session_high=session_high,
                             session_low=session_low, condor_active=condor_active,
-                            now_et=now_et)
+                            now_et=now_et, orb=orb)
         if not prep.ready or prep.unmet or prep.structural or prep.starved:
             return prep.tick.already()
         # ⚠️ `prep.credit` IS PASSED NOW. `_build_signal` had no credit in scope

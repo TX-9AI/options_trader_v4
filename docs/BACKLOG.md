@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.55
+# BACKLOG.md — v1.56
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,66 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.56 — 2026-09-04 — r238 — 🔴 TCS REBUILT: THE CREDIT VERSION OF THE RUNAWAY,
+ANCHORED TO THE 50.** Operator's spec, 2026-09-04, six parameters, all quoted in
+the code beside what they replace.
+
+| | |
+|---|---|
+| **Window** | 11:31 → 14:00 for entries. *"No new positions after 1400, but condor management is allowed until the flatten."* Same number as the old placeholder, **chosen** this time. |
+| **Precondition** | no open debit, butterfly exempt — `has_blocking_position` (r197, already built) |
+| **Trigger** | `fifty_accepted` — 1m close beyond `target_50pct`, **held** at the next tick |
+| **Live condition** | `holds_fifty` — price still on the traded side of the 50 |
+| **Short** | nearest OTM strike from **current price**, floor side |
+| **Wing** | **widest** clearing 1:1 on the **expiry** basis |
+| **Stop** | 15% of credit, floored by `2 × short-leg spread` |
+| **Exits** | 15% stop first · nickel · 15:45 flatten |
+| **Size** | `_size_vertical`, full grade budget (already built) |
+| **Re-entry** | permitted; strictness is the limiter, no latch |
+
+🔑 **THE TRIGGER IS REUSED, NOT REBUILT.** `fifty_accepted` is a dated, latched,
+falsifiable event with a pending-then-hold test that discards a close which
+reverses. TCS has never had one — its old conditions were a per-tick set, which
+is why it churned. **TCS.8 is closed by reuse.**
+🔴 **THE WING RULE IS INVERTED AND DOES NOT CALL `search_wing`.** That helper
+maximises R, which drives the wing **narrow**; the spec wants the **widest**
+clearing 1:1 — more credit and more absolute stop room. And 1:1 must be the
+**expiry** basis: with the stop at 15% of credit, `credit/stop` is 1/0.15 = 6.67
+for every wing, a **constant**, so "set the wing accordingly" would have nothing
+to solve for. `TCS_R_FLOOR_EXPIRY` is deliberately separate from the sweep's
+`R_FLOOR_STOP` (r234) — one constant with two bases is the rot §35 names.
+🔑 **THE TWO RULES PULL THE SAME WAY.** A thin far-OTM sale fails 1:1 *and* its
+stop cannot clear 2× the quote; a rich near-money sale clears both. Realized
+shape: **$0.375 risked against $2.45 to the nickel — 6.5:1, breakeven near 13%.**
+Operator: *"available, not expected."*
+⚠️ **`adx`, `trend_vote`, `outside_range`, `pop`, `drift_bar` — all GONE.**
+Inherited for a continuation trade this is not.
+⚠️ **THE EXIT BRANCH HAD NO PREMIUM STOP AT ALL.** `is_trend_participation`
+checked the breach and returned. The 15%-of-credit stop now runs first; the
+breach survives as a backstop, expected inert. **`stop_survivable` at ENTRY is
+load-bearing for this EXIT** — without it this is the r155-inverted stop.
+🔴 **THREE FAULTS THE SUITE CAUGHT IN MY OWN WORK, each a first-tick crash:** a
+ghost `chain.contracts` (OptionsChain has `.calls`/`.puts`) — `check_attr_fidelity`;
+`safe_float` used six times and never imported — `check_singletons`, *"a global
+declared but never bound raises only when the line RUNS"*; and an **invented**
+`cv.fill_credit`, the §0.1 failure this repo is named after.
+⚠️ **AND MY FIRST FIXTURE WAS REFUSED AT R 0.85 — THE CODE WAS RIGHT.** 1:1 on
+the expiry basis genuinely needs credit ≥ 50% of width, so a near-ATM short is
+not a nicety, it is the only way the floor is reachable. Recorded because it is
+the single most surprising consequence of the spec.
+`tests/check_tcs_fifty.py` v1.0, 7 checks, drives the operator's own 947/945
+example. Five checkers re-derived; C1–C5/T7/T8 **retired** because they pinned
+conditions the rewrite deleted. **81/81 green.**
+⚠️ **STILL HELD BY `OT_TCS_ACTIVE=0`** on all 15 boxes. Landing this does not
+unpark it; clearing that flag is a separate, deliberate act.
+
+| id | question | state |
+|---|---|---|
+| **TCS.8** | Re-entry latch — closed by reuse of `fifty_accepted`; operator ruled no latch, strictness is the limiter. | ✅ **CLOSED r238** |
+| **TCS.10** | C1–C5/T7/T8 covered the POP fault and the structural-vs-condition split. `check_tcs_fifty` does not. Owed. | 🔲 OPEN |
+| **TCS.11** | Never run against a tick. First live session needs `fifty_accepted` counts, `holds_fifty` refusals, and how often 1:1 is reachable — the 0.85 fixture says it may be rare. | 🔲 OPEN |
+| **TCS.9** | `cascade_harness`/`cascade_real` still hardcode their own `(14, 0)`. Now correct by accident. | 🔲 OPEN |
 
 **v1.55 — 2026-09-04 — r237 — 🔴 TCS PARKED AT ITS FIRST GATE.** Operator, mid-session:
 *"I don't know how TCS has cleared the bar to fire... set the impossible variable and

@@ -1,5 +1,7 @@
 """
-config.py  v4.13
+config.py  v4.14
+v4.14  2026-09-04  r238 — TCS REBUILT. `TCS_ENTRY_END_ET` (14,0) spec'd
+      not inherited; `TCS_R_FLOOR_EXPIRY` and `TCS_STOP_PCT_OF_CREDIT` added.
 v4.13 2026-09-04  r237 — 🔴 TCS_ENTRY_END_ET SET OUT OF REACH: (14, 0) -> (0, 0).
       Operator, mid-session 2026-09-04, after UNH fired three times in three
       minutes on identical strikes: *"set the impossible variable and comment
@@ -510,6 +512,29 @@ TCS_MIN_CREDIT_PCT_WIDTH    = float(os.environ.get("OT_TCS_MIN_CREDIT_PCT", "0.1
 # the right ORDERING regardless of the exact value.
 TCS_LOSS_GIVEN_BREACH       = float(os.environ.get("OT_TCS_LGB", "0.5"))
 TCS_MIN_CREDIT_NICKEL_MULT  = float(os.environ.get("OT_TCS_NICKEL_MULT", "4.0"))
+
+# ── r238 — THE TWO NUMBERS THE NEW TCS TURNS ON ───────────────────────────────
+# 🔴 1:1 ON THE EXPIRY BASIS, NOT THE STOP BASIS, and the distinction is
+# arithmetic rather than taste. With the stop at 15% OF CREDIT,
+# `credit / stop` is 1/0.15 = 6.67 for EVERY credit and EVERY wing — R on the
+# stop basis is a CONSTANT, so "set the protective wing to achieve 1:1" would
+# have nothing to solve for. Only `credit / (width - credit)` is a function of
+# the wing, and 1.0 there means CREDIT >= 50% OF WIDTH.
+# ⚠️ IT IS DELIBERATELY SEPARATE FROM `criteria.R_FLOOR_STOP`, which the SWEEP
+# uses on the stop basis (r234). One constant with two bases is the rot §35
+# names; each names its own.
+TCS_R_FLOOR_EXPIRY  = float(os.environ.get("OT_TCS_R_FLOOR_EXPIRY", "1.00"))
+
+# 🔴 15% OF CREDIT, which is NOT what exit_engine's lone stop does (15% of
+# RISK) and not an oversight. Operator, 2026-09-04: *"stop out at 15% of credit
+# collected"*, choosing the most aggressive option *"because it's available,
+# not expected."* On a $2.50 credit that is a $0.375 stop against a $2.45 win
+# to the nickel — a realized 6.5:1, breakeven near a 13% hit rate.
+# ⚠️ THE FLOOR THAT KEEPS IT HONEST is `stop_survivable`: the stop must clear
+# 2x the short leg's quote or it fires on a quote update rather than on the
+# trade being wrong. That is why the 1:1 rule and this one PULL THE SAME WAY —
+# a thin far-OTM sale fails both, a rich near-money sale clears both.
+TCS_STOP_PCT_OF_CREDIT = float(os.environ.get("OT_TCS_STOP_PCT_CREDIT", "0.15"))
 # ⚠️ RETIRED 2026-08-14, NOT DELETED. TC.6 no longer reads this. It was an
 # emergency brake during the rapid-fire incident and was the wrong instrument
 # for the right worry — the loop came from a $0.06 credit sitting one cent from
@@ -900,7 +925,18 @@ DEBIT_BLOCK_ACTIVE          = os.environ.get("OT_DEBIT_BLOCK_ACTIVE", "1") == "1
 # it enter and exit on alternating ticks. TCS.7 in BACKLOG holds the rewrite.
 #
 # The original note, still true and now acted on:
-TCS_ENTRY_END_ET            = (0, 0)    # ⚠️ PARKED r237. Was (14, 0), itself
+# 🔴 r238 — SPEC'D AT LAST. Same number it always held, DIFFERENT STATUS:
+# (14, 0) was inherited verbatim from a deleted global cutoff and config called
+# it PROVISIONAL and INERT, "operator specs TC.6's real v4 window before any
+# activation". Operator, 2026-09-04: *"No new positions after 1400, but condor
+# management is allowed until the flatten."* Chosen, not inherited.
+# ⚠️ MANAGEMENT IS NOT GATED BY THIS AND NEVER WAS — `condor_roll` and
+# `management.py` reference no window constant at all; they gate on having legs
+# and run to the 15:45 flatten. Verified, not assumed.
+# ⚠️ AND THE STRATEGY IS STILL HELD BY `OT_TCS_ACTIVE=0` in the systemd
+# drop-in on all 15 boxes. Restoring the window does NOT unpark it; clearing
+# that flag is a separate, deliberate act.
+TCS_ENTRY_END_ET            = (14, 0)   # r238: operator-spec'd. Was
                                         #   end, inherited verbatim from the
                                         #   deleted global cutoff so behaviour
                                         #   is unchanged while TCS is OFF.

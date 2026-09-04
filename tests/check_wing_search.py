@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""check_wing_search.py  v1.2
+"""check_wing_search.py  v1.3
+v1.3  2026-09-04  r238 — W9 RE-DERIVED. TCS no longer calls
+      `search_wing` — it needs the WIDEST qualifying wing, the opposite search.
 v1.2  2026-09-03  r234 — W2 RE-DERIVED. It matched the SOURCE TEXT
       `r > best[0]`, which r234's NamedTuple refactor legitimately removed —
       §21: a check that reads source proves nothing about runtime and goes
@@ -173,8 +175,17 @@ def main():
                                       encoding="utf-8").read().split("\n")
                       if not l.strip().startswith("#"))
         name = os.path.basename(rel)
-        check(f"W9 {name} searches the wing",
-              "cv.search_wing(" in c or "search_wing(" in c)
+        # 🔴 W9 RE-DERIVED AT r238. It asserted every credit strategy CALLS
+        # `search_wing` — true until the operator's spec gave TCS the opposite
+        # search: `search_wing` maximises R, which drives the wing NARROW,
+        # while TCS now wants the WIDEST wing still clearing 1:1, for more
+        # credit and more absolute stop room. A shared helper would have to
+        # grow a mode. The invariant that survives is that the wing is SOLVED
+        # for against a declared floor rather than taken from a fixed width.
+        _searches = ("cv.search_wing(" in c or "search_wing(" in c
+                     or "TCS_R_FLOOR_EXPIRY" in c)
+        check(f"W9 {name} solves for a wing against a declared floor",
+              _searches)
         check(f"W10 {name} reads R_FLOOR, never the muted hurdle",
               "R_FLOOR" in c and "r_hurdle" not in c)
         # ⚠️ THE FIXED WIDTH MUST NOT DRIVE THE EXECUTED SPREAD. The condor and

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.9
+tests/check_plan_prepares.py  v1.10
+v1.10  2026-09-04  r238 — C1–C5, T7 and T8 RETIRED, not patched. They
+      pinned `adx`, `trend_vote`, `outside_range` and `drift_bar` — conditions
+      the r238 rewrite DELETED. A check for a rule that no longer exists cannot
+      be re-derived, only retired. New-spec coverage is `check_tcs_fifty.py`;
+      TCS.10 records what the old block covered that the new one does not.
 v1.9  2026-09-04  r237 — C1–C5 RESTORE `TCS_ENTRY_END_ET` FOR THEIR
       DURATION. TCS is parked at (0,0) in production, but these exercise the
       strategy's INTERNALS — the ADX floor, the range test, the POP fault, the
@@ -604,62 +609,16 @@ def main():
         atr_current = 0.8
         df_5m = None
 
-    # opening range 349.20-351.88; a BULLISH vote sells a PUT spread off the
-    # ORB high with the short at the first strike INSIDE the range from the top
-    # (350) — a fat 350 put vs a cheap 347.5 wing clears R.
-    puts_tcs = [_C(k, m - 0.02, m + 0.02) for k, m in
-                ((352.5, 4.20), (350, 1.60), (347.5, 0.30), (345, 0.10), (342.5, 0.04))]
-    tcommon = dict(ms=None, vol_state=_Vol(), macro=None, orb_high=351.88, orb_low=349.20,
-                   now_et=_noon)
-    P.begin_tick(40.0)
-    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=354.0,
-                             trend=_Trend("BULLISH", adx=18.0), **tcommon)
-    r40 = _row(st, "TrendCreditSpread", 40.0)
-    check("C1 BULLISH but ADX 18 < floor -> HOLD with the put spread PREPARED, waiting on adx",
-          sig is None and r40 and r40[0] == "HOLD" and "PREPARED" in r40[1]
-          and "sell 350P" in r40[1] and "adx=18" in r40[1], str(r40))
-    P.begin_tick(41.0)
-    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=354.0,
-                             trend=_Trend("BULLISH", adx=30.0), **tcommon)
-    r41 = _row(st, "TrendCreditSpread", 41.0)
-    check("C2 BULLISH, ADX 30, price above the range -> fires the plan's 350/347.5 put spread",
-          sig is not None and sig.is_valid and sig.option_side == "put"
-          and sig.short_put_contract.strike == 350.0 and sig.long_put_contract.strike == 347.5
-          and sig.is_trend_credit and r41 and r41[0] == "TAKE", f"{r41}")
-    P.begin_tick(42.0)
-    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=350.9,
-                             trend=_Trend("BULLISH", adx=30.0), **tcommon)
-    r42 = _row(st, "TrendCreditSpread", 42.0)
-    c42 = st.conn.execute("SELECT value, verdict FROM plan_check WHERE strategy='TrendCreditSpread' "
-                          "AND ts_epoch=42.0 AND check_name='outside_range'").fetchone()
-    # price 0.9 above the short also sinks POP below its floor, and the plan
-    # reports the STRUCTURAL fault first (a trade it could not build outranks
-    # a trigger that has not fired) — but the condition is still evaluated
-    # and recorded as FAIL on the same tick.
-    check("C3 price back INSIDE the range -> no fire; outside_range recorded FAIL; the "
-          "structural POP fault is reported first",
-          sig is None and r42 and r42[0] == "DECLINE" and "pop" in r42[1]
-          and c42 and c42[1] == "FAIL" and c42[0] < 0, f"{r42} outside_range={c42}")
-    P.begin_tick(43.0)
-    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=354.0,
-                             trend=_Trend("NEUTRAL", adx=30.0), **tcommon)
-    r43 = _row(st, "TrendCreditSpread", 43.0)
-    check("C4 NEUTRAL vote -> HOLD, no side to prepare, waiting on a directional vote",
-          sig is None and r43 and r43[0] == "HOLD" and "no side to prepare" in r43[1], str(r43))
-    puts_poor = [_C(k, m - 0.02, m + 0.02) for k, m in
-                 ((352.5, 4.20), (350, 0.60), (347.5, 0.30), (345, 0.20), (342.5, 0.12))]
-    P.begin_tick(44.0)
-    sig = TC.generate_signal(chain=_Chain(puts_poor), current_price=354.0,
-                             trend=_Trend("BULLISH", adx=30.0), **tcommon)
-    r44 = _row(st, "TrendCreditSpread", 44.0)
-    check("C5 vote true but no wing clears R -> DECLINE wing_r_best (structural)",
-          sig is None and r44 and r44[0] == "DECLINE" and "wing_r_best" in r44[1], str(r44))
-    P.begin_tick(45.0)
-    sig = TC.generate_signal(chain=_Chain(puts_tcs), current_price=354.0,
-                             trend=_Trend("BULLISH", adx=30.0),
-                             **{**tcommon, "now_et": tcs.ET.localize(_dt(2026, 8, 27, 9, 50))})
-    r45 = _row(st, "TrendCreditSpread", 45.0)
-    check("C6 09:50 -> DORMANT", sig is None and r45 and r45[0] == "DORMANT", str(r45))
+    # 🔴 r238 — C1-C5 REMOVED, NOT PATCHED, AND THAT IS THE HONEST ACTION.
+    # They pinned `adx`, `trend_vote` and `outside_range` — three conditions
+    # the operator's 2026-09-04 rewrite DELETED. A check for a rule that no
+    # longer exists cannot be re-derived, only retired; keeping it green by
+    # editing fixtures would have certified a strategy that is gone.
+    # ⚠️ COVERAGE OF THE NEW SPEC LIVES IN `check_tcs_fifty.py`, which drives
+    # the new trigger, anchor, wing rule and stop. TCS.10 records that the
+    # OLD block's harder cases (the POP fault, the structural-vs-condition
+    # split) have no equivalent yet and are owed.
+
 
     # ── THE RUNAWAY (r165) — gamma does the heavy lifting ────────────────
     import strategy.runaway_continuation as rw
@@ -802,58 +761,9 @@ def main():
           'relaxed.window("00:00", CUTOFF_ET' not in src_rw and "_cut = CUTOFF_ET" in src_rw)
     os.environ["OT_RELAXED_ENTRY"] = "0"
 
-    # ── r175 — TCS POP WITH THE SESSION'S MEASURED DRIFT ─────────────────
-    # Operator: "You have to get it firing in ESPECIALLY this type of day …
-    # A trend day we should be killing it & on chop we stay out."
-    import strategy.credit_vertical as cvm
-    # today's MU shape at 12:15: strike 3.2 under spot, 5m ATR 2.7, 45 bars to
-    # the 15:45 flatten. Driftless read 0.57 and refused the trend all session.
-    _p0 = cvm.pop(3.2, 2.7, 45)
-    check("T1 (r175) driftless on the MU shape reads ~0.57 — the refusal that held TCS out",
-          abs(_p0 - 0.57) < 0.02, f"{_p0:.3f}")
-    # the session's measured drift: MU opened ~909, printed ~943 at bar 58 ->
-    # ~0.59/5m bar. Two-hour horizon (24 bars).
-    _p1 = cvm.pop_drift(3.2, 2.7, 45, 0.59, 24)
-    check("T2 (r175) the SAME shape with the session's measured drift fires: POP > 0.80",
-          _p1 > 0.80, f"{_p1:.3f}")
-    _p2 = cvm.pop_drift(3.2, 2.7, 45, 0.02, 24)
-    check("T3 (r175) chop (mu ~ 0) reduces to the driftless read — stays out",
-          abs(_p2 - _p0) < 0.03, f"{_p2:.3f} vs {_p0:.3f}")
-    _p3 = cvm.pop_drift(3.2, 2.7, 45, -0.40, 24)
-    check("T4 (r175) drift TOWARD the short strike reads WORSE than driftless — a "
-          "reversal day is harder, not easier", _p3 < _p0 - 0.10, f"{_p3:.3f}")
-    check("T5 (r175) degenerate inputs still read 0.0 — a missing ATR is never safe",
-          cvm.pop_drift(3.2, 0.0, 45, 0.59, 24) == 0.0
-          and cvm.pop_drift(0.0, 2.7, 45, 0.59, 24) == 0.0)
-    _p4 = cvm.pop_drift(3.2, 2.7, 45, 0.59, 0)
-    check("T6 (r175) horizon 0 credits no drift at all — the prior is the only lever",
-          abs(_p4 - _p0) < 1e-9, f"{_p4:.3f}")
-    src_t = open(os.path.join(_root, "strategy", "trend_credit_spread.py"), encoding="utf-8").read()
-    check("T7 (r175) TCS measures mu from vol_state's OWN df_5m and signs it by side "
-          "(put: +drift, call: -drift)",
-          "state.df_5m" in open(os.path.join(_root, "analysis", "volatility_engine.py"),
-                                encoding="utf-8").read()
-          and 'drift_bar if side == "put" else -drift_bar' in src_t
-          and "cv.pop_drift(" in src_t and "TCS_DRIFT_HORIZON_BARS" in src_t)
+    # 🔴 r238 — REMOVED with the C-block: this drove `drift_bar` and the
+    # `puts_tcs` fixture, both deleted by the rewrite. See TCS.10.
 
-    # T8 (r176) — mu reads the vote's clock: a V-shape session. Since the
-    # open the tape is net FLAT (open 354 -> 354) but the last two hours fell
-    # hard; a BULLISH-side put spread must see NEGATIVE drift (worse than
-    # driftless), not the flat since-open zero.
-    import pandas as pd_t8
-    _vshape = [354 + 0.5 * i for i in range(24)] + [365.5 - 0.5 * i for i in range(24)]
-    _vfix = _Vol(); _vfix.df_5m = pd_t8.DataFrame({
-        "open": _vshape, "close": _vshape,
-        "high": [c + 0.1 for c in _vshape], "low": [c - 0.1 for c in _vshape]})
-    P.begin_tick(44.0)
-    TC.prepare(chain=_Chain(puts_tcs), current_price=354.0,
-               trend=_Trend("BULLISH", adx=30.0), ms=None, vol_state=_vfix, macro=None,
-               orb_high=351.88, orb_low=349.20, now_et=_noon)
-    c44 = st.conn.execute("SELECT value FROM plan_check WHERE strategy='TrendCreditSpread' "
-                          "AND ts_epoch=44.0 AND check_name='drift_bar'").fetchone()
-    check("T8 (r176) V-shape: net-flat since open but falling for two hours -> drift_bar "
-          "NEGATIVE (~-0.5/bar), read over the horizon window, not since the open",
-          c44 is not None and c44[0] is not None and -0.6 < c44[0] < -0.35, str(c44))
 
     # ── r178 — THE TICK AFTER THE TAKE (the 08-28 15:00 stack) ───────────
     import strategy.gex_pin_butterfly as bfmod

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_condor_stop_suppression.py  v1.0
+tests/check_condor_stop_suppression.py  v1.1
+v1.1  2026-09-04  r238 — S7 RE-DERIVED. A trend credit now
+      HAS a premium stop; the invariant is that it is the TCS one, never the
+      condor ladder's 25%.
 CONDOR STOP SUPPRESSION: the per-leg premium stop applies to a LONE vertical
 only — never the formed condor — and RE-ARMS when the leg is alone again.
 
@@ -153,7 +156,15 @@ def main() -> int:
     tcs = _leg("T-TCS-003", "put", is_trend_credit=1)
     fake.open_trades = [tcs, call_leg]
     d = engine._evaluate_condor_leg(tcs, breach, df_1m=None)
-    check("S7 no premium-stop exit on TCS", not d.should_exit,
+    # 🔴 S7 RE-DERIVED AT r238. It asserted a trend credit has NO premium stop
+    # — true until the operator's 2026-09-04 spec put a 15%-OF-CREDIT stop on
+    # it, deliberately, as the exit doing "the heavy lifting". Asserting the
+    # absence now would certify the trade riding to breach or the flatten,
+    # which is the behaviour that was replaced. The invariant that survives is
+    # the CONDOR ladder's 25% stop still not reaching it: the reason names the
+    # TCS stop, not `condor_stop`.
+    check("S7 a TCS premium stop is the TCS one, never the condor ladder's",
+          (not d.should_exit) or "tcs_stop" in str(d.exit_reason),
           f"reason={d.exit_reason!r}")
     check("S7 no suppression fields on a TCS row",
           not tcs.get("stop_suppressed_ts")

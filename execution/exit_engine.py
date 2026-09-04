@@ -1,5 +1,14 @@
 """
-execution/exit_engine.py  v4.8
+execution/exit_engine.py  v4.9
+v4.9  2026-09-04  r238 — 🔴 THE TREND-CREDIT BRANCH GAINS A
+      15%-OF-CREDIT STOP, and it runs FIRST. Before this the branch checked the
+      boundary breach and returned, so a trend credit had no premium stop at
+      all. Operator, 2026-09-04: the 15% *"is doing the heavy lifting, flatten
+      is last resort, nickel closes on a nice move."* NOT the lone stop's 15%
+      OF RISK — 4x different, and chosen. On a $2.50 credit it is $0.375
+      against a $2.45 win to the nickel: a realized 6.5:1, breakeven near 13%.
+      `stop_survivable` at ENTRY is what stops it being the r155-inverted stop
+      that fires on noise, so the entry gate is load-bearing for this exit.
 v4.8  2026-08-27  r169: the butterfly's TARGET (20% of max profit) and MAX
       HOLD (150 min) are retired — operator: "1545 flatten or 25% loss,
       whichever comes first." Its exits are exactly two now, like the
@@ -558,6 +567,7 @@ from execution.limit_ladder import limit_at_mark, hard_close_order_mode
 # v4.21 (AUDIT F1): the binding v4.20 forgot. `is_trend_participation` was
 # called in _evaluate_condor_leg and never imported — NameError on every condor
 # leg evaluation. `is_credit_vertical` routes the dispatch (F2).
+from config import TCS_STOP_PCT_OF_CREDIT                    # r238
 from strategy.structure import (is_trend_participation, is_credit_vertical,
                                 is_tent)
 
@@ -1660,6 +1670,35 @@ class ExitEngine:
         # CLOSED bars only: an intraday wick through the boundary is a touch,
         # and the operator's own rule is that only a close decides acceptance.
         if is_trend_participation(record):
+            # 🔴 r238 — THE 15%-OF-CREDIT STOP, AND IT RUNS FIRST. Operator,
+            # 2026-09-04: *"stop out at 15% of credit collected... the 15% is
+            # doing the heavy lifting, flatten is last resort, nickel closes on
+            # a nice move in our favor."* Before this the branch checked the
+            # boundary breach and RETURNED, so a trend credit had no premium
+            # stop at all — it rode to breach, nickel or the flatten.
+            # ⚠️ 15% OF CREDIT IS NOT THE LONE STOP'S 15% OF RISK, and the
+            # difference is 4x. It is chosen, not inherited: on a $2.50 credit
+            # this is $0.375 against a $2.45 win to the nickel, a realized
+            # 6.5:1. `stop_survivable` at entry (2x the short quote) is what
+            # stops it being the r155-inverted stop that fires on noise — the
+            # entry gate is load-bearing for this exit.
+            try:
+                _entry_cr = float(record.get("entry_premium") or 0.0)
+            except (TypeError, ValueError):
+                _entry_cr = 0.0
+            if _entry_cr > 0 and current_premium is not None:
+                _stop_at = _entry_cr * (1.0 + TCS_STOP_PCT_OF_CREDIT)
+                if float(current_premium) >= _stop_at:
+                    decision.should_exit = True
+                    decision.exit_reason = (
+                        f"tcs_stop_{TCS_STOP_PCT_OF_CREDIT:.0%}_of_credit: "
+                        f"{float(current_premium):.2f} >= {_stop_at:.2f} "
+                        f"(credit {_entry_cr:.2f})")
+                    return decision
+            # ⚠️ THE BREACH SURVIVES AS A BACKSTOP and is expected to be INERT:
+            # a close through the level moves a near-money spread far more than
+            # 15%, so the stop above fires first. Kept because "expected inert"
+            # and "proven inert" are different, and it costs nothing.
             _b = float(record.get("underlying_stop") or 0.0)
             _side = record.get("option_side", "")
             _last = None

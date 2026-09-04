@@ -1,5 +1,12 @@
 """
-main.py  v4.35
+main.py  v4.36
+v4.36  2026-09-04  r238 — THE TCS DISPATCH NOW PASSES `orb`. Its
+      trigger is the ORB engine's `fifty_accepted` and its level is
+      `target_50pct`, so the strategy needs the engine it was explicitly
+      built without. `generate_signal`'s old docstring said "NO `orb`
+      PARAMETER... there is no morning level worth anchoring to" — true of
+      the BOUNDARY, which the operator has now ruled out as an anchor, and
+      untrue of the 50, which is the whole basis of the rewrite.
 v4.35  2026-09-02  r220 — 🔴 CREDIT VERTICALS POSTED A STATIC LIMIT AND NEVER
        WALKED IT. Every other live entry prices through `ladder_registry` —
        `_place_single_leg` and `_place_butterfly` both call `_walk_price` —
@@ -3726,6 +3733,12 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 current_price=ctx["price"], trend=ctx.get("trend"),
                 orb_high=_orb_hi, orb_low=_orb_lo,
                 session_high=_tcs_hi, session_low=_tcs_lo,
+                # 🔴 r238 — TCS NOW NEEDS THE ORB ENGINE. Its trigger is
+                # `fifty_accepted` and its level is `target_50pct`; the old
+                # docstring said "NO `orb` PARAMETER... there is no morning
+                # level worth anchoring to", which was true of the BOUNDARY
+                # and is not true of the 50.
+                orb=get_orb_engine().data,
                 condor_active=False)), ctx)  # v4.3: gate is _can_open_credit_spread
         if tcs_sig is not None:
             tcs_sig.condor_trigger_source = "trend_orb"
