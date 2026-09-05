@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v4.3 · 2026-09-05 — §0 plus 37 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v4.4 · 2026-09-05 — §0 plus 38 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -488,6 +488,40 @@ leaves; a commit is the change, the backlog is what survives the thread.
   opened) goes in the ledger as an open step. The recurring failure class here is
   output that renders cleanly while meaning something other than it appears —
   a laundered green is worse than a red.
+
+## 18a. 🔴 NO COMMAND PRINTS A SERVICE ENVIRONMENT BLOCK. EVER.
+
+Added 2026-09-05 after I leaked every credential on the fleet to the operator's
+terminal in one line.
+
+I wanted to confirm one variable and wrote
+`systemctl show shadow-observer -p Environment --value`. That flag prints the
+**WHOLE** block. Onto his screen, into the session transcript, and out of
+reach: `TT_REFRESH_TOKEN` (a live JWT with `read trade` scope on the funded
+account), `TT_CLIENT_SECRET`, `GITHUB_TOKEN` with write access to both repos,
+and `TELEGRAM_TOKEN`. Four rotations across fifteen boxes, on a Saturday
+evening, because I did not think about what `--value` returns.
+
+⚠️ **I HAD ALREADY WRITTEN THE SAFE FORM EARLIER IN THE SAME SESSION** and
+reached for the unsafe one anyway. Knowing the rule is not the same as having
+it in the command, which is why it is a section and not a note.
+
+**THE RULE.** Never `-p Environment` without a filter. Never `systemctl cat`,
+`cat` on a unit, `env`, `printenv`, `set`, or `/proc/<pid>/environ` on a box
+that holds credentials. When one variable is the question, ask for exactly
+that one:
+
+    systemctl show <unit> -p Environment --value | tr " " "\n" | grep OT_SHADOW_STAGE
+
+⚠️ **THE FLEET KEEPS ITS ENV INLINE IN THE UNIT** — `optionsbot.service` carries
+`Environment=` lines rather than an `EnvironmentFile`, and the observer unit's
+own comments instruct copying them across. So EVERY unit on every box is a
+credential store, and there is no "safe" unit to run this against.
+
+🔑 **AND THE GENERAL FORM, BECAUSE THE NEXT ONE WILL NOT BE `systemctl`:** before
+a command goes in a code box, ask what it prints on the WIDEST input, not the
+one being looked for. A flag that returns "the value" of a plural field returns
+all of them. That question costs nothing and would have cost him nothing.
 
 ## 19. COMMANDS GO IN A CODE BOX, ON ONE LINE, SEMICOLON-SEPARATED.
 
@@ -1096,6 +1130,21 @@ directions.
 ---
 
 ## CHANGELOG
+
+**v4.4 — 2026-09-05 — r265 — §18a ADDED: NO COMMAND PRINTS A SERVICE
+ENVIRONMENT BLOCK.**
+I ran `systemctl show shadow-observer -p Environment --value` across all fifteen
+boxes to confirm one variable. It printed the whole block — `TT_REFRESH_TOKEN`
+(live, `read trade`, funded account), `TT_CLIENT_SECRET`, `GITHUB_TOKEN` with
+write on both repos, `TELEGRAM_TOKEN` — to his terminal and into the session
+record. Four rotations across fifteen boxes, caused entirely by me.
+⚠️ **I HAD WRITTEN THE SAFE FORM EARLIER IN THE SAME SESSION.** Knowing the rule
+did not put it in the command, so it is a section now: never `-p Environment`
+unfiltered, never `systemctl cat`/`env`/`printenv` on a box holding creds, and
+the `| tr " " "\n" | grep <VAR>` form is spelled out at the site.
+🔑 The general rule it generalises to: **ask what a command prints on the widest
+input, not the one you are looking for.** A flag that returns "the value" of a
+plural field returns all of them.
 
 **v4.3 — 2026-09-05 — otv4 r253 — §15 REWRITTEN: THE OPERATOR LANDS FROM THE
 MENU, AND THE ASSISTANT STOPS PRINTING LAND COMMANDS.**

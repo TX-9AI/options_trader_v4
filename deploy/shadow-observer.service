@@ -1,3 +1,5 @@
+# E (2026-09-05) — r265: OT_SHADOW_STAGE default 1 -> 2. See the block at the
+#     constant; the fleet was armed by drop-in the same day.
 # D (2026-07-31) — TEMPLATED. __INSTALL_DIR__ is substituted at install time by
 # `shadow_devtools.sh` option 11, mirroring how setup_ec2.sh writes
 # optionsbot.service with ${INSTALL_DIR}. The path was hardcoded to
@@ -25,9 +27,26 @@ WorkingDirectory=__INSTALL_DIR__
 # Environment=...                      <- copy remaining lines from optionsbot.service
 #
 # Build-order staging (see shadow/observer.py header):
-#   1 = primitives measure-only (default; verify velocity for a few sessions)
+#   1 = primitives measure-only (verify velocity for a few sessions)
 #   2 = enable scorers + would-fire threshold logging (still zero firing)
-Environment=OT_SHADOW_STAGE=1
+#
+# 🔴 DEFAULT MOVED 1 -> 2 ON 2026-09-05 (r265), AND THE REASON IS THE DEFAULT
+# ITSELF. Stage 1 was meant to de-risk the build order for "a few sessions".
+# It ran on all 15 boxes from July to 2026-09-05 because nothing ever forced
+# the second step — SEVEN WEEKS of primitives with `scores: []`, so every tick
+# recorded what was OBSERVABLE and nothing recorded what the scorers WOULD have
+# said. The counterfactual half of the corpus does not exist for that period
+# and cannot be rebuilt: the tape is gone.
+# ⚠️ SAME SHAPE AS THE RETENTION PURGE LOGGING "WOULD remove" FOR TWO MONTHS
+# (r162). A deliberate first step with no forcing function becomes a permanent
+# state, and both times the evidence that it was stuck was sitting in the data
+# nobody read.
+# ⚠️ THE FLEET WAS ARMED BY DROP-IN on 2026-09-05
+# (/etc/systemd/system/shadow-observer.service.d/stage.conf). This line moves so
+# a re-install cannot silently put it back to 1 — the divergence between a
+# running box and the unit in the repo is exactly how the next seven weeks
+# would be lost the same way.
+Environment=OT_SHADOW_STAGE=2
 
 ExecStart=__INSTALL_DIR__/venv/bin/python -m shadow.observer
 Restart=always
