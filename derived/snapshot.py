@@ -1,5 +1,29 @@
 """
-derived/snapshot.py  v4.1
+derived/snapshot.py  v4.2
+v4.2  2026-09-04  r243 — 🔴 THE PIN AND ITS EM FRACTION JOIN THE
+      PAYLOAD. Operator, 2026-09-04, after the stop-removal and window cases
+      both failed on evidence: *"that leaves the EM variable as our last hope
+      of raising our win rate."* It was UNANSWERABLE — `pin_em_fraction` gates
+      every butterfly fire, `plan_check` carries it on every tick with NO
+      trade_id, and this payload is keyed BY trade_id and carried no pin and no
+      EM. So whether the 7 winners sat lower in the 0.30-1.00 band than the 13
+      losers could not be asked.
+      🔑 SAME SHAPE AS r240: a field computed, used for a DECISION, and never
+      written where the OUTCOME could be joined to it. The bridge existed; it
+      did not carry the field.
+      ⚠️ DERIVED FROM ctx, NOT PLUMBED — `pin_strike` and `atm_iv` are already
+      there and `expected_move()` is the strategy's own function, so this is
+      the fraction THE GATE USED rather than a second definition of it.
+      ⚠️ EMITTED FOR EVERY STRATEGY, not just the butterfly: the runaway and
+      the ORB fire near pins too, and a field present only where someone
+      expected to need it is a field no study can ask a new question of.
+      ⚠️ None WHEN UNMEASURABLE, 0.0 FOR A PIN AT THE MONEY — opposite facts,
+      and this file's contract is that absent stays distinguishable.
+      ⚠️ AND IT CANNOT RAISE: `capture()` runs on every fill, so a study field
+      that throws would cost a trade its snapshot for a number nobody needs
+      live. S4 drives four degenerate contexts.
+      ⚠️ NOTHING ACCRUES RETROACTIVELY — the 20 butterflies already banked stay
+      unmeasurable. This starts the collection.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -83,6 +107,19 @@ class SnapshotEngine(DerivedEngine):
         """
         trend, vol = ctx.get("trend"), ctx.get("vol")
         price = _f(ctx.get("price"))
+        # r243 — the pin and how far it sits, in expected moves. Both None when
+        # unmeasurable; NEVER 0.0, because a pin at the money and a pin that
+        # could not be read are opposite facts and this file's own contract is
+        # that "measured as absent" must stay distinguishable.
+        _pin = _f(getattr(ctx.get("gex"), "pin_strike", None))
+        _pin_frac = None
+        try:
+            from strategy.gex_pin_butterfly import expected_move as _em_fn
+            _em = _em_fn(price, _f(ctx.get("atm_iv"))) if price else None
+            if _pin and _em and _em > 0:
+                _pin_frac = abs(_pin - price) / _em
+        except Exception:                                       # noqa: BLE001
+            _pin_frac = None
 
         payload = {
             "schema": 1,
@@ -127,6 +164,29 @@ class SnapshotEngine(DerivedEngine):
             "gap_pct": _f((ctx.get("gap") or {}).get("gap_pct")
                           if isinstance(ctx.get("gap"), dict)
                           else ctx.get("gap_pct")),
+            # 🔴 r243 — THE PIN AND ITS EM FRACTION. Operator, 2026-09-04,
+            # after the stop-removal and window cases both failed on evidence:
+            # *"then that leaves the EM variable as our last hope of raising
+            # our win rate."* And it was UNANSWERABLE — `pin_em_fraction` is
+            # computed on every butterfly tick and gates every fire, but this
+            # payload carried no pin and no EM, and `plan_check` has the value
+            # with NO trade_id. So there is no way to ask whether the seven
+            # winners sat lower in the 0.30-1.00 band than the thirteen losers,
+            # which is the entire question.
+            # 🔑 SAME SHAPE AS r240: a field computed, used for a DECISION, and
+            # never written where the OUTCOME could be joined to it. This
+            # payload is keyed by trade_id, so it is the bridge — it just did
+            # not carry the field.
+            # ⚠️ DERIVED HERE, NOT PLUMBED. `pin_strike` and `atm_iv` are
+            # already in ctx and `expected_move()` is the strategy's own
+            # function, so this reproduces the fraction the gate actually used
+            # rather than inventing a second definition of it.
+            # ⚠️ AND IT IS EMITTED FOR EVERY STRATEGY, not just the butterfly —
+            # the runaway and the ORB fire near pins too, and a field present
+            # only where someone expected to need it is a field no study can
+            # ask a new question of.
+            "pin_strike": _pin,
+            "pin_em_fraction": _pin_frac,
             "gap_class": ((ctx.get("gap") or {}).get("gap_class")
                           if isinstance(ctx.get("gap"), dict) else None),
         }

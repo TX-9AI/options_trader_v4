@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-231 Python modules across 13 local packages.
+232 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -279,8 +279,8 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `database/trade_logger.py`, `main.py`, `status.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `tests/check_butterfly_legs.py`, `tests/check_derived_layer.py`
 
 ### `derived/snapshot.py`
-- **calls:** `derived/base.py`
-- **called by:** `derived/registry.py`
+- **calls:** `derived/base.py`, `strategy/gex_pin_butterfly.py`
+- **called by:** `derived/registry.py`, `tests/check_snapshot_pin.py`
 
 ### `derived/surface.py`
 - **calls:** `analysis/second_order.py`, `data/candle_feed.py`, `derived/base.py`
@@ -420,7 +420,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `strategy/gex_pin_butterfly.py`
 - **calls:** `analysis/gate_report.py`, `config.py`, `strategy/base_strategy.py`, `strategy/criteria.py`, `strategy/plan.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_butterfly_wing_grid.py`, `tests/check_dispatch.py`, `tests/check_entry_windows.py`, `tests/check_plan_prepares.py`, `tests/stress_entry_path.py`
+- **called by:** `derived/snapshot.py`, `main.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_butterfly_wing_grid.py`, `tests/check_dispatch.py`, `tests/check_entry_windows.py`, `tests/check_plan_prepares.py`, `tests/check_snapshot_pin.py`, `tests/stress_entry_path.py`
 
 ### `strategy/iron_condor_strategy.py`
 - **calls:** `analysis/gate_report.py`, `analysis/market_state.py`, `analysis/session_map.py`, `analysis/signal_journal.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `derived/registry.py`, `strategy/__init__.py`, `strategy/base_strategy.py`, `strategy/condor_roll.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`, `strategy/plan.py`
@@ -768,6 +768,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_sizing_parity.py`
 - **calls:** `risk/risk_manager.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_snapshot_pin.py`
+- **calls:** `derived/snapshot.py`, `strategy/gex_pin_butterfly.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_standing_offer.py`

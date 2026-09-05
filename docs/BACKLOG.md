@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.60
+# BACKLOG.md — v1.61
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,60 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.61 — 2026-09-04 — r243 — 🔴 THE PIN AND ITS EM FRACTION REACH THE
+SNAPSHOT — AND THREE BUTTERFLY LEVERS DIED ON EVIDENCE FIRST.**
+
+## WHAT THE EVENING ACTUALLY FOUND
+
+🔴 **EVERY butterfly loss is a premium stop.** 13 losses, all `stop_24/25/26%`,
+**−$2,393.50**, matching the 13 losers to the dollar. It has never lost to the
+market — only to its own stop, at a 16–26 minute hold, while its 7 winners run
+to `hard_close` at 289 minutes for **+$2,714**.
+🔴 **BUT THE MFE STUDY REFUTED REMOVING THE STOP.** 10 of 13 traded above entry
+before being cut — and the column beside it says why that is not the finding it
+looks like: **winners peak at bar 141–305; the stopped trades peak at a median
+of bar 5.5**, ten of twelve within 15 bars at 1.03–1.49× and then fade. That is
+a pop on entry noise, not a trade working toward the pin. **Only 2 of 13 share
+the winners' late-peak signature, against a break-even of 9 of 13** (average win
++0.72× the debit; a stop costs 25% of it, no stop costs 100%). Operator, after
+seeing it: *"I'm already convinced not to change the window or remove the stop."*
+⚠️ **MY OWN SCREEN'S VERDICT LINE WAS TOO CRUDE** — it printed *"the stop is
+taking trades that were working"* off the MFE ratio alone while ignoring
+`mfe_bars`, which is the column that decides it.
+⚠️ **AND THE 09:45 FIRES WERE THE DEFECT, NOT THE DESIGN.** I read r196's
+comment describing the fault as current behaviour and told the operator his own
+correction had not happened. `EARLIEST_ET` is 12:00, FOUNDATIONAL, passed as its
+own relaxed value so it cannot widen. **Second time in one hour I read a
+historical entry as a live state** (the first was BFLY.2's blocking, closed at
+r197).
+
+## THE FIX THAT SURVIVED
+
+🔑 **`pin_strike` and `pin_em_fraction` now ride the fire snapshot.** The EM band
+is 0.30–1.00 and hard-capped, and the live question — *do the winners sit lower
+in the band?* — was **unanswerable**: `plan_check` carries the value on every
+tick with **no `trade_id`**, and `fire_snapshot` is keyed **by `trade_id`** and
+carried no pin and no EM.
+🔑 **SAME SHAPE AS r240** — computed, used for a decision, never written where
+the outcome could be joined to it. The bridge existed; it did not carry the
+field.
+⚠️ **DERIVED FROM ctx, NOT PLUMBED**, using the strategy's own
+`expected_move()` — so it is the fraction **the gate used**, not a second
+definition of it. Emitted for **every** strategy, because a field present only
+where someone expected to need it is a field no study can ask a new question of.
+⚠️ `None` when unmeasurable, `0.0` for a pin at the money — opposite facts. And
+it cannot raise: `capture()` runs on every fill, so S4 drives four degenerate
+contexts.
+⚠️ **NOTHING ACCRUES RETROACTIVELY.** The 20 butterflies already banked stay
+unmeasurable.
+`tests/check_snapshot_pin.py` v1.0, 7 checks, born red. **86/86 green.**
+
+| id | question | state |
+|---|---|---|
+| **BFLY.11** | **Do the winners sit lower in the EM band?** Answerable once ~3 weeks of snapshots carry `pin_em_fraction`. If they do, the lever is **lowering** `EM_MAX_FRAC`, not raising it — a pin a full EM away is the loosest end of the band and the least likely to convert. | 🔲 OPEN |
+| **BFLY.12** | `screen_bfly_stop` reported **419 trades** where there are 20 — ~399 rows with `exit_premium 0.00`, `pnl 0`, `reason None` are unclosed/non-terminal. `RP.COLS` carries `status` and the screen never filtered on it. The quantiles are computed off real rows so the finding stands, but the counts are junk. | 🔲 OPEN |
+| **BFLY.13** | The verdict line should read `mfe_bars`, not just the MFE ratio. As written it would call a 1-bar pop "a trade that was working". | 🔲 OPEN |
 
 **v1.60 — 2026-09-04 — r242 — 📌 DOCS ONLY. DISP.1: THE REGIME QUESTION IS
 ASKED ONCE FOR DEBITS AND N TIMES FOR CREDITS.** Operator, 2026-09-04: *"why
