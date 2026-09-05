@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.78
+# BACKLOG.md — v1.79
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -107,6 +107,7 @@ feed plumbing and are not warehouse candidates.
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
 | **RPT.14** | ⬜ **`tests/test_fit_readiness_s3.py` HAS BEEN DEAD, NOT PASSING.** | ⬜ | It calls `fr._rows_warehouse([DAY])` while that function has taken `(dates, cache)` since the streaming rewrite, so **every run ends in a TypeError before a single assertion executes**. ⚠️ **VERIFIED AT HEAD, NOT INFERRED** — it raises identically on an unmodified checkout. Repairing the call revealed a SECOND staleness: `collect()`'s return shape changed too (`fired`/`declined` are ints, not lists), so the file is two API generations behind. The half-repair was **reverted rather than shipped** — a test that runs and asserts the wrong shape is worse than one that visibly fails. 🔑 **A file whose presence reads as coverage while it cannot run is the exact failure §0.6 names.** Needs re-deriving against the current `collect()`, which is its own job. |
+| **TZ.1** | 🔴 **ONE ET/UTC BOUNDARY FOR EVERY CONTROL-SIDE SCRIPT.** | dtp r287 | ◐ **BUILT + PUSHED.** Operator, 2026-09-05: *"Store everything as UTC, but when a report prompt asks me for a date, convert my choice assuming I mean ET. It's incredibly annoying when I run a report for 'today' at 6pm and it says nothing to report, because UTC has already started the next day."* 📊 **SURVEYED BEFORE WRITING A LINE: NINE naive sites against FIVE correct ones, and the five each carried their own private copy** — so this was never a missing translator, it was the absence of a boundary. The naive nine: `eod_analysis`, `eod_conductor_v2`, `fit_readiness`, `pnl_s3`, `excursion_report`, `orchestrator`, `tools/report_parity`, `trade_report`, and **`market_calendar` — the module that decides what a trading day IS, asking a UTC box**. ⚠️ **THE ROLL IS 20:00 ET IN SUMMER, 19:00 IN WINTER**, and past it a report finds nothing and SAYS SO rather than erroring — a defect in the clock reading as a fact about the market. `ettime.py` now owns `now_et`, `today_et`, `operator_date`, `days_back`, `stamp_et`, `et_day`, `et_bounds`; the five copies delegate. 🔑 **T4 IS THE DURABLE HALF** — it sweeps the repo for naive clock calls and fails on a NEW one, because fixing nine sites without a guard buys a year at most (C.30 turned into something that runs). |
 | **DOC.15** | 🔴 **r247 AND r248 WERE SPENT NUMBERS WITH NO ROWS, AND THE LEDGER COULD NOT SAY WHY.** | r259 | ◐ **PUSHED.** Both were otv4 halves cut against a BACKLOG version that r278 superseded before they landed; each was re-cut as `_r2` and landed as r250/r251. `check_ledger_parity` reported them only inside *"15 unused revision number(s)"* — true, and useless to a reader who cannot tell a MISSING revision from a number that was never used without going through git. **Rows now exist IN SEQUENCE between r246 and r249**, marked cut-never-landed with what superseded them. ⚠️ **AND THE IN-SEQUENCE PLACEMENT IS WHY THIS SHIPPED AS A FILE RATHER THAN AN APPEND** — the operator's call, and correct: an append can only reach the bottom of the table, where a row for r247 would sit after r258 and break the newest-is-last property the whole ordering contract rests on. ⚠️ §35's rule that GENESIS never ships still holds for the ordinary case; this is the r194 exception — a REPAIR to existing rows — and it is safe only because the copy was taken from HEAD immediately before packaging and nothing landed in between. |
 | **RPT.11** | 🔴 **SIX MENU CONFIRMS ACCEPTED LOWERCASE `y` AND NOTHING ELSE.** | dtp r283 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the operator answered the LIVE backfill prompt with **`Y`** and the run silently did not happen — no error, no message, just the next prompt. **A confirm that discards a plausible yes is worse than one that refuses**, because *declined* and *ran and did nothing* look identical. All six sites route through `_yes` in `devtools.sh`; the DESTRUCTIVE ones now say what they declined while a flag toggle stays quiet, which is why the helper is a pure predicate rather than one that prints. ⚠️ **C3 pins that NO lowercase-only comparison survives anywhere in the menu** — fixing the one site that bit and leaving five is how this returns (C.30: when a rule changes, sweep its readers). ⚠️ And it must still refuse `n`, `sure` and empty: these prompts wake boxes, stop trading and delete rows, so loosening it to *anything non-empty* would be worse than the bug. |
 | **RPT.12** | 🔴 **THE OHLC BACKFILL'S STREAM CAP WAS 29-BOX ARITHMETIC, AND IT HARD-STOPS.** | dtp r283 | ◐ **BUILT + PUSHED.** A **one-box** backfill against a 15-box fleet was refused outright: `10 stream cap` with 15 running, and the check is `return 2`, not a warning — despite the file's own header describing a warn-never-stop pattern for a different check nearby. 🔑 **r53 ALREADY RETIRED THE FLEET-WIDE COPY OF THIS GUARD** on exactly this reasoning — *"it existed so a maintenance wake could not put 29 boxes on the wire at once; the fleet is 15 and a normal session already carried ~20 without strain"* — and this per-report copy was never swept after the 2026-08-20 pare. Same shape as the README fleet count that read 29 for nine days. Default moves to **20, which is r53's own recorded figure rather than one I chose**, `OT_STREAM_CAP`-overridable, and marked a PRIOR: if the DXFeed ceiling is ever measured rather than inferred, it moves again. |
@@ -336,6 +337,52 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.79 — 2026-09-05 — dtp r287 — TZ.1: ONE ET/UTC BOUNDARY, AND A SWEEP THAT
+KEEPS IT.**
+
+Operator: *"Store everything as UTC, but when a report prompt asks me for a
+date, convert my choice assuming I mean ET. It's incredibly annoying when I run
+a report for 'today' at 6pm and it says nothing to report, because UTC has
+already started the next day."*
+
+📊 **SURVEYED FIRST, AND THE SURVEY CHANGED THE JOB.** NINE sites handed out a
+naive "today"; FIVE more had it right and each carried its own private
+three-line copy. **So there was never one missing translator — there were five,
+and nine places that never got one**, which is how the count grows every time
+somebody adds a report. The worst of the nine was **`market_calendar`, the
+module that decides what a trading day IS**, asking a UTC box: after the roll it
+answered Friday's question about Saturday, returned False, and was
+indistinguishable from a real holiday.
+
+⚠️ **THE ROLL IS 20:00 ET IN SUMMER, 19:00 IN WINTER** — the instant UTC
+midnight lands. Past it every naive default asks for TOMORROW, finds nothing,
+and **reports nothing rather than erroring**: a defect in the clock reading as a
+finding about the market, which is the worst shape of bug this project has.
+
+🔑 **`ettime.py` IS THE BOUNDARY AND IMPORTS NOTHING FROM THIS REPO.** A first
+cut had it re-export `et_day`/`et_bounds` from `warehouse_reader` and closed a
+cycle immediately — `warehouse_reader` imports `market_calendar`, which now asks
+this module what today is. **The boundary cannot depend on one of its own
+consumers**, so the two functions moved here and `warehouse_reader` re-exports
+them for its existing callers. The cycle was the architecture telling me which
+way the dependency goes.
+
+⚠️ **`operator_date()` RAISES ON A TYPO** rather than defaulting. A prompt that
+silently reinterprets an unparseable answer produces a clean report about the
+wrong day, which is the same failure one level up. And `days_back()` builds
+ranges in ET DAYS rather than by subtracting 86400 — that is not a day across a
+DST boundary, and T3 spans the November change to prove it.
+
+🔴 **T4 IS THE DURABLE HALF OF THE DELIVERY.** It walks the whole repo for
+`datetime.now()`, `date.today()` and `utcnow()` outside the boundary and fails
+on a new one, with `ettime` and `auto_label` exempt for stated reasons. Fixing
+nine sites without that guard buys a year at most. T4b plants a fault to prove
+the sweep can go red, and T5 asserts the module has real callers — a boundary
+nobody imports is r230's defect wearing a new hat.
+
+`tests/test_ettime.py` v1.0, **13 checks**, born red. Fourteen existing control
+suites re-run green after the move.
 
 **v1.78 — 2026-09-05 — dtp r286 — S3.11 CLOSED, AND THE ROW'S OWN DIAGNOSIS WAS
 WRONG.**
