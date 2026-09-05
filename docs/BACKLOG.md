@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.86
+# BACKLOG.md — v1.87
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -104,6 +104,7 @@ feed plumbing and are not warehouse candidates.
 | **S3.17** | 🔴 **TWO PURGES FOUGHT OVER ONE DATABASE — AND THIS FILE HAD NO LOCK WHILE `s3_push` HAS HAD ONE SINCE WH.6.** | otv4 r256 / dtp r282 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the conductor's purge phase and a hand-run `--apply` overlapped, and four boxes raised `sqlite3.OperationalError: database is locked` at `DELETE FROM candles`. **THREE DEFECTS, ALL MINE.** (1) No mutual exclusion — `s3_push.acquire_lock()` guards every invocation path for exactly this reason and `retention_purge`, which DELETES, had nothing; same idiom now, own lock file, `OT_PURGE_LOCK_WAIT` 300s, and it WAITS rather than declining because a purge that silently does not run is the r162 failure again. (2) `_open()` connected at SQLite's **5-second default**, shorter than one 2 GB delete, so a brief overlap raised instead of waiting — `busy_timeout` is now explicit at 120s. (3) **The COUNT was wrapped and the DELETE was not**, so one locked table escaped `purge()`, killed `main()`, and **the reclaim never executed** — which is why AMD, AVGO, GOOGL and NVDA kept their WALs while the eleven that got through returned 8.7 GB. Each DELETE is guarded per table, the failures are named, and a partial purge exits 4 so the conductor can say PARTIAL per box instead of letting it read as done. |
 | **S3.18** | 🔴 **`head -3` ATE THE CAUSE OF EVERY PURGE FAILURE, AND THE RECLAIM VERDICT EVERY NIGHT.** | dtp r282 | ◐ **BUILT + PUSHED.** The phase piped the remote purge through `head -3`, sized for the old one-line summary. All the operator saw was `Traceback (most recent call last): \| File ".../retention_purge.py", line 598, in <mo` — the OUTERMOST frame, with the exception type and the raising line cut off. **Three round trips to learn it was `database is locked`.** ⚠️ **A traceback puts its cause LAST**, and the reclaim line prints AFTER the deletion counts, so `head` also guaranteed the checkpoint verdict was invisible on every box on every run — the one line that says whether a 1.6 GB WAL came back. Now redirected to a file on the box, `$?` captured FIRST, then `tail -12`: piping into `tail` would have made `rc=$?` report tail's status, which is the swallowed-exit-code trap this project already records for pytest. |
 | **S3.19** | ⬜ **AN SSH TIMEOUT KILLS THE CLIENT, NOT THE REMOTE PROCESS.** | ⬜ | `ssh_util.ssh_run` gives subprocess `SSH_CONNECT_TIMEOUT + 10` = 22s and returns `rc=255 ssh timeout` — but the remote `python3` KEEPS RUNNING with nobody reading its output. That is what created S3.17's collision: two option-14 fan-outs timed out on QQQ, their abandoned purges held `feed_store` open, and the conductor's checkpoint arrived to a busy database. S3.17's lock makes it harmless; it does not make it visible. 🔑 **This is the concrete argument for SSM Run Command** over SSH for the fan-out: instance IDs rather than IPs (WH.7's own conclusion, applied to the command path instead of only the stop path), async with no 22s ceiling, output to S3 rather than through a pipe, and a stopped instance returning a named failure instead of hanging. Needs a probe first — does the agent answer on all 15 — and two IAM changes. |
+| **LAND.3** | 🔴 **A ROLLED-BACK HALF WAS TOLD ITS FILES WERE "IN THE TREE, UNCOMMITTED" — TRUE, AND MISLEADING.** | dtp r293 | ◐ **BUILT + PUSHED.** r279's rollback uses `reset --soft` deliberately, so an unrelated file the operator had mid-edit survives (§35). The consequence is that the payload stays **STAGED IN THE INDEX** — and the habitual cleanup `git checkout -- .` copies the INDEX into the working tree, **restoring exactly what it was meant to discard**. 📊 Observed on a real retry 2026-09-05: the tree read clean, the files were still there, and the next land appended a **SECOND GENESIS row for the same revision**. `check_land_discipline`'s duplicate-row check caught it, which is the only reason it was not silent. The message now says STAGED and prints a command that **unstages first**. ⚠️ **THE MECHANISM IS UNCHANGED** — the defect was in the sentence and in the absence of a command to act on. ⚠️ **AND TWO WRONG DRAFTS OF THE CHECK ARE RECORDED WITH IT:** the first failed at the CONTENT GATE, where nothing is committed or staged, so the broken command worked and the case passed at HEAD; the second read `die()`'s line, which belongs to the half that FAILED and never had anything staged either. **Only the rolled-back half reaches the defect**, and a case that does not take that path proves nothing. |
 | **SEC.1** | 🔴🔴 **I LEAKED EVERY FLEET CREDENTIAL TO THE OPERATOR'S TERMINAL IN ONE COMMAND.** | r265 | ◐ **PUSHED.** To confirm ONE variable I ran `systemctl show shadow-observer -p Environment --value` across all 15 boxes. **That flag prints the WHOLE block.** Exposed: `TT_REFRESH_TOKEN` (live JWT, `read trade` scope, funded account), `TT_CLIENT_SECRET`, `GITHUB_TOKEN` with write on both repos, `TELEGRAM_TOKEN`. **Four rotations across fifteen boxes, on a Saturday evening, caused entirely by me.** ⚠️ **I HAD WRITTEN THE SAFE FORM EARLIER IN THE SAME SESSION** and reached for the unsafe one anyway — which is the argument for a checker rather than a note. `WORKING_AGREEMENT` **§18a** + `tests/check_no_env_dump.py`. 🔑 **THE CHECKER'S OWN FALSE POSITIVES FIXED THE RULE:** three install scripts do `EL=$(systemctl show … -p Environment --value)` and then filter with `grep "^$1="` — that CAPTURES and emits nothing, and is correct. The offence is **EMITTING** the block, not reading it; a rule banning the read would have flagged three working files and been switched off. ⚠️ Generalised at §18a: **ask what a command prints on the WIDEST input, not the one you are looking for** — a flag returning "the value" of a plural field returns all of them. |
 | **SHD.1** | ⬜ **THE SHADOW ↔ PLAN DIVERGENCE JOIN — WHAT WE DID vs WHAT WE SHOULD HAVE DONE.** | ⬜ | Operator's actual instrument, and it does not exist. 🔑 **BOTH SIDES ARE WAREHOUSE-READABLE:** `push_jsonl_tree` does `json.loads` per line and wraps the parsed dict as `record`, so `cache.load("shadow", …, datatype="shadow")` works through r286's path. 🔴 **BUT THEY SHARE NEITHER CLOCK NOR TYPE:** `plan_tick` keys on `ts_epoch REAL` (UTC seconds); shadow's `ts` is `prim.ts_et`, an ET **string** — and two independent processes on their own loops never land on the same float, so an equality join is impossible by construction. **PROPOSED RULE: nearest PRECEDING shadow tick to each plan tick, with the gap reported** — not minute-bucketing, because the question is what was observable AT THE MOMENT the plan decided and averaging a minute destroys the lead-time signal, which is the entire point. Left side is every plan_tick **including the declines**. Blocked until Monday's tape carries stage 2. |
 | **CND.1** | ✅ **THE FORMED CONDOR HAS NO FURTHER LOSS BOUNDARY, AND THAT IS A DECISION.** | r269 | ✅ **SETTLED — DO NOT RE-OPEN.** Operator, 2026-09-05: *"The current architecture covers all condor management. It's a settled issue."* The **15:45 close, the nickel close and the roll ARE the management**; the 25% floor stays a LONE-vertical rule with suppress-on-pair and re-arm-when-alone. 🔑 **THE REASONING IS THE REPO'S OWN:** `risk_manager.compute_condor_leg_size` full-sizes each leg because the two verticals cannot both reach max loss at expiry — price can only be at one extreme — so a stop on the tested side converts a structurally hedged position into a directional one at the worst possible moment. Precedent: the trend credit spread carries `stop_premium=0.0` deliberately. ⚠️ **RECORDED AT THE SITE**, in `exit_engine` v4.10, because `HANDOFF_CONDOR_STOP_20260824.md` held the ONLY statement of the open question and was deleted at r269 — the answer had to outlive the question. ⚠️ Suppression and re-arm remain edge-triggered into the log: *a stop that silently stops existing* is the failure class this repo spent a week removing. |
@@ -343,6 +344,39 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.87 — 2026-09-05 — dtp r293 — LAND.3: THE ROLLBACK'S RECOVERY RESTORED WHAT
+IT CLAIMED TO DISCARD.**
+
+r279's all-or-none rollback uses `reset --soft` on purpose, so an unrelated file
+the operator had mid-edit survives. The consequence went unstated: **the payload
+stays staged in the index.** The message said *"the files are still in the tree,
+uncommitted"* — true, and the natural reading is that a `git checkout -- .`
+clears them. It does not. That command copies the INDEX into the working tree,
+so it **restores precisely the changes it was run to remove.**
+
+📊 **OBSERVED ON A REAL RETRY, NOT REASONED.** The tree read clean, the files
+were still present, and the next land appended a **second GENESIS row for the
+same revision**. `check_land_discipline`'s duplicate-row check refused it —
+which is the only reason this surfaced at all rather than landing a ledger with
+two authoritative rows for r270.
+
+The message now names the state (`the payload is STAGED, not discarded`) and
+prints a command that unstages before it restores. ⚠️ **The rollback mechanism
+is untouched and stays `--soft`** — §35's reason still holds. The defect was in
+what the operator was told, and in there being nothing to act on.
+
+⚠️ **TWO WRONG DRAFTS OF THE CHECK ARE WORTH RECORDING**, because both passed
+against the broken code. The first drove a CONTENT-GATE refusal, where nothing
+has been committed and nothing is staged — so the old command worked and the
+case went green at HEAD. The second read `die()`'s recovery line, which belongs
+to the half that FAILED and likewise never staged anything. **Only the
+rolled-back half reaches the defect.** A case that does not take the exact
+failing path is a case that certifies the bug.
+
+`tests/check_land_sh.py` v1.5, born red 2. R1d runs the printed command and
+asserts the repo is clean afterwards — grepping the message for `reset` would
+have passed against any sentence containing the word.
 
 **v1.86 — 2026-09-05 — otv4 r270 / dtp r292 — ASK.1: THE CHARACTER ENGINE'S ONLY
 OUTPUT REACHES THE WAREHOUSE.**
