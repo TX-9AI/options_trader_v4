@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.69
+# BACKLOG.md — v1.70
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -98,7 +98,9 @@ feed plumbing and are not warehouse candidates.
 | **S3.7** | Menu 54 → retire, or repoint to `warehouse_reader.build()`. | ⬜ | Duplicates what `eod_analysis._consolidate()` already does from S3. |
 | **S3.9** | 🔴 **THE CDC COLLAPSE KEYED ON A ROWID, WHICH IS NOT AN IDENTITY.** | dtp r276 | ◐ **BUILT + PUSHED.** `_rid` is the source table's sqlite `rowid` (`s3_push:945`). r266 scoped it to the `dt=` partition after (QQQ, 1) on 09-01 collided with (QQQ, 1) on 09-04 — a real UNDER-count, fixed. ⚠️ **AND THE SAME EDIT OPENED AN OVER-COUNT:** `push_derived` files every CHANGED row under the PUSH day, so one CDC row touched on two days lands in two partitions and a partition-scoped key keeps BOTH. Under-count, then over-count, on the same data. 🔑 **EVERY ONE OF THESE TABLES EXCEPT `character_ledger` DECLARES A PRIMARY KEY THE BOX ALREADY ENFORCES** — the identity was in the schema the whole time, and `screen_plan_gates` (dtp r271) was already grouping its per-tick panel on `plan_check`'s own PK. `DERIVED_NATURAL_KEY` is diffed against otv4's real `CREATE TABLE` statements by N4b, so a PK change here goes red rather than collapsing on a key the box no longer enforces. **The row count becomes self-verifying:** distinct primary keys per ET day IS the population, which is what made *"is 2.38M plan_check rows complete"* unanswerable. ⚠️ `character_ledger`'s key is `id INTEGER PRIMARY KEY AUTOINCREMENT` — in sqlite that IS the rowid — so it keeps r266's partition-scoped fallback, and any row missing a key component falls back too and is **counted in the banner**. |
 | **S3.11** | ⬜ **THERE ARE STILL THREE COLLAPSE RULES ON ONE DATASET, AND C.17 SAYS THERE IS EXACTLY ONE.** | ⬜ | Measured at HEAD: `warehouse_reader.load_derived` collapses on the natural key (S3.9); `fit_readiness` runs a SECOND collapse in SQL, `GROUP BY _rid, <ts>`; and `tests/screen_plan_gates.py:101` runs **no collapse at all** — its printed row count is raw object rows, which is where the 2.38M figure came from. 🔴 **THE THREE DISAGREE BY CONSTRUCTION**, which is the S3.6 shape one level over. Not folded into S3.9 deliberately — neither `fit_readiness` nor the screen calls `load_derived`, so nothing here was required to make S3.9 work (WA §4). Ruling wanted: point all three at `load_derived`, or leave the screen raw and label it so. |
-| **S3.12** | ⬜ **THE STREAM REPORT IS NOT IN THE NIGHTLY CHAIN YET, DELIBERATELY.** | ⬜ | `eod_analysis` already runs `warehouse_coverage.py --date <date>` as a phase, so wiring `--streams` in is one argument. **It is not wired, and the reason is the sequencing rather than the work:** the `CONDITIONAL` and `DEAD` classifications in `STREAM_POLICY` are MY declarations read out of `s3_push`'s stage list, and none has been checked against what the bucket actually holds. A phase that goes red every night on a stream nobody expects is a permanent red, and a permanent red is the one thing that stops a board being read (CV.1). ⚠️ **AND MONDAY IS THE FIRST TAPE FOR SIX SWEEP REVISIONS** — r242's own reasoning applies: a zero result has to be attributable. **Run it by hand once, read the verdicts against the real bucket, correct the policy table, then wire the phase.** |
+| **S3.12** | ⬜ **THE STREAM REPORT IS NOT IN THE NIGHTLY CHAIN YET, DELIBERATELY.** | ⬜ | `eod_analysis` already runs `warehouse_coverage.py --date <date>` as a phase, so wiring `--streams` in is one argument. **It is not wired, and the reason is the sequencing rather than the work:** the `CONDITIONAL` and `DEAD` classifications in `STREAM_POLICY` are MY declarations read out of `s3_push`'s stage list, and none has been checked against what the bucket actually holds. A phase that goes red every night on a stream nobody expects is a permanent red, and a permanent red is the one thing that stops a board being read (CV.1). ⚠️ **AND MONDAY IS THE FIRST TAPE FOR SIX SWEEP REVISIONS** — r242's own reasoning applies: a zero result has to be attributable. **PRECONDITION MET 2026-09-05:** run by hand over 09-01..09-04, nine flags raised, **seven of them the policy table** — corrected in dtp r280. The remaining two are the QQQ 09-03 gap, explained (disk-full) and bounded. The phase is now wirable on the next pass. |
+| **S3.13** | ⬜ **THE 2026-08-25 PURGE DELETED 492,945 `raw/shadow` OBJECTS AS A DEAD STREAM. IT WAS NOT DEAD.** | ⬜ | The purge was justified by the same never-installed finding ASK.2 now records as false. `raw/` is the durable copy and by design never deletes; this deletion went through the console grant. **What is actually lost is not yet established and should be measured before it is described** — the boxes do not purge `shadow` (it is in neither `ARTIFACT_DAYS` nor `DERIVED_ARTIFACT_DAYS`), and QQQ holds 32 date dirs, so some or all of it may still be box-side and re-pushable. Two questions, in order: **how many of the deleted dates still exist on a box**, and **is the answer to re-push them or to accept the loss** given the stream's stated purpose was the Layer-1 freeze evidence. ⚠️ It is also a standing lesson: a purge argued from a finding rather than from the bucket deleted the bucket's own evidence that the finding was wrong. |
+| **S3.14** | ⬜ **`shadow` IS UNBOUNDED ON THE BOXES, AND QQQ FILLED ITS DISK.** | ⬜ | Nothing purges it: `shadow` appears in neither `ARTIFACT_DAYS` nor `DERIVED_ARTIFACT_DAYS`, and `NEVER_PURGE` does not name it either — it is untouched by absence rather than by policy. QQQ holds **32 date directories** of high-frequency jsonl and **ran out of space on 2026-09-03**, which is what cost that day's `eod` and `ohlc`. ⚠️ **THE LINK IS PLAUSIBLE AND NOT MEASURED** — no size was taken, and r162 already established `feed_store.db` as the disk story on the 08-27 outage. This is filed as a question, not a cause: **measure `du -sh` on the shadow tree across the fleet before anything is concluded or deleted.** Its disposition depends on ASK.2. |
 | **S3.10** | ⬜ **NOTHING VERIFIES S3 COVERAGE PER STREAM PER DAY.** | dtp r277 | ◐ **BUILT + PUSHED.** `warehouse_coverage.py` v1.2 `--streams`, ADDITIVE — the v1.1 VIX report, its verdicts and its exit code are untouched, and `tests/test_warehouse_coverage.py` is byte-identically green before and after, which is the additive claim proven rather than asserted. Every stream carries its GRAIN (`record` / `batch` / `pusher`) and its EXPECTATION (`EVERY` / `OWNER` / `CONDITIONAL` / `DEAD`). 🔑 **A SILENT BOX IS ONE DIAGNOSIS, NOT TWENTY** — a box that pushed nothing is `BOX_SILENT` and its absences are attributed there rather than counted against every stream, which is v1.0's `PUSH_DEFECT`/`OWNER_DOWN` split generalised; without it the first fleet-wide outage makes the report unreadable. The panel is imported from `selector.PANEL` and an empty one REFUSES rather than grading against a guess. Presence is ONE delimited LIST per stream-day; object counts page and are opt-in behind `--counts`, pinned by counting paginator calls (dtp r253). | 🔑 **A TOOL ALREADY EXISTS TO EXTEND** — `warehouse_coverage.py` v1.1 is LIST-only, trading-day aware, and already carries `NOT_A_SESSION` and `PARTIAL_BY_DESIGN`. Building a second one is the WA §35 rot. ⚠️ **THE EXTENSION IS NOT ONE LINE:** `push_derived` writes ONE OBJECT PER TABLE PER RUN and `push_series` batches at 50k, so an object count on `raw/derived_*` counts PUSH RUNS, while `push_file` is one object per line and it does count rows. And the derived `dt=` is the PUSH day (C.9), so a partition check there answers *"did each box's pusher run"* and cannot answer *"are the rows complete."* **Delivered next as dtp r277.** |
 
 ### Sensor twins — control-side, read S3, boxes untouched
@@ -141,7 +143,7 @@ against each box. That is right **during** a session and wrong after it.
 | ID | question | status |
 |---|---|---|
 | **ASK.1** | `character_axis_sample` — include in S3.1's push, or leave it on the box? | ⬜ |
-| **ASK.2** | `shadow/` still ships to the boxes and `s3_push` still runs a shadow stage, but shadow was never installed on the v4 fleet. Cut both, or leave? | ⬜ |
+| **ASK.2** | 🔴 **PREMISE FALSIFIED — `shadow` IS LIVE.** The question was *"shadow/ still ships to the boxes and `s3_push` still runs a shadow stage, but shadow was never installed on the v4 fleet — cut both, or leave?"* **The never-installed finding is wrong.** Measured on QQQ 2026-09-05: **32 date directories, newest 2026-09-04, and a shadow systemd unit present.** The bucket agrees from the other side — 15 boxes push it every session, and `WAREHOUSE_MAP.md` (generated 09-01) shows `raw/shadow` at 160,978 objects across 7 days. So the ruling is no longer *cut a dead stage or leave it*; it is **keep collecting a live stream, or stop it deliberately** — a different question with a different cost. | ⬜ |
 | **ASK.3** | Disposition of `AUDIT.md`, `AUDIT_HANDOFF.md`, `AUDIT_FINDINGS.md` and the four `HANDOFF_*` docs — spent thread contracts. Keep, archive, or delete? | ⬜ |
 | **RUN.1** | 🔴 **IS ONE RUNAWAY PER BREAK MEANT TO INCLUDE WINNERS?** r174's ruling reads *"one runaway per break, even on relaxed"*, but `finish_break` is called ONLY from the losing-exit hook — so a WINNING exit leaves the break live and the next tick re-enters. QQQ 2026-09-03 shows both halves: 09:52 trail **+$96**, then 09:53 re-entry stopping **−$204**; 10:16 trail, then 10:21 re-entry. ⚠️ **AND THE UNDERLYING CONDITION IS A STATE, NOT AN EVENT** — `_closed_beyond_and_held` is `prev_close > tp50 and price_now > tp50`, which stays true for as long as price remains beyond the 50%, so the trigger re-qualifies on every tick. Operator, 2026-09-03: *"the condition to enter is so loose that it will reenter a position as soon as the previous one closes, as long as it closes beyond the 50% boundary."* Options: (a) finish the break on ANY resolved runaway, win or lose; (b) require a fresh event — a pullback and a new close-and-hold — rather than the standing state; (c) cap attempts per break. **This alters what gets traded, so it is the operator's call**; r223 fixed only the key defect that was masking it. | ⬜ |
 | **ASK.4** | `debug_status.py` and `stress_theta_bleed.py` sit at repo root. Move to `tests/` per WA §28, or are they entry points? | ⬜ |
@@ -322,6 +324,71 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.70 — 2026-09-05 — dtp r280 — THE COVERAGE REPORT'S FIRST REAL RUN FOUND
+NINE FLAGS AND SEVEN WERE MINE.**
+
+Run by hand over 2026-09-01..09-04, which is exactly what S3.12 said had to
+happen before the phase was wired. 🔑 **THE REPORT EARNED ITS PLACE AND NOT IN
+THE WAY INTENDED:** it was built to find gaps in the bucket and what it found
+first was three wrong declarations in its own policy table. That is the whole
+argument for running a new alarm by hand before automating it, and the argument
+holds whichever way the next run goes.
+
+🔴 **(1) `prints` — SPX IS A CASH INDEX AND PUBLISHES NO TimeAndSale.** r95
+already recorded that `prints` on a cash index renders n/a; I declared the
+stream `EVERY` anyway, so it flagged SPX on all four days. Fixed with a
+**per-symbol exception**, not by loosening the stream — a box that *cannot*
+write a stream is a different fact from a stream nobody is graded on, and
+collapsing them would stop the report noticing the day the other fourteen go
+quiet. S12b pins exactly that.
+
+🔴 **(2) `trades` IS CONDITIONAL.** `push_trades` is CDC, so a box with no
+changed rows pushes nothing and absence means that box took no trades — a
+market outcome. ⚠️ **CORROBORATED RATHER THAN REASONED FROM THE CODE:**
+`derived_fire_snapshot` and `derived_plan_ledger` matched the trades count
+**box-for-box on all four days** — 15/13/10/12 against trades missing 0/2/5/3 —
+three independent streams agreeing on which boxes had no fills.
+
+🔴 **(3) `shadow` IS LIVE, AND "NEVER INSTALLED ON THE v4 FLEET" IS FALSE.**
+Measured on QQQ 2026-09-05: **32 date directories, newest 2026-09-04, and a
+shadow systemd unit present.** The bucket said the same thing from the other
+side the whole time — 15 boxes pushing every session, and `WAREHOUSE_MAP.md`
+generated 09-01 showing `raw/shadow` at 160,978 objects over 7 days. Two
+instruments already disagreed with the finding and nobody read them together.
+
+⚠️ **AND THE COST IS FILED, NOT SOFTENED. S3.13:** the 2026-08-25 purge deleted
+**492,945 `raw/shadow` objects** as a dead stream, on this belief. `raw/` is the
+durable copy and never deletes by design; that one went through the console
+grant. **What is actually lost is not established and must be measured before
+it is described** — the boxes never purge shadow, so some of it may still be
+box-side and re-pushable. **S3.14** records the other half: shadow is unbounded
+on disk by *absence* from every purge list rather than by policy, QQQ holds 32
+date dirs of high-frequency jsonl, and QQQ ran out of space on 09-03 — which is
+what cost that day's `eod` and `ohlc`. ⚠️ **That link is plausible and NOT
+measured**, and it is filed as a question rather than a cause.
+
+**ASK.2's premise is falsified** and the row is rewritten: the ruling is no
+longer *cut a dead stage or leave it* but **keep collecting a live stream or
+stop it deliberately** — a different question with a different cost.
+
+**THE TWO REMAINING FLAGS WERE REAL AND ARE EXPLAINED.** QQQ missing `eod` and
+`ohlc` on 09-03 only, with its candles, series, journal and all seven derived
+streams present — the box ran out of disk. `eod` is unrecoverable: `pnl_today
+.json` is a fixed filename overwritten once per session and 09-04 landed for all
+15 boxes, so it has already been replaced. `ohlc` is date-partitioned and may
+survive on the box; `push_whole_files` keys on content hash per path, so a
+normal pusher run would ship it. ⚠️ **A zero-byte file is the case to watch** —
+`if not raw: continue` skips an empty file **silently**, which is an absence
+that never announces itself.
+
+`tests/test_stream_coverage.py` v1.1, **29 checks, born red 5 against v1.2** —
+and the cases assert VERDICTS from `check_streams`, never that `STREAM_POLICY`
+contains a string, because a test that reads the map back is the map agreeing
+with itself (C.23). ⚠️ **S4 IS RE-DERIVED, NOT PATCHED:** it used `shadow` as
+its DEAD example, so leaving it would have gone on certifying the exact
+classification this revision corrects — the r233/r234 trap. It now uses
+`theo_series`, which is genuinely dead.
 
 **v1.69 — 2026-09-05 — otv4 r253 — DEP.5: THE WORKING AGREEMENT CATCHES UP TO
 THE DEPLOY. DOCS ONLY.**
