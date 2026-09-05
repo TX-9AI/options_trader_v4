@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.81
+# BACKLOG.md — v1.82
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -53,7 +53,7 @@ actually read goes in as an open step, not a closed one.
 | **DOC.7** | `day_trader_pro/README.md` describes the fleet as **options_trader_v3**. | ⬜ | The control repo names the wrong trading repo. |
 | **DOC.8** | `day_trader_pro/tests/check_ssh_decode.py` carries a title `v1.0` and **no dated changelog entry**. | ⬜ | Found by GATE.1 on its first run against dtp. Minor, and exactly the class the gate exists for. |
 | **DEP.1** | 🔴 **THE DEPLOY WAS THE MOST REPEATED ACT IN THIS PROJECT AND THE ONLY ONE STILL DONE BY HAND.** | dtp r278 | ◐ **BUILT + PUSHED.** 🔑 **NINE OF THE OPERATOR'S TEN STAGES ALREADY EXISTED IN `tools/land.sh` (r235) AND WERE NOT REBUILT** — unpack, stage, find the repo by marker, pull first, content gate, regenerate both maps and fail on drift, append GENESIS before `git add`, `check_land_discipline` for the version/changelog/GENESIS bookkeeping, commit, push, clean up. r278 adds the ONE that was missing and fixes two defects the hand-run was hiding. **(1) IT RAN NO CHECKERS** — the content gate greps and never executes, which is the r201 shape §0.6 names; `CHECK <path>` now RUNS in the repo, and a half shipping a `.py` outside `docs/` that declares none is REFUSED, because *nothing was executed* must not read like *everything passed*. **(2) `git add -A`** staged whatever was in the tree, against the operator's own standing rule written after a stray file was pushed off main — every path is now named. **(3) THE ARCHIVE IT DELETED WAS A GUESS** (`ls … \| head -1`), and he routinely has two pending; `LAND_ARCHIVE` names it and an ambiguous glob now deletes NOTHING and says so. New `tools/deploy.sh` finds the tarball, prompts on ambiguity rather than picking, discovers the halves from their specs, ORDERs them, and execs the lander FROM THE ARCHIVE so a delivery that improves the lander is landed by the improved copy. |
-| **DEP.2** | ⬜ **`land.sh`'s CONTENT GATE USES BARE `grep -q`, SO A PATTERN WITH `*` SILENTLY MATCHES SOMETHING WEAKER.** | ⬜ | 🔴 **FOUND WHILE BUILDING r277, MEASURED NOT REASONED:** `POS docs/GENESIS.md\|**r247**` PASSED against a GENESIS containing no `r247`. In BRE the trailing `**` reads as *zero or more `7`s*, so the pattern degenerates to `r24` and matches `r240`, `r241`, anything. **`**rNNN**` is this repo's own GENESIS row idiom**, so any spec written that way checks something weaker than it says — the laundered green §18 names, inside the gate whose whole job is to prevent it. Fix is `grep -qF` for POS/NEG plus a selftest case built from a pattern that degenerates. ⚠️ **NOT FOLDED INTO r278 DELIBERATELY:** the lander that changes the lander is verified by the old lander, and r235 already had to solve self-replacement once. It is a small change and it deserves its own delivery and its own born-red. |
+| **DEP.2** | ✅ **CLOSED — POS/NEG MATCH AS FIXED STRINGS. THE GATE FAILED BOTH WAYS IN ONE DAY.** | dtp r289 | ◐ **BUILT + PUSHED.** `land.sh` used `grep -q`, a **basic regular expression**, on assertions that are ordinary text. Both directions were observed on 2026-09-05: **FAILED OPEN** — `POS docs/GENESIS.md|**r247**` degenerates to `r24` followed by *zero or more* 7s, so the gate said PASS against a ledger with no r247 row; **FAILED CLOSED** — `NEG menu_functions.sh|[ "$GO" = "y" ]` read the brackets as a character class, matched a file that does not contain the string, and refused a correct delivery, costing a re-cut. 🔑 **A GATE THAT CAN DO BOTH IS NOT A WEAK GATE — IT IS UNRELATED TO WHAT IT CLAIMS TO CHECK.** ⚠️ And regex bought nothing here by design: the operator's own supersession rule is that the assertion is *a distinctive LINE from the real change*, so `**bold**`, `[brackets]`, `$vars` and `.` are content, and an engine can only misread them. `grep -qF`. **F1/F2 drive a REAL land** rather than grepping the source for `-qF`, which would pass against the flag sitting in a comment; **F3 proves the literal form still refuses** a genuinely absent string, because loosening a check that misfires is the easy wrong fix. |
 | **DEP.3** | ⬜ **LAND.1 IS REVERSED, BY THE OPERATOR, AND THE RECORD SHOULD NOT CONTRADICT ITSELF.** | ⬜ | LAND.1 ruled that `land.sh` gets no menu item: *"installer scripts should call it, not me manually running it."* **No installer ever called it** — every land since r235 has been a pasted command — so the premise was false in practice, and he asked for the item directly on 2026-09-05. Recorded rather than quietly overridden: **C.31** says a rule outliving its reason is a rule the next reader loosens for a worse reason. `menu_registry.sh` v1.10 carries the reversal in its own changelog; this row is so the ledger agrees with it. |
 | **DEP.4** | 🔴 **A MULTI-HALF DELIVERY COULD LAND HALF-WAY, ON ORIGIN.** | dtp r279 | ◐ **BUILT + PUSHED.** Observed, not imagined: landing `r277_r2` before `r276_r2` in the sandbox, the dtp half passed its gate, committed **and pushed**, and only then did the otv4 half correctly refuse on a GENESIS row `r276` had not yet written. Origin held the code with no backlog entry — a half delivery on the shared truth fifteen boxes pull from — and re-running died at `git commit` with nothing left to stage. 🔑 **A PRE-FLIGHT OF EVERY GATE WOULD NOT HAVE WORKED**, and that is the design: a half is ALLOWED to gate on an artifact an earlier half produces, so verifying half two before half one lands would fail a gate that is not failing. **The split is COMMIT vs PUSH, which is where the irreversibility actually sits.** Phase 1 verifies and commits each half locally, in order, so a later half still sees an earlier half's files; phase 2 pushes, and only if every half reached a commit. Any phase-1 failure rolls every repo this run committed to back to its pre-run SHA. ⚠️ **THE ROLLBACK IS `reset --soft`** — a hard reset would revert an unrelated tracked file the operator had mid-edit, which is §35's own reason for refusing a blind `git checkout -- .`; a rolled-back half looks exactly like a gate failure today, files present and uncommitted, recovery printed. ⚠️ **AND THE LIMIT IS STATED:** two remotes are not a transaction. The pushes are last and back to back, and a failure names which repo is ahead and the one command that fixes it — a pushed half is NOT auto-reverted, because undoing something already on origin is a decision for a human. |
 | **DEP.6** | 🔴 **THE RECLAIM RAN WHILE THE WRITERS HELD THE STORE OPEN.** | otv4 r255 / dtp r281 | ◐ **BUILT + PUSHED.** `wal_checkpoint(TRUNCATE)` returns **busy** while ANY other connection holds a read mark, and the WAL is only partly reclaimed — measured in `check_purge_reclaim` R2/R2b at **7.1MB → 4.4MB with a reader against 7.1MB → 0 without**. Both close paths purged with `optionsbot` and `candle-feed` still running, which is fine for deleting rows and fatal for getting the space back, and is almost certainly why MU's WAL reached 1.6 GB. **Conductor v2.2** gains `stop_services()` between the verdict and the purge; **`self_close` v1.3** gains step 2b after verification succeeds. ⚠️ **ON THE VERIFIED LIST ONLY** — a held box keeps its services, because it is up for the operator to look at (his 2026-08-25 ruling) and holds the only copy of its day. ⚠️ **AFTER the drain, not before**: stopping first would leave services down on boxes that then get HELD, which is a different state from the one the ruling describes. ⚠️ **STOP, NEVER DISABLE** — the units come back on the next wake, which is how MU lost its swapfile unnoticed for nine days. |
@@ -340,6 +340,38 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.82 — 2026-09-05 — dtp r289 — DEP.2: THE CONTENT GATE WAS MATCHING
+PATTERNS, NOT CONTENT.**
+
+`land.sh` compared POS/NEG assertions with `grep -q` — a **basic regular
+expression** — against strings that are ordinary text. It graded two deliveries
+wrongly in a single day, in **opposite directions**.
+
+🔴 **FAILED OPEN.** `POS docs/GENESIS.md|**r247**`. In a BRE that reads as `r24`
+followed by *zero or more* `7`s and *zero or more* `*`s, so it matched a GENESIS
+containing `r24` and no `r247` at all. The gate reported PASS on an assertion
+that was false, which is the failure this whole mechanism exists to prevent.
+
+🔴 **FAILED CLOSED.** `NEG menu_functions.sh|[ "$GO" = "y" ]`. The brackets are
+a character class, so the NEG matched a file that did not contain the string,
+and a correct delivery was refused. That one cost a re-cut of the archive.
+
+🔑 **A GATE THAT CAN FAIL BOTH WAYS IS NOT A WEAK GATE. IT IS UNRELATED TO THE
+THING IT CLAIMS TO CHECK** — and it had been that way since r235, silently, on
+every delivery that happened not to contain a metacharacter.
+
+⚠️ **AND THE REGEX BOUGHT NOTHING BY DESIGN.** The operator's supersession rule
+is that an assertion names *a distinctive LINE from the real change*, so
+`**bold**`, `[brackets]`, `$vars`, `(parens)` and `.` are the CONTENT being
+asserted. A pattern engine can only misread them. `grep -qF`.
+
+`tests/check_land_sh.py` v1.3, **born red 2**. ⚠️ F1 and F2 drive a **real
+land** — a source check for `-qF` would pass against the flag sitting in a
+comment and prove nothing, which is the same defect one level up. F3 exists
+because loosening a check that misfires is the easy wrong fix: the literal form
+must still refuse a delivery whose asserted content is genuinely absent, and it
+does.
 
 **v1.81 — 2026-09-05 — r265 — SEC.1: I LEAKED THE FLEET'S CREDENTIALS. AND
 SHADOW WAS ONLY HALF COLLECTING.**
