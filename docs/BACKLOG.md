@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.64
+# BACKLOG.md — v1.65
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -52,6 +52,9 @@ actually read goes in as an open step, not a closed one.
 | **DOC.6** | **9 of the last 18 otv4 revisions shipped at least one file with a STALE HEADER.** | ⬜ | Measured 2026-08-29 by replaying `check_land_discipline` over r162–r182. Named example: `strategy/trend_credit_spread.py` gained **22 lines in r175** and its title still reads **v4.5 / r164 / 2026-08-27** at HEAD — a strategy file whose changelog attributes its current content to a revision that did not write it. GATE.1 stops the next one; **this is the backlog of ones already shipped.** |
 | **DOC.7** | `day_trader_pro/README.md` describes the fleet as **options_trader_v3**. | ⬜ | The control repo names the wrong trading repo. |
 | **DOC.8** | `day_trader_pro/tests/check_ssh_decode.py` carries a title `v1.0` and **no dated changelog entry**. | ⬜ | Found by GATE.1 on its first run against dtp. Minor, and exactly the class the gate exists for. |
+| **DEP.1** | 🔴 **THE DEPLOY WAS THE MOST REPEATED ACT IN THIS PROJECT AND THE ONLY ONE STILL DONE BY HAND.** | dtp r278 | ◐ **BUILT + PUSHED.** 🔑 **NINE OF THE OPERATOR'S TEN STAGES ALREADY EXISTED IN `tools/land.sh` (r235) AND WERE NOT REBUILT** — unpack, stage, find the repo by marker, pull first, content gate, regenerate both maps and fail on drift, append GENESIS before `git add`, `check_land_discipline` for the version/changelog/GENESIS bookkeeping, commit, push, clean up. r278 adds the ONE that was missing and fixes two defects the hand-run was hiding. **(1) IT RAN NO CHECKERS** — the content gate greps and never executes, which is the r201 shape §0.6 names; `CHECK <path>` now RUNS in the repo, and a half shipping a `.py` outside `docs/` that declares none is REFUSED, because *nothing was executed* must not read like *everything passed*. **(2) `git add -A`** staged whatever was in the tree, against the operator's own standing rule written after a stray file was pushed off main — every path is now named. **(3) THE ARCHIVE IT DELETED WAS A GUESS** (`ls … \| head -1`), and he routinely has two pending; `LAND_ARCHIVE` names it and an ambiguous glob now deletes NOTHING and says so. New `tools/deploy.sh` finds the tarball, prompts on ambiguity rather than picking, discovers the halves from their specs, ORDERs them, and execs the lander FROM THE ARCHIVE so a delivery that improves the lander is landed by the improved copy. |
+| **DEP.2** | ⬜ **`land.sh`'s CONTENT GATE USES BARE `grep -q`, SO A PATTERN WITH `*` SILENTLY MATCHES SOMETHING WEAKER.** | ⬜ | 🔴 **FOUND WHILE BUILDING r277, MEASURED NOT REASONED:** `POS docs/GENESIS.md\|**r247**` PASSED against a GENESIS containing no `r247`. In BRE the trailing `**` reads as *zero or more `7`s*, so the pattern degenerates to `r24` and matches `r240`, `r241`, anything. **`**rNNN**` is this repo's own GENESIS row idiom**, so any spec written that way checks something weaker than it says — the laundered green §18 names, inside the gate whose whole job is to prevent it. Fix is `grep -qF` for POS/NEG plus a selftest case built from a pattern that degenerates. ⚠️ **NOT FOLDED INTO r278 DELIBERATELY:** the lander that changes the lander is verified by the old lander, and r235 already had to solve self-replacement once. It is a small change and it deserves its own delivery and its own born-red. |
+| **DEP.3** | ⬜ **LAND.1 IS REVERSED, BY THE OPERATOR, AND THE RECORD SHOULD NOT CONTRADICT ITSELF.** | ⬜ | LAND.1 ruled that `land.sh` gets no menu item: *"installer scripts should call it, not me manually running it."* **No installer ever called it** — every land since r235 has been a pasted command — so the premise was false in practice, and he asked for the item directly on 2026-09-05. Recorded rather than quietly overridden: **C.31** says a rule outliving its reason is a rule the next reader loosens for a worse reason. `menu_registry.sh` v1.10 carries the reversal in its own changelog; this row is so the ledger agrees with it. |
 
 ### S3 repoint — the reporting apparatus
 
@@ -313,6 +316,81 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.65 — 2026-09-05 — dtp r278 — DEP.1: THE UNIVERSAL DEPLOY, AS A MENU ITEM
+— AND NINE OF ITS TEN STAGES ALREADY EXISTED.**
+
+Operator's spec, 2026-09-05: a devtools option that finds a tar in
+`/home/ubuntu`, unpacks and stages it, verifies the write map, the file map,
+the file versions, the changelog and the GENESIS append, *"any smoke tests or
+canaries are verified"*, commits, and cleans up.
+
+🔑 **`tools/land.sh` (r235) ALREADY DID NINE OF THOSE TEN**, and has done all
+four of today's lands end to end. Rebuilding it would have been the WA §35 rot
+— two implementations of one job, and whichever gets updated becomes the truth
+while the other rots. So r278 adds the missing stage and fixes what the
+hand-run was hiding.
+
+🔴 **(1) IT RAN NO CHECKERS.** The content gate greps for a distinctive line and
+never EXECUTES anything — which is precisely the r201 shape §0.6 names: the gate
+asserted a function existed and that the file parsed, and both were true of the
+broken version. `CHECK <path>` directives now run in the repo and must exit 0.
+⚠️ **AND A HALF THAT SHIPS CODE AND DECLARES NO CHECK IS REFUSED**, detected
+from the payload rather than trusted to the author, because the realistic
+failure is a FORGOTTEN check and *nothing was executed* must not read like
+*everything passed*. A docs-only half legitimately has nothing to run and says
+so out loud — "not applicable" and "passed" must never look alike (r183).
+
+🔴 **(2) `git add -A`.** The operator's standing rule is the opposite — *"NEVER
+`git add -A`; stage shipped files by name"*, written after a stray
+`fit_report.py` was pushed off main — while WA §33's sketch of the land order
+says `git add -A`. Two documents disagreed and **the looser one was the one in
+the code.** Every path is now named: the payload's own file list plus the two
+regenerated maps and the GENESIS row. C3 plants an unrelated dirty file and
+requires it out of the delivery commit; only a dirty-tree fixture can tell the
+two versions apart.
+
+🔴 **(3) THE ARCHIVE IT DELETED WAS A GUESS.** `ls "$HOME"/*_r*.tar* | head -1`
+takes the first glob match and the cleanup `rm -f`s it — and on 2026-09-05 he
+had r276 and r277 in `/home/ubuntu` at once. `LAND_ARCHIVE` names the file
+`deploy.sh` actually extracted; without it an ambiguous glob deletes NOTHING and
+says so. Untidy is recoverable; deleting the wrong tarball is not.
+
+**NEW `tools/deploy.sh`** is only the three things standing between the lander
+and a menu item, each a real gap: FINDING the archive (prompting on ambiguity
+rather than picking), DISCOVERING the halves from their own specs (the operator
+should not have to know a tarball is *"dtp otv4"*), and ORDERING them via a new
+optional `ORDER n` directive — because a two-repo delivery whose second half
+cites the first must not land backwards, which is exactly r277's otv4 half
+gating on r247's GENESIS row. 🔑 **IT EXECS THE LANDER FROM THE ARCHIVE**, repo
+copy as fallback: a delivery that improves the lander has to be landed by the
+improved copy or the improvement is never exercised on the one delivery that
+could prove it — and the fallback is what keeps archives cut before r278
+landing through the item unchanged.
+
+`tests/check_land_sh.py` v1.1, **27 checks, born red 8/19 against v1.0** — C1b
+lands a delivery whose declared check exits 1 (proving v1.0 executed nothing),
+C3 finds `STRAY.txt` in the commit (proving `git add -A`), C4b finds the guessed
+archive deleted. **D1-D5 drive `deploy.sh` itself end to end** against a real
+two-half tarball in a real `$HOME`, and **D2c requires the backwards order to be
+REFUSED**, because an ordering never tested against the wrong order is one
+nobody knows works (§17). `docs/MENU_INVENTORY.tsv` regenerated **after reading
+the diff** — 2 labels added, 0 removed, 0 commands changed — never reflexively,
+which turns the proof tool into a rubber stamp.
+
+**DEP.2 opened, and it is the sharper finding.** `land.sh`'s gate uses bare
+`grep -q`, so `POS docs/GENESIS.md|**r247**` PASSED against a GENESIS with no
+`r247` in it: BRE reads the trailing `**` as *zero or more 7s* and the pattern
+degenerates to `r24`. **`**rNNN**` is this repo's own GENESIS idiom.** Not fixed
+here, deliberately — the lander that changes the lander is verified by the old
+lander, and that change deserves its own born-red rather than riding in.
+**DEP.3** records that LAND.1 is reversed at the operator's own request, so the
+ledger does not contradict `menu_registry.sh` v1.10.
+
+⚠️ **AND r276/r277 ARE SUPERSEDED ON THIS LINE ONLY.** Their otv4 halves were
+cut against v1.64 and would overwrite this entry. They are re-issued as `_r2`
+against v1.65/v1.66 and land AFTER r278 — through the new menu item, which is
+the proof run.
 
 **v1.64 — 2026-09-04 — r246 — FIT.2 AND TCS.9 CLOSED — AND FIT.2 WAS FILED
 WRONG.**
