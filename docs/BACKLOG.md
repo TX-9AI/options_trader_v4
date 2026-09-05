@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.66
+# BACKLOG.md — v1.67
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -96,7 +96,8 @@ feed plumbing and are not warehouse candidates.
 | **S3.7** | Menu 54 → retire, or repoint to `warehouse_reader.build()`. | ⬜ | Duplicates what `eod_analysis._consolidate()` already does from S3. |
 | **S3.9** | 🔴 **THE CDC COLLAPSE KEYED ON A ROWID, WHICH IS NOT AN IDENTITY.** | dtp r276 | ◐ **BUILT + PUSHED.** `_rid` is the source table's sqlite `rowid` (`s3_push:945`). r266 scoped it to the `dt=` partition after (QQQ, 1) on 09-01 collided with (QQQ, 1) on 09-04 — a real UNDER-count, fixed. ⚠️ **AND THE SAME EDIT OPENED AN OVER-COUNT:** `push_derived` files every CHANGED row under the PUSH day, so one CDC row touched on two days lands in two partitions and a partition-scoped key keeps BOTH. Under-count, then over-count, on the same data. 🔑 **EVERY ONE OF THESE TABLES EXCEPT `character_ledger` DECLARES A PRIMARY KEY THE BOX ALREADY ENFORCES** — the identity was in the schema the whole time, and `screen_plan_gates` (dtp r271) was already grouping its per-tick panel on `plan_check`'s own PK. `DERIVED_NATURAL_KEY` is diffed against otv4's real `CREATE TABLE` statements by N4b, so a PK change here goes red rather than collapsing on a key the box no longer enforces. **The row count becomes self-verifying:** distinct primary keys per ET day IS the population, which is what made *"is 2.38M plan_check rows complete"* unanswerable. ⚠️ `character_ledger`'s key is `id INTEGER PRIMARY KEY AUTOINCREMENT` — in sqlite that IS the rowid — so it keeps r266's partition-scoped fallback, and any row missing a key component falls back too and is **counted in the banner**. |
 | **S3.11** | ⬜ **THERE ARE STILL THREE COLLAPSE RULES ON ONE DATASET, AND C.17 SAYS THERE IS EXACTLY ONE.** | ⬜ | Measured at HEAD: `warehouse_reader.load_derived` collapses on the natural key (S3.9); `fit_readiness` runs a SECOND collapse in SQL, `GROUP BY _rid, <ts>`; and `tests/screen_plan_gates.py:101` runs **no collapse at all** — its printed row count is raw object rows, which is where the 2.38M figure came from. 🔴 **THE THREE DISAGREE BY CONSTRUCTION**, which is the S3.6 shape one level over. Not folded into S3.9 deliberately — neither `fit_readiness` nor the screen calls `load_derived`, so nothing here was required to make S3.9 work (WA §4). Ruling wanted: point all three at `load_derived`, or leave the screen raw and label it so. |
-| **S3.10** | ⬜ **NOTHING VERIFIES S3 COVERAGE PER STREAM PER DAY.** | ⬜ | 🔑 **A TOOL ALREADY EXISTS TO EXTEND** — `warehouse_coverage.py` v1.1 is LIST-only, trading-day aware, and already carries `NOT_A_SESSION` and `PARTIAL_BY_DESIGN`. Building a second one is the WA §35 rot. ⚠️ **THE EXTENSION IS NOT ONE LINE:** `push_derived` writes ONE OBJECT PER TABLE PER RUN and `push_series` batches at 50k, so an object count on `raw/derived_*` counts PUSH RUNS, while `push_file` is one object per line and it does count rows. And the derived `dt=` is the PUSH day (C.9), so a partition check there answers *"did each box's pusher run"* and cannot answer *"are the rows complete."* **Delivered next as dtp r277.** |
+| **S3.12** | ⬜ **THE STREAM REPORT IS NOT IN THE NIGHTLY CHAIN YET, DELIBERATELY.** | ⬜ | `eod_analysis` already runs `warehouse_coverage.py --date <date>` as a phase, so wiring `--streams` in is one argument. **It is not wired, and the reason is the sequencing rather than the work:** the `CONDITIONAL` and `DEAD` classifications in `STREAM_POLICY` are MY declarations read out of `s3_push`'s stage list, and none has been checked against what the bucket actually holds. A phase that goes red every night on a stream nobody expects is a permanent red, and a permanent red is the one thing that stops a board being read (CV.1). ⚠️ **AND MONDAY IS THE FIRST TAPE FOR SIX SWEEP REVISIONS** — r242's own reasoning applies: a zero result has to be attributable. **Run it by hand once, read the verdicts against the real bucket, correct the policy table, then wire the phase.** |
+| **S3.10** | ⬜ **NOTHING VERIFIES S3 COVERAGE PER STREAM PER DAY.** | dtp r277 | ◐ **BUILT + PUSHED.** `warehouse_coverage.py` v1.2 `--streams`, ADDITIVE — the v1.1 VIX report, its verdicts and its exit code are untouched, and `tests/test_warehouse_coverage.py` is byte-identically green before and after, which is the additive claim proven rather than asserted. Every stream carries its GRAIN (`record` / `batch` / `pusher`) and its EXPECTATION (`EVERY` / `OWNER` / `CONDITIONAL` / `DEAD`). 🔑 **A SILENT BOX IS ONE DIAGNOSIS, NOT TWENTY** — a box that pushed nothing is `BOX_SILENT` and its absences are attributed there rather than counted against every stream, which is v1.0's `PUSH_DEFECT`/`OWNER_DOWN` split generalised; without it the first fleet-wide outage makes the report unreadable. The panel is imported from `selector.PANEL` and an empty one REFUSES rather than grading against a guess. Presence is ONE delimited LIST per stream-day; object counts page and are opt-in behind `--counts`, pinned by counting paginator calls (dtp r253). | 🔑 **A TOOL ALREADY EXISTS TO EXTEND** — `warehouse_coverage.py` v1.1 is LIST-only, trading-day aware, and already carries `NOT_A_SESSION` and `PARTIAL_BY_DESIGN`. Building a second one is the WA §35 rot. ⚠️ **THE EXTENSION IS NOT ONE LINE:** `push_derived` writes ONE OBJECT PER TABLE PER RUN and `push_series` batches at 50k, so an object count on `raw/derived_*` counts PUSH RUNS, while `push_file` is one object per line and it does count rows. And the derived `dt=` is the PUSH day (C.9), so a partition check there answers *"did each box's pusher run"* and cannot answer *"are the rows complete."* **Delivered next as dtp r277.** |
 
 ### Sensor twins — control-side, read S3, boxes untouched
 
@@ -319,6 +320,64 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.67 — 2026-09-05 — dtp r277 — S3.10: PER-STREAM, PER-DAY, PER-BOX COVERAGE
+— AND THE FOUR WAYS IT COULD CRY WOLF.**
+
+🔑 **THE TOOL ALREADY EXISTED AND WAS EXTENDED, NOT DUPLICATED.**
+`warehouse_coverage.py` v1.1 is LIST-only, trading-day aware via
+`market_calendar.is_trading_day`, and already carries `NOT_A_SESSION` and
+`PARTIAL_BY_DESIGN`. A second coverage tool would have been the WA §35 rot.
+**ADDITIVE:** `--streams` is its own report with its own exit code, and the v1.1
+verdict suite is byte-identically green before and after.
+
+🔑 **COVERAGE MEANS TWO DIFFERENT THINGS AND EVERY ROW SAYS WHICH.** Read from
+`s3_push.py`: `push_derived` writes ONE OBJECT PER TABLE PER RUN (line 959),
+`push_series` batches at 50,000 — while `push_jsonl_tree` and `push_trades`
+write one object per RECORD. So a count on `raw/signal_journal` is volume and
+the same count on `raw/derived_plan_check` is push RUNS, which is how 5,389
+objects sat beside 2.38M rows with nothing reconciling them. 🔴 **A DERIVED ROW
+IS LABELLED `pusher`, because its `dt=` is the PUSH day (C.9)** — it can say
+whether that box's pusher ran and CANNOT say whether that day's rows are
+complete.
+
+⚠️ **"ABSENT" IS NOT ONE FACT, AND THE NEGATIVE CASES ARE THE ONES THAT MATTER.**
+`chain_snapshots` is written only by a box that TRADED; `shadow` was NEVER
+INSTALLED on the v4 fleet; `theo_series` and `underlying_series` were
+unsubscribed at r118/r125b. Grading any of those as a gap puts a permanent red
+on the board — v1.1 learned this on a Sunday.
+
+🔴 **A SILENT BOX IS ONE DIAGNOSIS, NOT TWENTY.** A box that pushed nothing at
+all reports as `BOX_SILENT` and its absences are attributed there rather than
+counted against every EVERY-stream — v1.0's own `PUSH_DEFECT` vs `OWNER_DOWN`
+split generalised. Without it the first fleet-wide outage produces twenty red
+lines for one cause and drowns the single-stream gap on another box, which S2c
+pins by keeping exactly that gap visible underneath.
+
+⚠️ **THE PANEL IS `selector.PANEL`, IMPORTED** — r185 records what one fact
+living in three documents cost. An empty `PANEL` means discretionary selection
+is on, so the mode REFUSES rather than grading against a guess (dtp r250).
+⚠️ **AN UNDECLARED STREAM IS REPORTED, NEVER SKIPPED** — a tool that quietly
+shrinks its own scope is as misleading as one that over-reports (v1.1's finding).
+⚠️ **`NVDA_EXT` NORMALISES TO `NVDA`** — r194's guard matched a name FORMAT
+rather than an IDENTITY and proposed deleting the extended tape of every panel
+symbol.
+⚠️ **COST:** presence is ONE delimited LIST per stream-day; counts page and are
+opt-in, **pinned by COUNTING PAGINATOR CALLS** rather than by reading code
+(dtp r253).
+
+`tests/test_stream_coverage.py` v1.0, **24 checks**, born red at `bb27458`.
+⚠️ **THE BORN-RED IS WEAK HERE AND THAT IS WORTH SAYING:** unlike r276, where
+`load_derived` existed and misbehaved, this is a NEW capability, so at HEAD
+there is nothing to be wrong. The proof that carries weight is S2b-S7b, plus
+S11 which measures the REAL rendered line (C.23) and S11b which reads the VALUES
+back, because r216 is the other half of that lesson.
+
+**S3.10 closed. S3.12 opened:** the phase is NOT wired into `eod_analysis` yet —
+the `CONDITIONAL` and `DEAD` classifications have never been checked against the
+bucket, and Monday is the first tape for six sweep revisions. ⚠️ **RE-ISSUED AS
+`_r2`:** the code half is byte-identical; only this file and the specs moved.
+dtp red set unchanged: 6 before, 6 after.
 
 **v1.66 — 2026-09-05 — dtp r276 — 🔴 THE CDC COLLAPSE KEYS ON THE TABLE'S OWN
 PRIMARY KEY. `_rid` WAS NEVER AN IDENTITY.**
