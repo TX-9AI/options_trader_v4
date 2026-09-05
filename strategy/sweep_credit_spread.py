@@ -1,5 +1,28 @@
 """
-strategy/sweep_credit_spread.py  v5.2
+strategy/sweep_credit_spread.py  v5.3
+v5.3  2026-09-04  r241 — 🔴 THE AGE GATE IS REMOVED, NOT RAISED.
+      Operator, 2026-09-04: *"I don't give a rat's ass how old the level is,
+      it's still a level. Why are we still measuring the age of them?"* Because
+      I only half-shipped his 2026-08-11 ruling — SWP.5 said LIVENESS REPLACES
+      THE CLOCK, r230 found it had never reached the code, and I raised the
+      ceiling 6 → 48 instead of deleting the gate. My call, not his.
+      🔑 AGE MEASURES THE RAID, NOT THE LEVEL. A level swept at 09:45 that has
+      held since is the SAME LEVEL at 13:00, arguably better for having held
+      longer — and levels are swept all day; the morning's is not the only one
+      on the board.
+      🔴 MEASURED FLEET-WIDE 08-31..09-04: `age` failed 46,791 of 61,641 (76%)
+      and on 333 ticks — 26% of every tick that was ONE gate short — it was the
+      ONLY thing refusing. Complete setups, declined for being old.
+      ⚠️ `invalidated` ALREADY ANSWERS THIS CORRECTLY: has price ACCEPTED back
+      through the level. It fails 73%, a market fact rather than a defect.
+      `age` was a second, worse proxy for a question that gate settles — two
+      rules for one thing, §35's rot.
+      ⚠️ THE MEASUREMENT SURVIVES. `sig.sweep_age_bars` still carries it to the
+      row: knowing how old a level was is useful for FITTING, deciding with it
+      is what was ruled out.
+      ⚠️ AND UNMEASURABLE IS NOT OLD. `bars_ago` absent yields the 999 sentinel
+      and refuses under its own name — a data fault, not a staleness judgement,
+      and admitting it silently would be absent-is-not-zero again.
 v5.2  2026-09-03  r234 — GATED ON THE STOP BASIS, AND THE
       SURVIVABILITY DENOMINATOR WAS 4.15x WRONG. This computed
       `credit * MAX_LOSS_PCT` — 15% OF CREDIT, the inverted rule r155 deleted —
@@ -315,7 +338,13 @@ def _gate(name: str, reason: str) -> None:
 # DEFAULT: a getattr default is exactly what let a name defined nowhere
 # govern fifteen boxes silently. A missing constant must raise at import on
 # the first box that pulls it, not fall back to a number nobody chose.
-MAX_AGE_BARS = config.SWEEP_STALE_HARD_BARS
+# 🔴 r241 — `MAX_AGE_BARS` IS GONE. Not raised, not pinned: REMOVED. r230
+# raised it 6 -> 48 and that was the half-measure; the operator's 08-11 ruling
+# was that liveness replaces the clock, and `invalidated` is the liveness test.
+# ⚠️ WHAT REPLACES IT IS NOT A THRESHOLD. The 999 sentinel means `bars_ago`
+# could not be read at all, which is a DATA fault and not a staleness one, so
+# it refuses by its own name rather than through an age ceiling.
+_AGE_UNMEASURABLE = 999
 # ⚠️ WAS 0.002 (0.20%) - A PRE-MEASUREMENT GUESS THE DATA CONTRADICTS. Combined
 # with the new 0.25% ceiling it left a 0.20-0.25% sliver and EXCLUDED the
 # shallow bucket that measured BEST: <0.10% pierces survived on 33%, and
@@ -410,7 +439,6 @@ GATES = {
     # "a level that still holds at 5 hours is a DIFFERENT trade from a fresh
     # raid" - which is the §36 definition of foundational, not selection. It
     # has NO relax call at all now, so the checker refuses any future one.
-    "MAX_AGE_BARS":       "FOUNDATIONAL",
     # FEASIBILITY - above 0.20% ATR the tape produced a 0.5% move on 92% of
     # 90-bar windows. A boundary does not hold in that.
     "ATR_MAX_PCT":        "FEASIBILITY",
@@ -831,7 +859,7 @@ class SweepCreditSpreadStrategy:
         "reclaimed":    "a bar has CLOSED back inside the pool (a wick is a touch) — "
                         "or the level is a MOVING tine, whose TOUCH is the trigger",
         "invalidated":  "price has NOT accepted through it after the reclaim",
-        "age":          f"reclaimed within MAX_AGE_BARS ({MAX_AGE_BARS}; backstop only - liveness is `invalidated`)",
+
         "rejection":    f"rejection >= {MIN_REJECTION_PCT*100:.3f}%",
         "pierce_depth": f"pierce <= {MAX_REJECTION_PCT*100:.3f}% (relaxed x3)",
         "side_of_pool": "price is on the profitable side of the pool",
@@ -956,11 +984,37 @@ class SweepCreditSpreadStrategy:
         # was. Absent stays 999; ZERO now stays zero.
         _ba = getattr(sweep, "bars_ago", None)
         age = 999 if _ba is None else int(_ba)
-        # 🔴 r230 - NO relax call. `invalidated` is the liveness test;
-        # this is SWP.5's bounded backstop and it does not widen.
-        _max_age = MAX_AGE_BARS
         prep.age = age
-        prep.cond("age", age, f"<= {_max_age:g} bars", age <= _max_age)
+        # 🔴 r241 - THE AGE GATE IS GONE. Operator, 2026-09-04: *"I don't give a
+        # rat's ass how old the level is, it's still a level. Why are we still
+        # measuring the age of them?"* Because I only half-shipped his 08-11
+        # ruling: SWP.5 said LIVENESS REPLACES THE CLOCK, r230 found it had
+        # never reached the code, and I raised the ceiling from 6 to 48 instead
+        # of removing the gate. That was my call, not his.
+        # 🔑 AGE MEASURES THE RAID, NOT THE LEVEL. A level swept at 09:45 that
+        # has held ever since is the SAME LEVEL at 13:00 - arguably a better
+        # one, having held longer. And levels are swept all day; the morning's
+        # is not the only one on the board.
+        # ⚠️ `invalidated` ALREADY ANSWERS THIS AND ANSWERS IT CORRECTLY - has
+        # price ACCEPTED back through the level. It fails 73% of the time,
+        # which is a market fact rather than a defect. `age` was a second,
+        # worse proxy for a question that gate already settles: two rules for
+        # one thing, which is the rot §35 names.
+        # 🔴 MEASURED FLEET-WIDE, 08-31..09-04: age failed 46,791 of 61,641
+        # (76%), and on 333 ticks - 26% of every tick that was ONE gate short -
+        # it was the ONLY thing refusing. Those are complete setups declined
+        # for being old.
+        # ⚠️ THE UNMEASURABLE CASE SURVIVES ON ITS OWN TERMS. `bars_ago` absent
+        # yields the 999 sentinel, and an unmeasurable sweep is NOT an old one:
+        # it refuses because the reclaim cannot be located at all, which is a
+        # data fault, not a staleness judgement. Silently admitting it would be
+        # the absent-is-not-zero failure this repo keeps paying for.
+        if age >= _AGE_UNMEASURABLE:
+            prep.structural.append(("sweep_unmeasurable",
+                f"bars_ago is the {_AGE_UNMEASURABLE} sentinel - the reclaim "
+                f"cannot be located, so this sweep is UNMEASURED rather than "
+                f"stale"))
+            return prep
         rej = float(getattr(sweep, "rejection_pct", 0.0) or 0.0)
         prep.rej = rej
         prep.cond("rejection", rej, self.CONDITIONS["rejection"], rej >= MIN_REJECTION_PCT)

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_ledger_parity.py  v1.0
+tests/check_ledger_parity.py  v1.1
+v1.1  2026-09-04  r241 — r226 JOINS THE KNOWN-ROWLESS SET. r240's own
+      GENESIS row cites it by name while explaining that it rebuilds it, so
+      the citation became "cited but rowless" the moment r240 landed — caught
+      by this checker the same day it was written. The citation IS the record
+      of why the number is missing, not evidence of a lost row.
 v1.0  2026-09-04  r240 — THE TWO LEDGERS MUST AGREE, AND THE BACKLOG MUST BE
       ABLE TO ANSWER "WHAT IS OPEN". Both had stopped being true.
 
@@ -117,7 +122,13 @@ def main():
     # never existed; the ledger cannot say which and it is not rewritten to
     # guess. Recorded as DOC.11, allowed by name, and a FOURTH such citation
     # fails — because that would be a new loss rather than an old one.
-    KNOWN_ROWLESS_CITATIONS = {110, 141, 159}
+    # ⚠️ r226 JOINED THIS SET WHEN r240 LANDED, and the checker caught it the
+    # same day it was written. r240's own GENESIS row explains that it rebuilds
+    # r226 — so citing it by name is CORRECT, and the citation is the record of
+    # why the number is missing rather than evidence of a lost row. L2 already
+    # allows it as a known unlanded revision; L3 allows the citation for the
+    # same reason and by the same name.
+    KNOWN_ROWLESS_CITATIONS = {110, 141, 159, 226}
     cited = [n for n in gaps
              if re.search(rf'\br{n}\b', gen) and n not in KNOWN_ROWLESS_CITATIONS]
     check("L3 no NEW missing revision number is cited in GENESIS prose "

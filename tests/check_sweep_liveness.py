@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_sweep_liveness.py  v1.0
+tests/check_sweep_liveness.py  v1.1
+v1.1  2026-09-04  r241 — RE-DERIVED. Every check pinned a CEILING —
+      that MAX_AGE_BARS existed, resolved to 48, was FOUNDATIONAL and admitted
+      33-48 bar sweeps. r241 removes the gate outright per the operator's
+      ruling, so asserting a ceiling would pin the thing being removed. What
+      survives is SWP.5's actual point: liveness is `invalidated`, the age is
+      still RECORDED, and an unmeasurable sweep refuses on its own terms.
 v1.0  2026-09-03  r230 — SWP.5 WAS RULED AND NEVER WIRED. `sweep_credit_spread` read
 `SWEEP_CS_MAX_AGE_BARS`, a name defined nowhere, so the ceiling was the
 getattr DEFAULT of 6 while SWP.5's measured 48 sat unread in config.
@@ -39,74 +45,70 @@ def main():
     src = open(scs.__file__, encoding="utf-8").read()
     tree = ast.parse(src)
 
-    # ── L1 — SWP.5's constant exists and is the ruled value ──────────────
-    hard = getattr(config, "SWEEP_STALE_HARD_BARS", None)
-    check("L1 config.SWEEP_STALE_HARD_BARS is SWP.5's 48",
-          hard == 48, f"got {hard!r}")
+    # 🔴 RE-DERIVED AT r241. Every check below pinned a CEILING — that
+    # MAX_AGE_BARS existed, resolved to 48, was FOUNDATIONAL, and admitted
+    # 33-48 bar sweeps. The operator's ruling removes the gate outright:
+    # *"I don't give a rat's ass how old the level is, it's still a level."*
+    # SWP.5 said LIVENESS REPLACES THE CLOCK in 2026-08-11; r230 raised the
+    # ceiling 6 -> 48 instead of deleting it, and that half-measure is what
+    # these checks were written against. Asserting a ceiling now would pin the
+    # thing being removed.
+    # ⚠️ WHAT SURVIVES IS THE POINT OF SWP.5: the liveness test is
+    # `invalidated`, and an UNMEASURABLE sweep still refuses on its own terms.
+    src = open(scs.__file__, encoding="utf-8").read()
+    tree = ast.parse(src)
 
-    # ── L2 — the module binds it DIRECTLY, no getattr fallback ───────────
-    # AST, not a string search: a getattr default is the defect, and the
-    # changelog names it.
-    binding = None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for t in node.targets:
-                if isinstance(t, ast.Name) and t.id == "MAX_AGE_BARS":
-                    binding = node.value
-    check("L2 MAX_AGE_BARS is bound at module level", binding is not None)
-    is_attr = (isinstance(binding, ast.Attribute)
-               and binding.attr == "SWEEP_STALE_HARD_BARS")
-    check("L2b MAX_AGE_BARS = config.SWEEP_STALE_HARD_BARS (not getattr)",
-          is_attr, ast.unparse(binding) if binding is not None else "absent")
+    # ── L1 — THE CEILING IS GONE, NOT RAISED ─────────────────────────────
+    # AST, not a string search: the changelog names MAX_AGE_BARS while
+    # explaining its removal, and a grep would match the explanation (§20).
+    bound = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Assign)
+             and any(getattr(t, "id", "") == "MAX_AGE_BARS" for t in n.targets)]
+    check("L1 MAX_AGE_BARS is no longer bound at module level", not bound,
+          f"lines {[n.lineno for n in bound]}")
+    check("L1b and the module does not expose it",
+          not hasattr(scs, "MAX_AGE_BARS"))
 
-    # ── L3 — the RESOLVED value, which is what actually gates ────────────
-    check("L3 module MAX_AGE_BARS resolves to 48",
-          scs.MAX_AGE_BARS == 48, f"got {scs.MAX_AGE_BARS!r}")
+    # ── L2 — `age` IS NO LONGER A CONDITION ──────────────────────────────
+    # 🔴 MEASURED FLEET-WIDE 08-31..09-04: age failed 46,791 of 61,641 (76%),
+    # and on 333 ticks — 26% of every tick that was ONE gate short — it was the
+    # ONLY thing refusing. Complete setups, declined for being old.
+    check("L2 'age' is not a declared condition",
+          "age" not in scs.SweepCreditSpreadStrategy.CONDITIONS,
+          str(sorted(scs.SweepCreditSpreadStrategy.CONDITIONS)))
+    conds = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call)
+             and getattr(n.func, "attr", "") == "cond"
+             and n.args and isinstance(n.args[0], ast.Constant)
+             and n.args[0].value == "age"]
+    check("L2b and nothing calls prep.cond('age', ...)", not conds,
+          f"lines {[n.lineno for n in conds]}")
 
-    # ── L4 — no relax call touches it, in EITHER form ────────────────────
-    # Operator ruling 2026-09-03: eliminate relaxed from the age question.
-    # Scoped to a CALL whose arguments include the Name, so the comment
-    # explaining the removal cannot match.
-    relaxed_on_age = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fn = node.func
-        nm = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
-        if nm not in ("widen", "window"):
-            continue
-        args = [a.id for a in node.args if isinstance(a, ast.Name)]
-        args += [k.value.id for k in node.keywords if isinstance(k.value, ast.Name)]
-        if "MAX_AGE_BARS" in args:
-            relaxed_on_age.append(node.lineno)
-    check("L4 no relaxed.widen/window call on MAX_AGE_BARS",
-          not relaxed_on_age, f"lines {relaxed_on_age}")
+    # ── L3 — BUT THE AGE IS STILL RECORDED ───────────────────────────────
+    # ⚠️ r241 removes the GATE, not the MEASUREMENT. `sig.sweep_age_bars` still
+    # carries it onto the trade row: knowing how old a level was is useful for
+    # fitting, DECIDING with it is what was ruled out.
+    check("L3 the age is still recorded on the signal",
+          "sig.sweep_age_bars = prep.age" in src)
 
-    # ── L5 — declared FOUNDATIONAL, so check_gates enforces L4 forever ───
-    check("L5 GATES declares MAX_AGE_BARS FOUNDATIONAL",
-          scs.GATES.get("MAX_AGE_BARS") == "FOUNDATIONAL",
-          repr(scs.GATES.get("MAX_AGE_BARS")))
+    # ── L4 — THE UNMEASURABLE CASE REFUSES ON ITS OWN TERMS ──────────────
+    # 🔴 A 999 sentinel means `bars_ago` could not be read AT ALL. That is a
+    # DATA fault, not a staleness judgement, and admitting it silently would be
+    # the absent-is-not-zero failure this repo keeps paying for.
+    check("L4 the 999 sentinel still refuses, by its own name",
+          "sweep_unmeasurable" in src and "_AGE_UNMEASURABLE = 999" in src)
 
-    # ── L6 — the gate ADMITS today's real refusals ───────────────────────
-    # 2026-09-03, measured from plan_check: QQQ `age` FAILED 761/761 at
-    # 33-48 bars. Every one of those clears at 48. This is the whole point
-    # of the revision and it is asserted on the arithmetic the gate runs.
-    todays = [33, 40, 44, 48]
-    admitted = [a for a in todays if a <= scs.MAX_AGE_BARS]
-    check("L6 QQQ's 33-48 bar sweeps all clear the backstop",
-          admitted == todays, f"admitted {admitted} of {todays}")
-
-    # ── L7 — and it still REFUSES beyond the backstop ────────────────────
-    # A gate that admits everything is not a backstop. 999 is the module's
-    # own absent-sentinel and must not be treated as a live reading.
-    check("L7 a 999-bar sentinel is still refused",
-          not (999 <= scs.MAX_AGE_BARS))
+    # ── L5 — LIVENESS IS `invalidated`, WHICH SWP.5 ALWAYS SAID ──────────
+    # It fails 73% fleet-wide, which is price accepting through a level — a
+    # market fact, not a defect, and the gate doing exactly its job.
+    check("L5 'invalidated' remains a declared condition",
+          "invalidated" in scs.SweepCreditSpreadStrategy.CONDITIONS)
 
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 8 checks")
+    print("GREEN — 7 checks")
     return 0
 
 

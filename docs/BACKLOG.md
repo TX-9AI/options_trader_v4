@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.58
+# BACKLOG.md — v1.59
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,58 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.59 — 2026-09-04 — r241 / dtp r272 — 🔴 THE AGE GATE IS REMOVED, NOT
+RAISED — AND THE MEASUREMENT THAT SHOWS WHETHER r234 LANDED.**
+🔴 Operator, 2026-09-04: *"I don't give a rat's ass how old the level is, it's
+still a level. Why are we still measuring the age of them?"* **Because I only
+half-shipped his 2026-08-11 ruling.** SWP.5 said *"LIVENESS REPLACES THE
+CLOCK"*; r230 found it had never reached the code and **raised the ceiling 6 →
+48 instead of deleting the gate.** That was my call, not his.
+🔑 **AGE MEASURES THE RAID, NOT THE LEVEL.** A level swept at 09:45 that has
+held since is the *same level* at 13:00 — arguably better for having held
+longer. And levels are swept all day; the morning's is not the only one on the
+board, which is the operator's point and it kills the "morning event, afternoon
+window" chain I had built on top of it.
+🔴 **MEASURED FLEET-WIDE, 08-31..09-04:** `age` failed **46,791 of 61,641
+(76%)**, and on **333 ticks — 26% of every tick that was ONE gate short — it
+was the only thing refusing.** Complete setups, declined for being old.
+⚠️ `invalidated` already answers this correctly and fails 73% — price accepting
+through a level is a market fact, not a defect. `age` was a second, worse proxy
+for a question that gate settles.
+⚠️ **THE MEASUREMENT SURVIVES** — `sig.sweep_age_bars` still reaches the row.
+The gate goes, the number stays, because age is useful for FITTING.
+⚠️ **AND UNMEASURABLE IS NOT OLD.** The 999 sentinel refuses under its own name
+(`sweep_unmeasurable`): a data fault, not a staleness judgement.
+
+## THE MEASUREMENT — dtp r272
+
+🔑 **A MIN/MAX CANNOT ANSWER WHETHER r234 WORKED.** `wing_r_best` failed 58,205
+times over `0.0000 .. 0.9841`, and r234's bar sits at the equivalent of **0.15**
+on that scale. A median of 0.60 and a median of 0.02 report **identically** as a
+range and mean opposite things: the first says most of those 509 sole-blocker
+ticks now fire, the second says r234 barely touched the sweep and the anchor
+distance is still the problem. The screen now prints p10/p25/median/p75/p90 per
+rung.
+
+## THREE FRAMINGS I GOT WRONG, IN ORDER
+
+⚠️ I claimed the window and the debit block were **redundant**. Then that they
+**overlapped**. Both wrong: `DEBIT_DIRECTIONAL_CUTOFF_ET` 11:30 ends debit
+entries and `CREDIT_ENTRY_START_ET` 11:31 begins credit entries — **they never
+compete**, and the debit block is a backstop for a position still running, not
+a gate on entry. The window is the design and was never the problem.
+⚠️ And I built a "sweeps happen in the morning, the window opens in the
+afternoon" causal chain **on top of the age gate that shouldn't exist**.
+
+`tests/check_age_gate_gone.py` v1.0, 9 checks, born red 7. `check_sweep_liveness`
+**re-derived** — it pinned the ceiling. `check_ledger_parity` gains r226 to its
+known-rowless set: **r240's own GENESIS row cites it**, so the checker caught
+its own new case the day it was written. **85/85 green.**
+
+| id | question | state |
+|---|---|---|
+| **SWEEP.12** | Read the `wing_r_best` quantiles. Median **above 0.15** → r234 cleared it and the sweep should fire Monday. Median near **0.02** → r234 barely touched it and SWEEP.2's anchor distance is the real blocker. | 🔲 OPEN |
 
 **v1.58 — 2026-09-04 — r240 — 🔴 r226 WAS CUT AND NEVER LANDED, AND THE CHANGE
 IT DESCRIBED IS THE ONE BLOCKING MOM.1. PLUS: THE BACKLOG COULD NO LONGER
