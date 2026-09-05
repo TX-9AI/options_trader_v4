@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v4.4 · 2026-09-05 — §0 plus 38 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v4.5 · 2026-09-05 — §0 plus 39 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1069,6 +1069,36 @@ PINNING with the apex on the pin — are tested inline against no constant. Ther
 is nothing to pass to `relaxed.widen()`, so they cannot be loosened even by
 mistake.
 
+## 36a. EVERY S3-SOURCED READER GOES THROUGH `WarehouseCache.load`.
+
+Added 2026-09-05 (r272), correcting SNS.4, which said `load_derived()`.
+
+**It said the wrong function, and the reason it was wrong is the point.**
+`warehouse_reader.load_derived` carries the natural-key collapse, the forward
+partition scan and the ET-day filter — and **it has no production callers**
+(S3.11). Every report reaches the warehouse through `WarehouseCache.load`,
+which had none of the three until dtp r286 and r290 put them there. A rule
+pointing at the correct-but-unused function would have sent the next reader
+down the road with no traffic, which is how the defect happened in the first
+place.
+
+🔑 **WHAT THE CACHE GIVES YOU, AND WHY A BARE PARTITION READ IS NOT
+EQUIVALENT.** It collapses CDC duplicates on each table's own declared primary
+key, and REFUSES to collapse when the projection is missing part of that key
+rather than folding distinct rows together. It scans a forward window and keeps
+rows by their OWN ET day, because a derived partition is stamped with the PUSH
+day (C.9) — so a bare read both MISSES rows pushed the next morning and
+INCLUDES rows dated before the range. It streams at O(one object). And it
+reports which collapse rule ran, so a report can state its provenance instead
+of asserting one.
+
+⚠️ **A BARE `read_prefix` OR HAND-ROLLED PAGINATOR REPRODUCES ALL OF THAT
+WRONG, SILENTLY.** Every failure in this class renders as a smaller, plausible
+number — never as an error.
+
+⚠️ **`load_derived` REMAINS THE REFERENCE IMPLEMENTATION** and its checker is
+worth keeping, but code that reads the warehouse for a report does not call it.
+
 ## 37. AN INTERRUPTED FIRING SEQUENCE IS NEVER RE-ENTERED. IT IS LOGGED AS MISSED.
 Added 2026-08-24, operator's ruling, after r95 restored ORB state across a
 restart and the first instinct was to let the recovered setup trade.
@@ -1130,6 +1160,16 @@ directions.
 ---
 
 ## CHANGELOG
+
+**v4.5 — 2026-09-05 — r272 — §36a ADDED: EVERY S3-SOURCED READER GOES THROUGH
+`WarehouseCache.load`.**
+Corrects SNS.4, which mandated `load_derived()` — the function that carries the
+collapse, the forward scan and the ET-day filter, and **has no production
+callers**. A rule naming the correct-but-unused path would have sent the next
+reader down the road with no traffic, which is exactly how S3.11 and S3.21
+happened. The cache is what every report actually uses and now carries all
+three behaviours; a bare partition read reproduces them wrong and renders as a
+smaller, plausible number rather than an error.
 
 **v4.4 — 2026-09-05 — r265 — §18a ADDED: NO COMMAND PRINTS A SERVICE
 ENVIRONMENT BLOCK.**
