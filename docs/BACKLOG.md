@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.89
+# BACKLOG.md — v1.90
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -84,7 +84,7 @@ feed plumbing and are not warehouse candidates.
 | **BFLY.5** | ⬜ **DOES A CHEAPER AFTERNOON FLY ACTUALLY BUY MORE SIZE?** | ⬜ | The noon floor's NEW justification (r200) rests partly on this, so it is load-bearing and unmeasured. The butterfly sizes through `_size_budget` on `net_debit`, so a cheaper body should mean more contracts for the same dollars. **Comparison set exists and is closed:** the three tagged 09:45 flies of 2026-08-31 (MU, TSLA, NFLX) against every afternoon fly from r196 onward. Wants `contracts` and `net_debit` per butterfly row, afternoon vs pre-noon. If it does not hold, reason 2 comes out of the config and noon rests on pin probability alone. |
 | **BFLY.6** | 🔴 **THE NOON RULE'S ORIGINAL PREMISE WAS FALSIFIED, AND THE COUNTEREXAMPLE IS THE ONLY SAMPLE THERE WILL BE.** | ⬜ | 2026-08-31: BFLY.1's relaxed floor let four flies open at 09:45; **three carried to the 15:40 hard close in profit** — MU +$637.50, TSLA +$692.00, NFLX +$47.00, together most of a +$1,543.50 fleet day. The retired premise said exactly this could not happen. ⚠️ **ONE SESSION, AND A PINNING TAPE** — GEX read PINNING or AMPLIFYING across the panel, which is the day an early fly works and precisely the population the rule distrusted. Not enough to overturn anything. 🔑 **The sample is now CLOSED**: r196 is baked, so no further pre-noon flies will occur unless deliberately reopened. Operator's call 2026-08-31: noon going forward. Recorded so the counterexample is not lost, and so nobody re-derives the retired premise from scratch. |
 | **RPT.4** | 🔴 **BOTH DASHBOARDS SHOWED ONE OPEN POSITION AND CALLED IT THE BOOK.** | r199 | ◐ **PUSHED.** `status.py:290` and `query.py:194` both carried `ORDER BY entry_time DESC LIMIT 1`. **Latent since r161 made the butterfly additive** — before that, one position per box was TRUE and the limit was correct; nothing swept the readers when the rule changed. Measured 2026-08-31 on CRM, holding a runaway AND a butterfly, showing one, with `2 × $100 = $1010.00 at risk` describing the runaway alone. ⚠️ **r197 makes multi-position boxes the norm**, so this stopped being latent. Both now render every position, oldest-first, with the COUNT and the SUMMED exposure in the header — D3 pins the sum, because listing two cards while printing one card's risk recreates the r121 confusion (*"How is 2 contracts at $96 costing me $800???"*) one level up. |
-| **RPT.5** | ⬜ **DUPLICATE PLAN-LEDGER ROWS.** CRM printed `RunawayContinuation [TRIGGERED] @ 259.38` **twice**. | ⬜ | r199 collapses them FOR DISPLAY and prints how many it collapsed, so the duplication stays visible — it does NOT fix the ledger. Two rows for one strategy at one trigger is a write-side question nobody has asked yet. Do not mask it further. |
+| **RPT.5** | ◐ **INSTRUMENTED — THE TWO EXPLANATIONS ARE OPPOSITE AND A COLLAPSE HID THAT.** | dtp r295 | ◐ **BUILT + PUSHED — the probe, not the answer.** `plan_ledger.open_plan()` mints `uuid4().hex[:16]` per call, so two rows means `_ledger_open` RAN TWICE — and r212 already closes the previous unfilled plan first with `terminal_reason = "superseded — never filled"`. 🔑 **SO TWO ROWS MAY BE ENTIRELY CORRECT:** two genuine intents, the first refused an entry and superseded. Or a real double-write. **Those look identical under r199's display collapse and are opposite findings.** `tools/plan_dupe_probe.py` clusters on (symbol, strategy, trigger_price) and names the mechanism from the earlier row's state: `superseded` → the r212 path working, a STRATEGY question about re-arming after a refused entry; still LIVE or terminal for another reason → a genuine double-write and the ledger is wrong. ⚠️ **EXIT CODE IS NON-ZERO ONLY FOR THE UNEXPLAINED**, because supersession is the designed path and a study that flags its own system's correct behaviour gets ignored. ⚠️ **AND A SAME-SECOND PAIR IS CALLED OUT REGARDLESS** — r212's reasoning is that *"take() and the entry attempt happen on the SAME tick, so by the time the next one fires the previous has resolved"*; two rows inside a second means that assumption did not hold, whatever the states say. **Run it over a real range to close this.** |
 | **BFLY.3** | 🔴 **THE BUTTERFLY'S WINGS WERE COMPUTED ON A STRIKE GRID THAT DOES NOT EXIST.** | r198 | ◐ **PUSHED.** `config.STRIKE_INCREMENT` is ONE global number for fifteen symbols, and `round_to_strike()` returns an **int** — so every wing quantised to whole dollars regardless of the symbol's ladder. **Measured 2026-08-31: PLTR pin 190, EM 3.25 → wing 1 → legs 189/191 on a $2.50 ladder; AMD pin 472.5 → legs 470.5/474.5.** Neither pair is listed, so the `legs` gate refused for **242 and 243 minutes** (~900 ticks each) on both boxes — an arithmetic problem wearing the costume of a market judgement. `_chain_increment()` now reads the real ladder off the chain (MEDIAN gap near the pin, so one stray half-strike cannot set the grid) and the wing snaps to it, float-safe. 🔑 **THE APEX NEVER MOVES** — both pins were LISTED strikes; only the wings were off-grid, so *"a nearest-strike substitute is a different one"* is untouched and W3 pins it. Operator ruled a wider-than-intended wing ACCEPTED (*"it will bear out in the metrics later on if that is viable"*), so `wing_intended`, `grid_increment` and `wing_stretch` ride on the signal — a ruling that defers to metrics needs the metrics to see it. |
 | **BFLY.2** | 🔴 **AN OPEN BUTTERFLY BLOCKED EVERY OTHER ENTRY ON THE BOX — the reciprocal of r161, never built.** | r197 | ◐ **PUSHED.** r161 exempted the butterfly from the single-position rule ON ENTRY (*"no position slot, no capital, no competition"*), but `has_open_position()` still counted it — no slot going IN, one slot occupied once THERE. **Measured 2026-08-31: MU, NFLX and TSLA each held a 09:45 butterfly and each sat in the second-leg-only branch when the credit windows opened, `CondorManagement=HOLD(no credit verticals open)` on all three.** One opportunistic trade removed three boxes from the credit side for the session. `has_blocking_position()` counts everything except a butterfly. ⚠️ **CREDIT IS STILL BLOCKED BY AN OPEN ORB OR RUNAWAY DEBIT** — B3 pins that every non-butterfly strategy still blocks, so this cannot degrade into "nothing blocks". The branch was NOT flipped (that would leave a butterfly-only box unmanaged); the ENTRY half is added back after management. |
 | **BFLY.1** | 🔴 **THE BUTTERFLY'S NOON FLOOR WAS RELAXABLE, AND THE FIRST LIVE-FLEET OPEN SPENT IT.** | r196 | ◐ **PUSHED.** Operator, watching butterflies at 09:45: *"the noon floor is non-negotiable."* Confirmed from the fleet's own logs: `DORMANT(entry_window: outside the butterfly slot 09:45-...)` and `Entry: gex_pin_butterfly_relaxed` on `[PAPER]` boxes — 09:45 is `relaxed.window()`'s `relaxed_earliest` DEFAULT exactly, not a pin forming early. `EARLIEST_ET` moves **SELECTION → FOUNDATIONAL** and is pinned via `relaxed_earliest=EARLIEST_ET`; `LATEST_ET` stays relaxable. Verified in paper with relaxed ON: window was `09:45-15:30`, is now `12:00-15:30`. |
@@ -344,6 +344,43 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.90 — 2026-09-05 — dtp r295 — RPT.5: THE INSTRUMENT, NOT THE ANSWER.**
+
+CRM printed `RunawayContinuation [TRIGGERED] @ 259.38` twice. r199 collapsed it
+for display and printed the count, and the row said plainly: *"a write-side
+question nobody has asked yet. Do not mask it further."*
+
+🔑 **READING THE WRITE PATH FIRST CHANGED THE QUESTION.**
+`plan_ledger.open_plan()` mints a fresh `uuid4` per call, so two rows means
+`_ledger_open` ran twice — and r212 **already** closes the previous unfilled
+plan of that strategy first, stamping `terminal_reason = "superseded — never
+filled"`. So two rows can be entirely correct: the strategy fired, the entry was
+refused, and it re-armed. **Or it can be a genuine double-write.** Under a
+display collapse those are indistinguishable, and they are opposite findings —
+one is a strategy question about re-arming, the other is a ledger defect.
+
+**`tools/plan_dupe_probe.py`** clusters on (symbol, strategy, trigger_price) and
+reads the verdict off the earlier row: `superseded` is r212 working; still LIVE,
+or terminal for some other reason, is a double-write. ⚠️ **It exits non-zero
+only for the unexplained ones** — supersession is the designed path, and a study
+that flags its own system's correct behaviour is a study that gets ignored.
+⚠️ **A same-second pair is called out either way**, because r212's own reasoning
+is that the previous plan has resolved before the next fires, and two rows
+inside a second means it had not.
+
+⚠️ **A CLI STUDY, NOT A MENU ITEM** — it takes real arguments and can be re-run
+over another range without a prompt in between (operator, 2026-09-01).
+
+`tests/test_plan_dupe_probe.py`, **6 checks**, driving the real fixture through
+`WarehouseCache` — the path every report takes — rather than calling the
+classification directly, which would pass against a probe that never reads the
+right column. ⚠️ Two of my own errors on the way: a day count computed by
+dividing epoch seconds (a float into `range()`, and an hour wrong across DST
+even if it had not been), and a double-encoded fixture.
+
+**RPT.5 stays OPEN.** This is the instrument; the answer needs a run over a real
+range.
 
 **v1.89 — 2026-09-05 — dtp r294 — RPT.14: A CHECKER THAT HAD NOT RUN IN WEEKS
 RUNS AGAIN, AND THE REASON IT MATTERED IS ALREADY IN THE LEDGER.**
