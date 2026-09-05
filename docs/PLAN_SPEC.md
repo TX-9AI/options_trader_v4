@@ -312,7 +312,8 @@ declare-then-compare.
 **What r126-r145 delivered was not this document.** It was a second
 implementation of every strategy inside `derived/plans.py` that guessed at what
 the real one would do and recorded the guess (zero calls into `strategy/`; see
-`docs/HANDOFF_PLAN_ARCHITECTURE_REBUILD.md`). Operator, 2026-08-26: *"The
+the r146 rebuild; its handoff was deleted at r269 once §8 held the
+as-built record). Operator, 2026-08-26: *"The
 strategy is the spec, the specification. The plan is how it executes according
 to the spec … I don't need two strategies for every strategy."* r146 tears the
 mirror out and builds the plan as he described it.
@@ -486,7 +487,7 @@ defects fixed: the land gate had been red since r152 (the exorcism gate
 tripped on r152's own test); three files changed without a version bump or
 changelog entry (recorded retroactively); leg two was dead whenever the
 nearest complementary level was a tine — moot now that the condor selects
-no level. On `docs/HANDOFF_PLAN_INPUTS.md`'s "plan-side gatherer that
+no level. On the r158 handoff's "plan-side gatherer that
 searches the feed": correct in its goal, dangerous in its wording — the plan
 gathers measurements and selects variables; it never decides that a setup
 exists. Starvation by name is the part of that handoff that is built.

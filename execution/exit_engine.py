@@ -1,5 +1,13 @@
 """
-execution/exit_engine.py  v4.9
+execution/exit_engine.py  v4.10
+v4.10 2026-09-05  r269 — 🔴 THE FORMED CONDOR'S LOSS BOUNDARY IS SETTLED: there
+      is NONE, deliberately. Operator: *"The current architecture covers all
+      condor management. It's a settled issue."* The 15:45 close, the nickel
+      close and the roll ARE the management. This replaces a citation to
+      `docs/HANDOFF_CONDOR_STOP_20260824.md`, deleted this revision — that
+      document held the only statement of the open question, so the answer is
+      recorded AT THE SITE that would otherwise invent a boundary. No code
+      change.
 v4.9  2026-09-04  r238 — 🔴 THE TREND-CREDIT BRANCH GAINS A
       15%-OF-CREDIT STOP, and it runs FIRST. Before this the branch checked the
       boundary breach and returned, so a trend credit had no premium stop at
@@ -43,9 +51,10 @@ v4.4  2026-08-24  CONDOR STOP SUPPRESSION (operator ruling: "The 25% stop
       v4.3) — stop_premium stays the immutable entry-time floor per the v3.1
       trail lesson — and are announced edge-triggered at INFO. Lone
       calibration unchanged at 15% (TRADES.md §5 / F6). The formed structure
-      keeps 15:45 close, nickel close, and the roll; its further loss
-      boundary is an open operator decision (docs/HANDOFF_CONDOR_STOP_
-      20260824.md). Stale CONDOR_STOP_LOSS_PCT import removed (unused here
+      keeps 15:45 close, nickel close, and the roll. 🔴 SETTLED 2026-09-05
+      (r269): THE FORMED CONDOR HAS NO FURTHER LOSS BOUNDARY, DELIBERATELY -
+      operator, "the current architecture covers all condor management."
+      Those three ARE the management. Stale CONDOR_STOP_LOSS_PCT import removed (unused here
       now; main.py still stamps the row floor with it). exit_reason gains
       "(lone 15%)".
 
@@ -1779,9 +1788,18 @@ class ExitEngine:
         # the moment the leg is alone again — one-way suppression would leave
         # a naked full-sized position with no premium stop.
         # ⚠️ SUPPRESSED IS NOT UNMANAGED: the formed structure keeps the 15:45
-        # close above, the nickel close below, and the roll. Any loss boundary
-        # beyond those is an OPEN OPERATOR DECISION (see
-        # docs/HANDOFF_CONDOR_STOP_20260824.md) — nothing here invents one.
+        # close above, the nickel close below, and the roll.
+        # 🔴 SETTLED 2026-09-05 (r269) — DO NOT RE-OPEN. There is NO further
+        # loss boundary on a formed condor, and that is a decision rather than
+        # an omission. Operator: *"The current architecture covers all condor
+        # management. It's a settled issue."* The reasoning is `risk_manager
+        # .compute_condor_leg_size`'s own: the two verticals CANNOT both reach
+        # max loss at expiry because price can only be at one extreme, so a
+        # stop on the tested side converts a structurally hedged position into
+        # a directional one at the worst possible moment. Precedent: the trend
+        # credit spread carries `stop_premium=0.0` for the same reason.
+        # ⚠️ NOTHING HERE INVENTS ONE, and nothing should ADD one without a new
+        # ruling — this comment is the record that it was asked and answered.
         # Suppress/re-arm persist on the row as stop_suppressed_ts /
         # stop_suppressed_by (NEW FIELDS, trade_logger v4.3 — stop_premium
         # stays the immutable entry-time floor, per the v3.1 trail lesson) and

@@ -1,5 +1,8 @@
 """
-derived/plans.py  v2.0
+derived/plans.py  v2.1
+v2.1  2026-09-05  r269 — provenance citation redirected to `docs/PLAN_SPEC.md`
+      §8, which holds the as-built record; the r146 handoff that requested the
+      rebuild was deleted as a spent thread contract. No code change.
 v2.0  2026-08-26  r146 — THE SEVEN BUILDERS ARE DELETED (1,212 lines, lines
       465-1677 of v1.0). They were a second implementation of every strategy
       that guessed at what the real one would do and recorded the guess; zero
@@ -7,7 +10,8 @@ v2.0  2026-08-26  r146 — THE SEVEN BUILDERS ARE DELETED (1,212 lines, lines
       `TrendParticipation | TAKE | R 1.43` across the fleet on 2026-08-26
       while those boxes traded nothing. Operator: *"I don't need two
       strategies for every strategy."* Full accounting in
-      docs/HANDOFF_PLAN_ARCHITECTURE_REBUILD.md.
+      docs/PLAN_SPEC.md §8 (the as-built record; the r146 handoff that
+#      requested it was deleted at r269 as a spent thread contract).
       WHAT MOVED WHERE: the recording layer (plan_tick / plan_check schema,
       NULL-not-zero, starved rows) -> `strategy/plan.py`; the shared session
       map and the operator's geometry ruling -> `analysis/session_map.py`;

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_exit_executes.py  v4.2
+tests/check_exit_executes.py  v4.3
+v4.3  2026-09-05  r269 — the "prefer executing to reading" citation now names
+      WORKING_AGREEMENT §0.6 rather than `AUDIT_HANDOFF §5`, deleted this
+      revision. The principle is unchanged and is why this file executes.
 v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -25,7 +28,8 @@ INHERITED DOCTRINE
 MEASUREMENTS AND CONSTRAINTS CARRIED FROM v3 — NOT A CHANGELOG.
 WORKING_AGREEMENT 32 requires this block be read before the file is edited.
 
-"Prefer executing to reading" (AUDIT_HANDOFF §5) exists because defects keep
+"Prefer executing to reading" — WORKING_AGREEMENT §0.6, and the reason the
+adversarial audits were run that way — exists because defects keep
 being invisible to `import`: the ctx NameError of 2026-08-18, the vanished
 bisected class. `import` proves a file parses; only a call proves it runs.
 The 15%-unhedged / 25%-hedged condor-leg stop asserted here is TRADES.md §5's

@@ -31,7 +31,8 @@ threads rather than in code. Search on the finding, not the date:
 3. `docs/GENESIS.md` — 50 revisions with the reasoning, **corrections kept.**
    Read the corrections; they tell you where the previous thread was weakest.
 4. `docs/WORKING_AGREEMENT.md` — 36 sections of hard-won operational rules.
-5. `docs/AUDIT_FINDINGS.md` — the ten findings from the adversarial audit.
+5. The 2026-08-20 audit findings are closed and recorded per-item in
+   `docs/BACKLOG.md`; `AUDIT_FINDINGS.md` was deleted at r269.
 
 **Added 2026-08-22→25 and ESSENTIAL — the feed architecture is not optional
 reading, it is where four of the five 2026-08-21 blockers lived:**

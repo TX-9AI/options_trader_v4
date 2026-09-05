@@ -1,5 +1,15 @@
 """
-config.py  v4.14
+config.py  v4.15
+v4.15  2026-09-05  r269 — WHY THIS REPO EXISTS IS NOW IN THE DOCTRINE BLOCK.
+      The v3 direction-skill measurement (715 trades, 44.9% correct side, CI
+      entirely below a coin flip) and the P&L attribution that followed it were
+      lifted out of `docs/AUDIT_HANDOFF.md`, which was DELETED along with seven
+      sibling thread contracts — 89 KB of spent handoffs and one durable fact.
+      ⚠️ IT DID NOT GO TO THE BACKLOG: that file is DEFERRED WORK, and this is
+      a settled measurement. It did not go to an archive either, because an
+      archive is where documents go to stop being read. It is in the block
+      WA §32 requires be read before this file is edited.
+
 v4.14  2026-09-04  r238 — TCS REBUILT. `TCS_ENTRY_END_ET` (14,0) spec'd
       not inherited; `TCS_R_FLOOR_EXPIRY` and `TCS_STOP_PCT_OF_CREDIT` added.
 v4.13 2026-09-04  r237 — 🔴 TCS_ENTRY_END_ET SET OUT OF REACH: (14, 0) -> (0, 0).
@@ -74,6 +84,27 @@ v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
 MEASUREMENTS AND CONSTRAINTS CARRIED FROM v3 - NOT A CHANGELOG.
+
+🔴 WHY THIS REPO EXISTS, AND IT IS A MEASUREMENT, NOT A PREFERENCE.
+v3's central premise was measured FALSE. `tests/direction_skill.py`,
+715 closed directional trades over 16 sessions: the regime classifier
+picked the correct SIDE on 44.9%, 95% CI [41.3%, 48.6%] - the interval
+sits ENTIRELY BELOW A COIN FLIP. Puts were 34.2%. The strategy most
+dependent on it lost $5,872 across 660 trades.
+What made money was REGIME-INDEPENDENT: `orb_trail_stop` 96% / 85 trades
+/ +$30,696, worst case -$16. What lost it was the floors and BOS:
+`max_loss_floor` 76 trades / -$28,179, and `bos_exit` 217 trades /
+-$7,085 carrying the single largest loss in the book.
+🔑 THE THESIS THAT REPLACED IT: entries decided by STRUCTURE, not by
+labels; exits kept because they were MEASURED; every threshold traceable
+to a number.
+⚠️ LIFTED HERE 2026-09-05 (r269) FROM `docs/AUDIT_HANDOFF.md`, WHICH WAS
+DELETED. It sat in an 89 KB set of spent thread contracts nobody reads,
+and it is the one fact in them that must not be re-derived: without it,
+a future reader rebuilds the regime classifier because it sounds
+reasonable. It belongs in the block WA 32 requires be read before this
+file is edited - not in a backlog, which is DEFERRED WORK, and not in an
+archive, which is a place documents go to stop being read.
 Dated release framing and trivia are stripped; what remains is the
 reasoning behind the thresholds, the design guarantees, and the
 defects that recur when forgotten. WORKING_AGREEMENT 32 requires
