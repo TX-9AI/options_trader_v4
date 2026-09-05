@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/cascade_real.py  v1.1  (2026-08-30)
+tests/cascade_real.py  v1.2
+v1.2  2026-09-04  r246 — TCS.9: the local constant copy is now
+      COMPARED against config by `check_cascade_constants.py`. The copy
+      is deliberate — this harness models the cascade without importing
+      config — but a copy nobody compares is drift waiting to happen:
+      r238 parked TCS at (0,0) and this still read (14,0), modelling a
+      TCS that traded, and r241 made it correct BY ACCIDENT.  (2026-08-30)
 
 v1.1  2026-08-30  r193 — ORB_NO_ENTRY_AFTER_ET follows config (11:30).
       This file declared its OWN (11, 0); a real-tape run rehearsing an 11:00
@@ -52,6 +58,15 @@ ORB_NO_ENTRY_AFTER_ET       = (11, 30)   # r193 — keep in step with config;
                                          # tests/check_orb_window.py pins every copy
 DEBIT_DIRECTIONAL_CUTOFF_ET = (11, 30)
 CONDOR_ENTRY_START_ET       = (11, 11)
+# 🔴 r246 (TCS.9) — THESE ARE A DELIBERATE LOCAL COPY, AND THE COPY IS THE
+# POINT: this harness models the cascade WITHOUT importing config, so it can be
+# reasoned about standing still while the fleet's constants move. But a copy
+# nobody compares is drift waiting to happen — r238 set TCS_ENTRY_END_ET to
+# (0,0) to park TCS and these still read (14,0), so for a day they modelled a
+# TCS that traded. r241 restored (14,0) and made them correct BY ACCIDENT.
+# ⚠️ `tests/check_cascade_constants.py` now compares every one of these against
+# config and fails on a difference, so the copy stays intentional instead of
+# becoming stale. Same treatment ORB_NO_ENTRY_AFTER_ET already has.
 TCS_START_ET                = (11, 31)
 TCS_ENTRY_END_ET            = (14, 0)
 BUTTERFLY_ENTRY_START_ET    = (12, 0)

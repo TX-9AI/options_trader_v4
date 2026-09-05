@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_note_label.py  v1.0
+tests/check_note_label.py  v1.1
+v1.1  2026-09-04  r246 — N4 extends to the gate reporter: it must
+      resolve the same dispatch labels, keep its own spelling, and be a
+      SUPERSET of the shared map.
 v1.0  2026-09-04  r239 — THE NOTE LABEL IS CANONICAL. `_note_evaluation` is the
       only writer of `strategy_note`, and it stamped the raw `_safe_strategy`
       dispatch label while the plan ledger and gate rows use the class name.
@@ -83,11 +86,31 @@ def main():
     check("N3b every label is either a class name or aliased to one",
           labels, f"labels={sorted(labels)}")
 
+    # ══ N4 — THE GATE REPORTER RESOLVES THE SAME LABELS ══════════════════
+    # 🔴 r246. `gate_report` held its OWN dict and was missing `ORB` and
+    # `SweepForLeg2`, so the ORB's fired() arrived as "ORB" and never resolved
+    # — r239's split in a THIRD place. r239 fixed the notes writer; the plan
+    # board had it right since r147; this one was never told.
+    from analysis.gate_report import DISPATCH_ALIAS as GA
+    check("N4 the reporter resolves ORB", GA.get("ORB") == "ORBStrategy")
+    check("N4b and SweepForLeg2 (r160's ruling)",
+          GA.get("SweepForLeg2") == "SweepCreditSpread")
+    # ⚠️ NOT A DUPLICATE — COMPOSED. `plan.DISPATCH_ALIAS` maps to the CLASS
+    # NAME; this maps to the REPORTER'S OWN name, and `GexPinButterfly`
+    # (lowercase x) is live at gex_pin_butterfly:271 while dispatch fires under
+    # "GEXPinButterfly". Merging them would break that reconciliation, which is
+    # why FIT.2's "two copies of one map" was the wrong diagnosis.
+    check("N4c the reporter's own spelling still wins",
+          GA.get("GEXPinButterfly") == "GexPinButterfly")
+    check("N4d and it is a SUPERSET of the shared map",
+          all(GA.get(k) for k in DISPATCH_ALIAS),
+          str([k for k in DISPATCH_ALIAS if not GA.get(k)]))
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 5 checks")
+    print("GREEN — 9 checks")
     return 0
 
 

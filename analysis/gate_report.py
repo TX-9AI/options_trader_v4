@@ -1,5 +1,17 @@
 """
-analysis/gate_report.py  v4.1
+analysis/gate_report.py  v4.2
+v4.2  2026-09-04  r246 — 🔴 DISPATCH_ALIAS IS COMPOSED FROM THE
+      CANONICAL MAP. This held its own dict and was MISSING `ORB` and
+      `SweepForLeg2`, so the ORB's `fired()` arrived as "ORB" and never
+      resolved — r239's split in a THIRD place. r239 fixed the notes writer,
+      the plan board had it right since r147, this one was never told.
+      ⚠️ COMPOSED, NOT REPLACED, and FIT.2's "two copies of one map" was the
+      wrong diagnosis. `plan.DISPATCH_ALIAS` maps a dispatch label to the CLASS
+      NAME; this maps it to THE REPORTER'S OWN name, and `GexPinButterfly`
+      (lowercase x) is live at `gex_pin_butterfly:271` while dispatch fires
+      under "GEXPinButterfly". Merging them would have broken that.
+      ⚠️ THE LOCAL LAYER GOES LAST so a reporter-name override always wins, and
+      the import degrades to local names on failure — this file never raises.
 v4.1  2026-08-23  AUDIT F9: `cleared()` had ZERO callers, so the CLEARED event
 the docstring calls "as important as the block" could never be written, and
 snapshot() reported a strategy blocked with a growing held_s forever - after
@@ -55,11 +67,34 @@ REANNOUNCE_S = 900.0
 
 # main.py dispatches under short labels; strategies report under their class
 # names. One map, so a fire can find the block it clears.
-DISPATCH_ALIAS = {
+# 🔴 r246 — COMPOSED FROM THE CANONICAL MAP, NOT A SECOND COPY OF IT. This held
+# its own dict and was MISSING `ORB -> ORBStrategy` and
+# `SweepForLeg2 -> SweepCreditSpread`, so the ORB's `fired()` arrived as "ORB"
+# and never resolved — r239's split, in a third place. r239 fixed the notes
+# writer; the plan board had it right since r147; this one was never told.
+# ⚠️ AND IT IS NOT A DUPLICATE, WHICH IS WHY IT IS COMPOSED RATHER THAN
+# REPLACED. `plan.DISPATCH_ALIAS` maps a dispatch label to the STRATEGY CLASS
+# NAME. This maps a dispatch label to THE REPORTER'S OWN INTERNAL NAME, and
+# `GexPinButterfly` (lowercase x) is live: `gex_pin_butterfly:271` calls
+# `blocked("GexPinButterfly", ...)` while dispatch fires under
+# "GEXPinButterfly". Merging the two would have broken that reconciliation.
+# FIT.2 filed this as "two copies of one map"; that was wrong.
+# 🔑 THE LOCAL LAYER GOES LAST so a reporter-name override always wins over the
+# shared entry — the shared map cannot silently redirect a name this file owns.
+try:
+    from strategy.plan import DISPATCH_ALIAS as _SHARED_ALIAS
+except Exception:                                              # noqa: BLE001
+    # ⚠️ NEVER RAISES INTO THE REPORTER. This file's contract is "never raises";
+    # an import failure degrades to the local names rather than killing the
+    # gate board.
+    _SHARED_ALIAS = {}
+
+_REPORTER_NAMES = {
+    # the reporter's own spelling, which is NOT the class name
     "GEXPinButterfly": "GexPinButterfly",
-    "CondorPlan": "IronCondorStrategy",
-    "CondorLeg": "IronCondorStrategy",
 }
+
+DISPATCH_ALIAS = {**_SHARED_ALIAS, **_REPORTER_NAMES}
 
 
 class GateReporter:

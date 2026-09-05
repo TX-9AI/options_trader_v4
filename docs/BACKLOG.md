@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.63
+# BACKLOG.md — v1.64
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,38 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.64 — 2026-09-04 — r246 — FIT.2 AND TCS.9 CLOSED — AND FIT.2 WAS FILED
+WRONG.**
+🔴 **r239'S SPLIT WAS IN A THIRD PLACE.** `gate_report` kept its own
+`DISPATCH_ALIAS` and was **missing `ORB` and `SweepForLeg2`**, so the ORB's
+`fired()` arrived as `"ORB"` and never resolved. r239 fixed the notes writer;
+the plan board had it right since r147; this one was never told.
+⚠️ **BUT IT IS NOT A DUPLICATE, AND FIT.2 SAID IT WAS.** I filed it as *"two
+copies of one map"*. `plan.DISPATCH_ALIAS` maps a dispatch label to the **class
+name**; `gate_report`'s maps it to **the reporter's own internal name**, and
+`GexPinButterfly` (lowercase x) is live — `gex_pin_butterfly:271` calls
+`blocked("GexPinButterfly", …)` while dispatch fires under `"GEXPinButterfly"`.
+**Merging them would have broken that reconciliation.** Composed instead, with
+the local layer last so a reporter name always wins, and the import degrading to
+local names on failure because this file never raises.
+🔑 **TCS.9 — THE COPY IS FINE; THE MISSING COMPARISON WASN'T.** The cascade
+harnesses keep local constants deliberately, so the cascade can be reasoned
+about without importing config. But r238 parked `TCS_ENTRY_END_ET` at (0,0) and
+both still read (14,0) — **for a day they modelled a TCS that traded** — and
+r241 restored (14,0), making them correct **by accident**, which is not the same
+as correct. `check_cascade_constants.py` now compares every mirrored constant
+and **was verified to go red against config parked at (0,0)**, the exact drift
+it was written for. Same treatment `ORB_NO_ENTRY_AFTER_ET` already had.
+⚠️ **AND IT REFUSES TO PASS ON NOTHING** — C2 fails if the parse stops finding
+the constants, so a rename cannot produce a cheerful green having verified
+nothing.
+`check_cascade_constants.py` v1.0, 8 checks. `check_note_label` → 9. **87/87.**
+
+| id | question | state |
+|---|---|---|
+| **FIT.2** | Not a duplicate — a missing composition. Closed by r246. | ✅ **CLOSED r246** |
+| **TCS.9** | Local copies now compared against config. | ✅ **CLOSED r246** |
 
 **v1.63 — 2026-09-04 — r245 / dtp r275 — 🔴 THREE INSTRUMENTS MISLED IN ONE
 EVENING. ALL THREE READ A PROXY INSTEAD OF THE THING ITSELF.**
@@ -639,7 +671,7 @@ no new dtp reds** (7 were already red at HEAD).
 | id | question | state |
 |---|---|---|
 | **FIT.1** | `RunawayContinuation declined 37,412` prints next to a rung distribution summing to **1,650**. They come from different streams — declines from `strategy_note`, rungs from `gate_disposition` — and were never comparable, but printing them adjacently invites the misread. | 🔲 OPEN |
-| **FIT.2** | `analysis/gate_report.py:58` keeps its **own copy** of `DISPATCH_ALIAS`. Two copies of one map is how the first rots; r239 did not merge them. | 🔲 OPEN |
+| **FIT.2** | `analysis/gate_report.py:58` keeps its **own copy** of `DISPATCH_ALIAS`. Two copies of one map is how the first rots; r239 did not merge them. | ⬛ superseded — see r246 |
 
 **v1.56 — 2026-09-04 — r238 — 🔴 TCS REBUILT: THE CREDIT VERSION OF THE RUNAWAY,
 ANCHORED TO THE 50.** Operator's spec, 2026-09-04, six parameters, all quoted in
@@ -699,7 +731,7 @@ unpark it; clearing that flag is a separate, deliberate act.
 | **TCS.8** | Re-entry latch — closed by reuse of `fifty_accepted`; operator ruled no latch, strictness is the limiter. | ✅ **CLOSED r238** |
 | **TCS.10** | C1–C5/T7/T8 covered the POP fault and the structural-vs-condition split. `check_tcs_fifty` does not. Owed. | 🔲 OPEN |
 | **TCS.11** | Never run against a tick. First live session needs `fifty_accepted` counts, `holds_fifty` refusals, and how often 1:1 is reachable — the 0.85 fixture says it may be rare. | 🔲 OPEN |
-| **TCS.9** | `cascade_harness`/`cascade_real` still hardcode their own `(14, 0)`. Now correct by accident. | 🔲 OPEN |
+| **TCS.9** | `cascade_harness`/`cascade_real` still hardcode their own `(14, 0)`. Now correct by accident. | ⬛ superseded — see r246 |
 
 **v1.55 — 2026-09-04 — r237 — 🔴 TCS PARKED AT ITS FIRST GATE.** Operator, mid-session:
 *"I don't know how TCS has cleared the bar to fire... set the impossible variable and
@@ -736,7 +768,7 @@ is pinned in `check_tcs_parked` so this file can never be what claims TCS is par
 | id | question | state |
 |---|---|---|
 | **TCS.8** | The rewrite must add a re-entry latch. r235's `confirmation_seq`/`order_placed_seq` is the pattern; TCS has no confirmation concept at all to hang it on. | ⬛ superseded — see r238 |
-| **TCS.9** | `cascade_harness.py:49` and `cascade_real.py:56` hardcode their own `TCS_ENTRY_END_ET = (14, 0)`, so they now model a TCS that still trades. Not in the `check_*` glob, so nothing went red. Pre-existing drift, named not fixed. | 🔲 OPEN |
+| **TCS.9** | `cascade_harness.py:49` and `cascade_real.py:56` hardcode their own `TCS_ENTRY_END_ET = (14, 0)`, so they now model a TCS that still trades. Not in the `check_*` glob, so nothing went red. Pre-existing drift, named not fixed. | ⬛ superseded — see r246 |
 
 **v1.54 — 2026-09-04 — r236 — 📌 DOCS ONLY. THE TCS's ACTUAL INTENT, THE VOL
 SENSORS NOBODY READS, AND THREE DISPOSITIONS.** No code. Recorded because all
