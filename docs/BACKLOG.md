@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.76
+# BACKLOG.md — v1.77
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -99,7 +99,7 @@ feed plumbing and are not warehouse candidates.
 | **S3.7** | Menu 54 → retire, or repoint to `warehouse_reader.build()`. | ⬜ | Duplicates what `eod_analysis._consolidate()` already does from S3. |
 | **S3.9** | 🔴 **THE CDC COLLAPSE KEYED ON A ROWID, WHICH IS NOT AN IDENTITY.** | dtp r276 | ◐ **BUILT + PUSHED.** `_rid` is the source table's sqlite `rowid` (`s3_push:945`). r266 scoped it to the `dt=` partition after (QQQ, 1) on 09-01 collided with (QQQ, 1) on 09-04 — a real UNDER-count, fixed. ⚠️ **AND THE SAME EDIT OPENED AN OVER-COUNT:** `push_derived` files every CHANGED row under the PUSH day, so one CDC row touched on two days lands in two partitions and a partition-scoped key keeps BOTH. Under-count, then over-count, on the same data. 🔑 **EVERY ONE OF THESE TABLES EXCEPT `character_ledger` DECLARES A PRIMARY KEY THE BOX ALREADY ENFORCES** — the identity was in the schema the whole time, and `screen_plan_gates` (dtp r271) was already grouping its per-tick panel on `plan_check`'s own PK. `DERIVED_NATURAL_KEY` is diffed against otv4's real `CREATE TABLE` statements by N4b, so a PK change here goes red rather than collapsing on a key the box no longer enforces. **The row count becomes self-verifying:** distinct primary keys per ET day IS the population, which is what made *"is 2.38M plan_check rows complete"* unanswerable. ⚠️ `character_ledger`'s key is `id INTEGER PRIMARY KEY AUTOINCREMENT` — in sqlite that IS the rowid — so it keeps r266's partition-scoped fallback, and any row missing a key component falls back too and is **counted in the banner**. |
 | **S3.11** | ⬜ **THERE ARE STILL THREE COLLAPSE RULES ON ONE DATASET, AND C.17 SAYS THERE IS EXACTLY ONE.** | ⬜ | Measured at HEAD: `warehouse_reader.load_derived` collapses on the natural key (S3.9); `fit_readiness` runs a SECOND collapse in SQL, `GROUP BY _rid, <ts>`; and `tests/screen_plan_gates.py:101` runs **no collapse at all** — its printed row count is raw object rows, which is where the 2.38M figure came from. 🔴 **THE THREE DISAGREE BY CONSTRUCTION**, which is the S3.6 shape one level over. Not folded into S3.9 deliberately — neither `fit_readiness` nor the screen calls `load_derived`, so nothing here was required to make S3.9 work (WA §4). Ruling wanted: point all three at `load_derived`, or leave the screen raw and label it so. |
-| **S3.12** | ⬜ **THE STREAM REPORT IS NOT IN THE NIGHTLY CHAIN YET, DELIBERATELY.** | ⬜ | `eod_analysis` already runs `warehouse_coverage.py --date <date>` as a phase, so wiring `--streams` in is one argument. **It is not wired, and the reason is the sequencing rather than the work:** the `CONDITIONAL` and `DEAD` classifications in `STREAM_POLICY` are MY declarations read out of `s3_push`'s stage list, and none has been checked against what the bucket actually holds. A phase that goes red every night on a stream nobody expects is a permanent red, and a permanent red is the one thing that stops a board being read (CV.1). ⚠️ **AND MONDAY IS THE FIRST TAPE FOR SIX SWEEP REVISIONS** — r242's own reasoning applies: a zero result has to be attributable. **PRECONDITION MET 2026-09-05:** run by hand over 09-01..09-04, nine flags raised, **seven of them the policy table** — corrected in dtp r280. The remaining two are the QQQ 09-03 gap, explained (disk-full) and bounded. The phase is now wirable on the next pass. |
+| **S3.12** | ✅ **WIRED — THE PER-STREAM BOARD IS A NIGHTLY PHASE.** | dtp r285 | ◐ **BUILT + PUSHED.** `eod_analysis` v1.3 gains a **STREAMS** phase, directly after COVERAGE and before the R suite. 🔑 **THE PRECONDITION WAS THE WHOLE POINT AND IT IS NOW MET:** r277 shipped `--streams` and deliberately left it unwired because the CONDITIONAL and DEAD classifications were read out of `s3_push`'s stage list and never checked against a real bucket. The first hand-run raised **nine flags and seven were the policy table** (r280), and the two real absences were closed as ACCEPTED_LOSS (r284). **An alarm wired before that would have cried wolf on night one and been ignored by night two.** ⚠️ **A SEPARATE PHASE FROM COVERAGE** — the VIX report answers *did the single-writer stream land*, this answers *did every box push every stream it owes*; two questions behind one green is how a passing check stops meaning anything. ⚠️ **IT PRINTS THE FLAGGED ROWS, NOT A COUNT** — `head -3` in the conductor's purge phase (dtp r282) is one phase over, and a summary that hides its rows is one nobody can act on. The **▪ accepted-loss rows print on a clean night too**, because r284's contract is that a closed absence stays VISIBLE. ⚠️ **WARN, NEVER STOP:** a gap is a fact about yesterday, and aborting would cost the R baseline over a missing OHLC file. |
 | **S3.15** | 🔴 **DELETING ROWS RETURNED NO DISK, AND THE WAL WAS BIGGER THAN EVERYTHING THE PURGE COULD REACH.** | otv4 r255 | ◐ **BUILT + PUSHED.** `retention_purge` v1.2: delete → **checkpoint** → **gated vacuum**, plus four stores that grew by ABSENCE from every list rather than by policy. 📊 Measured fleet-wide 2026-09-05: `feed_store.db` carries **18-34% free pages** (330-690 MB/box) inside files this purge has trimmed nightly since r162 — the purge worked and the space never came back, because freed pages plateau at the high-water mark. **And MU carried a 1.6 GB `feed_store.db-wal`** beside a 2.3 GB store, META 1.1 GB, AMD 963 MB. ⚠️ **A WAL IS RECLAIMED BY A CHECKPOINT, NOT A VACUUM** — seconds, no temp space — so it runs first and unconditionally. **VACUUM IS GATED**, needing free disk above the live size, because the four boxes that needed it most had less; it refuses with the arithmetic printed and `SQLITE_TMPDIR` on the data dir (`/tmp` is a 476M tmpfs). **COVERAGE:** `plan_tick`/`plan_check` at 7 days in their own `DERIVED_CDC_DAYS` (they ship via `push_derived`, not `push_series`, and folding them into the existing list would turn `check_purge_pushed` C9 red for a TRUE reason); `chain_snapshots` at 3, closing a divergence where config has declared it since v4.4 with no reader; **`shadow` DECLARED AND NOT ENFORCED**. It also reports REMAINING rows per table, because no deletion count explains why MU holds 1.8 GB live against CVX's 0.20 GB. |
 | **S3.17** | 🔴 **TWO PURGES FOUGHT OVER ONE DATABASE — AND THIS FILE HAD NO LOCK WHILE `s3_push` HAS HAD ONE SINCE WH.6.** | otv4 r256 / dtp r282 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the conductor's purge phase and a hand-run `--apply` overlapped, and four boxes raised `sqlite3.OperationalError: database is locked` at `DELETE FROM candles`. **THREE DEFECTS, ALL MINE.** (1) No mutual exclusion — `s3_push.acquire_lock()` guards every invocation path for exactly this reason and `retention_purge`, which DELETES, had nothing; same idiom now, own lock file, `OT_PURGE_LOCK_WAIT` 300s, and it WAITS rather than declining because a purge that silently does not run is the r162 failure again. (2) `_open()` connected at SQLite's **5-second default**, shorter than one 2 GB delete, so a brief overlap raised instead of waiting — `busy_timeout` is now explicit at 120s. (3) **The COUNT was wrapped and the DELETE was not**, so one locked table escaped `purge()`, killed `main()`, and **the reclaim never executed** — which is why AMD, AVGO, GOOGL and NVDA kept their WALs while the eleven that got through returned 8.7 GB. Each DELETE is guarded per table, the failures are named, and a partial purge exits 4 so the conductor can say PARTIAL per box instead of letting it read as done. |
 | **S3.18** | 🔴 **`head -3` ATE THE CAUSE OF EVERY PURGE FAILURE, AND THE RECLAIM VERDICT EVERY NIGHT.** | dtp r282 | ◐ **BUILT + PUSHED.** The phase piped the remote purge through `head -3`, sized for the old one-line summary. All the operator saw was `Traceback (most recent call last): \| File ".../retention_purge.py", line 598, in <mo` — the OUTERMOST frame, with the exception type and the raising line cut off. **Three round trips to learn it was `database is locked`.** ⚠️ **A traceback puts its cause LAST**, and the reclaim line prints AFTER the deletion counts, so `head` also guaranteed the checkpoint verdict was invisible on every box on every run — the one line that says whether a 1.6 GB WAL came back. Now redirected to a file on the box, `$?` captured FIRST, then `tail -12`: piping into `tail` would have made `rc=$?` report tail's status, which is the swallowed-exit-code trap this project already records for pytest. |
@@ -334,6 +334,42 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.77 — 2026-09-05 — dtp r285 — S3.12: THE COVERAGE BOARD JOINS THE NIGHTLY
+CHAIN, LAST RATHER THAN FIRST.**
+
+`eod_analysis` v1.3 gains a **STREAMS** phase between COVERAGE and the R suite.
+
+🔑 **THE DELAY WAS THE DESIGN.** r277 built `--streams` and refused to wire it,
+because every CONDITIONAL and DEAD classification in the policy table was a
+declaration read out of `s3_push`'s stage list and never checked against a real
+bucket. The first hand-run raised **nine flags and seven were mine** — `prints`
+graded EVERY when SPX is a cash index that publishes none, `trades` graded EVERY
+when `push_trades` is CDC, `shadow` graded DEAD when fifteen boxes push it every
+session. r280 corrected all three; r284 closed the two genuine absences as
+ACCEPTED_LOSS. **Wired on the day it was built, this alarm would have cried wolf
+on its first night and been ignored by its second** — the CV.1 failure, arrived
+at from the other direction.
+
+⚠️ **A SEPARATE PHASE, NOT AN ARGUMENT TO `COVERAGE`.** The VIX report answers
+*did the single-writer stream land*; this answers *did every box push every
+stream it owes*. Different questions with different exit codes, and two of them
+behind one green is how a passing check stops meaning anything.
+
+⚠️ **IT CARRIES THE ROWS.** dtp r282 is one phase over in the same chain, where
+`head -3` ate the cause of every purge failure for weeks. The phase logs each
+flagged line — 🔴 gap, ❗ stale exemption, ❓ undeclared — and **▪ accepted-loss
+rows print on a clean night as well**, because r284's contract is that a closed
+absence stays visible rather than vanishing from the board.
+
+⚠️ **WARN, NEVER STOP.** A coverage gap is a fact about yesterday; the rest of
+the chain still has work to do, and a phase that aborted would cost the R
+baseline over a missing OHLC file.
+
+`tests/test_streams_phase.py` v1.0, **12 checks**, born red. P1 asserts the
+phase is in the list that actually RUNS rather than merely defined — a function
+nobody calls is the r230 defect. P3 is the one that matters: the flagged rows
+must survive the phase, including the accepted-loss ones.
 
 **v1.76 — 2026-09-05 — r260 — S3.16 ANSWERED AND CLOSED; MEM.1's BANDING HALF
 RULED OUT AND SETTLED. DOCS ONLY.**
