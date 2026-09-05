@@ -1,6 +1,35 @@
 #!/usr/bin/env python3
 """
-warehouse/retention_purge.py  v1.2
+warehouse/retention_purge.py  v1.3
+v1.3  2026-09-05  r256 — TWO PURGES FOUGHT OVER ONE DATABASE, AND THIS FILE HAD
+      NO LOCK WHILE ITS SIBLING HAS HAD ONE ALL ALONG.
+      🔴 MEASURED ON THE FLEET, 2026-09-05, NOT REASONED. The conductor's purge
+      phase and a hand-run `--apply` fan-out overlapped, and four boxes died
+      with `sqlite3.OperationalError: database is locked` at
+      `DELETE FROM candles`. `s3_push.acquire_lock()` has guarded EVERY
+      invocation path since WH.6 for exactly this reason — *"the timer and the
+      conductor's --verify are different entrypoints to the same work, and
+      nothing else was stopping them overlapping"* — and this file, which
+      DELETES, had nothing. Same idiom, same `LOCK_WAIT` shape, one lock file.
+      🔴 AND `_open()` CONNECTED AT SQLITE'S 5-SECOND DEFAULT. A 2 GB delete
+      runs far longer than that, so a brief overlap RAISED instead of waiting.
+      `busy_timeout` is now explicit and generous; the lock makes contention
+      rare and the timeout makes the rare case wait rather than fail.
+      🔴 AND ONE LOCKED TABLE KILLED THE WHOLE RUN. The COUNT was wrapped and
+      the DELETE was not, so an error on `candles` escaped `purge()`, took
+      `main()` with it, and the RECLAIM NEVER EXECUTED — which is why AMD,
+      AVGO, GOOGL and NVDA kept their WALs while the boxes that got through
+      returned 8.7 GB. Each DELETE is now guarded per table: it reports, it
+      counts the failure, and the run continues to the checkpoint.
+      ⚠️ A PARTIAL PURGE IS SAID OUT LOUD. Tables that could not be trimmed are
+      named in the summary and the exit code is non-zero, because "removed
+      1,452 rows" and "removed 1,452 rows and failed on four tables" are
+      different facts and only one of them needs an operator.
+      🔑 WHAT TONIGHT PROVED, RECORDED SO IT IS NOT RE-LITIGATED: the reclaim
+      itself WORKS. QQQ's WAL went 1.7 GB -> 260 KB and its store 2.4 GB ->
+      1.4 GB; TSLA 1.1 GB -> 268 KB and 1.9 GB -> 1020 MB, on a re-run with
+      nobody else touching the box. Fleet 23.2 GB -> 9.8 GB. The design was
+      right; it had no mutual exclusion.
 v1.2  2026-09-05  r255 — TRANSFER, DELETE, **RECLAIM** — AND FOUR STORES THAT
       GREW UNBOUNDED BY ABSENCE FROM EVERY LIST RATHER THAN BY POLICY.
       Operator, 2026-09-05: *"Transfer to s3, then delete, then vacuum. We need
@@ -116,6 +145,7 @@ Run:  python3 warehouse/retention_purge.py            # dry, prints the plan
 
 from __future__ import annotations
 
+import fcntl
 import os
 import sqlite3
 import sys
@@ -201,6 +231,49 @@ NEVER_PURGE = {
 }
 
 DAY = 86400.0
+
+# ── r256 — MUTUAL EXCLUSION, MIRRORING `s3_push.acquire_lock` ──────────────
+# One lock file per box, its own name: this and the pusher touch the same
+# stores but are different work, and sharing a lock would make a long drain
+# block a purge for no reason.
+LOCK_PATH  = os.path.join(HERE, "data", "retention_purge.lock")
+LOCK_WAIT  = int(os.environ.get("OT_PURGE_LOCK_WAIT", "300"))
+# SQLite's default is FIVE SECONDS, which is shorter than a single 2 GB delete.
+BUSY_MS    = int(os.environ.get("OT_PURGE_BUSY_MS", "120000"))
+
+
+def acquire_lock(wait_s: int = None):
+    """Exclusive flock, or None. Guards EVERY invocation path.
+
+    🔴 THE CONDUCTOR PHASE AND A HAND-RUN ARE DIFFERENT ENTRYPOINTS TO THE SAME
+    WORK, and on 2026-09-05 they overlapped: four boxes raised `database is
+    locked` on `DELETE FROM candles`, and the boxes that lost the race kept
+    their WALs because the reclaim never ran. `s3_push` has had this guard on
+    every path since WH.6; this file, which DELETES, had none.
+    ⚠️ IT WAITS RATHER THAN REFUSING. A purge that gives up because a drain is
+    still finishing is a purge that silently does not run, which is the r162
+    failure in a new costume — and the caller is a nightly chain with minutes
+    to spare, not an interactive prompt.
+    """
+    wait_s = LOCK_WAIT if wait_s is None else wait_s
+    try:
+        os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
+        fh = open(LOCK_PATH, "w")
+    except Exception:                                          # noqa: BLE001
+        return None                     # cannot lock -> caller decides
+    deadline = time.time() + max(0, wait_s)
+    while True:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fh
+        except OSError:
+            if time.time() >= deadline:
+                try:
+                    fh.close()
+                except Exception:                              # noqa: BLE001
+                    pass
+                return None
+            time.sleep(1)
 
 # VACUUM needs a full second copy of the LIVE pages before it can replace the
 # original; 1.15 is that plus a margin. Below VACUUM_MIN_FREE_BYTES there is
@@ -389,9 +462,36 @@ def _open(path: str):
     if not os.path.exists(path):
         return None
     try:
-        return sqlite3.connect(path)
+        c = sqlite3.connect(path, timeout=BUSY_MS / 1000.0)
+        # ⚠️ BOTH, DELIBERATELY. The `timeout=` argument governs the Python
+        # driver's own retry loop; `busy_timeout` governs SQLite's. They are
+        # different knobs and the default of five seconds on either is shorter
+        # than one 2 GB delete.
+        c.execute("pragma busy_timeout=%d" % BUSY_MS)
+        return c
     except sqlite3.Error:
         return None
+
+
+def _try_delete(conn, table, sql, args, failed) -> bool:
+    """Run one DELETE. -> True on success; on failure record it and return False.
+
+    🔴 r256 — WHY THIS EXISTS. The COUNT above every DELETE was wrapped and the
+    DELETE was not, so `database is locked` on ONE table escaped `purge()`,
+    killed `main()`, and the reclaim never ran. The cost was measured: four
+    boxes kept their WALs (AMD 963 MB, NVDA, AVGO, GOOGL) while the eleven that
+    got through returned 8.7 GB.
+    ⚠️ IT RETURNS FALSE RATHER THAN RAISING, and the caller zeroes that table's
+    count — because reporting rows as removed when the DELETE failed is worse
+    than the failure. The names are collected so the summary can say WHICH.
+    """
+    try:
+        conn.execute(sql, args)
+        return True
+    except sqlite3.Error as exc:                               # noqa: BLE001
+        _log(f"⚠️ {table}: DELETE FAILED ({exc}) — table skipped, run continues")
+        failed.append(table)
+        return False
 
 
 def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
@@ -401,6 +501,7 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
         "OT_DERIVED_DB", os.path.join(HERE, "data", "derived_store.db"))
     now = time.time()
     removed: dict = {}
+    failed: list = []
 
     fc = _open(feed_db)
     if fc is not None:
@@ -416,8 +517,16 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
                 continue
             removed[f"candles/{interval}"] = n
             if apply and n:
-                fc.execute("DELETE FROM candles WHERE interval=? AND"
-                           " ts_epoch_ms < ?", (interval, cutoff_ms))
+                # 🔴 r256 — GUARDED. This exact statement raised
+                # `database is locked` on four boxes on 2026-09-05, escaped
+                # purge(), killed main(), and took the RECLAIM with it — which
+                # is why those boxes kept their WALs while the rest returned
+                # 8.7 GB. One table failing must cost that table, not the run.
+                if not _try_delete(fc, "candles",
+                                   "DELETE FROM candles WHERE interval=? AND"
+                                   " ts_epoch_ms < ?", (interval, cutoff_ms),
+                                   failed):
+                    removed[f"candles/{interval}"] = 0
 
         for table, days in ARTIFACT_DAYS.items():
             if table in NEVER_PURGE:
@@ -429,8 +538,10 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
             except sqlite3.Error:
                 continue                      # table absent on this box
             removed[table] = n
-            if apply and n:
-                fc.execute(f"DELETE FROM {table} WHERE ts_epoch < ?", (cutoff,))
+            if apply and n and not _try_delete(
+                    fc, table, f"DELETE FROM {table} WHERE ts_epoch < ?",
+                    (cutoff,), failed):
+                removed[table] = 0
         if apply:
             fc.commit()
         fc.close()
@@ -467,8 +578,10 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
             except sqlite3.Error:
                 continue
             removed[f"derived/{table}"] = n
-            if apply and n:
-                dc.execute(f"DELETE FROM {table} WHERE ts_epoch < ?", (cutoff,))
+            if apply and n and not _try_delete(
+                    dc, table, f"DELETE FROM {table} WHERE ts_epoch < ?",
+                    (cutoff,), failed):
+                removed[f"derived/{table}"] = 0
         if apply:
             dc.commit()
         dc.close()
@@ -493,6 +606,7 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
     # holds 1.8 GB live against CVX's 0.20 GB on identical policy, and the
     # aggression has to be aimed at whichever table that is.
     removed["_remaining"] = _remaining(feed_db, derived_db)
+    removed["_failed"] = failed
     return removed
 
 
@@ -541,10 +655,30 @@ def main(argv=None) -> int:
     """
     argv = list(argv or [])
     apply = ("--apply" in argv) or os.environ.get("OT_RETENTION_APPLY") == "1"
-    removed = purge(apply=apply)
+    # 🔴 r256 — THE LOCK IS TAKEN HERE, AROUND EVERYTHING, so a hand-run and
+    # the conductor phase cannot both be inside purge() at once. Waiting is the
+    # right behaviour: the caller is a nightly chain with minutes to spare, and
+    # a purge that silently declines is the r162 failure again.
+    lock = acquire_lock()
+    if lock is None:
+        _log(f"⚠️ ANOTHER PURGE HOLDS THE LOCK after {LOCK_WAIT}s — declining. "
+             f"Nothing was deleted, nothing was reclaimed.")
+        return 3
+    try:
+        removed = purge(apply=apply)
+    finally:
+        # ⚠️ RELEASED IN A `finally`. A lock file left held by a crashed run
+        # would silently disable every later purge, which is exactly the
+        # invisible-no-op class r162 already cost this fleet two months for.
+        try:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+        except Exception:                                      # noqa: BLE001
+            pass
     # r255 — the result now carries three shapes: integer row counts, the
     # string "declared, not enforced" for an inert tree, and the two report
     # dicts. Only the integers are rows, and summing blindly would have raised.
+    failed = removed.pop("_failed", [])
     reclaimed = removed.pop("_reclaim", {})
     remaining = removed.pop("_remaining", {})
     counts = {k: v for k, v in removed.items() if isinstance(v, int)}
@@ -591,6 +725,16 @@ def main(argv=None) -> int:
         _log("   remaining rows after purge:")
         for t in sorted(remaining, key=lambda k: -remaining[k]):
             _log(f"     {t:<26} {remaining[t]:>12,}")
+
+    # ── r256 — A PARTIAL PURGE IS NOT A SUCCESS ─────────────────────────────
+    # ⚠️ "removed 1,452 rows" and "removed 1,452 rows and failed on four
+    # tables" are different facts, and only one of them needs an operator. The
+    # non-zero exit is what lets the conductor's phase say so per box.
+    if failed:
+        _log(f"⚠️⚠️ PARTIAL PURGE — {len(failed)} table(s) could not be "
+             f"trimmed: {', '.join(sorted(set(failed)))}. The reclaim still "
+             f"ran; those tables keep their rows until the next pass.")
+        return 4
     return 0
 
 

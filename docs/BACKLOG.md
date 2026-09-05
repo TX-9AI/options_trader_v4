@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.71
+# BACKLOG.md — v1.72
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -101,6 +101,9 @@ feed plumbing and are not warehouse candidates.
 | **S3.11** | ⬜ **THERE ARE STILL THREE COLLAPSE RULES ON ONE DATASET, AND C.17 SAYS THERE IS EXACTLY ONE.** | ⬜ | Measured at HEAD: `warehouse_reader.load_derived` collapses on the natural key (S3.9); `fit_readiness` runs a SECOND collapse in SQL, `GROUP BY _rid, <ts>`; and `tests/screen_plan_gates.py:101` runs **no collapse at all** — its printed row count is raw object rows, which is where the 2.38M figure came from. 🔴 **THE THREE DISAGREE BY CONSTRUCTION**, which is the S3.6 shape one level over. Not folded into S3.9 deliberately — neither `fit_readiness` nor the screen calls `load_derived`, so nothing here was required to make S3.9 work (WA §4). Ruling wanted: point all three at `load_derived`, or leave the screen raw and label it so. |
 | **S3.12** | ⬜ **THE STREAM REPORT IS NOT IN THE NIGHTLY CHAIN YET, DELIBERATELY.** | ⬜ | `eod_analysis` already runs `warehouse_coverage.py --date <date>` as a phase, so wiring `--streams` in is one argument. **It is not wired, and the reason is the sequencing rather than the work:** the `CONDITIONAL` and `DEAD` classifications in `STREAM_POLICY` are MY declarations read out of `s3_push`'s stage list, and none has been checked against what the bucket actually holds. A phase that goes red every night on a stream nobody expects is a permanent red, and a permanent red is the one thing that stops a board being read (CV.1). ⚠️ **AND MONDAY IS THE FIRST TAPE FOR SIX SWEEP REVISIONS** — r242's own reasoning applies: a zero result has to be attributable. **PRECONDITION MET 2026-09-05:** run by hand over 09-01..09-04, nine flags raised, **seven of them the policy table** — corrected in dtp r280. The remaining two are the QQQ 09-03 gap, explained (disk-full) and bounded. The phase is now wirable on the next pass. |
 | **S3.15** | 🔴 **DELETING ROWS RETURNED NO DISK, AND THE WAL WAS BIGGER THAN EVERYTHING THE PURGE COULD REACH.** | otv4 r255 | ◐ **BUILT + PUSHED.** `retention_purge` v1.2: delete → **checkpoint** → **gated vacuum**, plus four stores that grew by ABSENCE from every list rather than by policy. 📊 Measured fleet-wide 2026-09-05: `feed_store.db` carries **18-34% free pages** (330-690 MB/box) inside files this purge has trimmed nightly since r162 — the purge worked and the space never came back, because freed pages plateau at the high-water mark. **And MU carried a 1.6 GB `feed_store.db-wal`** beside a 2.3 GB store, META 1.1 GB, AMD 963 MB. ⚠️ **A WAL IS RECLAIMED BY A CHECKPOINT, NOT A VACUUM** — seconds, no temp space — so it runs first and unconditionally. **VACUUM IS GATED**, needing free disk above the live size, because the four boxes that needed it most had less; it refuses with the arithmetic printed and `SQLITE_TMPDIR` on the data dir (`/tmp` is a 476M tmpfs). **COVERAGE:** `plan_tick`/`plan_check` at 7 days in their own `DERIVED_CDC_DAYS` (they ship via `push_derived`, not `push_series`, and folding them into the existing list would turn `check_purge_pushed` C9 red for a TRUE reason); `chain_snapshots` at 3, closing a divergence where config has declared it since v4.4 with no reader; **`shadow` DECLARED AND NOT ENFORCED**. It also reports REMAINING rows per table, because no deletion count explains why MU holds 1.8 GB live against CVX's 0.20 GB. |
+| **S3.17** | 🔴 **TWO PURGES FOUGHT OVER ONE DATABASE — AND THIS FILE HAD NO LOCK WHILE `s3_push` HAS HAD ONE SINCE WH.6.** | otv4 r256 / dtp r282 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the conductor's purge phase and a hand-run `--apply` overlapped, and four boxes raised `sqlite3.OperationalError: database is locked` at `DELETE FROM candles`. **THREE DEFECTS, ALL MINE.** (1) No mutual exclusion — `s3_push.acquire_lock()` guards every invocation path for exactly this reason and `retention_purge`, which DELETES, had nothing; same idiom now, own lock file, `OT_PURGE_LOCK_WAIT` 300s, and it WAITS rather than declining because a purge that silently does not run is the r162 failure again. (2) `_open()` connected at SQLite's **5-second default**, shorter than one 2 GB delete, so a brief overlap raised instead of waiting — `busy_timeout` is now explicit at 120s. (3) **The COUNT was wrapped and the DELETE was not**, so one locked table escaped `purge()`, killed `main()`, and **the reclaim never executed** — which is why AMD, AVGO, GOOGL and NVDA kept their WALs while the eleven that got through returned 8.7 GB. Each DELETE is guarded per table, the failures are named, and a partial purge exits 4 so the conductor can say PARTIAL per box instead of letting it read as done. |
+| **S3.18** | 🔴 **`head -3` ATE THE CAUSE OF EVERY PURGE FAILURE, AND THE RECLAIM VERDICT EVERY NIGHT.** | dtp r282 | ◐ **BUILT + PUSHED.** The phase piped the remote purge through `head -3`, sized for the old one-line summary. All the operator saw was `Traceback (most recent call last): \| File ".../retention_purge.py", line 598, in <mo` — the OUTERMOST frame, with the exception type and the raising line cut off. **Three round trips to learn it was `database is locked`.** ⚠️ **A traceback puts its cause LAST**, and the reclaim line prints AFTER the deletion counts, so `head` also guaranteed the checkpoint verdict was invisible on every box on every run — the one line that says whether a 1.6 GB WAL came back. Now redirected to a file on the box, `$?` captured FIRST, then `tail -12`: piping into `tail` would have made `rc=$?` report tail's status, which is the swallowed-exit-code trap this project already records for pytest. |
+| **S3.19** | ⬜ **AN SSH TIMEOUT KILLS THE CLIENT, NOT THE REMOTE PROCESS.** | ⬜ | `ssh_util.ssh_run` gives subprocess `SSH_CONNECT_TIMEOUT + 10` = 22s and returns `rc=255 ssh timeout` — but the remote `python3` KEEPS RUNNING with nobody reading its output. That is what created S3.17's collision: two option-14 fan-outs timed out on QQQ, their abandoned purges held `feed_store` open, and the conductor's checkpoint arrived to a busy database. S3.17's lock makes it harmless; it does not make it visible. 🔑 **This is the concrete argument for SSM Run Command** over SSH for the fan-out: instance IDs rather than IPs (WH.7's own conclusion, applied to the command path instead of only the stop path), async with no 22s ceiling, output to S3 rather than through a pipe, and a stopped instance returning a named failure instead of hanging. Needs a probe first — does the agent answer on all 15 — and two IAM changes. |
 | **S3.16** | ⬜ **WHY DOES MU HOLD 1.8 GB LIVE AGAINST CVX's 0.20 GB ON IDENTICAL POLICY?** | ⬜ | A 9x spread with the same `RETENTION_DAYS` and the same `ARTIFACT_DAYS` on both. ⚠️ **INFERENCE, NOT MEASUREMENT:** `greeks_series` and `quote_series` are PER-CONTRACT at 3 days, and **MEM.1** measured MU at **356 contracts spanning ±45% of spot**, most of it more than 30% OTM and untradeable, while the aux tenors are banded and the primary expiry chain is not. If that holds, the disk story and the 09-02 OOM are ONE root cause. r255's per-table remaining-row report answers this on the first armed run — a query, not an argument. Its disposition is MEM.1's banding question, which is a trading-path change and the operator's call. |
 | **S3.13** | ⬜ **THE 2026-08-25 PURGE DELETED 492,945 `raw/shadow` OBJECTS AS A DEAD STREAM. IT WAS NOT DEAD.** | ⬜ | The purge was justified by the same never-installed finding ASK.2 now records as false. `raw/` is the durable copy and by design never deletes; this deletion went through the console grant. **What is actually lost is not yet established and should be measured before it is described** — the boxes do not purge `shadow` (it is in neither `ARTIFACT_DAYS` nor `DERIVED_ARTIFACT_DAYS`), and QQQ holds 32 date dirs, so some or all of it may still be box-side and re-pushable. Two questions, in order: **how many of the deleted dates still exist on a box**, and **is the answer to re-push them or to accept the loss** given the stream's stated purpose was the Layer-1 freeze evidence. ⚠️ It is also a standing lesson: a purge argued from a finding rather than from the bucket deleted the bucket's own evidence that the finding was wrong. |
 | **S3.14** | ⬜ **`shadow` IS UNBOUNDED ON THE BOXES, AND QQQ FILLED ITS DISK.** | otv4 r255 | 🔴 **REFUTED AND CLOSED — shadow is 21-40 MB, about a third of one percent of a 10 GiB volume. It was never the disk.** I raised it from a directory count without measuring a size; the measurement kills it. ✅ **CLOSED — DEAD**, recorded rather than dropped. **The real consumer is `feed_store.db` plus its WAL**, which S3.15 and DEP.6 now carry. | Nothing purges it: `shadow` appears in neither `ARTIFACT_DAYS` nor `DERIVED_ARTIFACT_DAYS`, and `NEVER_PURGE` does not name it either — it is untouched by absence rather than by policy. QQQ holds **32 date directories** of high-frequency jsonl and **ran out of space on 2026-09-03**, which is what cost that day's `eod` and `ohlc`. ⚠️ **THE LINK IS PLAUSIBLE AND NOT MEASURED** — no size was taken, and r162 already established `feed_store.db` as the disk story on the 08-27 outage. This is filed as a question, not a cause: **measure `du -sh` on the shadow tree across the fleet before anything is concluded or deleted.** Its disposition depends on ASK.2. |
@@ -327,6 +330,48 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.72 — 2026-09-05 — otv4 r256 / dtp r282 — THE NIGHTLY RECLAIM WORKS. IT HAD
+NO MUTUAL EXCLUSION, AND ITS FAILURES WERE INVISIBLE.**
+
+🔑 **FIRST, WHAT THE FLEET PROVED, BECAUSE IT IS THE PART THAT SURVIVES.** The
+r255 reclaim ran for real: **fleet `feed_store` + WAL went 23.2 GB -> 9.8 GB.**
+MU 3.90 -> 1.40, META 2.60 -> 0.73, AMD 2.24 -> 0.70, SPX 2.30 -> 0.98. Thirteen
+of fifteen WALs went to zero, and on a clean re-run with nobody else touching
+the box, QQQ went **1.7 GB -> 260 KB** and TSLA **1.1 GB -> 268 KB**. No box
+reported BUSY where the reclaim reached it, so **`stop_services` releases the
+stores exactly as designed.** The checkpoint, the gated vacuum and the ordering
+are all confirmed against real data. What was missing was a lock.
+
+🔴 **THREE DEFECTS, ALL MINE, AND THE FIRST ONE HAD A WORKING PRECEDENT ONE FILE
+OVER.** `s3_push.acquire_lock()` has guarded *every* invocation path since WH.6,
+written because *"the timer and the conductor's `--verify` are different
+entrypoints to the same work, and nothing else was stopping them overlapping"* —
+and `retention_purge`, which **deletes**, had none. `_open()` then connected at
+SQLite's five-second default, shorter than a single 2 GB delete. And the COUNT
+was wrapped while the DELETE was not, so one locked table took `main()` down and
+**the reclaim never executed** on the four boxes that lost the race.
+
+🔴 **`head -3` IS WHY IT TOOK THREE ROUND TRIPS.** A traceback puts its cause
+last; the phase read the first three lines. The operator saw an outermost frame
+and a truncated path. ⚠️ **And the same truncation hid the reclaim verdict on
+every box on every run** — the single line that says whether a 1.6 GB WAL came
+back. Redirected to a file now, exit code captured before the pipe, `tail -12`.
+
+⚠️ **S3.19 OPENED, AND IT IS THE ROOT CAUSE RATHER THAN THE SYMPTOM.** An ssh
+timeout kills the local client and leaves the remote `python3` running. Two
+option-14 fan-outs timed out on QQQ; their abandoned purges held the store open
+and the conductor's checkpoint found it busy. The lock makes that harmless. It
+does not make it visible, and that is the concrete case for SSM.
+
+`tests/check_purge_lock.py` v1.0, **11 checks**, born red — L1 takes the lock in
+a **second process**, because `flock` is per open-file-description and a
+same-process check would pass against code that locks nothing (C.23). D1 holds a
+**real exclusive transaction** rather than stubbing an exception, because the
+finding is about a timeout and a stub would pin the handler and miss it. L3 pins
+the SHIPPED defaults, since the cases shorten them to stay quick and a fixture
+that agrees with itself proves nothing. `dtp check_conductor_purge` v1.2, born
+red 2.
 
 **v1.71 — 2026-09-05 — otv4 r255 / dtp r281 — TRANSFER, DELETE, **RECLAIM** —
 AND THE WAL NOBODY HAD LOOKED AT.**
