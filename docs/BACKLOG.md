@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.85
+# BACKLOG.md — v1.86
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -161,7 +161,7 @@ against each box. That is right **during** a session and wrong after it.
 
 | ID | question | status |
 |---|---|---|
-| **ASK.1** | `character_axis_sample` — include in S3.1's push, or leave it on the box? | ⬜ |
+| **ASK.1** | ✅ **RESOLVED — `character_axis_sample` IS PUSHED.** | otv4 r270 / dtp r292 | ◐ **BUILT + PUSHED.** Operator ruled 2026-09-05: push it. Append-only and keyed `(symbol, ts_epoch)`, so it joins `DERIVED_SERIES_TABLES` on the HIGH-WATER path rather than CDC. 🔑 **IT IS THE ONLY SURVIVING OUTPUT OF THE CHARACTER ENGINE:** r85 set `BANDS_SET=False`, so `character_ledger` records no transitions and pushed **0 boxes** in the 2026-09-05 census — and `character_engine`'s own comment states the consequence: *"the sample IS the deliverable right now — one session of real efficiency values is what the bands get derived from."* Holding the bands back was the reason for collecting it, and leaving it on the box meant the corpus the bands are derived FROM had no durable home. It carries `efficiency`, `vol_ratio`, `close_capture`, two realised-vol estimators, `adx`, `atr_normalized` and `price` — a feature vector, and STRIDED rather than per-tick, so it is a small stream. ⚠️ **SHIPPED WITH ITS PURGE ENTRY AND ITS COVERAGE ROW.** It was in NO list — neither purged nor protected — the same by-absence exposure as S3.15; and an undeclared stream renders UNDECLARED and fails the board on night one. `CONDITIONAL`, not `EVERY`, because a strided writer on a thin session legitimately produces none. |
 | **ASK.2** | 🔴 **PREMISE FALSIFIED — `shadow` IS LIVE.** The question was *"shadow/ still ships to the boxes and `s3_push` still runs a shadow stage, but shadow was never installed on the v4 fleet — cut both, or leave?"* **The never-installed finding is wrong.** Measured on QQQ 2026-09-05: **32 date directories, newest 2026-09-04, and a shadow systemd unit present.** The bucket agrees from the other side — 15 boxes push it every session, and `WAREHOUSE_MAP.md` (generated 09-01) shows `raw/shadow` at 160,978 objects across 7 days. So the ruling is no longer *cut a dead stage or leave it*; it is **keep collecting a live stream, or stop it deliberately** — a different question with a different cost. | ⬜  🔴 **SETTLED 2026-09-05 — SHADOW IS THE FITTING CORPUS, AND STAGE 2 IS ARMED.** Operator: *"I am looking for market intelligence. What indicators recorded the earliest sign a tradeable move was imminent. The shadow data will tell us what primitives we should be fitting our trade triggers on and what exhaustion signals were appearing on the tape to better inform our stops. It should be fitting data."* 🔴 **AND IT WAS ONLY HALF COLLECTING.** Measured 2026-09-05, all 15 boxes: `"stage": 1`, `scores: []`, **zero scorer entries** — seven weeks of primitives with NO counterfactual. `OT_SHADOW_STAGE=1` is the de-risk default meant to hold "for a few sessions" and nothing ever forced step two; **same shape as the retention purge logging "WOULD remove" for two months (r162)**. What the period DOES hold is real and answers half the question: per tick, `current_roc` vs `typical_roc`, `atr_normalized`, `bb_width_pct`, `price_vs_bb` and nearest-level distance in pct AND ATR. What it cannot hold is `stages`, `conviction`, `invalidated` and `would_fire` across ten thresholds — the tape is gone. **Armed by drop-in on all 15 the same day; r265 moves the unit default so a re-install cannot revert it.** |
 | **ASK.3** | ✅ **RESOLVED — EIGHT SPENT THREAD CONTRACTS DELETED, ONE MEASUREMENT LIFTED.** | r269 | ✅ **CLOSED.** ~89 KB / ~1,700 lines across `AUDIT.md`, `AUDIT_HANDOFF.md`, `AUDIT_FINDINGS.md` and five `HANDOFF_*` docs. Read before ruling: `AUDIT.md` is a DELIVERY CONTRACT whose every constraint `land.sh` and §15 now enforce mechanically; the five handoffs are REQUESTS whose work landed and which say so in their own opening lines (*"RESOLVED — r146"*, *"Ships with…"*). 🔑 **ONE DURABLE FACT WAS BURIED IN THEM** — v3's central premise measured FALSE: 715 closed directional trades over 16 sessions, the regime classifier picking the correct SIDE on **44.9%, 95% CI [41.3%, 48.6%]**, entirely below a coin flip; puts 34.2%; plus the P&L attribution that produced the v4 thesis. ⚠️ **IT DID NOT GO TO THE BACKLOG** — operator: *"backlog is deferred work"* — and not to an archive, which is where documents go to stop being read. It is in `config.py`'s **INHERITED DOCTRINE** block, which WA §32 requires be read before that file is edited. ⚠️ **AND DELETION WAS NOT FREE:** six live citations pointed into these files and were redirected first. |
 | **RUN.1** | 🔴 **IS ONE RUNAWAY PER BREAK MEANT TO INCLUDE WINNERS?** r174's ruling reads *"one runaway per break, even on relaxed"*, but `finish_break` is called ONLY from the losing-exit hook — so a WINNING exit leaves the break live and the next tick re-enters. QQQ 2026-09-03 shows both halves: 09:52 trail **+$96**, then 09:53 re-entry stopping **−$204**; 10:16 trail, then 10:21 re-entry. ⚠️ **AND THE UNDERLYING CONDITION IS A STATE, NOT AN EVENT** — `_closed_beyond_and_held` is `prev_close > tp50 and price_now > tp50`, which stays true for as long as price remains beyond the 50%, so the trigger re-qualifies on every tick. Operator, 2026-09-03: *"the condition to enter is so loose that it will reenter a position as soon as the previous one closes, as long as it closes beyond the 50% boundary."* Options: (a) finish the break on ANY resolved runaway, win or lose; (b) require a fresh event — a pullback and a new close-and-hold — rather than the standing state; (c) cap attempts per break. **This alters what gets traded, so it is the operator's call**; r223 fixed only the key defect that was masking it. | ⬜ |
@@ -343,6 +343,45 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.86 — 2026-09-05 — otv4 r270 / dtp r292 — ASK.1: THE CHARACTER ENGINE'S ONLY
+OUTPUT REACHES THE WAREHOUSE.**
+
+Operator ruled: push it.
+
+🔑 **AND IT IS NOT A MINOR TABLE.** r85 set `BANDS_SET=False`, so
+`character_ledger` records no transitions and pushed **0 boxes** in the
+2026-09-05 stream census. `character_engine`'s own comment says what that
+leaves: *"the sample IS the deliverable right now — one session of real
+efficiency values is what the bands get derived from."* **Holding the bands back
+was the entire reason for collecting this**, and until now the corpus they are
+to be derived from lived only on the boxes.
+
+Per row: `efficiency`, `vol_ratio`, `close_capture`, `realised_vol_cc`,
+`realised_vol_parkinson`, `adx`, `atr_normalized`, `price`, keyed
+`(symbol, ts_epoch)`. Two realised-volatility estimators side by side — a
+feature vector rather than a status field. It is **strided**
+(`BASELINE_STRIDE_S`) on purpose, because *"a 15s cadence would write ~1,560
+rows per symbol-day to answer a question a few hundred answers just as well."*
+
+⚠️ **THREE PLACES, ONE REVISION.** Append-only and ts-keyed, so it takes the
+HIGH-WATER path with `fork_series` and friends, not CDC. It gets a
+`retention_purge` entry at 20 days **in the same revision that pushes it** —
+it was in no list at all, neither purged nor protected, the exact by-absence
+exposure that let `shadow`, `plan_tick` and `plan_check` grow unbounded
+(S3.15), and adding the push alone would have left it that way. And it gets a
+`STREAM_POLICY` row, because an undeclared stream renders **UNDECLARED** and
+fails the coverage board on night one — a new alarm that cries wolf immediately
+is how an operator learns to stop reading it.
+
+⚠️ **`CONDITIONAL`, NOT `EVERY`.** The engine writes only when an axis value is
+computable, and the write is strided, so a thin session legitimately produces
+none. Grading it `EVERY` would flag quiet boxes as gaps — the mistake r280
+corrected for `trades` and `prints`.
+
+⚠️ **20 days is the sibling default and a RE-PUSH WINDOW, not a fit decision.**
+S3 is the durable home; how much history the bands need is answered from the
+warehouse, by whoever fits them.
 
 **v1.85 — 2026-09-05 — r269 — ASK.3 RESOLVED AND CND.1 SETTLED: EIGHT SPENT
 CONTRACTS DELETED, TWO THINGS LIFTED OUT OF THEM FIRST.**

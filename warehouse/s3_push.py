@@ -1,5 +1,16 @@
 """
-warehouse/s3_push.py  v4.5
+warehouse/s3_push.py  v4.6
+v4.6  2026-09-05  r270 / ASK.1 — `character_axis_sample` JOINS
+      `DERIVED_SERIES_TABLES`. Operator ruled: push it. Append-only and keyed
+      `(symbol, ts_epoch)`, so it takes the HIGH-WATER path, not CDC.
+      🔑 IT IS THE ONLY SURVIVING OUTPUT OF THE CHARACTER ENGINE: r85 set
+      BANDS_SET=False, `character_ledger` records no transitions and pushed 0
+      boxes in the 2026-09-05 census, and `character_engine`'s own comment says
+      "the sample IS the deliverable right now — one session of real efficiency
+      values is what the bands get derived from." Holding the bands back was
+      the reason for collecting it; leaving it on the box meant the corpus the
+      bands are derived FROM had no durable home.
+      ⚠️ SHIPPED WITH ITS PURGE ENTRY AND ITS COVERAGE ROW, not before them.
 v4.5  2026-08-29  r191 — THE THREE DERIVED SERIES ARE WAREHOUSED (backlog
       S3.1). `fork_series`, `indicator_series` and `surface_series` live in
       derived_store.db and had NO PUSH STAGE, while retention_purge deletes
@@ -911,9 +922,21 @@ SERIES_TABLES = ("greeks_series", "quote_series", "prints", "last_trade",
 # v4.5 — the RECOMPUTABLE series in derived_store.db. Append-only and keyed on
 # ts_epoch, so they take the high-water path, not the CDC path. Kept in sync
 # with retention_purge.DERIVED_ARTIFACT_DAYS by tests/check_purge_pushed.py.
-# ⚠️ `character_axis_sample` is deliberately NOT here — its disposition is an
-# open operator ruling (backlog ASK.1) and guessing it would decide by default.
-DERIVED_SERIES_TABLES = ("fork_series", "indicator_series", "surface_series")
+# 🔴 r270 — `character_axis_sample` JOINS THE LIST. Operator ruled 2026-09-05:
+# push it. It is APPEND-ONLY and keyed `(symbol, ts_epoch)`, so it takes the
+# high-water path with its siblings rather than the CDC path.
+# 🔑 IT IS THE ONLY SURVIVING OUTPUT OF THE CHARACTER ENGINE. r85 set
+# `BANDS_SET=False`, so `character_ledger` records no transitions and pushes
+# 0 boxes — measured in the 2026-09-05 stream census. `character_engine`'s own
+# comment states the consequence: **"the sample IS the deliverable right now —
+# one session of real efficiency values is what the bands get derived from."**
+# Holding the bands back was the whole point of collecting this, and leaving it
+# on the box meant the thing the bands are derived FROM lived nowhere durable.
+# ⚠️ IT IS STRIDED, NOT PER TICK (`BASELINE_STRIDE_S`), deliberately: a 15s
+# cadence would write ~1,560 rows per symbol-day to answer a question a few
+# hundred answers just as well. So this is a small stream, not a new SPX chain.
+DERIVED_SERIES_TABLES = ("fork_series", "indicator_series", "surface_series",
+                         "character_axis_sample")
 
 DERIVED_TABLES = ("fire_snapshot", "strategy_note", "plan_ledger",
                   "plan_tick", "plan_check",

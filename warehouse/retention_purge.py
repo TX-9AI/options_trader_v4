@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-warehouse/retention_purge.py  v1.3
+warehouse/retention_purge.py  v1.4
+v1.4  2026-09-05  r270 / ASK.1 — `character_axis_sample` added at 20 days,
+      IN THE SAME REVISION THAT PUSHES IT. It was in no list at all — neither
+      purged nor protected — which is the by-absence exposure that let
+      `shadow`, `plan_tick` and `plan_check` grow unbounded (S3.15). Adding the
+      push without the purge would have left it that way and called the job
+      done. ⚠️ 20 days is the sibling default and a RE-PUSH WINDOW, not a fit
+      decision: S3 is the durable home, and how much history the bands need is
+      answered from the warehouse rather than from the box.
 v1.3  2026-09-05  r256 — TWO PURGES FOUGHT OVER ONE DATABASE, AND THIS FILE HAD
       NO LOCK WHILE ITS SIBLING HAS HAD ONE ALL ALONG.
       🔴 MEASURED ON THE FLEET, 2026-09-05, NOT REASONED. The conductor's purge
@@ -176,6 +184,16 @@ DERIVED_ARTIFACT_DAYS = {
     "indicator_series":  20,
     "fork_series":       20,
     "surface_series":    20,
+    # 🔴 r270 — ADDED WITH ITS PUSH, NOT AFTER IT. Until this revision
+    # `character_axis_sample` was in NO list — not purged and not protected,
+    # the same by-absence exposure that let `shadow`, `plan_tick` and
+    # `plan_check` grow unbounded (S3.15). Adding the push without the purge
+    # would have left it that way and called the job done.
+    # ⚠️ 20 DAYS IS THE SIBLING DEFAULT AND A RE-PUSH WINDOW, NOT A FIT
+    # DECISION. S3 is the durable home once r270 ships it there; how much
+    # history the BANDS need is a question for whoever fits them, and it is
+    # answered from the warehouse rather than from the box.
+    "character_axis_sample": 20,
 }
 
 # 🔑 r255 — CDC LIFECYCLE TABLES, PUSHED BY `push_derived`, NOT `push_series`.
