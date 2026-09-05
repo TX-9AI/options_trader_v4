@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.73
+# BACKLOG.md — v1.74
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -104,6 +104,7 @@ feed plumbing and are not warehouse candidates.
 | **S3.17** | 🔴 **TWO PURGES FOUGHT OVER ONE DATABASE — AND THIS FILE HAD NO LOCK WHILE `s3_push` HAS HAD ONE SINCE WH.6.** | otv4 r256 / dtp r282 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the conductor's purge phase and a hand-run `--apply` overlapped, and four boxes raised `sqlite3.OperationalError: database is locked` at `DELETE FROM candles`. **THREE DEFECTS, ALL MINE.** (1) No mutual exclusion — `s3_push.acquire_lock()` guards every invocation path for exactly this reason and `retention_purge`, which DELETES, had nothing; same idiom now, own lock file, `OT_PURGE_LOCK_WAIT` 300s, and it WAITS rather than declining because a purge that silently does not run is the r162 failure again. (2) `_open()` connected at SQLite's **5-second default**, shorter than one 2 GB delete, so a brief overlap raised instead of waiting — `busy_timeout` is now explicit at 120s. (3) **The COUNT was wrapped and the DELETE was not**, so one locked table escaped `purge()`, killed `main()`, and **the reclaim never executed** — which is why AMD, AVGO, GOOGL and NVDA kept their WALs while the eleven that got through returned 8.7 GB. Each DELETE is guarded per table, the failures are named, and a partial purge exits 4 so the conductor can say PARTIAL per box instead of letting it read as done. |
 | **S3.18** | 🔴 **`head -3` ATE THE CAUSE OF EVERY PURGE FAILURE, AND THE RECLAIM VERDICT EVERY NIGHT.** | dtp r282 | ◐ **BUILT + PUSHED.** The phase piped the remote purge through `head -3`, sized for the old one-line summary. All the operator saw was `Traceback (most recent call last): \| File ".../retention_purge.py", line 598, in <mo` — the OUTERMOST frame, with the exception type and the raising line cut off. **Three round trips to learn it was `database is locked`.** ⚠️ **A traceback puts its cause LAST**, and the reclaim line prints AFTER the deletion counts, so `head` also guaranteed the checkpoint verdict was invisible on every box on every run — the one line that says whether a 1.6 GB WAL came back. Now redirected to a file on the box, `$?` captured FIRST, then `tail -12`: piping into `tail` would have made `rc=$?` report tail's status, which is the swallowed-exit-code trap this project already records for pytest. |
 | **S3.19** | ⬜ **AN SSH TIMEOUT KILLS THE CLIENT, NOT THE REMOTE PROCESS.** | ⬜ | `ssh_util.ssh_run` gives subprocess `SSH_CONNECT_TIMEOUT + 10` = 22s and returns `rc=255 ssh timeout` — but the remote `python3` KEEPS RUNNING with nobody reading its output. That is what created S3.17's collision: two option-14 fan-outs timed out on QQQ, their abandoned purges held `feed_store` open, and the conductor's checkpoint arrived to a busy database. S3.17's lock makes it harmless; it does not make it visible. 🔑 **This is the concrete argument for SSM Run Command** over SSH for the fan-out: instance IDs rather than IPs (WH.7's own conclusion, applied to the command path instead of only the stop path), async with no 22s ceiling, output to S3 rather than through a pipe, and a stopped instance returning a named failure instead of hanging. Needs a probe first — does the agent answer on all 15 — and two IAM changes. |
+| **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.11** | 🔴 **SIX MENU CONFIRMS ACCEPTED LOWERCASE `y` AND NOTHING ELSE.** | dtp r283 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the operator answered the LIVE backfill prompt with **`Y`** and the run silently did not happen — no error, no message, just the next prompt. **A confirm that discards a plausible yes is worse than one that refuses**, because *declined* and *ran and did nothing* look identical. All six sites route through `_yes` in `devtools.sh`; the DESTRUCTIVE ones now say what they declined while a flag toggle stays quiet, which is why the helper is a pure predicate rather than one that prints. ⚠️ **C3 pins that NO lowercase-only comparison survives anywhere in the menu** — fixing the one site that bit and leaving five is how this returns (C.30: when a rule changes, sweep its readers). ⚠️ And it must still refuse `n`, `sure` and empty: these prompts wake boxes, stop trading and delete rows, so loosening it to *anything non-empty* would be worse than the bug. |
 | **RPT.12** | 🔴 **THE OHLC BACKFILL'S STREAM CAP WAS 29-BOX ARITHMETIC, AND IT HARD-STOPS.** | dtp r283 | ◐ **BUILT + PUSHED.** A **one-box** backfill against a 15-box fleet was refused outright: `10 stream cap` with 15 running, and the check is `return 2`, not a warning — despite the file's own header describing a warn-never-stop pattern for a different check nearby. 🔑 **r53 ALREADY RETIRED THE FLEET-WIDE COPY OF THIS GUARD** on exactly this reasoning — *"it existed so a maintenance wake could not put 29 boxes on the wire at once; the fleet is 15 and a normal session already carried ~20 without strain"* — and this per-report copy was never swept after the 2026-08-20 pare. Same shape as the README fleet count that read 29 for nine days. Default moves to **20, which is r53's own recorded figure rather than one I chose**, `OT_STREAM_CAP`-overridable, and marked a PRIOR: if the DXFeed ceiling is ever measured rather than inferred, it moves again. |
 | **S3.16** | ⬜ **WHY DOES MU HOLD 1.8 GB LIVE AGAINST CVX's 0.20 GB ON IDENTICAL POLICY?** | ⬜ | A 9x spread with the same `RETENTION_DAYS` and the same `ARTIFACT_DAYS` on both. ⚠️ **INFERENCE, NOT MEASUREMENT:** `greeks_series` and `quote_series` are PER-CONTRACT at 3 days, and **MEM.1** measured MU at **356 contracts spanning ±45% of spot**, most of it more than 30% OTM and untradeable, while the aux tenors are banded and the primary expiry chain is not. If that holds, the disk story and the 09-02 OOM are ONE root cause. r255's per-table remaining-row report answers this on the first armed run — a query, not an argument. Its disposition is MEM.1's banding question, which is a trading-path change and the operator's call. |
@@ -332,6 +333,49 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.74 — 2026-09-05 — dtp r284 — S3.20: THE RE-BASELINE, AS A LEDGER RATHER
+THAN AS A LIE.**
+
+The last thread from the coverage report's first run. QQQ ran out of disk on
+2026-09-03 and lost two streams for that day; both were chased to a conclusion —
+`eod` overwritten by the next session's fixed-filename write, `ohlc` unwritten
+and unrecoverable because DXFeed history is same-evening only and the backfill
+came back STILL MISSING. Without a record of that, `--streams` flags both as GAP
+forever, and **a permanent red is the one thing that stops a board being read** —
+the CV.1 lesson this file has now learned three times, on a Sunday, on `shadow`,
+and here.
+
+🔴 **THE OPERATOR ASKED WHETHER TO UPLOAD PLACEHOLDER OBJECTS INSTEAD, AND THE
+ANSWER IS NO.** `raw/` is the durable record and never deletes by design; an
+object in it is a claim to every future reader that a box wrote something that
+day. A synthetic `eod` would be indistinguishable from a real one, and
+`WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is
+actually stored rather than what was intended. Satisfying a check by lying to it
+is the named enemy here — output that renders cleanly while meaning something
+other than it appears.
+
+🔑 **SO IT IS A FOURTH CATEGORY, NOT A SUPPRESSION.** `ACCEPTED_LOSS` sits
+beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`, and **it prints every
+run** with the box, the reason and the date it was accepted. An absence quietly
+removed from the board is as bad as one that cries wolf: nobody would ever learn
+the fleet had a hole.
+
+⚠️ **AND IT AUDITS ITSELF, WHICH IS THE PART THAT MATTERS.** If an entry's data
+ever appears, the row renders **RESOLVED and the run FAILS**, telling the reader
+to delete the entry — because an exemption nobody removes is exactly what would
+suppress the next real gap on that stream. That is this category's own failure
+mode, one level up, and A4 pins it. A2 and A3 pin that the ledger excuses only
+the named box on the named day: a wildcard would have hidden the next outage.
+
+`tests/test_stream_coverage.py` v1.2, **38 checks, born red 6**. ⚠️ A1c was
+re-derived mid-build: it asserted the whole run exits 0, which is a claim about
+the fixture rather than the feature — the fixture declares four streams while
+the policy grades thirty, so every unlisted one legitimately gaps. The claim
+that belongs there is that the accepted streams contribute nothing to the
+failure count. ⚠️ And a first cut read the excused list out of `locals()`, which
+persists across loop iterations — one accepted stream would have stamped its
+exemption onto every stream after it.
 
 **v1.73 — 2026-09-05 — dtp r283 — TWO SILENT REFUSALS, BOTH FOUND BY ASKING FOR
 ONE ORDINARY THING.**
