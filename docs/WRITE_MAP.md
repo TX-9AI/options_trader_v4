@@ -37,15 +37,15 @@ Regenerated in the land gate; a stale map fails `--check`.
 
 | table | created by | written by | read by |
 |---|---|---|---|
-| `candles` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert), `tests/check_audit_20260823.py` (insert), `tests/check_manifold_windows.py` (insert/update), `tests/check_purge_pushed.py` (insert), `tools/segregate_nonrth_bars.py` (delete/update), `warehouse/retention_purge.py` (delete) | `data/candle_logger.py`, `data/market_data.py`, `tools/manifold_health.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
+| `candles` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert), `tests/check_audit_20260823.py` (insert), `tests/check_manifold_windows.py` (insert/update), `tests/check_purge_pushed.py` (insert), `tests/check_purge_reclaim.py` (insert), `tools/segregate_nonrth_bars.py` (delete/update), `warehouse/retention_purge.py` (delete) | `data/candle_logger.py`, `data/market_data.py`, `tools/manifold_health.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `chain_marks` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert) | `data/options_chain.py`, `tools/manifold_status.py`, `tools/probe_aux_streams.py` |
 | `chain_subs` | `data/candle_feed.py`, `data/options_chain.py` | `data/options_chain.py` (insert) | — |
 | `chain_subs_aux` | `analysis/tenor_publish.py` | `analysis/tenor_publish.py` (delete/insert) | `data/candle_feed.py` |
 | `feed_meta` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `data/market_data.py`, `tools/manifold_status.py` |
-| `greeks_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `analysis/second_order.py`, `derived/surface.py` |
+| `greeks_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_purge_reclaim.py` (delete/insert) | `analysis/second_order.py`, `derived/surface.py` |
 | `last_trade` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |
 | `prints` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_orb_geometry.py` (delete/insert) | `analysis/order_flow.py`, `analysis/tape_at_level.py` |
-| `quote_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/exit_replay.py` (insert) | `analysis/order_flow.py` |
+| `quote_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_purge_reclaim.py` (insert), `tests/exit_replay.py` (insert) | `analysis/order_flow.py` |
 | `session_summary` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_manifold_windows.py` (update) | — |
 | `theo_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |
 | `underlying_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | — |

@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
 """
-warehouse/self_close.py  v1.2
+warehouse/self_close.py  v1.3
 The box closes ITSELF: drain to S3, verify it landed, then shut down.
+
+v1.3  2026-09-05  r255 — RELEASE THE STORES BEFORE THE RECLAIM. `retention_purge`
+now checkpoints and vacuums, and both are blocked by a live connection:
+`wal_checkpoint(TRUNCATE)` returns busy while any other connection holds a read
+mark, and the WAL is only partly reclaimed (measured, check_purge_reclaim
+R2/R2b: 7.1MB -> 4.4MB with a reader, 7.1MB -> 0 without). MU carried a 1.6 GB
+`feed_store.db-wal` beside a 2.3 GB store on 2026-09-05.
+⚠️ AS A NEW STEP 2b, NOT BY CHANGING STEP 1. v1.2 leaves the feed running "so a
+16:00 candle can still land" and that is still right for the DRAIN — the feed
+writes right through it. What changed is that something now runs AFTER the
+drain which the feed can block, so the stop belongs after verification has
+SUCCEEDED. A held box returns before this line and keeps its feed exactly as it
+did.
+⚠️ STOP, NEVER DISABLE, and it never blocks the halt — a failed stop is logged
+and the purge simply reclaims less, which the checkpoint then reports as BUSY
+rather than as success.
 
 v1.2  2026-08-23  AUDIT F1: THE VERIFIER WAS SPAWNED UNDER THE BOT VENV, WHICH
 HAS NO boto3. The unit runs this file under `venv/bin/python` and v1.1 passed
@@ -133,6 +149,29 @@ def main(argv=None) -> int:
 
     if drift:
         _log("shortfall is COUNTER DRIFT — objects present; proceeding")
+
+    # ── 2b. RELEASE THE STORES (2026-09-05, r255) ───────────────────────────
+    # 🔴 THE FEED WAS DELIBERATELY LEFT RUNNING AT STEP 1 — "so a 16:00 candle
+    # can still land" — AND THAT IS STILL RIGHT FOR THE DRAIN. It is wrong for
+    # what comes next: `retention_purge` now checkpoints and vacuums, and BOTH
+    # are blocked by a live connection. `wal_checkpoint(TRUNCATE)` returns busy
+    # while another connection holds a read mark and the WAL is only partly
+    # reclaimed — measured in tests/check_purge_reclaim.py R2/R2b at 7.1MB ->
+    # 4.4MB with a reader against 7.1MB -> 0 without. The fleet's own evidence
+    # is MU's 1.6 GB `feed_store.db-wal` beside a 2.3 GB store on 2026-09-05.
+    # ⚠️ HERE AND NOT AT STEP 1: the feed keeps writing right through the drain,
+    # which is the behaviour that comment was protecting, and only stops once
+    # verification has SUCCEEDED. A held box returns above and never reaches
+    # this line, so it keeps its feed exactly as before.
+    # ⚠️ STOP, NEVER DISABLE — the unit must come back on the next wake.
+    # ⚠️ AND IT NEVER BLOCKS THE HALT, the same rule as the purge below.
+    try:
+        subprocess.run(["sudo", "systemctl", "stop", "candle-feed"],
+                       capture_output=True, timeout=120)
+        _log("candle-feed stopped — the stores are released for the reclaim")
+    except Exception as exc:                                    # noqa: BLE001
+        _log(f"could not stop candle-feed ({exc}) — the checkpoint will "
+             f"report BUSY and reclaim less; continuing")
 
     # ── 3. trim expired local data ──────────────────────────────────────────
     # 🔑 HERE, AND NOWHERE ELSE, BECAUSE VERIFICATION HAS JUST SUCCEEDED. The

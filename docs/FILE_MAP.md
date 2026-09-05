@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-233 Python modules across 13 local packages.
+234 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -734,6 +734,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/s3_push.py`
 - **called by:** (nothing - orphan or leaf)
 
+### `tests/check_purge_reclaim.py`
+- **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`
+- **called by:** (nothing - orphan or leaf)
+
 ### `tests/check_query_sections.py`
 - **calls:** (none)
 - **called by:** (nothing - orphan or leaf)
@@ -976,11 +980,11 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/__init__.py`
 - **calls:** (none)
-- **called by:** `tests/check_audit_20260823.py`, `tests/check_purge_pushed.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
+- **called by:** `tests/check_audit_20260823.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
 
 ### `warehouse/retention_purge.py`
 - **calls:** (none)
-- **called by:** `tests/check_purge_pushed.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
+- **called by:** `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
 
 ### `warehouse/s3_push.py`
 - **calls:** (none)

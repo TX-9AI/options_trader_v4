@@ -1,6 +1,71 @@
 #!/usr/bin/env python3
 """
-warehouse/retention_purge.py  v1.1
+warehouse/retention_purge.py  v1.2
+v1.2  2026-09-05  r255 — TRANSFER, DELETE, **RECLAIM** — AND FOUR STORES THAT
+      GREW UNBOUNDED BY ABSENCE FROM EVERY LIST RATHER THAN BY POLICY.
+      Operator, 2026-09-05: *"Transfer to s3, then delete, then vacuum. We need
+      a nightly hygiene program that aggressively scrubs the boxes after the
+      session & leaves only the required tenors."*
+
+      🔴 DELETING ROWS RETURNED NO DISK, AND THIS PROJECT WROTE THAT DOWN
+      ITSELF. `purge_verified`'s docstring reads *"NO VACUUM ... SQLite reuses
+      freed pages and the store reaches steady state."* Steady state is a
+      PLATEAU AT THE HIGH-WATER MARK, not a shrink. Measured fleet-wide
+      2026-09-05: `feed_store.db` carries 18-34% free pages — 330-690 MB per
+      box, inside files this purge has trimmed nightly since r162. The purge was
+      working and the space was never coming back.
+
+      🔴 AND THE WAL WAS LARGER THAN ANYTHING THE PURGE COULD REACH. MU held a
+      **1.6 GB `feed_store.db-wal`** beside a 2.3 GB database; META 1.1 GB, AMD
+      963 MB, AVGO 596 MB, CRM 500 MB. ⚠️ A WAL IS NOT RECLAIMED BY VACUUM — it
+      is reclaimed by a CHECKPOINT, which costs seconds and no temp space, so it
+      runs FIRST and unconditionally. SQLite auto-checkpoints near 4 MB, so a
+      1.6 GB WAL means checkpoints have not been completing, and the checkpoint
+      result is REPORTED rather than assumed: a TRUNCATE blocked by a live
+      reader returns busy and looks exactly like one that worked.
+      ⚠️ THE WAL WAS INVISIBLE FOR AN HOUR BECAUSE THE MEASUREMENT GLOBBED
+      `*.db`. WORKING_AGREEMENT §0.3 records that exact incident — the WAL files
+      are `.db-wal`, and the biggest files on the box were excluded by the
+      pattern whose job was to find them.
+
+      🔴 VACUUM IS GATED, NOT ATTEMPTED. It writes a COMPLETE SECOND COPY before
+      replacing the original, so it needs free disk greater than the live size —
+      and on 2026-09-05 the four boxes that needed it most (MU, NVDA, TSLA and
+      META, all under 900 MB free) are exactly the four where it would have
+      failed. A VACUUM that dies half-way at 16:10 on a 96%-full box is worse
+      than no VACUUM. It refuses with the arithmetic printed, and `SQLITE_TMPDIR`
+      points at the data directory because `/tmp` is a 476 MB tmpfs and a 1.8 GB
+      rewrite cannot fit in it (learned on MU, NVDA and QQQ, 2026-08-27).
+
+      🔑 FOUR STORES GREW BY ABSENCE. `plan_tick`, `plan_check`, `shadow` and
+      `chain_snapshots` appear in NONE of `RETENTION_DAYS`, `ARTIFACT_DAYS`,
+      `DERIVED_ARTIFACT_DAYS` or `NEVER_PURGE` — nothing deleted them and
+      nothing protected them either.
+      ⚠️ `chain_snapshots` IS THE SHARPEST: `config.py` has DECLARED 3 days for
+      it since v4.4 and no code ever read that. This file's own header rule says
+      config is the document and this is the code, so this file moves.
+      ⚠️ AND THEY NEEDED SEPARATE LISTS RATHER THAN A BIGGER ONE.
+      `check_purge_pushed` C9 proves every `DERIVED_ARTIFACT_DAYS` table ships
+      via `push_series`; `plan_tick`/`plan_check` ship via `push_derived` (CDC)
+      and the trees via `push_jsonl_tree`/`_push_chain_tree`. Adding them to the
+      existing dict would have turned C9 red FOR A TRUE REASON and taught the
+      next reader to loosen the one check that caught r191.
+
+      🔴 `shadow` IS DECLARED AND NOT ENFORCED (`None`), AND THAT IS WHY IT
+      SHIPS TODAY AT ALL. The 2026-08-25 purge deleted 492,945 `raw/shadow`
+      objects believing the stream was dead. It is not: 15/15 boxes carry a live
+      unit and 17-32 date directories reaching back to 2026-07-21, and because
+      `push_jsonl_tree` resumes from a per-path offset the bucket was never
+      re-sent. **The boxes hold the only copy of everything before 08-26, so
+      arming shadow before that history is re-pushed and VERIFIED would destroy
+      it.** Same sequencing the operator set for the tenors in r80: write the
+      number down, argue with it, then give it a consumer.
+
+      ⚠️ IT NOW REPORTS WHAT REMAINS, NOT ONLY WHAT WENT. Aggression has to be
+      aimed, and no deletion count explains why MU holds 1.8 GB live against
+      CVX's 0.20 GB on identical policy. Per-table remaining rows print every
+      run, so the next tuning decision is a query rather than an argument.
+v1.1  2026-08-29
 v1.1  2026-08-29  r191 — THE DERIVED-SERIES PURGE LIST BECOMES A CONSTANT,
       and its justification is retired. Behaviour is unchanged: the same
       three tables, the same 20 days. What changes is that
@@ -83,6 +148,41 @@ DERIVED_ARTIFACT_DAYS = {
     "surface_series":    20,
 }
 
+# 🔑 r255 — CDC LIFECYCLE TABLES, PUSHED BY `push_derived`, NOT `push_series`.
+# Its own list because the invariant differs: `check_purge_pushed` C9 proves a
+# DERIVED_ARTIFACT_DAYS table ships via push_series, and these do not. Folding
+# them in would turn C9 red for a TRUE reason, and a check that goes red for the
+# wrong reason is the one that gets loosened (the CV.1 lesson).
+# ⚠️ 7 DAYS IS A PRIOR, NOT A FIT, and it is a RE-PUSH window like the artifacts
+# above rather than a warm-up requirement: nothing on the box reads plan rows
+# across sessions — `query.py`'s panels are scoped to TODAY since r210 — so the
+# days exist only so a Friday push that failed silently is still recoverable on
+# Monday. ⚠️ NOT in NEVER_PURGE despite being plan-shaped: `plan_ledger` is the
+# biography and is protected; these two are the per-TICK spine, 2.38M rows over
+# five days fleet-wide, and the warehouse is their home.
+DERIVED_CDC_DAYS = {
+    "plan_tick":   7,
+    "plan_check":  7,
+}
+
+# 🔑 r255 — DATE-PARTITIONED FILE TREES under data/. Not tables: the unit of
+# deletion is a `<date>/` directory, and the cutoff is an ET TRADING DAY rather
+# than an epoch, because the directory name IS a date and a date predicate is an
+# exchange fact (r125). The boxes run UTC, so a naive `date.today()` here rolls
+# the day at 20:00 ET and would take a directory that is still today's.
+# ⚠️ `chain_snapshots` CLOSES A DIVERGENCE RATHER THAN OPENING A POLICY:
+# config.py has declared 3 days for it since v4.4 and nothing ever read it.
+# 🔴 `shadow` IS None — DECLARED, NOT ENFORCED. The boxes hold the ONLY copy of
+# everything before 2026-08-26 (the 08-25 purge deleted 492,945 objects on a
+# finding that was wrong, and the per-path push offsets meant it was never
+# re-sent). Arming this before that history is re-pushed AND VERIFIED destroys
+# it. The number is written down so it can be argued with; it gets a consumer
+# when the extraction has landed.
+TREE_DAYS = {
+    "chain_snapshots": 3,
+    "shadow":          None,
+}
+
 ARTIFACT_DAYS = {
     "greeks_series":     3,
     "quote_series":      3,
@@ -102,9 +202,187 @@ NEVER_PURGE = {
 
 DAY = 86400.0
 
+# VACUUM needs a full second copy of the LIVE pages before it can replace the
+# original; 1.15 is that plus a margin. Below VACUUM_MIN_FREE_BYTES there is
+# nothing worth a multi-minute rewrite in the middle of a takedown.
+VACUUM_HEADROOM        = 1.15
+# ⚠️ ENV-OVERRIDABLE AND READ PER CALL, not frozen at import. Two reasons and
+# the second is the honest one: an 8.6 GB box and a 19 GB box do not want the
+# same floor, and a checker has to be able to drive the REAL resolution path
+# rather than reach in and reassign a module constant — a test that monkeypatches
+# the threshold is testing its own patch (C.23).
+VACUUM_MIN_FREE_MB     = 200
+
+
+def _vacuum_min_free() -> int:
+    try:
+        return int(os.environ.get("OT_VACUUM_MIN_FREE_MB",
+                                  VACUUM_MIN_FREE_MB)) * 1024 * 1024
+    except ValueError:
+        return VACUUM_MIN_FREE_MB * 1024 * 1024
+
+
+def _mb(n) -> str:
+    n = float(n or 0)
+    return "%.0fMB" % (n / 1048576) if n < 1073741824 else "%.2fGB" % (n / 1073741824)
+
 
 def _log(msg: str) -> None:
     print(f"[retention] {msg}", flush=True)
+
+
+def _et_cutoff(days: int) -> str:
+    """The ET trading day `days` back, as YYYY-MM-DD.
+
+    ⚠️ ET, NOT THE BOX CLOCK. The boxes run UTC and these directories are named
+    for the ET session that wrote them, so a naive `date.today()` rolls the day
+    at 20:00 ET and a nightly purge running at 16:10 would be comparing against
+    tomorrow (r125, and the operator's own long-standing symptom).
+    """
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("America/New_York"))
+    return (now - timedelta(days=days)).date().isoformat()
+
+
+def _tree_purge(root: str, days, apply: bool) -> int:
+    """Remove whole `<date>/` directories older than the cutoff. -> dirs removed.
+
+    ⚠️ `days is None` MEANS DECLARED-BUT-INERT AND RETURNS -1, which the caller
+    reports as such. It is NOT the same as zero directories removed, and the two
+    must never render alike — a policy nobody is enforcing has to say so out
+    loud or it reads as a policy that found nothing to do.
+    ⚠️ THE NAME IS THE GUARD. Only a directory whose name parses as a date is
+    ever considered, so a stray file or a scratch folder under the tree cannot
+    be deleted by a rule written for dates.
+    """
+    if days is None:
+        return -1
+    cutoff = _et_cutoff(int(days))
+    removed = 0
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return 0                       # tree absent on this box — fine
+    for n in names:
+        if len(n) != 10 or n[4] != "-" or n[7] != "-":
+            continue
+        try:
+            int(n[:4]); int(n[5:7]); int(n[8:10])
+        except ValueError:
+            continue
+        if n >= cutoff:
+            continue
+        removed += 1
+        if apply:
+            import shutil
+            shutil.rmtree(os.path.join(root, n), ignore_errors=True)
+    return removed
+
+
+def _db_stat(path: str) -> dict:
+    """page_count / freelist / page_size / wal bytes for one store. Read-only."""
+    out = {"live": 0, "free": 0, "wal": 0}
+    try:
+        out["wal"] = os.path.getsize(path + "-wal")
+    except OSError:
+        pass
+    try:
+        c = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=5)
+    except sqlite3.Error:
+        return out
+    try:
+        g = lambda p: c.execute("pragma " + p).fetchone()[0]
+        pc, fl, ps = g("page_count"), g("freelist_count"), g("page_size")
+        out["live"] = (pc - fl) * ps
+        out["free"] = fl * ps
+    except sqlite3.Error:
+        pass
+    finally:
+        c.close()
+    return out
+
+
+def reclaim(paths, apply: bool) -> dict:
+    """CHECKPOINT then GATED VACUUM. -> {path: one-line verdict}.
+
+    🔑 ORDER IS THE DESIGN, NOT A PREFERENCE. The checkpoint is cheap, needs no
+    temp space and returns the WAL — 1.6 GB on MU, more than the whole free-page
+    total — so it runs first and always. The vacuum is expensive, needs a full
+    second copy on disk, and on the boxes that most need it there is no room; so
+    it runs last and only when the arithmetic says it fits.
+
+    ⚠️ NEITHER STEP MAY BLOCK THE HALT. Every failure is caught and reported;
+    the box still comes down, because a box left running all night costs money
+    and a large file does not (`purge_verified`'s rule, applied here).
+    """
+    out = {}
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        before = _db_stat(path)
+        note = []
+        # ── 1. CHECKPOINT — always, and its RESULT is read ──────────────────
+        # ⚠️ `wal_checkpoint(TRUNCATE)` returns (busy, log_pages, checkpointed).
+        # busy=1 means a reader held the WAL open and NOTHING was truncated —
+        # which is almost certainly why a 1.6 GB WAL exists at all. Reporting
+        # the flag is the difference between knowing that and assuming it.
+        if apply:
+            try:
+                c = sqlite3.connect(path, timeout=30)
+                busy, _lp, _ck = c.execute(
+                    "pragma wal_checkpoint(TRUNCATE)").fetchone()
+                c.close()
+                after_wal = 0
+                try:
+                    after_wal = os.path.getsize(path + "-wal")
+                except OSError:
+                    pass
+                if busy:
+                    note.append("checkpoint BUSY (a reader holds the WAL) "
+                                "wal %s -> %s" % (_mb(before["wal"]),
+                                                  _mb(after_wal)))
+                else:
+                    note.append("checkpoint ok, wal %s -> %s"
+                                % (_mb(before["wal"]), _mb(after_wal)))
+            except Exception as exc:                            # noqa: BLE001
+                note.append("checkpoint FAILED: %s" % exc)
+        else:
+            note.append("[dry] would checkpoint, wal %s" % _mb(before["wal"]))
+
+        # ── 2. VACUUM — gated on the arithmetic, refused with it printed ────
+        st = _db_stat(path)
+        need = int(st["live"] * VACUUM_HEADROOM)
+        try:
+            v = os.statvfs(os.path.dirname(path) or ".")
+            free = v.f_bavail * v.f_frsize
+        except OSError:
+            free = 0
+        if st["free"] < _vacuum_min_free():
+            note.append("vacuum skipped: only %s reclaimable" % _mb(st["free"]))
+        elif free < need:
+            # 🔴 THE REFUSAL CARRIES THE NUMBERS. "vacuum skipped" alone is the
+            # kind of line nobody acts on; naming the shortfall is what turns it
+            # into a volume decision.
+            note.append("vacuum REFUSED: needs %s free, disk has %s "
+                        "(%s reclaimable is stranded until the volume grows)"
+                        % (_mb(need), _mb(free), _mb(st["free"])))
+        elif not apply:
+            note.append("[dry] would vacuum, reclaiming ~%s" % _mb(st["free"]))
+        else:
+            # ⚠️ SQLITE_TMPDIR ON THE DATA DIRECTORY. /tmp is a 476 MB tmpfs and
+            # a 1.8 GB rewrite cannot fit in it — measured on MU, NVDA and QQQ,
+            # 2026-08-27.
+            os.environ["SQLITE_TMPDIR"] = os.path.dirname(path) or "."
+            try:
+                c = sqlite3.connect(path, timeout=60)
+                c.execute("vacuum")
+                c.close()
+                note.append("vacuumed, reclaimed ~%s" % _mb(st["free"]))
+            except Exception as exc:                            # noqa: BLE001
+                note.append("vacuum FAILED: %s" % exc)
+        out[os.path.basename(path)] = " | ".join(note)
+    return out
 
 
 def _open(path: str):
@@ -175,7 +453,11 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
     # DERIVED_ARTIFACT_DAYS above puts them inside check_purge_pushed's reach.
     dc = _open(derived_db)
     if dc is not None:
-        for table, days in DERIVED_ARTIFACT_DAYS.items():
+        # r255 — the two lists are walked together but kept SEPARATE above,
+        # because their push stages differ and so does the invariant that
+        # proves each one is safe to delete.
+        for table, days in list(DERIVED_ARTIFACT_DAYS.items()) + \
+                           list(DERIVED_CDC_DAYS.items()):
             if table in NEVER_PURGE:
                 continue
             cutoff = now - days * DAY
@@ -190,7 +472,51 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
         if apply:
             dc.commit()
         dc.close()
+
+    # ── r255: date-partitioned file trees ───────────────────────────────────
+    for tree, days in TREE_DAYS.items():
+        root = os.path.join(HERE, "data", tree)
+        n = _tree_purge(root, days, apply)
+        # ⚠️ -1 IS "DECLARED, NOT ENFORCED" AND MUST NOT RENDER AS ZERO.
+        removed[f"tree/{tree}"] = ("declared, not enforced" if n < 0 else n)
+
+    # ── r255: RECLAIM — checkpoint, then vacuum if it fits ──────────────────
+    # 🔑 AFTER the deletions, because a checkpoint before them would return a
+    # WAL that the deletes immediately refill, and a vacuum before them would
+    # copy rows that are about to go.
+    removed["_reclaim"] = reclaim(
+        [feed_db, derived_db,
+         os.path.join(HERE, "data", "trades.db")], apply)
+
+    # ── r255: WHAT REMAINS, so the next tuning decision is a query ──────────
+    # ⚠️ THIS IS NOT DECORATION. Nothing in a deletion count explains why MU
+    # holds 1.8 GB live against CVX's 0.20 GB on identical policy, and the
+    # aggression has to be aimed at whichever table that is.
+    removed["_remaining"] = _remaining(feed_db, derived_db)
     return removed
+
+
+def _remaining(feed_db: str, derived_db: str) -> dict:
+    """Row counts left behind, per purgeable table. Read-only, best effort."""
+    out = {}
+    for db, tables in ((feed_db, list(ARTIFACT_DAYS)),
+                       (derived_db, list(DERIVED_ARTIFACT_DAYS)
+                        + list(DERIVED_CDC_DAYS))):
+        c = _open(db)
+        if c is None:
+            continue
+        for t in tables:
+            try:
+                out[t] = c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except sqlite3.Error:
+                continue                # table absent on this box — fine
+        try:
+            out["candles"] = c.execute(
+                "SELECT COUNT(*) FROM candles").fetchone()[0]
+        except sqlite3.Error:
+            pass
+        c.close()
+    return out
 
 
 def main(argv=None) -> int:
@@ -216,7 +542,14 @@ def main(argv=None) -> int:
     argv = list(argv or [])
     apply = ("--apply" in argv) or os.environ.get("OT_RETENTION_APPLY") == "1"
     removed = purge(apply=apply)
-    total = sum(removed.values())
+    # r255 — the result now carries three shapes: integer row counts, the
+    # string "declared, not enforced" for an inert tree, and the two report
+    # dicts. Only the integers are rows, and summing blindly would have raised.
+    reclaimed = removed.pop("_reclaim", {})
+    remaining = removed.pop("_remaining", {})
+    counts = {k: v for k, v in removed.items() if isinstance(v, int)}
+    inert = [k for k, v in removed.items() if not isinstance(v, int)]
+    total = sum(counts.values())
     if not removed:
         _log("nothing to evaluate (no stores found)")
         return 0
@@ -231,12 +564,33 @@ def main(argv=None) -> int:
         _log(f"⚠️⚠️ RETENTION IS DRY — {total:,} row(s) were NOT removed. The "
              f"store will keep growing; this is how the fleet reached 100% "
              f"disk and went blind mid-session on 2026-08-27.")
-    for label in sorted(removed, key=lambda k: -removed[k]):
-        if removed[label]:
-            _log(f"   {label:<28} {removed[label]:>9,}")
-    # ⚠️ VACUUM IS NOT RUN. It rewrites the whole file and would stall the box
-    # for minutes at close; SQLite reuses freed pages, so the space returns as
-    # new rows land. A purge that blocks the halt is worse than a larger file.
+    for label in sorted(counts, key=lambda k: -counts[k]):
+        if counts[label]:
+            _log(f"   {label:<28} {counts[label]:>9,}")
+    # ⚠️ AN INERT POLICY ANNOUNCES ITSELF. "declared, not enforced" and "found
+    # nothing to remove" are different facts and must never render alike — the
+    # whole reason `shadow` ships with None is that somebody has to see it is
+    # not yet armed.
+    for label in sorted(inert):
+        _log(f"   {label:<28} {removed[label]}")
+
+    # ── r255 — RECLAIM ──────────────────────────────────────────────────────
+    # 🔴 THIS BLOCK REPLACES THE "VACUUM IS NOT RUN" NOTE THAT STOOD HERE. That
+    # note was right about the cost and wrong about the consequence: freed pages
+    # do NOT come back as the store grows, they plateau at the high-water mark,
+    # and fleet measurement on 2026-09-05 found 18-34% of every feed_store
+    # sitting free while the boxes ran out of disk.
+    for name, verdict in sorted(reclaimed.items()):
+        _log(f"   reclaim {name:<20} {verdict}")
+
+    # ── r255 — WHAT REMAINS ─────────────────────────────────────────────────
+    # ⚠️ REPORTED EVEN WHEN NOTHING WAS DELETED. The question this answers is
+    # not "did the purge work" but "which table is the 1.8 GB", and that one is
+    # unanswerable from a deletion count.
+    if remaining:
+        _log("   remaining rows after purge:")
+        for t in sorted(remaining, key=lambda k: -remaining[k]):
+            _log(f"     {t:<26} {remaining[t]:>12,}")
     return 0
 
 
