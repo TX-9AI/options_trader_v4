@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.68
+# BACKLOG.md — v1.69
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -56,6 +56,7 @@ actually read goes in as an open step, not a closed one.
 | **DEP.2** | ⬜ **`land.sh`'s CONTENT GATE USES BARE `grep -q`, SO A PATTERN WITH `*` SILENTLY MATCHES SOMETHING WEAKER.** | ⬜ | 🔴 **FOUND WHILE BUILDING r277, MEASURED NOT REASONED:** `POS docs/GENESIS.md\|**r247**` PASSED against a GENESIS containing no `r247`. In BRE the trailing `**` reads as *zero or more `7`s*, so the pattern degenerates to `r24` and matches `r240`, `r241`, anything. **`**rNNN**` is this repo's own GENESIS row idiom**, so any spec written that way checks something weaker than it says — the laundered green §18 names, inside the gate whose whole job is to prevent it. Fix is `grep -qF` for POS/NEG plus a selftest case built from a pattern that degenerates. ⚠️ **NOT FOLDED INTO r278 DELIBERATELY:** the lander that changes the lander is verified by the old lander, and r235 already had to solve self-replacement once. It is a small change and it deserves its own delivery and its own born-red. |
 | **DEP.3** | ⬜ **LAND.1 IS REVERSED, BY THE OPERATOR, AND THE RECORD SHOULD NOT CONTRADICT ITSELF.** | ⬜ | LAND.1 ruled that `land.sh` gets no menu item: *"installer scripts should call it, not me manually running it."* **No installer ever called it** — every land since r235 has been a pasted command — so the premise was false in practice, and he asked for the item directly on 2026-09-05. Recorded rather than quietly overridden: **C.31** says a rule outliving its reason is a rule the next reader loosens for a worse reason. `menu_registry.sh` v1.10 carries the reversal in its own changelog; this row is so the ledger agrees with it. |
 | **DEP.4** | 🔴 **A MULTI-HALF DELIVERY COULD LAND HALF-WAY, ON ORIGIN.** | dtp r279 | ◐ **BUILT + PUSHED.** Observed, not imagined: landing `r277_r2` before `r276_r2` in the sandbox, the dtp half passed its gate, committed **and pushed**, and only then did the otv4 half correctly refuse on a GENESIS row `r276` had not yet written. Origin held the code with no backlog entry — a half delivery on the shared truth fifteen boxes pull from — and re-running died at `git commit` with nothing left to stage. 🔑 **A PRE-FLIGHT OF EVERY GATE WOULD NOT HAVE WORKED**, and that is the design: a half is ALLOWED to gate on an artifact an earlier half produces, so verifying half two before half one lands would fail a gate that is not failing. **The split is COMMIT vs PUSH, which is where the irreversibility actually sits.** Phase 1 verifies and commits each half locally, in order, so a later half still sees an earlier half's files; phase 2 pushes, and only if every half reached a commit. Any phase-1 failure rolls every repo this run committed to back to its pre-run SHA. ⚠️ **THE ROLLBACK IS `reset --soft`** — a hard reset would revert an unrelated tracked file the operator had mid-edit, which is §35's own reason for refusing a blind `git checkout -- .`; a rolled-back half looks exactly like a gate failure today, files present and uncommitted, recovery printed. ⚠️ **AND THE LIMIT IS STATED:** two remotes are not a transaction. The pushes are last and back to back, and a failure names which repo is ahead and the one command that fixes it — a pushed half is NOT auto-reverted, because undoing something already on origin is a decision for a human. |
+| **DEP.5** | ⬜ **THE LAND COMMAND IS NO LONGER PRINTED — §15 REWRITTEN.** | otv4 r253 | ◐ **PUSHED.** Operator, 2026-09-05: *"I no longer need you to print the landing/commit commands going forward."* The deploy is the devtools item **`LAND a tarball from /home/ubuntu`** (54 today — **cite it by LABEL**, C.15). §15's LANDING half is superseded and its archive rules survive intact as §15a, struck rather than deleted per r240. **WHAT THE ASSISTANT STILL OWES IS THE ARCHIVE AND A `land.spec` PER HALF** — the mechanics are generic, the gate is specific, and only the author of a change can write `POS`/`NEG`/`CHECK`/`ORDER`. §19's scope narrowed to say it no longer covers the land command. 🔴 **§33's SKETCH CORRECTED:** it said `git add -A` while the operator's own standing rule says never to, and the looser document was the one the code followed for four months; it now shows named staging and the CHECK stage. |
 
 ### S3 repoint — the reporting apparatus
 
@@ -321,6 +322,52 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.69 — 2026-09-05 — otv4 r253 — DEP.5: THE WORKING AGREEMENT CATCHES UP TO
+THE DEPLOY. DOCS ONLY.**
+
+Operator, 2026-09-05: *"I no longer need you to print the landing/commit
+commands going forward... now we use [the LAND item] in devtools. Maybe update
+the working agreement that this is the preferred way we stage and commit files
+now."*
+
+**`WORKING_AGREEMENT.md` v4.3.** §15 is rewritten: the deploy is the devtools
+item **`LAND a tarball from /home/ubuntu`**, with its dry run beside it. Its
+archive rules — the `tar czf` build, the `.gz` strip that is not an invariant,
+`tar xf` never `xzf`, unique names per delivery, no scaffolding — are unchanged
+and survive as **§15a, struck rather than deleted** per r240's precedent,
+because a row a later entry contradicts is a wrong answer and not history, and
+that reasoning is still why the tarball looks the way it does.
+
+🔑 **WHAT THE ASSISTANT STILL OWES IS THE PART NO GENERIC TOOL CAN SUPPLY.** The
+archive, and a `land.spec` per half: `REPO` markers so the lander finds the
+checkout rather than guessing a path (§3), `REV` and `DESC` as the one string
+that becomes both the GENESIS row and the commit subject (§35), `ORDER` when a
+second half depends on its first, `POS`/`NEG` content assertions, and `CHECK`
+lines naming what must be EXECUTED. **The mechanics are generic; the gate is
+specific, and only the author of the change can write it.** §15 says so
+explicitly, so a future reader does not mistake "there is a menu item" for
+"there is nothing left to do."
+
+⚠️ **THE ITEM IS CITED BY LABEL AND THE NUMBER IS NAMED ONCE, AS OF A DATE.**
+It is 54 today. Menu numbers come from a render-time loop counter, are never
+stored or compared, and have moved twice in a week — **C.15** records that any
+document naming an item by number is wrong the moment the next item lands, and
+a rule file that rots inside a year is worse than one that says less.
+
+🔴 **§33's LAND-ORDER SKETCH IS CORRECTED, AND THE DISAGREEMENT IS THE FINDING.**
+It read `extract → verify → REGENERATE MAP → APPEND GENESIS → git add -A`, while
+the operator's own standing rule is *"NEVER `git add -A`; stage shipped files by
+name"*, written after a stray `fit_report.py` was pushed off main. **Two
+documents disagreed and the looser one was the one the code followed**, for four
+months, until dtp r278 measured it. The sketch now shows named staging and the
+`RUN THE CHECKS` stage — before r278 this command GREPPED and never executed
+anything, which is §0.6's own shape: the r201 gate asserted a function existed
+and the file parsed, and both were true of the broken version.
+
+§19's scope is narrowed rather than deleted: it still governs every other
+command the operator runs — fleet fan-outs, queries, studies — and now says
+plainly that it does not cover the land.
 
 **v1.68 — 2026-09-05 — dtp r279 — DEP.4: ALL HALVES LAND, OR NONE REACHES
 ORIGIN.**

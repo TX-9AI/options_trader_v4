@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v4.2 · 2026-08-31 — §0 plus 37 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v4.3 · 2026-09-05 — §0 plus 37 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -360,7 +360,54 @@ subfolder, not a guess.)
 
 ---
 
-## 15. DELIVERY IS A TARBALL PLUS ONE LINE. Nothing lands by hand.
+## 15. DELIVERY IS A TARBALL. THE OPERATOR LANDS IT FROM THE MENU.
+
+🔴 **AMENDED 2026-09-05 (dtp r278/r279, otv4 r253). THE ASSISTANT NO LONGER
+PRINTS A LAND COMMAND.** Operator: *"I no longer need you to print the
+landing/commit commands going forward."*
+
+**The deploy is a devtools item: `LAND a tarball from /home/ubuntu`**, with
+`LAND a tarball — DRY RUN` beside it. **CITE IT BY LABEL.** It sits at option
+54 as of 2026-09-05 and that number is arbitrary — menu numbers are assigned
+from a render-time loop counter and have moved twice in a week, which is why
+**C.15** says any document naming an item by number is wrong the moment the
+next item lands.
+
+**WHAT THE ASSISTANT STILL OWES, AND IT IS ALL OF THE HARD PART:** the archive,
+built with `tar czf`, uniquely named per delivery (§26); and **a `land.spec`
+per half**, which is the thing no generic tool can supply. The spec carries
+`REPO` markers so the lander finds the checkout rather than guessing a path
+(§3), `REV` and `DESC` — one string that becomes both the GENESIS row and the
+commit subject (§35) — `ORDER` when a two-repo delivery's second half depends
+on its first, `POS`/`NEG` content assertions, and `CHECK` lines naming what
+must be EXECUTED. **The generic half is mechanics; the specific half is the
+gate, and only the author of the change can write it.**
+
+⚠️ **A HALF THAT SHIPS CODE AND DECLARES NO `CHECK` IS REFUSED.** Detected
+from the payload, not trusted to the author, because the realistic failure is
+a forgotten check rather than a broken one — and *nothing was executed* must
+never read like *everything passed*. A docs-only half legitimately has nothing
+to run and says so out loud.
+
+⚠️ **ALL HALVES LAND OR NONE REACHES ORIGIN (dtp r279).** Every half is
+verified and committed LOCALLY first, in order; the pushes come last and only
+if every half got there. A failure rolls back every repo the run committed to,
+with `reset --soft` so an unrelated file the operator had mid-edit survives.
+**A pre-flight of every gate would NOT have worked** and the reason is worth
+keeping: a half is allowed to gate on an artifact an earlier half produces, so
+verifying half two before half one lands fails a gate that is not failing.
+
+⚠️ **THE LANDER TRAVELS IN THE TARBALL**, with the repo copy as fallback. A
+delivery that improves the lander must be landed BY the improved copy or the
+improvement is never exercised on the one delivery that could prove it.
+
+**WHAT FOLLOWS IS THE ORIGINAL §15, KEPT BECAUSE THE ARCHIVE RULES BELOW ARE
+UNCHANGED** — the naming, the `.gz` strip, the `tar xf` flag, the no-scaffolding
+rule. Only the LANDING half is superseded. Struck rather than deleted, per
+r240's precedent: a row a later entry contradicts is a wrong answer, not
+history, and the reasoning is still why the tarball looks the way it does.
+
+## 15a. ⬛ SUPERSEDED — DELIVERY IS A TARBALL PLUS ONE LINE.
 Added 2026-08-01. Every presented file, patch or hotfix ships as **one archive**
 built with **`tar czf` (.tar.gz)** — Termius prefers compressed. It arrives in
 `/home/ubuntu` **sometimes** renamed `.tar` (the `.gz` was stripped on 2026-08-01
@@ -443,6 +490,12 @@ leaves; a commit is the change, the backlog is what survives the thread.
   a laundered green is worse than a red.
 
 ## 19. COMMANDS GO IN A CODE BOX, ON ONE LINE, SEMICOLON-SEPARATED.
+
+⚠️ **SCOPE NARROWED 2026-09-05: THIS NO LONGER COVERS THE LAND COMMAND**, which
+is not printed at all any more — see §15. It still governs every other command
+the operator runs: a fleet fan-out, a query, a study, a one-off diagnostic. The
+form and the presentation rules below are unchanged for all of those.
+
 Added 2026-08-13, operator's instruction. Two halves of one failure: a command
 the operator cannot copy cleanly is a command that runs wrong.
 
@@ -792,7 +845,19 @@ graph — parsed, never executed, so a module that crashes on import still maps.
 **The generator runs INSIDE the land command**, between the verification gate
 and `git add`, so the commit always carries a current map:
 
-    extract → verify → REGENERATE MAP → APPEND GENESIS → git add -A
+    extract → verify → RUN THE CHECKS → REGENERATE MAP → APPEND GENESIS
+            → git add <named paths> → commit → push → cleanup
+
+🔴 **`git add -A` CORRECTED HERE 2026-09-05, AND THE DISAGREEMENT IS THE
+FINDING.** This sketch said `git add -A` while the operator's own standing rule
+says the opposite — *"NEVER `git add -A`; stage shipped files by name"*, written
+after a stray file was pushed off main. Two documents disagreed and **the looser
+one was the one the code followed**, for four months. `land.sh` v1.1 now stages
+the payload's own file list plus the artifacts the command itself generated, and
+nothing else. `RUN THE CHECKS` is likewise new (v1.1): before it, this command
+GREPPED and never executed, which is the §0.6 shape exactly — the r201 gate
+asserted a function existed and the file parsed, and both were true of the
+broken version.
             → commit → push → cleanup
 
 If regeneration reports broken imports, or `--check` reports drift, **the gate
@@ -1031,6 +1096,25 @@ directions.
 ---
 
 ## CHANGELOG
+
+**v4.3 — 2026-09-05 — otv4 r253 — §15 REWRITTEN: THE OPERATOR LANDS FROM THE
+MENU, AND THE ASSISTANT STOPS PRINTING LAND COMMANDS.**
+Operator, 2026-09-05: *"I no longer need you to print the landing/commit
+commands going forward... now we use [the LAND item] in devtools."* §15's
+LANDING half is superseded and its archive rules are kept intact as §15a,
+struck rather than deleted per r240 — the reasoning is still why the tarball
+looks the way it does. What the assistant still owes is the archive and a
+`land.spec` per half, which is the part no generic tool can supply: the
+mechanics are generic, the GATE is specific, and only the author of a change
+can write it. §19's scope is narrowed to say plainly that it no longer covers
+the land command. 🔴 **§33's LAND-ORDER SKETCH IS CORRECTED**: it said
+`git add -A` while the operator's own standing rule says never to, and the
+looser document was the one the code followed for four months. The sketch now
+shows named staging and the CHECK stage that dtp r278 added — before it, this
+command greped and never executed anything, which is §0.6's own shape.
+⚠️ **THE ITEM IS CITED BY LABEL, NEVER BY NUMBER.** It is 54 today; menu
+numbers come from a render-time loop counter and have moved twice in a week
+(C.15).
 
 **v4.2 — 2026-08-31 — §0 ADDED: THE ASSISTANT'S ATTESTATION.**
 Title and the unequivocal statement beneath it are the operator's own
