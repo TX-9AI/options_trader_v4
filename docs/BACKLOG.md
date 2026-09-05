@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.65
+# BACKLOG.md — v1.66
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -94,6 +94,9 @@ feed plumbing and are not warehouse candidates.
 | **S3.4** | Menu 55 (excursion) — **HELD PENDING AN OPERATOR RULING, not blocked on work.** | ⬜ | Measured 2026-08-29: the MEASUREMENT is engine-agnostic and fine (`mfe_premium`/`mae_premium`/`mfe_bars`/`mae_bars`, units fixed by audit F7). **The INTERPRETIVE layer is v3.** Five of nine `TRAIL_FLAVORS` no longer exist anywhere in otv4 (`continuation_trail`, `orb_fvg_trail_stop`, `trail_stop_hit`, `adopted_trail`, `bos_exit`, `insurance_stop`), and `FLOOR_REASON_PREFIXES` is `("hard_stop", "max_loss_floor")` — **`max_loss_floor` is gone**, so half the floor taxonomy is dead. Six reasons v4 DOES emit are in neither list: `credit_hard_close`, `debit_hard_close`, `orb_structure_stop`, `structure_stop`, `tcs_breach`, `adopted_stop`. So the LEASH and FLOOR verdicts score v4 trades against v3 categories. 🔴 **AND IT MAY BE SUPERSEDED:** `otv4/tests/stop_sweep.py` (menu 31) reads the SAME four columns, defaults to S3, is v4-native, and asks a superset question with honest pessimistic/optimistic bounds. Three options: retire 55 for 31 — rebuild 55's taxonomy from v4's live reasons — repoint as-is and accept v3 verdicts. |
 | **S3.8** | Cumulative excursions from the warehouse. | ⬜ | Menu 55's `--since` prompt is ALREADY dead: a bundle holds one session and the per-box DBs are gone (C.12), so `excursion_report` refuses. Restoring it means `load_day` unioning several `fleet_trades_*.json` across a date range. Real work, not a rider — and pointless until S3.4 is ruled on. |
 | **S3.7** | Menu 54 → retire, or repoint to `warehouse_reader.build()`. | ⬜ | Duplicates what `eod_analysis._consolidate()` already does from S3. |
+| **S3.9** | 🔴 **THE CDC COLLAPSE KEYED ON A ROWID, WHICH IS NOT AN IDENTITY.** | dtp r276 | ◐ **BUILT + PUSHED.** `_rid` is the source table's sqlite `rowid` (`s3_push:945`). r266 scoped it to the `dt=` partition after (QQQ, 1) on 09-01 collided with (QQQ, 1) on 09-04 — a real UNDER-count, fixed. ⚠️ **AND THE SAME EDIT OPENED AN OVER-COUNT:** `push_derived` files every CHANGED row under the PUSH day, so one CDC row touched on two days lands in two partitions and a partition-scoped key keeps BOTH. Under-count, then over-count, on the same data. 🔑 **EVERY ONE OF THESE TABLES EXCEPT `character_ledger` DECLARES A PRIMARY KEY THE BOX ALREADY ENFORCES** — the identity was in the schema the whole time, and `screen_plan_gates` (dtp r271) was already grouping its per-tick panel on `plan_check`'s own PK. `DERIVED_NATURAL_KEY` is diffed against otv4's real `CREATE TABLE` statements by N4b, so a PK change here goes red rather than collapsing on a key the box no longer enforces. **The row count becomes self-verifying:** distinct primary keys per ET day IS the population, which is what made *"is 2.38M plan_check rows complete"* unanswerable. ⚠️ `character_ledger`'s key is `id INTEGER PRIMARY KEY AUTOINCREMENT` — in sqlite that IS the rowid — so it keeps r266's partition-scoped fallback, and any row missing a key component falls back too and is **counted in the banner**. |
+| **S3.11** | ⬜ **THERE ARE STILL THREE COLLAPSE RULES ON ONE DATASET, AND C.17 SAYS THERE IS EXACTLY ONE.** | ⬜ | Measured at HEAD: `warehouse_reader.load_derived` collapses on the natural key (S3.9); `fit_readiness` runs a SECOND collapse in SQL, `GROUP BY _rid, <ts>`; and `tests/screen_plan_gates.py:101` runs **no collapse at all** — its printed row count is raw object rows, which is where the 2.38M figure came from. 🔴 **THE THREE DISAGREE BY CONSTRUCTION**, which is the S3.6 shape one level over. Not folded into S3.9 deliberately — neither `fit_readiness` nor the screen calls `load_derived`, so nothing here was required to make S3.9 work (WA §4). Ruling wanted: point all three at `load_derived`, or leave the screen raw and label it so. |
+| **S3.10** | ⬜ **NOTHING VERIFIES S3 COVERAGE PER STREAM PER DAY.** | ⬜ | 🔑 **A TOOL ALREADY EXISTS TO EXTEND** — `warehouse_coverage.py` v1.1 is LIST-only, trading-day aware, and already carries `NOT_A_SESSION` and `PARTIAL_BY_DESIGN`. Building a second one is the WA §35 rot. ⚠️ **THE EXTENSION IS NOT ONE LINE:** `push_derived` writes ONE OBJECT PER TABLE PER RUN and `push_series` batches at 50k, so an object count on `raw/derived_*` counts PUSH RUNS, while `push_file` is one object per line and it does count rows. And the derived `dt=` is the PUSH day (C.9), so a partition check there answers *"did each box's pusher run"* and cannot answer *"are the rows complete."* **Delivered next as dtp r277.** |
 
 ### Sensor twins — control-side, read S3, boxes untouched
 
@@ -316,6 +319,58 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.66 — 2026-09-05 — dtp r276 — 🔴 THE CDC COLLAPSE KEYS ON THE TABLE'S OWN
+PRIMARY KEY. `_rid` WAS NEVER AN IDENTITY.**
+
+🔴 **r266 FIXED AN UNDER-COUNT AND OPENED AN OVER-COUNT IN THE SAME MOTION.**
+Scoping `_rid` to the `dt=` partition stopped two sessions' rowids colliding —
+measured, real, and correct as far as it went. But `push_derived` files every
+CHANGED row under the **push** day, so one CDC row touched on two days lands in
+two partitions, and a partition-scoped key keeps both copies.
+
+🔑 **THE IDENTITY WAS IN THE SCHEMA THE WHOLE TIME.** Eight of the nine derived
+tables declare a `PRIMARY KEY` the box already enforces — `plan_check` is
+`(ts_epoch, symbol, strategy, direction, check_name)`, `strategy/plan.py:313`.
+`screen_plan_gates` has grouped its per-tick panel on exactly that key since dtp
+r271, so this is not a new idea; it is the one already working in the consumer
+that had to be right, applied to the reader. `DERIVED_NATURAL_KEY` is **diffed
+against otv4's own `CREATE TABLE` statements** (N4b), so it cannot drift into a
+second definition of identity.
+
+⚠️ **r266's STATED MECHANISM IS NOT ESTABLISHED, AND THIS DOES NOT REST ON IT.**
+Its comment says rowids restart because *"boxes purge and rebuild their derived
+stores."* `warehouse/retention_purge.py` at HEAD touches the derived store ONLY
+for `DERIVED_ARTIFACT_DAYS` — `indicator_series`, `fork_series`,
+`surface_series` — and **`plan_check` and `plan_tick` are in neither that list
+nor `NEVER_PURGE`**: nothing deletes them and nothing protects them by name. A
+box REBUILD restarts rowids; the nightly purge does not. Recorded rather than
+quietly corrected, because a landed comment naming the wrong cause is what the
+next reader will reason from.
+
+🔑 **THE COUNT IS NOW SELF-VERIFYING** — distinct primary keys per ET day IS the
+row population, which is what made *"a 5-day range returned 2.38M `plan_check`
+rows and there is no way to know whether that is complete"* unanswerable.
+⚠️ **THE FALLBACK IS COUNTED OUT LOUD.** `character_ledger`'s key is
+`id INTEGER PRIMARY KEY AUTOINCREMENT`, which in sqlite IS the rowid, so it
+keeps r266's partition-scoped key; any row missing a component falls back the
+same way and the banner names the rule that ran and counts the fallbacks.
+⚠️ **ABSENT IS TESTED AS `is None`, NEVER FALSINESS** — `direction` is
+`NOT NULL DEFAULT ''` and `ts_epoch` can be `0.0` (**C.45**).
+
+`tests/test_natural_key.py` v1.0, **17 checks, born red 10/17 at `bb27458`** —
+N5 goes red on the BEHAVIOUR (*"one row pushed on two days loaded as 2"*) rather
+than on the absence of the helper, because a born-red that only says *"the fix
+is not installed"* proves installation and never correctness.
+`tests/test_cdc_partition_key.py` **re-derived to v1.1, not patched**: its C2
+asserted the 3-part key, the exact shape being replaced, so leaving it would
+have certified the defect on every run — the r233/r234 trap.
+
+**BFLY.12 and BFLY.13 closed by dtp r275**, struck in place per r240's
+precedent. **S3.10** and **S3.11** filed. ⚠️ **RE-ISSUED AS `_r2`:** the first
+cut was built against BACKLOG v1.64 and would have overwritten r278's DEP
+entries; the code halves are byte-identical, only this file and the specs moved.
+dtp red set unchanged: 6 before, 6 after.
 
 **v1.65 — 2026-09-05 — dtp r278 — DEP.1: THE UNIVERSAL DEPLOY, AS A MENU ITEM
 — AND NINE OF ITS TEN STAGES ALREADY EXISTED.**
@@ -542,8 +597,8 @@ unmeasurable.
 | id | question | state |
 |---|---|---|
 | **BFLY.11** | **Do the winners sit lower in the EM band?** Answerable once ~3 weeks of snapshots carry `pin_em_fraction`. If they do, the lever is **lowering** `EM_MAX_FRAC`, not raising it — a pin a full EM away is the loosest end of the band and the least likely to convert. | 🔲 OPEN |
-| **BFLY.12** | `screen_bfly_stop` reported **419 trades** where there are 20 — ~399 rows with `exit_premium 0.00`, `pnl 0`, `reason None` are unclosed/non-terminal. `RP.COLS` carries `status` and the screen never filtered on it. The quantiles are computed off real rows so the finding stands, but the counts are junk. | 🔲 OPEN |
-| **BFLY.13** | The verdict line should read `mfe_bars`, not just the MFE ratio. As written it would call a 1-bar pop "a trade that was working". | 🔲 OPEN |
+| **BFLY.12** | `screen_bfly_stop` reported **419 trades** where there are 20 — ~399 rows with `exit_premium 0.00`, `pnl 0`, `reason None` are unclosed/non-terminal. `RP.COLS` carries `status` and the screen never filtered on it. The quantiles are computed off real rows so the finding stands, but the counts are junk. | ✅ **CLOSED dtp-r275** — keyed on a CLOSING FACT (a non-empty `exit_reason`) rather than on a `status` spelling, because a value renamed under a name check has bitten this project twice in one week; the count is labelled CLOSED so 419 cannot recur silently. `test_bfly_stop.py` B6. |
+| **BFLY.13** | The verdict line should read `mfe_bars`, not just the MFE ratio. As written it would call a 1-bar pop "a trade that was working". | ✅ **CLOSED dtp-r275** — 🔑 **AND IT CORRECTED THE NUMBER IN THE OPERATOR'S FAVOUR.** The bar floor now comes from the WINNERS in that sample, not from a threshold anyone chose. Against the winners' own floor of bar 141, only CVX at 144 qualifies — **1 of 12, against a break-even needing 9 of 13** — so the case against removing the butterfly's stop is STRONGER than it was stated in chat. B5 pins that the ratio alone says 10 of 12 while `mfe_bars` says 1: opposite conclusions from the same rows. |
 
 **v1.60 — 2026-09-04 — r242 — 📌 DOCS ONLY. DISP.1: THE REGIME QUESTION IS
 ASKED ONCE FOR DEBITS AND N TIMES FOR CREDITS.** Operator, 2026-09-04: *"why
