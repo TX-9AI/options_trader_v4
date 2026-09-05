@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.72
+# BACKLOG.md — v1.73
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -104,6 +104,8 @@ feed plumbing and are not warehouse candidates.
 | **S3.17** | 🔴 **TWO PURGES FOUGHT OVER ONE DATABASE — AND THIS FILE HAD NO LOCK WHILE `s3_push` HAS HAD ONE SINCE WH.6.** | otv4 r256 / dtp r282 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the conductor's purge phase and a hand-run `--apply` overlapped, and four boxes raised `sqlite3.OperationalError: database is locked` at `DELETE FROM candles`. **THREE DEFECTS, ALL MINE.** (1) No mutual exclusion — `s3_push.acquire_lock()` guards every invocation path for exactly this reason and `retention_purge`, which DELETES, had nothing; same idiom now, own lock file, `OT_PURGE_LOCK_WAIT` 300s, and it WAITS rather than declining because a purge that silently does not run is the r162 failure again. (2) `_open()` connected at SQLite's **5-second default**, shorter than one 2 GB delete, so a brief overlap raised instead of waiting — `busy_timeout` is now explicit at 120s. (3) **The COUNT was wrapped and the DELETE was not**, so one locked table escaped `purge()`, killed `main()`, and **the reclaim never executed** — which is why AMD, AVGO, GOOGL and NVDA kept their WALs while the eleven that got through returned 8.7 GB. Each DELETE is guarded per table, the failures are named, and a partial purge exits 4 so the conductor can say PARTIAL per box instead of letting it read as done. |
 | **S3.18** | 🔴 **`head -3` ATE THE CAUSE OF EVERY PURGE FAILURE, AND THE RECLAIM VERDICT EVERY NIGHT.** | dtp r282 | ◐ **BUILT + PUSHED.** The phase piped the remote purge through `head -3`, sized for the old one-line summary. All the operator saw was `Traceback (most recent call last): \| File ".../retention_purge.py", line 598, in <mo` — the OUTERMOST frame, with the exception type and the raising line cut off. **Three round trips to learn it was `database is locked`.** ⚠️ **A traceback puts its cause LAST**, and the reclaim line prints AFTER the deletion counts, so `head` also guaranteed the checkpoint verdict was invisible on every box on every run — the one line that says whether a 1.6 GB WAL came back. Now redirected to a file on the box, `$?` captured FIRST, then `tail -12`: piping into `tail` would have made `rc=$?` report tail's status, which is the swallowed-exit-code trap this project already records for pytest. |
 | **S3.19** | ⬜ **AN SSH TIMEOUT KILLS THE CLIENT, NOT THE REMOTE PROCESS.** | ⬜ | `ssh_util.ssh_run` gives subprocess `SSH_CONNECT_TIMEOUT + 10` = 22s and returns `rc=255 ssh timeout` — but the remote `python3` KEEPS RUNNING with nobody reading its output. That is what created S3.17's collision: two option-14 fan-outs timed out on QQQ, their abandoned purges held `feed_store` open, and the conductor's checkpoint arrived to a busy database. S3.17's lock makes it harmless; it does not make it visible. 🔑 **This is the concrete argument for SSM Run Command** over SSH for the fan-out: instance IDs rather than IPs (WH.7's own conclusion, applied to the command path instead of only the stop path), async with no 22s ceiling, output to S3 rather than through a pipe, and a stopped instance returning a named failure instead of hanging. Needs a probe first — does the agent answer on all 15 — and two IAM changes. |
+| **RPT.11** | 🔴 **SIX MENU CONFIRMS ACCEPTED LOWERCASE `y` AND NOTHING ELSE.** | dtp r283 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the operator answered the LIVE backfill prompt with **`Y`** and the run silently did not happen — no error, no message, just the next prompt. **A confirm that discards a plausible yes is worse than one that refuses**, because *declined* and *ran and did nothing* look identical. All six sites route through `_yes` in `devtools.sh`; the DESTRUCTIVE ones now say what they declined while a flag toggle stays quiet, which is why the helper is a pure predicate rather than one that prints. ⚠️ **C3 pins that NO lowercase-only comparison survives anywhere in the menu** — fixing the one site that bit and leaving five is how this returns (C.30: when a rule changes, sweep its readers). ⚠️ And it must still refuse `n`, `sure` and empty: these prompts wake boxes, stop trading and delete rows, so loosening it to *anything non-empty* would be worse than the bug. |
+| **RPT.12** | 🔴 **THE OHLC BACKFILL'S STREAM CAP WAS 29-BOX ARITHMETIC, AND IT HARD-STOPS.** | dtp r283 | ◐ **BUILT + PUSHED.** A **one-box** backfill against a 15-box fleet was refused outright: `10 stream cap` with 15 running, and the check is `return 2`, not a warning — despite the file's own header describing a warn-never-stop pattern for a different check nearby. 🔑 **r53 ALREADY RETIRED THE FLEET-WIDE COPY OF THIS GUARD** on exactly this reasoning — *"it existed so a maintenance wake could not put 29 boxes on the wire at once; the fleet is 15 and a normal session already carried ~20 without strain"* — and this per-report copy was never swept after the 2026-08-20 pare. Same shape as the README fleet count that read 29 for nine days. Default moves to **20, which is r53's own recorded figure rather than one I chose**, `OT_STREAM_CAP`-overridable, and marked a PRIOR: if the DXFeed ceiling is ever measured rather than inferred, it moves again. |
 | **S3.16** | ⬜ **WHY DOES MU HOLD 1.8 GB LIVE AGAINST CVX's 0.20 GB ON IDENTICAL POLICY?** | ⬜ | A 9x spread with the same `RETENTION_DAYS` and the same `ARTIFACT_DAYS` on both. ⚠️ **INFERENCE, NOT MEASUREMENT:** `greeks_series` and `quote_series` are PER-CONTRACT at 3 days, and **MEM.1** measured MU at **356 contracts spanning ±45% of spot**, most of it more than 30% OTM and untradeable, while the aux tenors are banded and the primary expiry chain is not. If that holds, the disk story and the 09-02 OOM are ONE root cause. r255's per-table remaining-row report answers this on the first armed run — a query, not an argument. Its disposition is MEM.1's banding question, which is a trading-path change and the operator's call. |
 | **S3.13** | ⬜ **THE 2026-08-25 PURGE DELETED 492,945 `raw/shadow` OBJECTS AS A DEAD STREAM. IT WAS NOT DEAD.** | ⬜ | The purge was justified by the same never-installed finding ASK.2 now records as false. `raw/` is the durable copy and by design never deletes; this deletion went through the console grant. **What is actually lost is not yet established and should be measured before it is described** — the boxes do not purge `shadow` (it is in neither `ARTIFACT_DAYS` nor `DERIVED_ARTIFACT_DAYS`), and QQQ holds 32 date dirs, so some or all of it may still be box-side and re-pushable. Two questions, in order: **how many of the deleted dates still exist on a box**, and **is the answer to re-push them or to accept the loss** given the stream's stated purpose was the Layer-1 freeze evidence. ⚠️ It is also a standing lesson: a purge argued from a finding rather than from the bucket deleted the bucket's own evidence that the finding was wrong. |
 | **S3.14** | ⬜ **`shadow` IS UNBOUNDED ON THE BOXES, AND QQQ FILLED ITS DISK.** | otv4 r255 | 🔴 **REFUTED AND CLOSED — shadow is 21-40 MB, about a third of one percent of a 10 GiB volume. It was never the disk.** I raised it from a directory count without measuring a size; the measurement kills it. ✅ **CLOSED — DEAD**, recorded rather than dropped. **The real consumer is `feed_store.db` plus its WAL**, which S3.15 and DEP.6 now carry. | Nothing purges it: `shadow` appears in neither `ARTIFACT_DAYS` nor `DERIVED_ARTIFACT_DAYS`, and `NEVER_PURGE` does not name it either — it is untouched by absence rather than by policy. QQQ holds **32 date directories** of high-frequency jsonl and **ran out of space on 2026-09-03**, which is what cost that day's `eod` and `ohlc`. ⚠️ **THE LINK IS PLAUSIBLE AND NOT MEASURED** — no size was taken, and r162 already established `feed_store.db` as the disk story on the 08-27 outage. This is filed as a question, not a cause: **measure `du -sh` on the shadow tree across the fleet before anything is concluded or deleted.** Its disposition depends on ASK.2. |
@@ -330,6 +332,46 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.73 — 2026-09-05 — dtp r283 — TWO SILENT REFUSALS, BOTH FOUND BY ASKING FOR
+ONE ORDINARY THING.**
+
+The whole finding came out of a single request — backfill one box's OHLC for one
+date — which was refused twice in a row without ever saying so.
+
+🔴 **RPT.12 — THE CAP.** `--stream-cap` defaults to 10, the fleet runs 15, so a
+**one-box** batch exceeded it and the run stopped. And it is a hard stop
+(`return 2`), not the warn-never-stop the file's header describes for a
+neighbouring check. 🔑 **r53 already retired the fleet-wide copy of this guard**,
+after the 2026-08-20 pare, in these words: *"it existed so a maintenance wake
+could not put 29 boxes on the wire at once; the fleet is 15 and a normal session
+already carried ~20 without strain."* This copy was never swept — the same shape
+as the README fleet count that read 29 for nine days. The default is now 20,
+**r53's own recorded number rather than one I invented**, env-overridable, and
+labelled a prior.
+
+🔴 **RPT.11 — THE CONFIRM.** With the cap raised by hand, the operator typed
+**`Y`** at the LIVE backfill prompt and nothing happened. `[ "$GO" = "y" ]`
+matches lowercase only, there is no else branch, and the run simply did not
+occur. ⚠️ **That is worse than a refusal**: *declined* and *ran and did nothing*
+are indistinguishable to the person watching. Six sites carried it; all six now
+route through `_yes`, and the destructive ones state what they declined. ⚠️ **A
+flag toggle must stay quiet**, which is why `_yes` is a pure predicate — one
+helper that printed for both would be wrong at half its callers.
+
+⚠️ **AND IT STILL REFUSES EVERYTHING ELSE.** C1b drives `n`, `N`, `no`, `sure`,
+`ye` and empty. These prompts wake boxes, stop trading and delete rows;
+loosening the check to *anything non-empty* would be a worse defect than the one
+it replaces. **C3 is the check that matters most** — no lowercase-only
+comparison survives anywhere in the menu, because repairing the site that bit
+and leaving five others is exactly how this comes back (C.30).
+
+`tests/test_confirm_and_cap.py` v1.0, **17 checks**, born red at HEAD. ⚠️ It
+EXTRACTS `_yes` from `devtools.sh` and runs it in a subshell rather than sourcing
+the file — `devtools.sh` ends in an interactive menu loop, and a fixture that
+launched the menu would be a test with a side effect on the operator's terminal.
+And the cap is read from the real `add_argument` default, not from the constant,
+because a constant nobody wired is the r230 defect exactly.
 
 **v1.72 — 2026-09-05 — otv4 r256 / dtp r282 — THE NIGHTLY RECLAIM WORKS. IT HAD
 NO MUTUAL EXCLUSION, AND ITS FAILURES WERE INVISIBLE.**
