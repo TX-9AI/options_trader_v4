@@ -1,5 +1,14 @@
 """
-shadow/observer.py  v4.2
+shadow/observer.py  v4.3
+v4.3  2026-09-05  r268 — the tick SEEDS a cold accumulator from `df_1m`, which
+      this function already holds, and stamps `velocity_state` on every record.
+      See shadow/primitives.py v4.1 for the failure this closes. ⚠️ The seed is
+      never fatal — a failure logs and the tick continues, because raising here
+      would cost the whole record and produce exactly the silent gap the change
+      exists to remove. ⚠️ And the tick now carries ONE epoch: a first cut
+      re-derived it by parsing `prim.ts_et` back into a datetime with the wrong
+      format string (that field uses a space, not a `T`), which is a second
+      source of truth for a value already in scope.
 v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -114,6 +123,11 @@ def _out_path(dt: datetime, symbol: str) -> str:
     return os.path.join(day_dir, f"{symbol}.jsonl")
 
 
+# r268 — how many trailing 1m closes a cold accumulator seeds from. 40 covers
+# MIN_TYPICAL_SAMPLES (20) with margin on a short session start.
+SEED_BARS = 40
+
+
 def _prim_fields(prim) -> dict:
     d = asdict(prim)
     d.pop("named_levels", None)          # keep lines compact; nearest refs suffice
@@ -140,15 +154,50 @@ def one_tick(symbol: str, acc: TickAccumulator, scorers: list) -> dict:
     liq = get_liquidity_mapper().analyze(df_5m, df_15m, price)
 
     now = _now_et()
+    # ⚠️ ONE EPOCH FOR THE WHOLE TICK. A first cut re-derived it by parsing
+    # `prim.ts_et` back into a datetime — with the wrong format string, since
+    # that field uses a space and not a `T`. The value is right here; parsing a
+    # string the same function just formatted is a second source of truth for
+    # no reason.
+    epoch_s = time.time()
     prim = compute_primitives(
-        acc, epoch_s=time.time(), ts_et=now.strftime("%Y-%m-%d %H:%M:%S"),
+        acc, epoch_s=epoch_s, ts_et=now.strftime("%Y-%m-%d %H:%M:%S"),
         minute_key=now.strftime("%Y-%m-%dT%H:%M"), price=price,
         vol_state=vol, liq_map=liq,
     )
 
+    # ── 🔴 r268 — SELF-HEALING RECOVERY, NOT A START-TIME DEPENDENCY ─────
+    # The accumulator is live-only, so a reboot or a `Restart=always` crash
+    # loop enters RTH with an empty deque and emits null velocity for the next
+    # five minutes — a record that reads as a quiet tape. `df_1m` is ALREADY
+    # HERE and is backfilled from the session open, so recovery is a loop over
+    # data this function already fetched. It runs whenever the accumulator is
+    # short, which means it covers the first tick of the day, the fourth
+    # restart of a crash loop, and every case in between — no timer, and
+    # nothing that depends on WHEN the process started.
+    if acc.velocity_state(epoch_s) == "warming" and df_1m is not None:
+        try:
+            bars = [(float(ix.timestamp()), float(cl))
+                    for ix, cl in zip(df_1m.index, df_1m["close"])]
+            seeded = acc.seed_from_closes(bars[-SEED_BARS:])
+            if seeded:
+                logger.info(f"velocity seeded from {seeded} 1m close(s) — "
+                            f"recovering a cold accumulator")
+        except Exception as exc:                                # noqa: BLE001
+            # ⚠️ NEVER FATAL. A failed seed costs velocity fidelity for a few
+            # minutes; raising here would cost the whole tick.
+            logger.warning(f"velocity seed skipped: {exc}")
+
     rec = {
         "ts": prim.ts_et, "symbol": symbol, "stage": STAGE,
         "price": price,
+        # 🔑 PROVENANCE ON EVERY RECORD. `warming` = not enough samples yet,
+        # `seeded` = the typical baseline still contains 1m-close ROCs whose
+        # magnitudes are on a different scale from live poll-interval ROCs,
+        # `live` = ticks only. A null velocity and a quiet tape must never
+        # render alike, and a seeded baseline must never be mistaken for a
+        # measured one.
+        "velocity_state": acc.velocity_state(epoch_s),
         # was hardcoded UNKNOWN and conviction is not computed in v4. Rows
         # before r58 carry "UNKNOWN"/0.0; absent keys after r58 mean r58+.
         "primitives": _prim_fields(prim),

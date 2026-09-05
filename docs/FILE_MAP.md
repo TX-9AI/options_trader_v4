@@ -4,7 +4,7 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-236 Python modules across 13 local packages.
+237 Python modules across 13 local packages.
 
 ## How to read this repo - orientation
 
@@ -380,7 +380,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `shadow/primitives.py`
 - **calls:** (none)
-- **called by:** `shadow/observer.py`, `shadow/registry.py`, `shadow/scorers.py`
+- **called by:** `shadow/observer.py`, `shadow/registry.py`, `shadow/scorers.py`, `tests/check_shadow_velocity.py`
 
 ### `shadow/registry.py`
 - **calls:** `shadow/primitives.py`
@@ -768,6 +768,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_runaway_handoff.py`
 - **calls:** `strategy/__init__.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`
+- **called by:** (nothing - orphan or leaf)
+
+### `tests/check_shadow_velocity.py`
+- **calls:** `shadow/primitives.py`
 - **called by:** (nothing - orphan or leaf)
 
 ### `tests/check_signal_kwargs.py`

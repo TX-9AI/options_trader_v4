@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.83
+# BACKLOG.md — v1.84
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -106,6 +106,7 @@ feed plumbing and are not warehouse candidates.
 | **S3.19** | ⬜ **AN SSH TIMEOUT KILLS THE CLIENT, NOT THE REMOTE PROCESS.** | ⬜ | `ssh_util.ssh_run` gives subprocess `SSH_CONNECT_TIMEOUT + 10` = 22s and returns `rc=255 ssh timeout` — but the remote `python3` KEEPS RUNNING with nobody reading its output. That is what created S3.17's collision: two option-14 fan-outs timed out on QQQ, their abandoned purges held `feed_store` open, and the conductor's checkpoint arrived to a busy database. S3.17's lock makes it harmless; it does not make it visible. 🔑 **This is the concrete argument for SSM Run Command** over SSH for the fan-out: instance IDs rather than IPs (WH.7's own conclusion, applied to the command path instead of only the stop path), async with no 22s ceiling, output to S3 rather than through a pipe, and a stopped instance returning a named failure instead of hanging. Needs a probe first — does the agent answer on all 15 — and two IAM changes. |
 | **SEC.1** | 🔴🔴 **I LEAKED EVERY FLEET CREDENTIAL TO THE OPERATOR'S TERMINAL IN ONE COMMAND.** | r265 | ◐ **PUSHED.** To confirm ONE variable I ran `systemctl show shadow-observer -p Environment --value` across all 15 boxes. **That flag prints the WHOLE block.** Exposed: `TT_REFRESH_TOKEN` (live JWT, `read trade` scope, funded account), `TT_CLIENT_SECRET`, `GITHUB_TOKEN` with write on both repos, `TELEGRAM_TOKEN`. **Four rotations across fifteen boxes, on a Saturday evening, caused entirely by me.** ⚠️ **I HAD WRITTEN THE SAFE FORM EARLIER IN THE SAME SESSION** and reached for the unsafe one anyway — which is the argument for a checker rather than a note. `WORKING_AGREEMENT` **§18a** + `tests/check_no_env_dump.py`. 🔑 **THE CHECKER'S OWN FALSE POSITIVES FIXED THE RULE:** three install scripts do `EL=$(systemctl show … -p Environment --value)` and then filter with `grep "^$1="` — that CAPTURES and emits nothing, and is correct. The offence is **EMITTING** the block, not reading it; a rule banning the read would have flagged three working files and been switched off. ⚠️ Generalised at §18a: **ask what a command prints on the WIDEST input, not the one you are looking for** — a flag returning "the value" of a plural field returns all of them. |
 | **SHD.1** | ⬜ **THE SHADOW ↔ PLAN DIVERGENCE JOIN — WHAT WE DID vs WHAT WE SHOULD HAVE DONE.** | ⬜ | Operator's actual instrument, and it does not exist. 🔑 **BOTH SIDES ARE WAREHOUSE-READABLE:** `push_jsonl_tree` does `json.loads` per line and wraps the parsed dict as `record`, so `cache.load("shadow", …, datatype="shadow")` works through r286's path. 🔴 **BUT THEY SHARE NEITHER CLOCK NOR TYPE:** `plan_tick` keys on `ts_epoch REAL` (UTC seconds); shadow's `ts` is `prim.ts_et`, an ET **string** — and two independent processes on their own loops never land on the same float, so an equality join is impossible by construction. **PROPOSED RULE: nearest PRECEDING shadow tick to each plan tick, with the gap reported** — not minute-bucketing, because the question is what was observable AT THE MOMENT the plan decided and averaging a minute destroys the lead-time signal, which is the entire point. Left side is every plan_tick **including the declines**. Blocked until Monday's tape carries stage 2. |
+| **SHD.2** | 🔴 **SHADOW VELOCITY DID NOT SURVIVE A RESTART, AND A NULL READ AS A QUIET TAPE.** | r268 | ◐ **BUILT + PUSHED.** Operator's parameters: *"I want it collecting from the open and recoverable from a reboot or crash loops."* `TickAccumulator` is LIVE-ONLY — `add()` runs from inside `one_tick` — so every tick before the process existed is gone. With `Restart=always`/`RestartSec=30`, a reboot at 10:00 or the fourth pass of a crash loop entered RTH with an empty deque and emitted `typical_roc: null` for five minutes (`MIN_TYPICAL_SAMPLES=20`). 🔴 **AND THAT IS INDISTINGUISHABLE FROM A QUIET TAPE** in the corpus meant for fitting triggers — the same silent-empty shape that let seven weeks of stage-1 data look like data. **`seed_from_closes()`** rebuilds the ROC history from the 1m closes `one_tick` already holds, backfilled from the session open, so recovery does not depend on WHEN the process started — the first tick of the day and the fourth restart take the same path, with no timer. ⚠️ **`velocity_state` — `warming`/`seeded`/`live` — is stamped on every record**, because a seeded baseline is a median of MINUTE moves while live samples are poll-interval moves; the record states the scale rather than pretending they are interchangeable, and stays `seeded` while any seeded sample is inside `TYPICAL_LOOKBACK_S`. |
 | **S3.21** | 🔴 **EVERY REPORT READ THE WRONG ROWS, IN BOTH DIRECTIONS, SINCE THE CACHE WAS WRITTEN.** | dtp r290 | ◐ **BUILT + PUSHED.** `WarehouseCache.load` listed only the requested `dt=` partitions and filtered nothing afterwards — but a DERIVED partition carries the **PUSH day**, not the row's ET day (C.9, which is why the coverage board grades those streams `pusher` grain). **A row whose session was in range but which pushed the next morning was NEVER READ** — silently, so the report showed a smaller, plausible number with nothing to indicate a hole — **and a row pushed inside the range whose own day fell before it was read anyway.** Neither consumer compensated: `collect()` takes `dates` and does not filter on them, `screen_plan_gates` bounds by strategy and symbol. 🔑 **`load_derived` HAS DONE THIS CORRECTLY SINCE r184** — scan forward, keep rows whose OWN timestamp lands in range — and it has no production callers (S3.11), so the right behaviour sat on the road with no traffic while every real report used the wrong one. ⚠️ **THE FILTER IS PER ROW IN PYTHON, NOT AN SQL OFFSET:** `_et_offset()` applies TODAY's UTC offset to every row — right for eight months, an hour wrong for four — the exact DST trap its own docstring warns about, one level up. ⚠️ Forward scanning is **derived-only**; raw streams are partitioned by the day they describe. |
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
@@ -341,6 +342,53 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.84 — 2026-09-05 — r268 — SHD.2: VELOCITY SURVIVES A RESTART, AND A NULL
+STOPS READING AS A QUIET TAPE.**
+
+Operator's parameters, given plainly after I circled the question twice:
+*"I want it collecting from the open and recoverable from a reboot or crash
+loops. The boxes come up at 09:15 sharp."*
+
+🔴 **THE DEFECT.** `TickAccumulator` is live-only — `add()` runs from inside
+`one_tick` — so a reboot at 10:00, or the fourth pass of a `Restart=always`
+crash loop, entered RTH with an empty deque and emitted `typical_roc: null` for
+the next five minutes. **And a null velocity is indistinguishable from a quiet
+tape**, in exactly the corpus the operator intends to fit triggers on. Same
+silent-empty shape that let seven weeks of stage-1 shadow data look like data.
+
+🔑 **RECOVERY IS FROM THE CANDLES, NOT FROM A CLOCK.** The 1m closes are
+backfilled from the session open and `one_tick` already holds them, so
+`seed_from_closes()` costs a loop over data in hand. **The first tick of the
+day, a 10:00 reboot and the fourth restart of a crash loop all take the same
+path** — nothing depends on when the process started, and no timer is
+load-bearing. The 09:15 wake is a convenience rather than a dependency, which
+is what makes it robust to the case the operator asked about.
+
+⚠️ **AND THE RECORD STATES ITS OWN PROVENANCE.** `velocity_state` is
+`warming`, `seeded` or `live` on every line. A seeded baseline is a median of
+MINUTE-to-minute moves while live samples are poll-interval moves — different
+scales — so the fit is told which it has rather than being handed a number on
+the wrong footing. It stays `seeded` while any seeded sample is still inside
+`TYPICAL_LOOKBACK_S`, because the median is taken over that window and one
+seeded sample in it still moves the denominator.
+
+⚠️ **TWO EARLIER PROPOSALS OF MINE WERE WITHDRAWN AND THAT IS WORTH RECORDING.**
+A clock-based pre-open warm-up fails the restart case entirely. A pre-open
+seed puts a thin-tape median under the denominator, and `TYPICAL_LOOKBACK_S =
+1800` would drag it through the whole ORB window — the case
+`TYPICAL_ROC_FLOOR` was already built to bound. ⚠️ **I ALSO ASSERTED THE
+PRE-OPEN DISTRIBUTION WITHOUT MEASURING IT**, on a fleet of fourteen mega-caps.
+Recovery from the session's own candles avoids the question rather than
+answering it.
+
+`tests/check_shadow_velocity.py` v1.0, **10 checks**, born red. ⚠️ V3b was
+re-derived mid-build: it asked for `seeded` at a moment when the seeded samples
+had already aged out of the lookback, where `warming` is the truthful answer —
+the code was right and the case was wrong. V5 drives zero, `None` and garbage
+closes, because the observer logs a failed tick at WARNING and continues, so an
+exception in the seed would cost the whole record and look like a quiet tape
+again.
 
 **v1.83 — 2026-09-05 — dtp r290 — S3.21: THE READ WINDOW WAS WRONG IN BOTH
 DIRECTIONS, AND THE CONTROL THAT WOULD HAVE CAUGHT IT COULD NOT RUN.**

@@ -1,5 +1,25 @@
 """
-shadow/primitives.py  v4.0
+shadow/primitives.py  v4.1
+v4.1  2026-09-05  r268 — VELOCITY SURVIVES A RESTART, AND SAYS WHERE IT CAME
+      FROM. `TickAccumulator` is LIVE-ONLY: `add()` runs from inside
+      `one_tick`, so every tick before the process existed is gone. With
+      `Restart=always` / `RestartSec=30`, a reboot at 10:00 or the fourth pass
+      of a crash loop entered RTH with an empty deque and emitted
+      `typical_roc: null` for the next five minutes — MIN_TYPICAL_SAMPLES=20 at
+      the fleet's poll interval.
+      🔴 AND A NULL VELOCITY IS INDISTINGUISHABLE FROM A QUIET TAPE, in the
+      corpus the operator intends to fit triggers on. Same silent-empty shape
+      that let seven weeks of stage-1 data look like data.
+      🔑 `seed_from_closes()` rebuilds the ROC history from 1m closes the
+      caller already holds — backfilled from the session open — so recovery is
+      independent of WHEN the process started: no timer, and the first tick of
+      the day and the fourth restart of a crash loop take the same path.
+      ⚠️ `velocity_state()` reports `warming` | `seeded` | `live` on every
+      record, because a seeded baseline is a median of MINUTE-to-minute moves
+      while live samples are poll-interval moves — different scales, and the
+      record must say which rather than pretend they are interchangeable. It
+      stays `seeded` while any seeded sample is still inside
+      TYPICAL_LOOKBACK_S, since the median is taken over that window.
 Velocity and tick-stream primitives for the observer.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -110,6 +130,8 @@ class TickAccumulator:
         self.forming: FormingBar = FormingBar()
         self.completed: Deque[FormingBar] = deque(maxlen=FORMING_BAR_HISTORY)
         self.last_velocity: Optional[float] = None
+        # r268 — newest seeded sample's epoch, or 0.0. Drives `velocity_state`.
+        self.seeded_until: float = 0.0
 
     def add(self, epoch_s: float, price: float, minute_key: str):
         # rolling ROC over VELOCITY_WINDOW_S, computed against the oldest sample
@@ -135,6 +157,65 @@ class TickAccumulator:
             fb.low = min(fb.low, price)
             fb.close = price
             fb.ticks += 1
+
+    def seed_from_closes(self, bars) -> int:
+        """Rebuild ROC history from 1-minute closes. -> samples seeded.
+
+        🔴 THIS IS THE RESTART PATH, AND IT IS THE WHOLE POINT (r268). The
+        accumulator is LIVE-ONLY: `add()` runs from inside `one_tick`, so every
+        tick before the process existed is gone. A reboot at 10:00, or the
+        third pass of a `Restart=always` crash loop, would otherwise enter RTH
+        with an empty deque and emit `typical_roc: null` for the next five
+        minutes — a record indistinguishable from a quiet tape, which is the
+        same silent-empty failure that made seven weeks of stage-1 data look
+        like data.
+        ⚠️ THE 1m CLOSES ARE ALREADY BACKFILLED by `candle_feed` from the
+        session open, and `one_tick` already holds them, so recovery costs a
+        loop over a list the caller has in hand — no new fetch, no timer, and
+        nothing that depends on WHEN the process started.
+        ⚠️ SEEDED ROCs ARE NOT LIVE ROCs. These are minute-to-minute moves;
+        live samples are poll-interval moves. The magnitudes are on different
+        scales, so `typical_roc` computed over a seeded deque means something
+        different from one computed over ticks — and the CALLER is told which,
+        rather than this class pretending they are interchangeable.
+        """
+        n = 0
+        prev_ts = prev_px = None
+        for ts, px in bars:
+            try:
+                ts = float(ts)
+                px = float(px)
+            except (TypeError, ValueError):
+                continue
+            if px <= 0:
+                continue
+            if prev_px and prev_px > 0 and ts > prev_ts:
+                self.rocs.append((ts, (px - prev_px) / prev_px))
+                self.seeded_until = max(getattr(self, "seeded_until", 0.0), ts)
+                n += 1
+            self.samples.append((ts, px))
+            prev_ts, prev_px = ts, px
+        return n
+
+    def velocity_state(self, epoch_s: float) -> str:
+        """`live` | `seeded` | `warming` — provenance for the record.
+
+        🔑 A NULL VELOCITY AND A QUIET TAPE MUST NOT RENDER ALIKE. Without this
+        the first five minutes of every session, every mid-session restart and
+        every crash loop all read as a flat market in the fitting corpus. The
+        record says which it is; the fit decides what to do about it.
+        """
+        vals = [ts for ts, _ in self.rocs if epoch_s - ts <= TYPICAL_LOOKBACK_S]
+        if len(vals) < MIN_TYPICAL_SAMPLES:
+            return "warming"
+        # ⚠️ SEEDED WHILE ANY SEEDED SAMPLE IS STILL INSIDE THE LOOKBACK —
+        # `typical_roc` is a median over that window, so one seeded sample in
+        # it still shifts the denominator. It stops being "seeded" when the
+        # window has rolled clear of them, not when the next live tick lands.
+        cut = getattr(self, "seeded_until", 0.0)
+        if cut and epoch_s - cut <= TYPICAL_LOOKBACK_S:
+            return "seeded"
+        return "live"
 
     def current_roc(self, epoch_s: float) -> Optional[float]:
         if not self.rocs:
