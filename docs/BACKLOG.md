@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.74
+# BACKLOG.md — v1.75
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -105,6 +105,7 @@ feed plumbing and are not warehouse candidates.
 | **S3.18** | 🔴 **`head -3` ATE THE CAUSE OF EVERY PURGE FAILURE, AND THE RECLAIM VERDICT EVERY NIGHT.** | dtp r282 | ◐ **BUILT + PUSHED.** The phase piped the remote purge through `head -3`, sized for the old one-line summary. All the operator saw was `Traceback (most recent call last): \| File ".../retention_purge.py", line 598, in <mo` — the OUTERMOST frame, with the exception type and the raising line cut off. **Three round trips to learn it was `database is locked`.** ⚠️ **A traceback puts its cause LAST**, and the reclaim line prints AFTER the deletion counts, so `head` also guaranteed the checkpoint verdict was invisible on every box on every run — the one line that says whether a 1.6 GB WAL came back. Now redirected to a file on the box, `$?` captured FIRST, then `tail -12`: piping into `tail` would have made `rc=$?` report tail's status, which is the swallowed-exit-code trap this project already records for pytest. |
 | **S3.19** | ⬜ **AN SSH TIMEOUT KILLS THE CLIENT, NOT THE REMOTE PROCESS.** | ⬜ | `ssh_util.ssh_run` gives subprocess `SSH_CONNECT_TIMEOUT + 10` = 22s and returns `rc=255 ssh timeout` — but the remote `python3` KEEPS RUNNING with nobody reading its output. That is what created S3.17's collision: two option-14 fan-outs timed out on QQQ, their abandoned purges held `feed_store` open, and the conductor's checkpoint arrived to a busy database. S3.17's lock makes it harmless; it does not make it visible. 🔑 **This is the concrete argument for SSM Run Command** over SSH for the fan-out: instance IDs rather than IPs (WH.7's own conclusion, applied to the command path instead of only the stop path), async with no 22s ceiling, output to S3 rather than through a pipe, and a stopped instance returning a named failure instead of hanging. Needs a probe first — does the agent answer on all 15 — and two IAM changes. |
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
+| **DOC.15** | 🔴 **r247 AND r248 WERE SPENT NUMBERS WITH NO ROWS, AND THE LEDGER COULD NOT SAY WHY.** | r259 | ◐ **PUSHED.** Both were otv4 halves cut against a BACKLOG version that r278 superseded before they landed; each was re-cut as `_r2` and landed as r250/r251. `check_ledger_parity` reported them only inside *"15 unused revision number(s)"* — true, and useless to a reader who cannot tell a MISSING revision from a number that was never used without going through git. **Rows now exist IN SEQUENCE between r246 and r249**, marked cut-never-landed with what superseded them. ⚠️ **AND THE IN-SEQUENCE PLACEMENT IS WHY THIS SHIPPED AS A FILE RATHER THAN AN APPEND** — the operator's call, and correct: an append can only reach the bottom of the table, where a row for r247 would sit after r258 and break the newest-is-last property the whole ordering contract rests on. ⚠️ §35's rule that GENESIS never ships still holds for the ordinary case; this is the r194 exception — a REPAIR to existing rows — and it is safe only because the copy was taken from HEAD immediately before packaging and nothing landed in between. |
 | **RPT.11** | 🔴 **SIX MENU CONFIRMS ACCEPTED LOWERCASE `y` AND NOTHING ELSE.** | dtp r283 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the operator answered the LIVE backfill prompt with **`Y`** and the run silently did not happen — no error, no message, just the next prompt. **A confirm that discards a plausible yes is worse than one that refuses**, because *declined* and *ran and did nothing* look identical. All six sites route through `_yes` in `devtools.sh`; the DESTRUCTIVE ones now say what they declined while a flag toggle stays quiet, which is why the helper is a pure predicate rather than one that prints. ⚠️ **C3 pins that NO lowercase-only comparison survives anywhere in the menu** — fixing the one site that bit and leaving five is how this returns (C.30: when a rule changes, sweep its readers). ⚠️ And it must still refuse `n`, `sure` and empty: these prompts wake boxes, stop trading and delete rows, so loosening it to *anything non-empty* would be worse than the bug. |
 | **RPT.12** | 🔴 **THE OHLC BACKFILL'S STREAM CAP WAS 29-BOX ARITHMETIC, AND IT HARD-STOPS.** | dtp r283 | ◐ **BUILT + PUSHED.** A **one-box** backfill against a 15-box fleet was refused outright: `10 stream cap` with 15 running, and the check is `return 2`, not a warning — despite the file's own header describing a warn-never-stop pattern for a different check nearby. 🔑 **r53 ALREADY RETIRED THE FLEET-WIDE COPY OF THIS GUARD** on exactly this reasoning — *"it existed so a maintenance wake could not put 29 boxes on the wire at once; the fleet is 15 and a normal session already carried ~20 without strain"* — and this per-report copy was never swept after the 2026-08-20 pare. Same shape as the README fleet count that read 29 for nine days. Default moves to **20, which is r53's own recorded figure rather than one I chose**, `OT_STREAM_CAP`-overridable, and marked a PRIOR: if the DXFeed ceiling is ever measured rather than inferred, it moves again. |
 | **S3.16** | ⬜ **WHY DOES MU HOLD 1.8 GB LIVE AGAINST CVX's 0.20 GB ON IDENTICAL POLICY?** | ⬜ | A 9x spread with the same `RETENTION_DAYS` and the same `ARTIFACT_DAYS` on both. ⚠️ **INFERENCE, NOT MEASUREMENT:** `greeks_series` and `quote_series` are PER-CONTRACT at 3 days, and **MEM.1** measured MU at **356 contracts spanning ±45% of spot**, most of it more than 30% OTM and untradeable, while the aux tenors are banded and the primary expiry chain is not. If that holds, the disk story and the 09-02 OOM are ONE root cause. r255's per-table remaining-row report answers this on the first armed run — a query, not an argument. Its disposition is MEM.1's banding question, which is a trading-path change and the operator's call. |
@@ -333,6 +334,35 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.75 — 2026-09-05 — r259 — DOC.15: TWO SPENT REVISION NUMBERS GET THEIR ROWS,
+IN SEQUENCE.**
+
+r247 and r248 were the otv4 halves of the natural-key and coverage deliveries,
+cut against BACKLOG v1.64/v1.65. Before either landed, r278 shipped the
+universal deploy and took v1.65, so both would have overwritten newer entries
+with an older file. They were re-cut as `_r2` and landed as **r250** and
+**r251**. 🔑 **Their content gates are why that was caught rather than
+clobbered** — r248's half asserted a GENESIS row written by its predecessor, so
+landing the pair out of order was REFUSED rather than quietly overwriting a
+backlog. The `ORDER` directive in the re-issues exists for the same reason.
+
+**The ledger could report the gap but not explain it.** `check_ledger_parity`
+listed them inside *"15 unused revision number(s)"*, which is true and leaves a
+reader unable to distinguish a MISSING revision from a number that was never
+used without going through git. §26 says numbering is sequential and never
+resets, so a spent number is a fact about the ledger and belongs in it.
+
+⚠️ **SHIPPED AS A FILE RATHER THAN AN APPEND, AT THE OPERATOR'S DIRECTION, AND
+HE WAS RIGHT.** I argued against it on §35 — GENESIS is append-only on the box
+and a shipped copy clobbers. That rule holds for the ordinary case and this is
+the r194 exception: a REPAIR to existing rows, which r194 also had to make and
+made in place. But an append can only reach the BOTTOM of the table, and a row
+for r247 sitting after r258 would break the newest-row-is-last property the
+land command's own ordering contract depends on. **In-sequence placement is only
+possible by shipping the file.** ⚠️ It is safe here for one reason worth stating:
+the copy was taken from HEAD immediately before packaging, so the lander's
+append lands on a current file. That condition is the whole of §35's concern.
 
 **v1.74 — 2026-09-05 — dtp r284 — S3.20: THE RE-BASELINE, AS A LEDGER RATHER
 THAN AS A LIE.**
