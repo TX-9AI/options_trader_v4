@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-tests/check_ledger_parity.py  v1.1
+tests/check_ledger_parity.py  v1.2
+v1.2  2026-09-04  r245 — 🔴 THE OPEN LIST MATCHES THE STATE MARKER,
+      NOT THE WORD. It asked whether "OPEN" appeared anywhere in the state
+      cell, and the older rows carry a long `◐ PUSHED…` narrative there
+      containing "OPENED" and "opening" — so CLOSED items read as open, TEN
+      false positives out of 25. I recommended work on BFLY.2 as though it
+      were live and then argued from a defect r197 had already fixed.
+      ⚠️ THIRD INSTRUMENT TO MISLEAD IN ONE EVENING, after the stop-forensics
+      count and its verdict line. All three read a proxy instead of the
+      thing itself. L6 pins the five markers against a fixture.
 v1.1  2026-09-04  r241 — r226 JOINS THE KNOWN-ROWLESS SET. r240's own
       GENESIS row cites it by name while explaining that it rebuilds it, so
       the citation became "cited but rowless" the moment r240 landed — caught
@@ -62,12 +71,19 @@ def open_items(bl):
     reported SWEEP.2/3/4 as open when they had been closed at r231/r234: the
     exact error it exists to catch, made while catching it.
     """
+    """
+    🔴 MATCHED ON THE STATE MARKER, NOT THE WORD. The first cut asked whether
+    "OPEN" appeared anywhere in the state cell — and the older rows carry a
+    long `◐ PUSHED…` narrative in that cell containing "OPENED" and "opening",
+    so CLOSED items read as open. BFLY.2 was closed at r197 and I recommended
+    work on it as though it were live, then argued from a defect r197 had
+    already fixed. The marker is the state; the prose is commentary.
+    """
     newest = {}
     for rid, state in item_rows(bl):
         if rid not in newest:          # first occurrence == newest entry
             newest[rid] = state
-    return sorted(k for k, s in newest.items()
-                  if "OPEN" in s.upper() and "CLOSED" not in s.upper())
+    return sorted(k for k, s in newest.items() if s.lstrip().startswith("\U0001f532"))
 
 
 def main():
@@ -103,8 +119,15 @@ def main():
     # delivery, and a check that is red by design is a check that gets ignored.
     # Scoped to ONE — the highest-numbered claim — so a second unlanded entry
     # still fails.
-    _newest = max((int(r[1:]) for r in claimed), default=0)
-    orphan = sorted(claimed - gen_rows - KNOWN_UNLANDED - {f"r{_newest}"},
+    # ⚠️ EVERYTHING PAST THE LEDGER'S END IS IN FLIGHT, not just one. The first
+    # cut exempted only the highest-numbered claim, assuming one delivery at a
+    # time — and went red the moment three were cut in an evening and none had
+    # landed. A revision NUMBERED ABOVE the last GENESIS row cannot have a row
+    # yet by definition; one numbered BELOW it and missing is a real orphan,
+    # which is what r226 was.
+    _last_landed = max((int(r[1:]) for r in gen_rows), default=0)
+    _in_flight = {r for r in claimed if int(r[1:]) > _last_landed}
+    orphan = sorted(claimed - gen_rows - KNOWN_UNLANDED - _in_flight,
                     key=lambda r: int(r[1:]))
     check("L2 every revision the BACKLOG claims has a GENESIS row "
           "(r226 excepted — cut, never landed, rebuilt as r240)",
@@ -153,11 +176,30 @@ def main():
     for rid in op:
         print(f"      {rid}")
 
+    # ══ L6 — THE OPEN LIST MATCHES THE MARKER, NOT THE WORD ══════════════
+    # 🔴 r245. The first cut asked whether "OPEN" appeared anywhere in the state
+    # cell. The older rows carry a long `◐ PUSHED…` narrative there containing
+    # "OPENED" and "opening", so CLOSED items read as OPEN — ten false
+    # positives out of 25. I recommended work on BFLY.2 as though it were live
+    # and then argued from a defect r197 had already fixed. The marker IS the
+    # state; the prose beside it is commentary.
+    _fixture = [("A.1", "🔲 OPEN"),
+                ("A.2", "◐ **PUSHED.** r197 OPENED C.27 and C.28; the reopening"),
+                ("A.3", "✅ **CLOSED r234**"),
+                ("A.4", "⬛ superseded — see r231"),
+                ("A.5", "📌 RECORDED")]
+    _open = sorted(i for i, s in _fixture if s.lstrip().startswith("🔲"))
+    check("L6 only the 🔲 row is open", _open == ["A.1"], str(_open))
+    check("L6b a PUSHED narrative containing 'OPENED' is NOT open",
+          "A.2" not in _open)
+    check("L6c and the real list is non-empty and unique",
+          op and len(op) == len(set(op)), f"{len(op)} open")
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 5 checks")
+    print("GREEN — 8 checks")
     return 0
 
 

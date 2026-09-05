@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.62
+# BACKLOG.md — v1.63
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,42 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.63 — 2026-09-04 — r245 / dtp r275 — 🔴 THREE INSTRUMENTS MISLED IN ONE
+EVENING. ALL THREE READ A PROXY INSTEAD OF THE THING ITSELF.**
+
+🔴 **BFLY.12 — the stop-forensics screen reported 419 trades where there are
+20.** ~399 unclosed rows with `pnl 0` and `exit_reason None` sat in the SURVIVED
+group. `RP.COLS` has carried `status` the whole time and the screen never used
+it. Now keyed on a **closing fact** — a non-empty `exit_reason` — rather than a
+status spelling, because this project has twice this week been bitten by a value
+renamed underneath a name check. The count is labelled **CLOSED** so 419 cannot
+recur silently.
+🔴 **BFLY.13 — the verdict line read the MFE ratio and ignored `mfe_bars`.** It
+printed *"the stop is taking trades that were working"* when the column beside it
+said the opposite: **winners peak at bar 141–305, the stopped trades at a median
+of bar 5.5.** The operator was one step from removing a stop on the strength of
+that line.
+🔑 **THE BAR FLOOR NOW COMES FROM THE WINNERS, NOT FROM ME.** A trade "was
+working" if it traded above entry **and** peaked no earlier than the earliest
+winner in that sample. Hard-coding a threshold would be a number I chose.
+⚠️ **AND THE STRICTER TEST CORRECTS MY OWN CHAT NUMBER.** I said *"2 of 13 share
+the winners' signature"* using a loose bar>15 cut. Against the winners' own floor
+of **bar 141**, only CVX at 144 qualifies — **1 of 12**, against a break-even
+needing 9 of 13. The case against removing the stop is stronger than I stated.
+🔴 **AND `check_ledger_parity`'s OWN OPEN LIST WAS WRONG.** It asked whether
+"OPEN" appeared anywhere in the state cell; the older rows carry a long
+`◐ PUSHED…` narrative there containing "OPENED" and "opening", so **CLOSED items
+read as open — ten false positives out of 25.** I recommended work on BFLY.2 as
+though it were live and then argued from a defect r197 had already fixed. **The
+true open list is 23.** L6 pins the five markers against a fixture.
+
+⚠️ **THE COMMON FAULT: a proxy for the thing.** A status inferred from a row's
+presence, a "was working" inferred from a ratio without its timing, an open
+state inferred from a word inside a paragraph. Each was cheap to write and each
+produced a confident wrong answer about a live trading decision.
+`test_bfly_stop.py` → 21 checks; `check_ledger_parity` → 8. **86/86 otv4 green,
+no new dtp reds.**
 
 **v1.62 — 2026-09-04 — r244 — 🔑 ALL THREE PIN MEASURES REACH THE SNAPSHOT.
 NO MEASURE OF PIN STRENGTH HAS EVER BEEN VALIDATED.**
