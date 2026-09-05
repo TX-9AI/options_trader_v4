@@ -1,5 +1,24 @@
 """
-derived/snapshot.py  v4.2
+derived/snapshot.py  v4.3
+v4.3  2026-09-04  r244 — 🔑 ALL THREE PIN MEASURES, NOT ONE.
+      `pin_concentration` (29% fail) and the GEX environment behind `pinning`
+      (53% fail) GATE every butterfly fire and NEITHER has ever been tested
+      against an outcome — both live in `plan_check` with no `trade_id`, so
+      nothing can join them to a P&L. Operator, 2026-09-04, on whether any
+      measure of pin strength has been validated: none has.
+      🔴 INSTRUMENTING ONLY THE EM FRACTION WOULD HAVE BEEN WORSE THAN USELESS
+      — a study could conclude "EM predicts nothing" while the real signal sat
+      in a field nobody recorded, and that negative would be believed.
+      ⚠️ RAW, NOT THRESHOLDED. The gate's pass/fail is already in `plan_check`;
+      what is missing is the VALUE, and a study cannot fit a boundary it can
+      only see one side of.
+      ⚠️ SEPARATELY, NOT COMPOSITED — r224's lesson: a composite that separates
+      tells you nothing about WHICH PART did the work.
+      ⚠️ CONTEXT FOR THE NEXT READER: `screen_entry_vectors` scored SIXTEEN
+      point-in-time vectors over 152 runaway trades and the best separation was
+      AUC 0.54, against a noise floor of 0.19 in its own fixture. It never
+      covered these three. Nothing here is evidence yet; it is the first time
+      the question can be asked.
 v4.2  2026-09-04  r243 — 🔴 THE PIN AND ITS EM FRACTION JOIN THE
       PAYLOAD. Operator, 2026-09-04, after the stop-removal and window cases
       both failed on evidence: *"that leaves the EM variable as our last hope
@@ -111,7 +130,28 @@ class SnapshotEngine(DerivedEngine):
         # unmeasurable; NEVER 0.0, because a pin at the money and a pin that
         # could not be read are opposite facts and this file's own contract is
         # that "measured as absent" must stay distinguishable.
-        _pin = _f(getattr(ctx.get("gex"), "pin_strike", None))
+        _gex = ctx.get("gex")
+        _pin = _f(getattr(_gex, "pin_strike", None))
+        # 🔴 r244 — THE OTHER TWO PIN MEASURES, for the same reason as the EM
+        # fraction. `pin_concentration` and the GEX environment GATE every
+        # butterfly fire (`pin_concentration` 29% fail, `pinning` 53%) and
+        # NEITHER has ever been tested against an outcome — they live in
+        # plan_check with no trade_id, so nothing can join them to a P&L.
+        # Operator, 2026-09-04, on whether any measure of pin strength has been
+        # validated: nothing has. `screen_entry_vectors` scored SIXTEEN vectors
+        # over 152 runaway trades and the best separation was AUC 0.54 against
+        # a noise floor of 0.19 in its own fixture — and it never covered these.
+        # 🔑 THREE MEASURES OR ONE ANSWER. Instrumenting only the EM fraction
+        # would let a study conclude "EM predicts nothing" while the real
+        # signal sat in a field nobody recorded. r224's own lesson: a composite
+        # that separates tells you nothing about WHICH PART did the work, so
+        # each component is recorded separately.
+        # ⚠️ RAW, NOT THRESHOLDED. The gate's answer (pass/fail against
+        # PIN_CONC_MIN) is already in plan_check; what is missing is the VALUE,
+        # because a study cannot fit a boundary it can only see one side of.
+        _conc = _f(getattr(_gex, "pin_concentration", None))
+        _gex_env = getattr(_gex, "gex_environment", None)
+        _gex_env = str(_gex_env) if _gex_env else None
         _pin_frac = None
         try:
             from strategy.gex_pin_butterfly import expected_move as _em_fn
@@ -187,6 +227,8 @@ class SnapshotEngine(DerivedEngine):
             # ask a new question of.
             "pin_strike": _pin,
             "pin_em_fraction": _pin_frac,
+            "pin_concentration": _conc,
+            "gex_environment": _gex_env,
             "gap_class": ((ctx.get("gap") or {}).get("gap_class")
                           if isinstance(ctx.get("gap"), dict) else None),
         }

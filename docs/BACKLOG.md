@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.61
+# BACKLOG.md — v1.62
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,37 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.62 — 2026-09-04 — r244 — 🔑 ALL THREE PIN MEASURES REACH THE SNAPSHOT.
+NO MEASURE OF PIN STRENGTH HAS EVER BEEN VALIDATED.**
+🔴 **THE STATE OF THE EVIDENCE, STATED PLAINLY.** The butterfly gates on
+`pin_concentration` (29% fail), `pinning` (53% fail) and `pin_em_fraction` (58%
+fail). **None of the three has ever been tested against an outcome.** They live
+in `plan_check`, which has no `trade_id`, so nothing can join them to a P&L.
+The thresholds are priors somebody chose, not fits — consistent with r152
+deleting the scorer for selecting losers, and with every v4 row being UNGRADED
+by construction.
+⚠️ **AND THE ONE VECTOR SCREEN THAT HAS RUN FOUND NOTHING.**
+`screen_entry_vectors` scored **sixteen** point-in-time vectors over 152 runaway
+trades; the best separation was **AUC 0.54** against a **0.19 noise floor in its
+own fixture**, and `adx` came in at 0.47 — *below* chance. It never covered the
+pin fields.
+🔴 **INSTRUMENTING ONLY THE EM FRACTION WOULD HAVE BEEN WORSE THAN USELESS.** A
+study three weeks from now could have concluded *"EM predicts nothing"* while
+the real signal sat in a field nobody recorded — and that negative would have
+been believed. r243 + r244 record all three.
+⚠️ **RAW, NOT THRESHOLDED.** The gate's pass/fail is already in `plan_check`;
+what was missing is the VALUE. A study cannot fit a boundary it can only see one
+side of.
+⚠️ **SEPARATELY, NOT COMPOSITED** — r224: *a composite that separates tells you
+nothing about which part did the work.*
+⚠️ **NOTHING ACCRUES RETROACTIVELY.** The 20 banked butterflies stay
+unmeasurable on all three.
+`check_snapshot_pin.py` → 11 checks. **86/86 green.**
+
+| id | question | state |
+|---|---|---|
+| **BFLY.14** | With ~3 weeks of snapshots, score `pin_concentration`, `gex_environment` and `pin_em_fraction` **separately** against outcome. The precedent says expect nothing: 16 vectors, best AUC 0.54, noise floor 0.19. A null result here is a real finding — it would mean the fly's three gates are priors with no evidence, and the win rate has to come from somewhere else entirely. | 🔲 OPEN |
 
 **v1.61 — 2026-09-04 — r243 — 🔴 THE PIN AND ITS EM FRACTION REACH THE
 SNAPSHOT — AND THREE BUTTERFLY LEVERS DIED ON EVIDENCE FIRST.**

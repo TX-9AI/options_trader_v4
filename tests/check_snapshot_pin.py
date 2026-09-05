@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_snapshot_pin.py  v1.0
+tests/check_snapshot_pin.py  v1.1
+v1.1  2026-09-04  r244 — S6 extends to `pin_concentration` and
+      `gex_environment` — recorded RAW, kept as distinct keys, and None rather
+      than 0.0 or "" when the gex object carries neither.
 v1.0  2026-09-04  r243 — THE PIN AND ITS EM FRACTION REACH THE SNAPSHOT.
 
 🔴 WHY. Operator, 2026-09-04, after the stop-removal and window cases both
@@ -32,8 +35,12 @@ def check(name, ok, detail=""):
 
 
 class _Gex:
-    def __init__(self, pin):
+    def __init__(self, pin, conc=None, env=None):
         self.pin_strike = pin
+        if conc is not None:
+            self.pin_concentration = conc
+        if env is not None:
+            self.gex_environment = env
 
 
 def main():
@@ -96,11 +103,34 @@ def main():
           EM_MIN_FRAC == 0.30 and EM_MAX_FRAC == 1.00,
           f"{EM_MIN_FRAC}-{EM_MAX_FRAC}")
 
+    # ══ S6 — ALL THREE PIN MEASURES, NOT JUST THE EM FRACTION ════════════
+    # 🔴 r244. `pin_concentration` (29% fail) and the GEX environment behind
+    # `pinning` (53% fail) GATE every butterfly fire and NEITHER has ever been
+    # tested against an outcome. Instrumenting only the EM fraction would let a
+    # study conclude "EM predicts nothing" while the real signal sat in a field
+    # nobody recorded.
+    full = e.build_payload({"price": price, "atm_iv": iv,
+                            "gex": _Gex(pin, conc=0.31, env="PINNING")})
+    check("S6 pin_concentration is recorded RAW, not as a pass/fail",
+          full["pin_concentration"] == 0.31, repr(full["pin_concentration"]))
+    check("S6b the GEX environment is recorded",
+          full["gex_environment"] == "PINNING", repr(full["gex_environment"]))
+    # ⚠️ THE GATE'S ANSWER IS ALREADY IN plan_check. What was missing is the
+    # VALUE — a study cannot fit a boundary it can only see one side of.
+    check("S6c a gex object carrying neither yields None, not 0.0 or ''",
+          got["pin_concentration"] is None and got["gex_environment"] is None,
+          f"{got['pin_concentration']!r} {got['gex_environment']!r}")
+    # 🔑 SEPARATELY, NOT COMPOSITED — r224: a composite that separates tells you
+    # nothing about WHICH PART did the work.
+    check("S6d all four pin fields are distinct keys",
+          len({"pin_strike", "pin_em_fraction", "pin_concentration",
+               "gex_environment"} & set(full)) == 4)
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 7 checks")
+    print("GREEN — 11 checks")
     return 0
 
 
