@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.79
+# BACKLOG.md — v1.80
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -108,6 +108,7 @@ feed plumbing and are not warehouse candidates.
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
 | **RPT.14** | ⬜ **`tests/test_fit_readiness_s3.py` HAS BEEN DEAD, NOT PASSING.** | ⬜ | It calls `fr._rows_warehouse([DAY])` while that function has taken `(dates, cache)` since the streaming rewrite, so **every run ends in a TypeError before a single assertion executes**. ⚠️ **VERIFIED AT HEAD, NOT INFERRED** — it raises identically on an unmodified checkout. Repairing the call revealed a SECOND staleness: `collect()`'s return shape changed too (`fired`/`declined` are ints, not lists), so the file is two API generations behind. The half-repair was **reverted rather than shipped** — a test that runs and asserts the wrong shape is worse than one that visibly fails. 🔑 **A file whose presence reads as coverage while it cannot run is the exact failure §0.6 names.** Needs re-deriving against the current `collect()`, which is its own job. |
 | **TZ.1** | 🔴 **ONE ET/UTC BOUNDARY FOR EVERY CONTROL-SIDE SCRIPT.** | dtp r287 | ◐ **BUILT + PUSHED.** Operator, 2026-09-05: *"Store everything as UTC, but when a report prompt asks me for a date, convert my choice assuming I mean ET. It's incredibly annoying when I run a report for 'today' at 6pm and it says nothing to report, because UTC has already started the next day."* 📊 **SURVEYED BEFORE WRITING A LINE: NINE naive sites against FIVE correct ones, and the five each carried their own private copy** — so this was never a missing translator, it was the absence of a boundary. The naive nine: `eod_analysis`, `eod_conductor_v2`, `fit_readiness`, `pnl_s3`, `excursion_report`, `orchestrator`, `tools/report_parity`, `trade_report`, and **`market_calendar` — the module that decides what a trading day IS, asking a UTC box**. ⚠️ **THE ROLL IS 20:00 ET IN SUMMER, 19:00 IN WINTER**, and past it a report finds nothing and SAYS SO rather than erroring — a defect in the clock reading as a fact about the market. `ettime.py` now owns `now_et`, `today_et`, `operator_date`, `days_back`, `stamp_et`, `et_day`, `et_bounds`; the five copies delegate. 🔑 **T4 IS THE DURABLE HALF** — it sweeps the repo for naive clock calls and fails on a NEW one, because fixing nine sites without a guard buys a year at most (C.30 turned into something that runs). |
+| **TZ.2** | 🔴 **THREE MENU PROMPTS BYPASSED THE BOUNDARY IN SHELL — r287's SWEEP READ ONLY PYTHON.** | dtp r288 | ◐ **BUILT + PUSHED.** Found by the operator asking whether a 19:30 report would know he meant Monday. It would — **unless he pressed ENTER at one of three prompts**, which fell back to `$(date +%F)`: UTC on this box, handing the script tomorrow's date BEFORE any Python default could apply. `menu_functions.sh:220/395/577`, against three sibling prompts in the same file already using `TZ=America/New_York date +%F`. ⚠️ **THE MISS WAS THE GUARD'S SCOPE, NOT THE FIX.** r287's T4 walked `*.py` and I called it the repo; the gap was in the language the checker did not read, which is the same shape as the defect it exists to catch. **T6 now sweeps `.sh`** and was proven red against the three real sites before they were fixed — editing three lines without extending the sweep would have left the next `.sh` prompt free to do it again. ⚠️ Also worth recording: **at 19:30 ET in SUMMER it is not yet Tuesday in UTC** — the roll is 20:00 EDT / 19:00 EST, so this is a winter-hours failure and would have looked intermittent. |
 | **DOC.15** | 🔴 **r247 AND r248 WERE SPENT NUMBERS WITH NO ROWS, AND THE LEDGER COULD NOT SAY WHY.** | r259 | ◐ **PUSHED.** Both were otv4 halves cut against a BACKLOG version that r278 superseded before they landed; each was re-cut as `_r2` and landed as r250/r251. `check_ledger_parity` reported them only inside *"15 unused revision number(s)"* — true, and useless to a reader who cannot tell a MISSING revision from a number that was never used without going through git. **Rows now exist IN SEQUENCE between r246 and r249**, marked cut-never-landed with what superseded them. ⚠️ **AND THE IN-SEQUENCE PLACEMENT IS WHY THIS SHIPPED AS A FILE RATHER THAN AN APPEND** — the operator's call, and correct: an append can only reach the bottom of the table, where a row for r247 would sit after r258 and break the newest-is-last property the whole ordering contract rests on. ⚠️ §35's rule that GENESIS never ships still holds for the ordinary case; this is the r194 exception — a REPAIR to existing rows — and it is safe only because the copy was taken from HEAD immediately before packaging and nothing landed in between. |
 | **RPT.11** | 🔴 **SIX MENU CONFIRMS ACCEPTED LOWERCASE `y` AND NOTHING ELSE.** | dtp r283 | ◐ **BUILT + PUSHED.** Measured 2026-09-05: the operator answered the LIVE backfill prompt with **`Y`** and the run silently did not happen — no error, no message, just the next prompt. **A confirm that discards a plausible yes is worse than one that refuses**, because *declined* and *ran and did nothing* look identical. All six sites route through `_yes` in `devtools.sh`; the DESTRUCTIVE ones now say what they declined while a flag toggle stays quiet, which is why the helper is a pure predicate rather than one that prints. ⚠️ **C3 pins that NO lowercase-only comparison survives anywhere in the menu** — fixing the one site that bit and leaving five is how this returns (C.30: when a rule changes, sweep its readers). ⚠️ And it must still refuse `n`, `sure` and empty: these prompts wake boxes, stop trading and delete rows, so loosening it to *anything non-empty* would be worse than the bug. |
 | **RPT.12** | 🔴 **THE OHLC BACKFILL'S STREAM CAP WAS 29-BOX ARITHMETIC, AND IT HARD-STOPS.** | dtp r283 | ◐ **BUILT + PUSHED.** A **one-box** backfill against a 15-box fleet was refused outright: `10 stream cap` with 15 running, and the check is `return 2`, not a warning — despite the file's own header describing a warn-never-stop pattern for a different check nearby. 🔑 **r53 ALREADY RETIRED THE FLEET-WIDE COPY OF THIS GUARD** on exactly this reasoning — *"it existed so a maintenance wake could not put 29 boxes on the wire at once; the fleet is 15 and a normal session already carried ~20 without strain"* — and this per-report copy was never swept after the 2026-08-20 pare. Same shape as the README fleet count that read 29 for nine days. Default moves to **20, which is r53's own recorded figure rather than one I chose**, `OT_STREAM_CAP`-overridable, and marked a PRIOR: if the DXFeed ceiling is ever measured rather than inferred, it moves again. |
@@ -337,6 +338,34 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.80 — 2026-09-05 — dtp r288 — TZ.2: THE BOUNDARY HAD A SHELL-SHAPED HOLE.**
+
+The operator asked a precise question — *"Monday at 19:30, when it's already
+Tuesday in UTC, it will know I mean Monday, right?"* — and checking it found the
+gap rather than confirming the fix.
+
+🔴 **THREE MENU PROMPTS FELL BACK TO `$(date +%F)`, WHICH IS UTC.**
+`menu_functions.sh:220`, `:395` and `:577` hand a date to the script BEFORE any
+Python default can apply, so r287's nine corrected sites were invisible behind
+three ENTER keys. Three sibling prompts in the very same file already used
+`TZ=America/New_York date +%F` — the identical five-right/nine-wrong split TZ.1
+found in Python, repeated one language over.
+
+⚠️ **THE MISS WAS THE GUARD'S SCOPE, AND THAT IS THE LESSON.** r287's T4 swept
+`*.py` and I called it the repo. **The gap was hiding in the language the
+checker did not read — the same shape as the defect the checker exists to
+catch.** So r288 extends the sweep to `.sh` rather than editing three lines: T6
+was proven RED against the three real sites before they were fixed, and T6b
+plants a fault to show it can fail, because a guard never seen red is a guard
+nobody has tested — which is exactly how v1.0 shipped blind to these.
+
+⚠️ **AND THE TIMING IN THE QUESTION WAS OFF, WHICH IS WORTH KEEPING.** At 19:30
+ET in summer it is 23:30 UTC — still the same day. The roll is **20:00 EDT /
+19:00 EST**, so this is a winter-hours failure. It would have presented as
+intermittent and seasonal, which is the hardest kind to chase from a symptom.
+
+`tests/test_ettime.py` v1.1, **15 checks**.
 
 **v1.79 — 2026-09-05 — dtp r287 — TZ.1: ONE ET/UTC BOUNDARY, AND A SWEEP THAT
 KEEPS IT.**
