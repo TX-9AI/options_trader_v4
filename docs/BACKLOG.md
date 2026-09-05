@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.88
+# BACKLOG.md — v1.89
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -112,7 +112,7 @@ feed plumbing and are not warehouse candidates.
 | **S3.21** | 🔴 **EVERY REPORT READ THE WRONG ROWS, IN BOTH DIRECTIONS, SINCE THE CACHE WAS WRITTEN.** | dtp r290 | ◐ **BUILT + PUSHED.** `WarehouseCache.load` listed only the requested `dt=` partitions and filtered nothing afterwards — but a DERIVED partition carries the **PUSH day**, not the row's ET day (C.9, which is why the coverage board grades those streams `pusher` grain). **A row whose session was in range but which pushed the next morning was NEVER READ** — silently, so the report showed a smaller, plausible number with nothing to indicate a hole — **and a row pushed inside the range whose own day fell before it was read anyway.** Neither consumer compensated: `collect()` takes `dates` and does not filter on them, `screen_plan_gates` bounds by strategy and symbol. 🔑 **`load_derived` HAS DONE THIS CORRECTLY SINCE r184** — scan forward, keep rows whose OWN timestamp lands in range — and it has no production callers (S3.11), so the right behaviour sat on the road with no traffic while every real report used the wrong one. ⚠️ **THE FILTER IS PER ROW IN PYTHON, NOT AN SQL OFFSET:** `_et_offset()` applies TODAY's UTC offset to every row — right for eight months, an hour wrong for four — the exact DST trap its own docstring warns about, one level up. ⚠️ Forward scanning is **derived-only**; raw streams are partitioned by the day they describe. |
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
-| **RPT.14** | ⬜ **`tests/test_fit_readiness_s3.py` HAS BEEN DEAD, NOT PASSING.** | ⬜ | It calls `fr._rows_warehouse([DAY])` while that function has taken `(dates, cache)` since the streaming rewrite, so **every run ends in a TypeError before a single assertion executes**. ⚠️ **VERIFIED AT HEAD, NOT INFERRED** — it raises identically on an unmodified checkout. Repairing the call revealed a SECOND staleness: `collect()`'s return shape changed too (`fired`/`declined` are ints, not lists), so the file is two API generations behind. The half-repair was **reverted rather than shipped** — a test that runs and asserts the wrong shape is worse than one that visibly fails. 🔑 **A file whose presence reads as coverage while it cannot run is the exact failure §0.6 names.** Needs re-deriving against the current `collect()`, which is its own job. |
+| **RPT.14** | ✅ **REVIVED — SIX CASES EXECUTING FOR THE FIRST TIME SINCE THE STREAMING REWRITE.** | dtp r294 | ◐ **BUILT + PUSHED.** It raised a TypeError before its first assertion, verified at HEAD. **TWO generations of silent API drift:** `_rows_warehouse(dates)` became `_rows_warehouse(dates, cache)`, and `collect()`'s `fired`/`declined` became COUNTERS at r245's OOM fix — so `shape()`'s `len()` could not work either. 🔑 **A AND B NOW DRIVE THE LIVE PATH.** The old fake patched `wr.read_prefix`, which `_rows_warehouse` stopped using at the streaming rewrite; a fake S3 CLIENT serves the same fixture through `WarehouseCache`, which is what a report actually takes. **Testing the old entrypoint is precisely how this rotted unseen.** ⚠️ **AND IT COST SOMETHING:** case C is a forward-scan POSITIVE CONTROL, and `WarehouseCache` shipped for months with no forward scan and no ET-day filter (S3.21) — the control existed and could not execute. ⚠️ C-F are **relabelled, not deleted**: they exercise `load_derived`, the REFERENCE implementation with no production callers, where the behaviour is defined; `test_cache_window` pins the same properties on the live path. Keeping only these is what let the cache ship wrong. ⚠️ A's banner assertion re-derived — it demanded the datatype prefix `derived_strategy_note` while the banner names the TABLE, and it now also requires the line to say WHICH collapse rule ran (r286). **Proof is old=TypeError, new=PASS at the same HEAD** — this revives a checker, it does not fix production code. |
 | **TZ.1** | 🔴 **ONE ET/UTC BOUNDARY FOR EVERY CONTROL-SIDE SCRIPT.** | dtp r287 | ◐ **BUILT + PUSHED.** Operator, 2026-09-05: *"Store everything as UTC, but when a report prompt asks me for a date, convert my choice assuming I mean ET. It's incredibly annoying when I run a report for 'today' at 6pm and it says nothing to report, because UTC has already started the next day."* 📊 **SURVEYED BEFORE WRITING A LINE: NINE naive sites against FIVE correct ones, and the five each carried their own private copy** — so this was never a missing translator, it was the absence of a boundary. The naive nine: `eod_analysis`, `eod_conductor_v2`, `fit_readiness`, `pnl_s3`, `excursion_report`, `orchestrator`, `tools/report_parity`, `trade_report`, and **`market_calendar` — the module that decides what a trading day IS, asking a UTC box**. ⚠️ **THE ROLL IS 20:00 ET IN SUMMER, 19:00 IN WINTER**, and past it a report finds nothing and SAYS SO rather than erroring — a defect in the clock reading as a fact about the market. `ettime.py` now owns `now_et`, `today_et`, `operator_date`, `days_back`, `stamp_et`, `et_day`, `et_bounds`; the five copies delegate. 🔑 **T4 IS THE DURABLE HALF** — it sweeps the repo for naive clock calls and fails on a NEW one, because fixing nine sites without a guard buys a year at most (C.30 turned into something that runs). |
 | **TZ.2** | 🔴 **THREE MENU PROMPTS BYPASSED THE BOUNDARY IN SHELL — r287's SWEEP READ ONLY PYTHON.** | dtp r288 | ◐ **BUILT + PUSHED.** Found by the operator asking whether a 19:30 report would know he meant Monday. It would — **unless he pressed ENTER at one of three prompts**, which fell back to `$(date +%F)`: UTC on this box, handing the script tomorrow's date BEFORE any Python default could apply. `menu_functions.sh:220/395/577`, against three sibling prompts in the same file already using `TZ=America/New_York date +%F`. ⚠️ **THE MISS WAS THE GUARD'S SCOPE, NOT THE FIX.** r287's T4 walked `*.py` and I called it the repo; the gap was in the language the checker did not read, which is the same shape as the defect it exists to catch. **T6 now sweeps `.sh`** and was proven red against the three real sites before they were fixed — editing three lines without extending the sweep would have left the next `.sh` prompt free to do it again. ⚠️ Also worth recording: **at 19:30 ET in SUMMER it is not yet Tuesday in UTC** — the roll is 20:00 EDT / 19:00 EST, so this is a winter-hours failure and would have looked intermittent. |
 | **DOC.15** | 🔴 **r247 AND r248 WERE SPENT NUMBERS WITH NO ROWS, AND THE LEDGER COULD NOT SAY WHY.** | r259 | ◐ **PUSHED.** Both were otv4 halves cut against a BACKLOG version that r278 superseded before they landed; each was re-cut as `_r2` and landed as r250/r251. `check_ledger_parity` reported them only inside *"15 unused revision number(s)"* — true, and useless to a reader who cannot tell a MISSING revision from a number that was never used without going through git. **Rows now exist IN SEQUENCE between r246 and r249**, marked cut-never-landed with what superseded them. ⚠️ **AND THE IN-SEQUENCE PLACEMENT IS WHY THIS SHIPPED AS A FILE RATHER THAN AN APPEND** — the operator's call, and correct: an append can only reach the bottom of the table, where a row for r247 would sit after r258 and break the newest-is-last property the whole ordering contract rests on. ⚠️ §35's rule that GENESIS never ships still holds for the ordinary case; this is the r194 exception — a REPAIR to existing rows — and it is safe only because the copy was taken from HEAD immediately before packaging and nothing landed in between. |
@@ -344,6 +344,48 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.89 — 2026-09-05 — dtp r294 — RPT.14: A CHECKER THAT HAD NOT RUN IN WEEKS
+RUNS AGAIN, AND THE REASON IT MATTERED IS ALREADY IN THE LEDGER.**
+
+`tests/test_fit_readiness_s3.py` raised a TypeError before its first assertion.
+Verified at HEAD, not inferred. **Two generations of API drift, both silent:**
+`_rows_warehouse(dates)` gained a `cache` argument at the streaming rewrite, and
+`collect()`'s `fired`/`declined` became COUNTERS at r245's OOM fix, so the
+`shape()` helper's `len()` could not have worked either.
+
+🔑 **AND IT COST SOMETHING CONCRETE.** Case C is a forward-scan **positive
+control** — the one that asserts a row pushed the next morning is still read for
+its own session. `WarehouseCache.load` shipped for months with **no forward scan
+and no ET-day filter** (S3.21, found today). The control existed, named the
+exact defect, and could not execute. A file whose presence reads as coverage
+while it cannot run is the failure §0.6 names.
+
+🔑 **A AND B NOW DRIVE THE PATH A REPORT TAKES.** The old fixture patched
+`wr.read_prefix`, which `_rows_warehouse` stopped calling at the rewrite — so
+even repaired, it would have gone on testing an entrypoint production had
+abandoned. A fake S3 **client** serves the same fixture through
+`WarehouseCache`. **Testing the old entrypoint is how this rotted unseen**, and
+it is the same shape as S3.11's `load_derived` and today's `head -3`.
+
+⚠️ **C-F ARE RELABELLED, NOT DELETED.** They exercise `load_derived`, the
+reference implementation with no production callers — where the behaviour is
+DEFINED, and worth pinning. `tests/test_cache_window.py` pins the same
+properties on the live path. Keeping only the reference cases is exactly what
+let the cache ship wrong; keeping both is deliberate.
+
+⚠️ **A's BANNER ASSERTION RE-DERIVED.** It demanded the literal
+`derived_strategy_note` — the datatype prefix — while the banner names the TABLE.
+It now checks that the stream is named AND that the line says which collapse
+rule ran, which is r286's contract that a report must not describe a collapse it
+did not get.
+
+**Six cases execute:** warehouse load 4 fired / 6 declined, sqlite↔warehouse
+parity row for row, the forward-scan control, the ET-day window filter, an
+unreachable bucket reporting an error rather than an empty result, and
+midnight-to-midnight ET bounds. **Proof is old=TypeError, new=PASS at the same
+HEAD** — this revives a checker rather than fixing production code, and saying
+otherwise would overstate it.
 
 **v1.88 — 2026-09-05 — r272 — THREE ROWS CLOSED BY READING THEM. DOCS ONLY.**
 
