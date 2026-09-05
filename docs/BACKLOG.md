@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.67
+# BACKLOG.md — v1.68
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -55,6 +55,7 @@ actually read goes in as an open step, not a closed one.
 | **DEP.1** | 🔴 **THE DEPLOY WAS THE MOST REPEATED ACT IN THIS PROJECT AND THE ONLY ONE STILL DONE BY HAND.** | dtp r278 | ◐ **BUILT + PUSHED.** 🔑 **NINE OF THE OPERATOR'S TEN STAGES ALREADY EXISTED IN `tools/land.sh` (r235) AND WERE NOT REBUILT** — unpack, stage, find the repo by marker, pull first, content gate, regenerate both maps and fail on drift, append GENESIS before `git add`, `check_land_discipline` for the version/changelog/GENESIS bookkeeping, commit, push, clean up. r278 adds the ONE that was missing and fixes two defects the hand-run was hiding. **(1) IT RAN NO CHECKERS** — the content gate greps and never executes, which is the r201 shape §0.6 names; `CHECK <path>` now RUNS in the repo, and a half shipping a `.py` outside `docs/` that declares none is REFUSED, because *nothing was executed* must not read like *everything passed*. **(2) `git add -A`** staged whatever was in the tree, against the operator's own standing rule written after a stray file was pushed off main — every path is now named. **(3) THE ARCHIVE IT DELETED WAS A GUESS** (`ls … \| head -1`), and he routinely has two pending; `LAND_ARCHIVE` names it and an ambiguous glob now deletes NOTHING and says so. New `tools/deploy.sh` finds the tarball, prompts on ambiguity rather than picking, discovers the halves from their specs, ORDERs them, and execs the lander FROM THE ARCHIVE so a delivery that improves the lander is landed by the improved copy. |
 | **DEP.2** | ⬜ **`land.sh`'s CONTENT GATE USES BARE `grep -q`, SO A PATTERN WITH `*` SILENTLY MATCHES SOMETHING WEAKER.** | ⬜ | 🔴 **FOUND WHILE BUILDING r277, MEASURED NOT REASONED:** `POS docs/GENESIS.md\|**r247**` PASSED against a GENESIS containing no `r247`. In BRE the trailing `**` reads as *zero or more `7`s*, so the pattern degenerates to `r24` and matches `r240`, `r241`, anything. **`**rNNN**` is this repo's own GENESIS row idiom**, so any spec written that way checks something weaker than it says — the laundered green §18 names, inside the gate whose whole job is to prevent it. Fix is `grep -qF` for POS/NEG plus a selftest case built from a pattern that degenerates. ⚠️ **NOT FOLDED INTO r278 DELIBERATELY:** the lander that changes the lander is verified by the old lander, and r235 already had to solve self-replacement once. It is a small change and it deserves its own delivery and its own born-red. |
 | **DEP.3** | ⬜ **LAND.1 IS REVERSED, BY THE OPERATOR, AND THE RECORD SHOULD NOT CONTRADICT ITSELF.** | ⬜ | LAND.1 ruled that `land.sh` gets no menu item: *"installer scripts should call it, not me manually running it."* **No installer ever called it** — every land since r235 has been a pasted command — so the premise was false in practice, and he asked for the item directly on 2026-09-05. Recorded rather than quietly overridden: **C.31** says a rule outliving its reason is a rule the next reader loosens for a worse reason. `menu_registry.sh` v1.10 carries the reversal in its own changelog; this row is so the ledger agrees with it. |
+| **DEP.4** | 🔴 **A MULTI-HALF DELIVERY COULD LAND HALF-WAY, ON ORIGIN.** | dtp r279 | ◐ **BUILT + PUSHED.** Observed, not imagined: landing `r277_r2` before `r276_r2` in the sandbox, the dtp half passed its gate, committed **and pushed**, and only then did the otv4 half correctly refuse on a GENESIS row `r276` had not yet written. Origin held the code with no backlog entry — a half delivery on the shared truth fifteen boxes pull from — and re-running died at `git commit` with nothing left to stage. 🔑 **A PRE-FLIGHT OF EVERY GATE WOULD NOT HAVE WORKED**, and that is the design: a half is ALLOWED to gate on an artifact an earlier half produces, so verifying half two before half one lands would fail a gate that is not failing. **The split is COMMIT vs PUSH, which is where the irreversibility actually sits.** Phase 1 verifies and commits each half locally, in order, so a later half still sees an earlier half's files; phase 2 pushes, and only if every half reached a commit. Any phase-1 failure rolls every repo this run committed to back to its pre-run SHA. ⚠️ **THE ROLLBACK IS `reset --soft`** — a hard reset would revert an unrelated tracked file the operator had mid-edit, which is §35's own reason for refusing a blind `git checkout -- .`; a rolled-back half looks exactly like a gate failure today, files present and uncommitted, recovery printed. ⚠️ **AND THE LIMIT IS STATED:** two remotes are not a transaction. The pushes are last and back to back, and a failure names which repo is ahead and the one command that fixes it — a pushed half is NOT auto-reverted, because undoing something already on origin is a decision for a human. |
 
 ### S3 repoint — the reporting apparatus
 
@@ -320,6 +321,62 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.68 — 2026-09-05 — dtp r279 — DEP.4: ALL HALVES LAND, OR NONE REACHES
+ORIGIN.**
+
+Operator, 2026-09-05: *"make sure all will land or none."*
+
+🔴 **THE FAILURE IS OBSERVED, NOT HYPOTHETICAL.** Landing `r277_r2` before
+`r276_r2` in the sandbox: the dtp half passed its gate, committed **and
+pushed**, and only then did the otv4 half correctly refuse on a GENESIS row
+`r276` had not yet written. Origin ended up holding the code with no backlog
+entry, and a re-run then died at `git commit` with nothing left to stage. v1.1
+landed halves sequentially and stopped at the first failure — one-at-a-time,
+not all-or-nothing.
+
+🔑 **A PRE-FLIGHT OF EVERY GATE WOULD NOT HAVE WORKED, AND THAT IS THE WHOLE
+DESIGN.** The obvious fix is *"verify every half before landing any"* — and it
+is wrong here, because a half is ALLOWED to gate on an artifact an earlier half
+produces. `r277_r2`'s otv4 half asserts a GENESIS row that `r276_r2`'s otv4 land
+appends. Pre-flighting it before r276 landed would fail a gate that is not
+actually failing; the dependency is real and the ordering exists to serve it.
+
+🔑 **SO THE SPLIT IS COMMIT vs PUSH, WHICH IS WHERE THE IRREVERSIBILITY SITS.**
+Phase 1 verifies and commits each half LOCALLY, in order, so a later half still
+sees an earlier half's landed files. Nothing is pushed. Phase 2 pushes every
+repo and only runs if every half reached a commit. A phase-1 failure rolls every
+repo this run committed to back to the SHA it was on before the run started —
+**origin never sees a partial delivery**, which is the property that matters
+when fifteen boxes pull from it.
+
+⚠️ **THE ROLLBACK IS `reset --soft`, NOT `--hard`.** A hard reset would also
+revert an unrelated tracked file the operator had edited — the exact reason §35
+already refuses a blind `git checkout -- .` on a failed gate. Soft moves HEAD
+back and leaves the tree, so a rolled-back half looks EXACTLY like a half that
+failed its gate today: files present, uncommitted, recovery printed. Nothing of
+his is destroyed to tidy up after a delivery of mine. ⚠️ A rollback that itself
+fails is NAMED, never swallowed — a silent one would leave him believing his
+checkout and origin agree when they do not.
+
+⚠️ **AND THE HONEST LIMIT IS STATED RATHER THAN PAPERED OVER.** Phase 2 pushes
+to two independent remotes; that is not a transaction and cannot be made one.
+What it CAN be is ordered last, back to back, with nothing between them but
+network — and if one fails, the report names which repo is ahead of its remote
+and the one command that fixes it. A pushed half is **not** auto-reverted:
+undoing something already on origin is a decision for a human, not a cleanup
+step.
+
+`tests/check_land_sh.py` v1.2, **35 checks, born red 4 against v1.1** — and A1b
+is the one that carries the weight because it asserts on the **BARE REPO**, not
+on the checkout: *"the local HEAD moved back"* is a weaker claim than *"origin
+never saw it"*, and origin is what the fleet pulls from. Against v1.1 it reports
+exactly the observed defect, `r999` on remote one while remote two sat at base.
+⚠️ **A1c IS THE CASE THAT CATCHES A LAZY ROLLBACK:** `--hard` would pass every
+other case here and silently revert a file the operator had mid-edit. ⚠️ **AND
+MY FIRST DRAFT OF A1c WAS WRONG AND THE CODE WAS RIGHT** — it edited a file the
+delivery legitimately overwrites, asserting a property no lander could have, and
+went red against correct code. Re-derived onto a file the payload does not ship.
 
 **v1.67 — 2026-09-05 — dtp r277 — S3.10: PER-STREAM, PER-DAY, PER-BOX COVERAGE
 — AND THE FOUR WAYS IT COULD CRY WOLF.**
