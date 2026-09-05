@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.59
+# BACKLOG.md — v1.60
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -313,6 +313,60 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.60 — 2026-09-04 — r242 — 📌 DOCS ONLY. DISP.1: THE REGIME QUESTION IS
+ASKED ONCE FOR DEBITS AND N TIMES FOR CREDITS.** Operator, 2026-09-04: *"why
+are the credit trades even polling during that time at all… could we move the
+window further upstream in the decision layer so it doesn't start asking until
+it's time?"*
+
+🔑 **THE MORNING HALF ALREADY WORKS THAT WAY.** `_afternoon_debit_blocked()` is
+evaluated **once at the top of the tick** (`main.py:3371-3372`), before any plan
+is polled, and it is **keyed on STRUCTURE, not on a name list** — the cutoff
+reads `_STRUCTURE_BY_NAME`, which records what each strategy BUILDS. Its own
+comment records why: v3 held a name list, **two of the three names were deleted**
+while `RunawayContinuation` was never added, and it *"would have been silently
+EXEMPT from the cutoff. An allow-list of names rots."*
+🔴 **THE AFTERNOON HALF HAS NO MIRROR.** There is no `_morning_credit_blocked`.
+`CREDIT_ENTRY_START_ET` is enforced **only inside each strategy**, as a declared
+`entry_window` condition. So every credit strategy is polled every tick from the
+open, and each one checks its own clock on the way in.
+⚠️ **AND THE RECORD HIDES IT.** `t.dormant()` deduplicates — the first tick
+outside the window writes a row and every identical tick after is silent. That is
+why `entry_window` shows **410 failures against 61,641 passes**: the 410 are
+*transitions*, not ticks. The morning polling is real and nearly invisible.
+
+## THE SHAPE
+
+🔑 **A mirror gate reading the SAME map, at the SAME point in the tick.** Not a
+schedule in `main.py` and not a per-strategy declaration read by dispatch — the
+authority already exists and is already structure-keyed.
+⚠️ **IT DISSOLVES THE MUTE RISK I RAISED.** I first proposed each strategy
+exposing `ENTRY_WINDOW` for dispatch to read, and warned that a wrong
+declaration would **silently mute a strategy** with a plausible NOT ASKED
+reason. That does not apply to the mirror: the map is already the authority for
+the debit half, its default is already defined and restrictive (`long_debit`),
+and a credit strategy skipped before 11:31 **would have refused itself anyway.**
+Same map, same answer, asked once instead of thousands of times — **behaviour
+identical by construction; only the record changes.**
+🔑 **THE RECORD CHANGE IS THE GAIN:** `NOT ASKED — before the credit window`
+instead of morning polling deduped into nothing.
+⚠️ **AND IT ENDS SINGLE-POINT ENFORCEMENT.** The strategy's own `entry_window`
+check is currently the ONLY thing between a credit spread and a morning fill.
+Two constant faults this week were exactly that class: `TCS_ENTRY_END_ET` was a
+placeholder nobody chose (r238), and `SWEEP_CS_MAX_AGE_BARS` was a name that did
+not exist (r230). The strategy check STAYS — the same declaration read twice is
+not duplication, and the second read is what catches a disagreement.
+
+⚠️ **NOT BUILT TONIGHT, DELIBERATELY.** It touches the dispatch path on the eve
+of the first observation of five sweep revisions (r230, r231, r233, r234, r241),
+none of which has seen a tick. A zero result on Monday must be attributable.
+
+| id | question | state |
+|---|---|---|
+| **DISP.1** | Mirror `_afternoon_debit_blocked` with a credit-side gate reading `_STRUCTURE_BY_NAME` at the same point in the tick. `vertical` before `CREDIT_ENTRY_START_ET` → `_plan_skip`. Behaviour-neutral by construction; the gain is a truthful record and enforcement above the plans. **Build after Monday's observation.** | 🔲 OPEN |
+| **DISP.2** | A checker pinning that every credit strategy's window starts at or after `DEBIT_DIRECTIONAL_CUTOFF_ET`, so the two regimes cannot silently overlap. Would have caught both of this week's constant faults. | 🔲 OPEN |
+| **DISP.3** | ORB and RunawayContinuation declare **no window constants at all** — their eligibility is entirely the cutoff. Fine today; worth naming because a future strategy with neither a declared window nor a structure entry is invisible to both gates. | 🔲 OPEN |
 
 **v1.59 — 2026-09-04 — r241 / dtp r272 — 🔴 THE AGE GATE IS REMOVED, NOT
 RAISED — AND THE MEASUREMENT THAT SHOWS WHETHER r234 LANDED.**
