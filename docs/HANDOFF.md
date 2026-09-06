@@ -155,7 +155,10 @@ and a shipped copy is always stale. This clobbered it twice.
 ## The land command pattern
 
 ```
-REV=rNN; rm -rf /tmp/$REV; mkdir -p /tmp/$REV; tar xf "$HOME/<archive>.tar" -C /tmp/$REV; cd ~/options-trader-v4 && git pull --ff-only && cp -r /tmp/$REV/otv4/. .; for c in check_imports check_gates check_no_regime check_condor_spec check_dispatch stress_entry_path check_exit_executes test_candle_routing; do python3 tests/$c.py >/dev/null 2>&1 || echo "$c FAILED"; done; python3 tests/gen_file_map.py >/dev/null 2>&1; python3 tests/gen_file_map.py --check | tail -1; printf '| **rNN** | <one line, why not what> |\n' >> docs/GENESIS.md; git add -A && git commit -q -m "OTV4 rNN: <same line>" && git push && rm -f "$HOME/<archive>.tar"
+# ⚠️ SUPERSEDED by the devtools LAND item (land.sh / deploy.sh, §15). Kept
+# because THIS LINE IS THE ONLY PLACE THE "eight standing checks" WERE EVER
+# ENUMERATED — see DOC.17. Do not land by hand from it.
+REV=rNN; rm -rf /tmp/$REV; mkdir -p /tmp/$REV; tar xf "$HOME/<archive>.tar" -C /tmp/$REV; cd ~/options-trader-v4 && git pull --ff-only && cp -r /tmp/$REV/otv4/. .; for c in check_imports check_gates check_condor_spec check_dispatch stress_entry_path check_exit_executes test_candle_routing; do python3 tests/$c.py >/dev/null 2>&1 || echo "$c FAILED"; done; python3 tests/gen_file_map.py >/dev/null 2>&1; python3 tests/gen_file_map.py --check | tail -1; printf '| **rNN** | <one line, why not what> |\n' >> docs/GENESIS.md; git add -A && git commit -q -m "OTV4 rNN: <same line>" && git push && rm -f "$HOME/<archive>.tar"
 ```
 
 **The same `$DESC` becomes both the GENESIS line and the commit subject** — one

@@ -557,8 +557,9 @@ cover every outcome, which is not coverage.
 `sweep_reversal_strategy.py` are **gone from the repo**, along with their imports
 and dispatch blocks in `main.py`.
 
-⚠️ **They were briefly carried as "inert shells" exempt from
-`tests/check_no_regime.py`, and that was wrong.** They were not future work —
+⚠️ **They were briefly carried as "inert shells" exempt from the tree-wide
+exorcism gate (`tests/check_no_regime.py`, retired r278 once the only surviving
+mentions were historical), and that was wrong.** They were not future work —
 they were the v3 implementations the new specs replace, and **a permanent
 exemption for superseded code is a growing blind spot an audit will ask about.**
 All three were gated on `regime.primary_regime`, which v4 leaves permanently

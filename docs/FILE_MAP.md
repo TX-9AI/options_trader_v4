@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-237 Python modules across 13 local packages.
+236 Python modules across 13 local packages.
 
-**Reached by:** 98 imported · 9 declared entry points · 68 referenced from a script, unit or doc but never imported · **62 by nothing here**.
+**Reached by:** 98 imported · 9 declared entry points · 69 referenced from a script, unit or doc but never imported · **60 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -544,7 +544,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_condor_spec.py`
 - **calls:** `analysis/pitchfork.py`, `execution/exit_engine.py`, `strategy/__init__.py`, `strategy/condor_roll.py`, `utils/time_utils.py`
-- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/check_condor_stop_suppression.py`
 - **calls:** `config.py`, `database/trade_logger.py`, `execution/exit_engine.py`
@@ -576,7 +576,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_dispatch.py`
 - **calls:** `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/check_drift_verdict.py`
 - **calls:** (none)
@@ -616,7 +616,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_imports.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`, `docs/WORKING_AGREEMENT.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`, `docs/WORKING_AGREEMENT.md`
 
 ### `tests/check_ladder_wired.py`
 - **calls:** `config.py`, `execution/__init__.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`, `execution/order_confirm.py`
@@ -632,7 +632,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_lone_stop.py`
 - **calls:** `config.py`
-- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_manage_call.py`
 - **calls:** `config.py`, `execution/position_manager.py`, `utils/time_utils.py`
@@ -653,10 +653,6 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_no_env_dump.py`
 - **calls:** (none)
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
-
-### `tests/check_no_regime.py`
-- **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`, `docs/TRADES.md`
 
 ### `tests/check_not_asked_reasons.py`
 - **calls:** `strategy/__init__.py`, `strategy/plan.py`
@@ -768,7 +764,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_retention_armed.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`
-- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_runaway_break_key.py`
 - **calls:** `database/__init__.py`, `database/trade_logger.py`, `strategy/__init__.py`, `strategy/runaway_continuation.py`
@@ -932,7 +928,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/stress_entry_path.py`
 - **calls:** `execution/entry_ladder.py`, `execution/exit_engine.py`, `main.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/relaxed.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/sweep_discriminator.py`
 - **calls:** (none)
@@ -944,7 +940,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/test_candle_routing.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/tick_board.py`
 - **calls:** (none)

@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""check_retention_armed.py — v1.0 (landed r162)
+"""check_retention_armed.py — v1.1 (landed r162; R5 re-derived r278)
+
+v1.1  2026-09-05 — r278. 🔴 R5 ASSERTED "VACUUM is still not EXECUTED at
+      shutdown" AND r255 MADE THAT FALSE ON PURPOSE. It has been red since that
+      afternoon and nothing noticed, because these checks only run when a
+      `land.spec` names them. THIRD INSTANCE OF THIS CLASS IN ONE DAY — the
+      conductor's C7 and the `head -3` truncation were the same shape; this one
+      was missed because it lives in the other repo.
+      🔑 The property being protected has not changed: **a vacuum must never
+      stall the halt.** r255 enforces it by REFUSING when free disk is under the
+      live size, rather than by the vacuum being absent. R5/R5b/R5c now pin
+      that: it exists, it is gated, and a failure is reported rather than
+      raised.
 
 🔴 THE NIGHTLY PURGE MUST ACTUALLY DELETE.
 
@@ -85,27 +97,50 @@ def main():
     finally:
         rp.purge = _real
 
-    # ── R5 — VACUUM is still not run, deliberately ───────────────────────
-    # ⚠️ NOT AN OVERSIGHT. VACUUM rewrites the whole file and would stall the
-    # box for minutes at close. With the purge ARMED, SQLite reuses freed
-    # pages and the file reaches steady state — VACUUM is only needed if the
-    # retention windows are shortened and the difference is wanted back as
-    # disk. A purge that blocks the halt is worse than a larger file.
-    # ⚠️ PARSE, DO NOT GREP. The first version stripped comment LINES and then
-    # searched for the word — which the module DOCSTRING contains (it recounts
-    # the failed VACUUM of 2026-08-27), so the check went red on prose. Walk
-    # the AST for an actual execute("VACUUM") call instead.
+    # ── 🔴 R5 RE-DERIVED (r278) — THE RULE CHANGED, SO THE CHECK MOVED ───
+    # It asserted "VACUUM is still not EXECUTED at shutdown", and r255 made
+    # that FALSE on purpose: a gated vacuum now runs inside `reclaim()`. The
+    # gate went red the afternoon r255 landed and NOTHING NOTICED, because
+    # nothing runs these checks unless a `land.spec` names them.
+    # ⚠️ THIRD INSTANCE OF THIS CLASS IN ONE DAY. The conductor's C7 pinned the
+    # same retired rule and was re-derived when the reclaim was built; `head
+    # -3` was the same shape; this one was missed because it lives in the OTHER
+    # repo. A check that goes on certifying a rule the system has stopped
+    # following is worse than no check — it reports green for a property that
+    # is no longer true.
+    #
+    # 🔑 WHAT THE ORIGINAL RULE WAS ACTUALLY PROTECTING, AND STILL IS: a vacuum
+    # must never stall the halt. r162's cost is in this file's header — the
+    # fleet went blind mid-session because the purge had run dry for two
+    # months, and the recovery included a failed VACUUM that could not fit in
+    # /tmp. So the property is not "no vacuum"; it is "no vacuum that cannot
+    # complete", and r255 enforces it by REFUSING when free disk is under the
+    # live size rather than by absence.
     import ast as _ast
-    rp_tree = _ast.parse(open(os.path.join(_root, "warehouse",
-                                           "retention_purge.py"),
-                              encoding="utf-8").read())
+    rp_src = open(os.path.join(_root, "warehouse", "retention_purge.py"),
+                  encoding="utf-8").read()
+    rp_tree = _ast.parse(rp_src)
+    # ⚠️ PARSE, DO NOT GREP — kept from v1.0, and the reason is still good: the
+    # module docstring recounts the failed VACUUM of 2026-08-27, so a text
+    # search goes red on prose.
     _vac = [n for n in _ast.walk(rp_tree)
             if isinstance(n, _ast.Call)
             and any(isinstance(a, _ast.Constant)
                     and isinstance(a.value, str)
                     and "vacuum" in a.value.lower() for a in n.args)]
-    check("R5 VACUUM is still not EXECUTED at shutdown",
-          not _vac, f"{len(_vac)} vacuum call(s)")
+    check("R5 the vacuum exists and is GATED, not absent",
+          bool(_vac), f"{len(_vac)} vacuum call(s)")
+    # 🔴 R5b — THE GATE IS THE WHOLE PROPERTY. A vacuum writes a complete second
+    # copy before replacing the original, so it needs free disk above the live
+    # size. On 2026-09-05 the four boxes that needed it most had less; one that
+    # died half-way at 16:10 on a 96%-full box would be worse than none.
+    check("R5b ...refusing when free disk is under the live size",
+          "_vacuum_min_free" in rp_src and "REFUSED" in rp_src)
+    # ⚠️ R5c — AND IT STILL MUST NOT STALL THE HALT. r162's rule, unchanged:
+    # a reclaim failure is reported and stepped over, never raised.
+    check("R5c ...and never blocking the halt — a failure is reported, "
+          "not raised",
+          "vacuum FAILED" in rp_src and "SQLITE_TMPDIR" in rp_src)
 
     print()
     if _fails:
