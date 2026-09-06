@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.92
+# BACKLOG.md — v1.93
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -113,6 +113,8 @@ feed plumbing and are not warehouse candidates.
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
 | **RPT.14** | ✅ **REVIVED — SIX CASES EXECUTING FOR THE FIRST TIME SINCE THE STREAMING REWRITE.** | dtp r294 | ◐ **BUILT + PUSHED.** It raised a TypeError before its first assertion, verified at HEAD. **TWO generations of silent API drift:** `_rows_warehouse(dates)` became `_rows_warehouse(dates, cache)`, and `collect()`'s `fired`/`declined` became COUNTERS at r245's OOM fix — so `shape()`'s `len()` could not work either. 🔑 **A AND B NOW DRIVE THE LIVE PATH.** The old fake patched `wr.read_prefix`, which `_rows_warehouse` stopped using at the streaming rewrite; a fake S3 CLIENT serves the same fixture through `WarehouseCache`, which is what a report actually takes. **Testing the old entrypoint is precisely how this rotted unseen.** ⚠️ **AND IT COST SOMETHING:** case C is a forward-scan POSITIVE CONTROL, and `WarehouseCache` shipped for months with no forward scan and no ET-day filter (S3.21) — the control existed and could not execute. ⚠️ C-F are **relabelled, not deleted**: they exercise `load_derived`, the REFERENCE implementation with no production callers, where the behaviour is defined; `test_cache_window` pins the same properties on the live path. Keeping only these is what let the cache ship wrong. ⚠️ A's banner assertion re-derived — it demanded the datatype prefix `derived_strategy_note` while the banner names the TABLE, and it now also requires the line to say WHICH collapse rule ran (r286). **Proof is old=TypeError, new=PASS at the same HEAD** — this revives a checker, it does not fix production code. |
+| **DOC.16** | 🔴 **THE FILE MAP PUT 55% OF THE REPO IN ONE MEANINGLESS BUCKET.** | r277 | ◐ **BUILT + PUSHED.** Operator: *"we have a file map for a reason. Try reading it. And if it's not useful, we might want to figure out why — because what the hell do we have a useless file map for?"* **130 of 237 modules read `orphan or leaf`**, holding three unrelated things: standing checks the land command runs BY NAME, generators the lander executes — **`gen_file_map.py` listed ITSELF as an orphan** — and genuinely one-shot studies. ⚠️ **A COLUMN THAT CANNOT TELL `check_ledger_parity` FROM `tine_order_study` IS WORSE THAN NO COLUMN**: anyone pruning by it deletes a nightly-critical check. 🔑 **THE MISSING SIGNAL IS INVOCATION, NOT IMPORT** — `land.spec CHECK` lines, unit files and devtools are invisible to an import graph. The generator now scans the repo's `.sh`, `.service`, `.timer` and `.md` surface and reports WHERE each module is named. **130 → 29.** ⚠️ It matches the STEM as well as the filename: a first cut required `.py` and buried `check_exit_executes` — written so F0 could not recur — while two documents cited it. ⚠️ **The residual 29 is a REVIEW list, not a delete list**, and the map says so: `land.spec` ships in a tarball and is never committed, and dtp's menu is another repo. |
+| **DOC.17** | ⬜ **NOTHING IN THIS REPO RECORDS WHICH CHECKS ARE STANDING.** | ⬜ | Fell out of DOC.16 and is the deeper half. `FILE_MAP` says *"tests/ holds the eight standing checks"* and **nothing enumerates them.** The only record that a check is load-bearing is a `CHECK` line in a `land.spec`, which ships inside a tarball and is never committed — so it survives exactly one delivery. That is why r277 had to infer status from prose mentions, and why the residual 29 cannot be pruned safely. 🔑 **PROPOSED, OPERATOR TO RULE:** a self-declaring marker in each standing check's own header rather than a separate manifest, since a manifest drifts and a header does not — `gen_file_map` then reports status instead of guessing it. **Which checks are standing is the operator's call.** |
 | **TZ.1** | 🔴 **ONE ET/UTC BOUNDARY FOR EVERY CONTROL-SIDE SCRIPT.** | dtp r287 | ◐ **BUILT + PUSHED.** Operator, 2026-09-05: *"Store everything as UTC, but when a report prompt asks me for a date, convert my choice assuming I mean ET. It's incredibly annoying when I run a report for 'today' at 6pm and it says nothing to report, because UTC has already started the next day."* 📊 **SURVEYED BEFORE WRITING A LINE: NINE naive sites against FIVE correct ones, and the five each carried their own private copy** — so this was never a missing translator, it was the absence of a boundary. The naive nine: `eod_analysis`, `eod_conductor_v2`, `fit_readiness`, `pnl_s3`, `excursion_report`, `orchestrator`, `tools/report_parity`, `trade_report`, and **`market_calendar` — the module that decides what a trading day IS, asking a UTC box**. ⚠️ **THE ROLL IS 20:00 ET IN SUMMER, 19:00 IN WINTER**, and past it a report finds nothing and SAYS SO rather than erroring — a defect in the clock reading as a fact about the market. `ettime.py` now owns `now_et`, `today_et`, `operator_date`, `days_back`, `stamp_et`, `et_day`, `et_bounds`; the five copies delegate. 🔑 **T4 IS THE DURABLE HALF** — it sweeps the repo for naive clock calls and fails on a NEW one, because fixing nine sites without a guard buys a year at most (C.30 turned into something that runs). |
 | **TZ.2** | 🔴 **THREE MENU PROMPTS BYPASSED THE BOUNDARY IN SHELL — r287's SWEEP READ ONLY PYTHON.** | dtp r288 | ◐ **BUILT + PUSHED.** Found by the operator asking whether a 19:30 report would know he meant Monday. It would — **unless he pressed ENTER at one of three prompts**, which fell back to `$(date +%F)`: UTC on this box, handing the script tomorrow's date BEFORE any Python default could apply. `menu_functions.sh:220/395/577`, against three sibling prompts in the same file already using `TZ=America/New_York date +%F`. ⚠️ **THE MISS WAS THE GUARD'S SCOPE, NOT THE FIX.** r287's T4 walked `*.py` and I called it the repo; the gap was in the language the checker did not read, which is the same shape as the defect it exists to catch. **T6 now sweeps `.sh`** and was proven red against the three real sites before they were fixed — editing three lines without extending the sweep would have left the next `.sh` prompt free to do it again. ⚠️ Also worth recording: **at 19:30 ET in SUMMER it is not yet Tuesday in UTC** — the roll is 20:00 EDT / 19:00 EST, so this is a winter-hours failure and would have looked intermittent. |
 | **DOC.15** | 🔴 **r247 AND r248 WERE SPENT NUMBERS WITH NO ROWS, AND THE LEDGER COULD NOT SAY WHY.** | r259 | ◐ **PUSHED.** Both were otv4 halves cut against a BACKLOG version that r278 superseded before they landed; each was re-cut as `_r2` and landed as r250/r251. `check_ledger_parity` reported them only inside *"15 unused revision number(s)"* — true, and useless to a reader who cannot tell a MISSING revision from a number that was never used without going through git. **Rows now exist IN SEQUENCE between r246 and r249**, marked cut-never-landed with what superseded them. ⚠️ **AND THE IN-SEQUENCE PLACEMENT IS WHY THIS SHIPPED AS A FILE RATHER THAN AN APPEND** — the operator's call, and correct: an append can only reach the bottom of the table, where a row for r247 would sit after r258 and break the newest-is-last property the whole ordering contract rests on. ⚠️ §35's rule that GENESIS never ships still holds for the ordinary case; this is the r194 exception — a REPAIR to existing rows — and it is safe only because the copy was taken from HEAD immediately before packaging and nothing landed in between. |
@@ -344,6 +346,47 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.93 — 2026-09-05 — r277 — DOC.16: THE FILE MAP ANSWERED A QUESTION NOBODY
+WAS ASKING.**
+
+Operator, after watching me grep for callers file by file all session: *"we have
+a file map for a reason. Try reading it. And if it's not useful, we might want
+to figure out why that is — because what the hell do we have a useless file map
+for?"*
+
+Both halves were right. **It does answer the question** — `debug_status.py`
+reads `called by: (entry point)`, `stress_theta_bleed.py` shows its imports and
+no importer — and I derived both by grep instead.
+
+🔴 **AND IT IS LESS USEFUL THAN IT SHOULD BE, FOR A REAL REASON.** 130 of 237
+modules — **55% of the repo** — read `orphan or leaf`, and that one bucket held
+standing checks the land command runs by name, generators the lander executes,
+and one-shot studies. **`gen_file_map.py` listed itself as an orphan.** A column
+that cannot distinguish `check_ledger_parity` from `tine_order_study` is worse
+than no column, because anyone pruning by it deletes something
+nightly-critical.
+
+🔑 **THE MISSING SIGNAL IS INVOCATION, NOT IMPORT.** `land.spec CHECK` lines,
+unit files, devtools, the conductor's subprocess calls — none of it appears in
+an import graph. The generator now scans the repo's own `.sh`, `.service`,
+`.timer` and `.md` surface for each module's name. **130 unexplained becomes
+29**, which is short enough to read.
+
+⚠️ **IT MATCHES THE STEM, NOT JUST THE FILENAME.** A first cut required the
+`.py` and put `check_exit_executes` — the file written so F0 could not recur —
+in the unreferenced bucket while two documents named it. **A matcher stricter
+than the way people write reports absence where there is none.**
+
+⚠️ **AND THE RESIDUAL 29 IS A REVIEW LIST, NOT A DELETE LIST**, stated in the
+map's own header: a `land.spec` ships inside a tarball and is never committed
+here, and `day_trader_pro`'s devtools menu is a different repo.
+
+**DOC.17 opened, and it is the deeper half.** `FILE_MAP` claims *"tests/ holds
+the eight standing checks"* and **nothing enumerates them**. The only record
+that a check is load-bearing is a `CHECK` line in a spec that survives one
+delivery. That is why this revision had to infer status from prose, and why the
+29 still cannot be pruned safely.
 
 **v1.92 — 2026-09-05 — dtp r297 — RPT.5 ANSWERED: THERE IS NO DOUBLE-WRITE.**
 

@@ -6,6 +6,14 @@ the canary fails on drift (WORKING_AGREEMENT 33).
 
 237 Python modules across 13 local packages.
 
+**Reached by:** 98 imported · 9 declared entry points · 68 referenced from a script, unit or doc but never imported · **62 by nothing here**.
+
+⚠️ The last group is a REVIEW LIST, not a delete list. A
+`land.spec CHECK` line ships inside a tarball and is never
+committed here, and `day_trader_pro`'s devtools menu is a
+different repo — a module run from either still reads as
+unreferenced. Confirm before removing anything.
+
 ## How to read this repo - orientation
 
 **The one-way flow:** `data/` fetches -> `analysis/` describes ->
@@ -120,7 +128,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/pitchfork_lifecycle.py`
 - **calls:** `analysis/pitchfork.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `analysis/pitchfork_observer.py`
 - **calls:** `analysis/pitchfork.py`
@@ -236,7 +244,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `derived/__init__.py`
 - **calls:** `derived/base.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `check_versions.sh`
 
 ### `derived/base.py`
 - **calls:** (none)
@@ -312,7 +320,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/fill_model.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `execution/ladder_registry.py`
 - **calls:** `execution/entry_ladder.py`
@@ -344,7 +352,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `notifications/__init__.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `check_versions.sh`
 
 ### `notifications/alert_manager.py`
 - **calls:** `config.py`, `notifications/telegram_sender.py`, `utils/time_utils.py`
@@ -360,7 +368,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `risk/__init__.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `check_versions.sh`
 
 ### `risk/risk_manager.py`
 - **calls:** `config.py`, `database/trade_logger.py`, `notifications/alert_manager.py`, `utils/math_utils.py`, `utils/time_utils.py`
@@ -464,491 +472,491 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/butterfly_plan.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/cascade_harness.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/cascade_real.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/cascade_warehouse.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/chain_feasibility.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_age_gate_gone.py`
 - **calls:** `strategy/__init__.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_atm_iv_stored.py`
 - **calls:** `main.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_atr_units.py`
 - **calls:** `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/volatility_engine.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_attr_fidelity.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/PLAN_SPEC.md`
 
 ### `tests/check_audit_20260823.py`
 - **calls:** `analysis/__init__.py`, `analysis/gate_report.py`, `data/__init__.py`, `data/candle_feed.py`, `derived/plan_ledger.py`, `strategy/__init__.py`, `strategy/iron_condor_strategy.py`, `warehouse/__init__.py`, `warehouse/self_close.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_butterfly_foundational.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/criteria.py`, `strategy/gex_pin_butterfly.py`, `strategy/plan.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/PLAN_SPEC.md`
 
 ### `tests/check_butterfly_legs.py`
 - **calls:** `derived/plan_ledger.py`, `derived/registry.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/plan.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/PLAN_SPEC.md`
 
 ### `tests/check_butterfly_nonblocking.py`
 - **calls:** `execution/position_manager.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_butterfly_wing_grid.py`
 - **calls:** `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/plan.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/PLAN_SPEC.md`
 
 ### `tests/check_cascade_constants.py`
 - **calls:** `config.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_chain_ordering.py`
 - **calls:** `derived/plans.py`, `strategy/__init__.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_condor_pairing.py`
 - **calls:** `analysis/condor_trigger_map.py`, `database/trade_logger.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_condor_rails.py`
 - **calls:** `analysis/__init__.py`, `analysis/pitchfork.py`, `analysis/pitchfork_observer.py`, `config.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_condor_spec.py`
 - **calls:** `analysis/pitchfork.py`, `execution/exit_engine.py`, `strategy/__init__.py`, `strategy/condor_roll.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/check_condor_stop_suppression.py`
 - **calls:** `config.py`, `database/trade_logger.py`, `execution/exit_engine.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_configure_relaxed.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `configure.sh`
 
 ### `tests/check_conviction_removed.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `README.md`, `docs/BACKLOG.md`
 
 ### `tests/check_criteria.py`
 - **calls:** `strategy/__init__.py`, `strategy/criteria.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_dashboards_multi_position.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_decisions_today.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_derived_layer.py`
 - **calls:** `analysis/__init__.py`, `analysis/second_order.py`, `analysis/volatility_measures.py`, `data/derived_store.py`, `derived/base.py`, `derived/registry.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_dispatch.py`
 - **calls:** `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/check_drift_verdict.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_engine_status.py`
 - **calls:** `data/derived_store.py`, `derived/base.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_entry_gate.py`
 - **calls:** `config.py`, `data/options_chain.py`, `execution/entry_engine.py`, `risk/session_guard.py`, `strategy/base_strategy.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_entry_windows.py`
 - **calls:** `config.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_exit_executes.py`
 - **calls:** `execution/exit_engine.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/check_ext_polarity.py`
 - **calls:** `config.py`, `data/candle_feed.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_feed_always_on.py`
 - **calls:** `data/__init__.py`, `data/candle_feed.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_fill_basis.py`
 - **calls:** `strategy/credit_vertical.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_gates.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`, `docs/TRADES.md` +1
 
 ### `tests/check_imports.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`, `docs/WORKING_AGREEMENT.md`
 
 ### `tests/check_ladder_wired.py`
 - **calls:** `config.py`, `execution/__init__.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`, `execution/order_confirm.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_ledger_parity.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_ledger_paths.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_lone_stop.py`
 - **calls:** `config.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_manage_call.py`
 - **calls:** `config.py`, `execution/position_manager.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_management_plan.py`
 - **calls:** `derived/notes.py`, `execution/exit_engine.py`, `strategy/__init__.py`, `strategy/management.py`, `strategy/plan.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_manifold_windows.py`
 - **calls:** `tools/manifold_health.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_missed_inert.py`
 - **calls:** `derived/plan_ledger.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/WORKING_AGREEMENT.md`
 
 ### `tests/check_no_env_dump.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_no_regime.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`, `docs/TRADES.md`
 
 ### `tests/check_not_asked_reasons.py`
 - **calls:** `strategy/__init__.py`, `strategy/plan.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_note_label.py`
 - **calls:** `analysis/gate_report.py`, `strategy/plan.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_observe_always.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_one_per_session.py`
 - **calls:** `database/trade_logger.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/PLAN_SPEC.md`
 
 ### `tests/check_orb_bounds_capability.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_orb_budget.py`
 - **calls:** `config.py`, `risk/risk_manager.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_orb_geometry.py`
 - **calls:** `analysis/tape_at_level.py`, `config.py`, `strategy/base_strategy.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/PLAN_SPEC.md`
 
 ### `tests/check_orb_geometry_size.py`
 - **calls:** `execution/__init__.py`, `execution/entry_engine.py`, `risk/risk_manager.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/PLAN_SPEC.md`
 
 ### `tests/check_orb_one_order.py`
 - **calls:** `analysis/__init__.py`, `analysis/orb_engine.py`, `strategy/orb_strategy.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_orb_rearm_zone.py`
 - **calls:** `analysis/__init__.py`, `analysis/orb_engine.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_orb_restart.py`
 - **calls:** `analysis/orb_engine.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/WORKING_AGREEMENT.md`
 
 ### `tests/check_orb_resume.py`
 - **calls:** `analysis/orb_engine.py`, `database/trade_logger.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_orb_sequence.py`
 - **calls:** `analysis/orb_engine.py`, `execution/__init__.py`, `execution/resting_orders.py`, `strategy/__init__.py`, `strategy/orb_strategy.py`, `strategy/plan.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/PLAN_SPEC.md`
 
 ### `tests/check_orb_window.py`
 - **calls:** `config.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_pairing_table.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_pin_bounded.py`
 - **calls:** `data/__init__.py`, `data/gex_data.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_plan_lifecycle.py`
 - **calls:** `derived/plan_ledger.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_plan_prepares.py`
 - **calls:** `analysis/liquidity_mapper.py`, `execution/position_manager.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/iron_condor_strategy.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/PLAN_SPEC.md`
 
 ### `tests/check_plan_signal.py`
 - **calls:** `analysis/orb_engine.py`, `strategy/__init__.py`, `strategy/orb_strategy.py`, `strategy/plan.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_plan_wiring.py`
 - **calls:** `analysis/__init__.py`, `analysis/gate_report.py`, `analysis/session_map.py`, `strategy/__init__.py`, `strategy/criteria.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_pool_geometry.py`
 - **calls:** `analysis/__init__.py`, `analysis/liquidity_mapper.py`, `analysis/session_map.py`, `strategy/__init__.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_purge_lock.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_purge_pushed.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/s3_push.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_purge_reclaim.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_query_sections.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_r_basis.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_rehearsal_toggle.py`
 - **calls:** `main.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_retention_armed.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_runaway_break_key.py`
 - **calls:** `database/__init__.py`, `database/trade_logger.py`, `strategy/__init__.py`, `strategy/runaway_continuation.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_runaway_handoff.py`
 - **calls:** `strategy/__init__.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_shadow_velocity.py`
 - **calls:** `shadow/primitives.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_signal_kwargs.py`
 - **calls:** `strategy/base_strategy.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_signal_numeric_tail.py`
 - **calls:** `main.py`, `strategy/__init__.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_singletons.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_sizing_parity.py`
 - **calls:** `risk/risk_manager.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_snapshot_pin.py`
 - **calls:** `derived/snapshot.py`, `strategy/gex_pin_butterfly.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_standing_offer.py`
 - **calls:** `analysis/orb_engine.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/entry_engine.py`, `execution/resting_orders.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_status_panel.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_strike_beyond.py`
 - **calls:** `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_structure_viable.py`
 - **calls:** `strategy/criteria.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_sweep_liveness.py`
 - **calls:** `config.py`, `strategy/__init__.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_sweep_spread.py`
 - **calls:** `config.py`, `data/options_chain.py`, `strategy/base_strategy.py`, `strategy/structure.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_tcs_fifty.py`
 - **calls:** `config.py`, `strategy/trend_credit_spread.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_tcs_parked.py`
 - **calls:** `config.py`, `strategy/criteria.py`, `strategy/trend_credit_spread.py`, `utils/time_utils.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_tent.py`
 - **calls:** `config.py`, `strategy/condor_roll.py`, `strategy/structure.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_tick_join.py`
 - **calls:** `data/options_chain.py`, `derived/notes.py`, `strategy/__init__.py`, `strategy/plan.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/PLAN_SPEC.md`
 
 ### `tests/check_trend_strength.py`
 - **calls:** `analysis/trend_strength.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_unrealized_sign.py`
 - **calls:** `strategy/__init__.py`, `strategy/structure.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_wing_search.py`
 - **calls:** `strategy/__init__.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`, `strategy/plan.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/edge_scan.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/entry_profile.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/eod_compare.py`
 - **calls:** `config.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/exit_record.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/exit_replay.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/fork_respect_study.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/TRADES.md`
 
 ### `tests/gen_file_map.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`, `docs/TRADES.md` +1
 
 ### `tests/gen_write_map.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/gex_from_chains.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/magnitude_estimator.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/opening_bias.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/orb_bleed_study.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/ROADMAP.md`
 
 ### `tests/pin_strength.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/ROADMAP.md`
 
 ### `tests/priced_plan.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/r_gate.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/r_ledger.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/rejection_ledger.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/ROADMAP.md`
 
 ### `tests/scrub_headers.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/stop_sweep.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/stress_entry_path.py`
 - **calls:** `execution/entry_ladder.py`, `execution/exit_engine.py`, `main.py`, `strategy/__init__.py`, `strategy/gex_pin_butterfly.py`, `strategy/relaxed.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/sweep_discriminator.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/tape_harness.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/test_candle_routing.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
 ### `tests/tick_board.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/tine_order_study.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/PORT_STATE.md`, `docs/TRADES.md`
 
 ### `tests/warehouse_source.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tools/manifold_health.py`
 - **calls:** `config.py`, `utils/time_utils.py`
@@ -956,15 +964,15 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tools/manifold_status.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tools/probe_aux_streams.py`
 - **calls:** `config.py`, `data/tasty_client.py`
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tools/segregate_nonrth_bars.py`
 - **calls:** (none)
-- **called by:** (nothing - orphan or leaf)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `utils/__init__.py`
 - **calls:** (none)

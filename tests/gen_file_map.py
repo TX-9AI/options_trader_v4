@@ -1,6 +1,27 @@
 #!/usr/bin/env python3
 """
-tests/gen_file_map.py  v4.1
+tests/gen_file_map.py  v4.2
+v4.2  2026-09-05  r277 — "NEVER IMPORTED" AND "NEVER USED" WERE ONE BUCKET, AND
+      IT HELD 130 OF 237 MODULES — 55% OF THE REPO. Operator: *"we have a file
+      map for a reason. Try reading it. And if it's not useful, we might want to
+      figure out why."* The `orphan or leaf` column mixed standing checks the
+      land command runs BY NAME, generators the lander executes — **this file
+      listed ITSELF as an orphan** — and genuinely one-shot studies. A column
+      that cannot tell `check_ledger_parity` from `tine_order_study` is worse
+      than no column: anyone pruning by it deletes a nightly-critical check.
+      🔑 THE MISSING SIGNAL IS INVOCATION, NOT IMPORT. Everything launched from
+      a shell — `land.spec CHECK` lines, unit files, devtools — is invisible to
+      an import graph, so the generator now scans the repo's own `.sh`,
+      `.service`, `.timer` and `.md` surface for each module's name and reports
+      WHERE it is referenced. **130 unexplained becomes 29.**
+      ⚠️ AND IT MATCHES THE STEM, NOT JUST THE FILENAME. A first cut required
+      `.py` and put `check_exit_executes` — written so F0 could not recur — in
+      the unreferenced bucket while TWO documents named it. A matcher stricter
+      than the way people write reports absence where there is none.
+      ⚠️ THE RESIDUAL LIST IS FOR REVIEW, NEVER FOR DELETION, and the header
+      says so: `land.spec` ships inside a tarball and is never committed here,
+      and `day_trader_pro`'s menu is a different repo.
+
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -67,6 +88,79 @@ ENTRY_POINTS = {
     "utils/check_sdk.py",
 }
 ABSENT_MARK = "<!-- REMOVED-ON-PURPOSE -->"
+
+# ── r277 — "NEVER IMPORTED" AND "NEVER USED" ARE NOT THE SAME FACT ──────────
+# 🔴 THE MAP PUT 130 OF 237 MODULES — 55% OF THE REPO — IN ONE BUCKET LABELLED
+# "orphan or leaf", and that bucket held three unrelated things:
+#   · standing checks the land command runs BY NAME through `land.spec CHECK`;
+#   · generators the land command executes — `gen_file_map.py` listed ITSELF
+#     as an orphan;
+#   · genuinely one-shot studies run once and never referenced again.
+# ⚠️ A COLUMN THAT CANNOT TELL `check_ledger_parity` FROM `tine_order_study` IS
+# WORSE THAN NO COLUMN: anyone pruning by it would delete a nightly-critical
+# check. The operator's question was exactly this — "what the hell do we have a
+# useless file map for?"
+#
+# 🔑 THE MISSING SIGNAL IS INVOCATION, NOT IMPORT. Everything that runs from a
+# shell — `land.spec CHECK` lines, `devtools.sh`, unit files, the conductor's
+# subprocess calls — is invisible to an import graph. So the generator now also
+# scans the repo's own non-Python surface for each module's filename and
+# reports WHERE it is referenced.
+# ⚠️ AND IT IS HONEST ABOUT WHAT IT STILL CANNOT SEE: `land.spec` files ship
+# inside tarballs and are never committed, and `day_trader_pro`'s devtools menu
+# is a different repo. A module referenced ONLY from there still reads as
+# unreferenced here, and the map says so rather than implying otherwise.
+MENTION_EXT = (".sh", ".service", ".timer", ".md", ".txt")
+MENTION_SKIP_DIRS = {".git", "__pycache__", "reports", "blind_tapes", "venv"}
+
+
+def _mentions(root: str, names: set) -> dict:
+    """{module path: [files that NAME it]} across the repo's shell/docs surface.
+
+    ⚠️ A MENTION IS EVIDENCE, NOT PROOF. `docs/TRADES.md` citing a study is the
+    map's own stated contract — "a number in a strategy file should be
+    traceable to a tool in here" — so a cited study is live evidence even
+    though nothing imports it. An UNCITED, UNIMPORTED module is the thing the
+    orphan report was always meant to surface, and it could not.
+    """
+    hits = {n: set() for n in names}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in MENTION_SKIP_DIRS]
+        for fn in filenames:
+            if not fn.endswith(MENTION_EXT):
+                continue
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, root)
+            # FILE_MAP names every module by construction; counting itself
+            # would make every module look referenced.
+            # 🔴 GENESIS IS EXCLUDED BECAUSE THE LAND COMMAND APPENDS TO IT
+            # BETWEEN REGENERATING THIS MAP AND VERIFYING IT. A revision whose
+            # DESC happens to name a module would add a mention the verify pass
+            # sees and the generate pass did not — the map becomes a function
+            # of its own commit message and the drift canary fires on every
+            # such delivery. Caught in the sandbox on this revision, whose own
+            # DESC names four modules.
+            # FILE_MAP/WRITE_MAP name every module by construction; counting
+            # them would make everything look referenced.
+            if rel in ("docs/FILE_MAP.md", "docs/WRITE_MAP.md",
+                       "docs/GENESIS.md"):
+                continue
+            try:
+                text = open(full, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            for n in names:
+                base = os.path.basename(n)
+                stem = base[:-3] if base.endswith(".py") else base
+                # ⚠️ MATCH THE STEM TOO. Prose cites a checker as
+                # `check_exit_executes`, without the extension — a first cut
+                # required `.py` and put that file, written so F0 could not
+                # recur, in the unreferenced bucket while two documents named
+                # it. A matcher stricter than the way people write is a
+                # matcher that reports absence where there is none.
+                if base in text or stem in text:
+                    hits[n].add(rel)
+    return hits
 
 
 def _walk(root):
@@ -137,6 +231,8 @@ def build(root):
 
 
 def render(root, files, calls, called_by, broken, unparsed, absent_block):
+    # Computed once per render; the scan is a few dozen small files.
+    MENTIONS = _mentions(root, set(files))
     L = []
     L.append("# FILE_MAP - every module, what it calls, and what calls it")
     L.append("")
@@ -145,6 +241,24 @@ def render(root, files, calls, called_by, broken, unparsed, absent_block):
     L.append("the canary fails on drift (WORKING_AGREEMENT 33).")
     L.append("")
     L.append(f"{len(files)} Python modules across {len({p.split('/')[0] for p in files if '/' in p})} local packages.")
+    L.append("")
+    # ── r277 — THE THREE WAYS A MODULE IS REACHED ──────────────────────────
+    _imp = sum(1 for p in files if called_by.get(p))
+    _ep = sum(1 for p in files if not called_by.get(p)
+              and (p in ENTRY_POINTS or os.path.basename(p) in ENTRY_POINTS))
+    _ref = sum(1 for p in files if not called_by.get(p)
+               and not (p in ENTRY_POINTS or os.path.basename(p) in ENTRY_POINTS)
+               and MENTIONS.get(p))
+    _none = len(files) - _imp - _ep - _ref
+    L.append(f"**Reached by:** {_imp} imported · {_ep} declared entry points · "
+             f"{_ref} referenced from a script, unit or doc but never imported "
+             f"· **{_none} by nothing here**.")
+    L.append("")
+    L.append("⚠️ The last group is a REVIEW LIST, not a delete list. A")
+    L.append("`land.spec CHECK` line ships inside a tarball and is never")
+    L.append("committed here, and `day_trader_pro`'s devtools menu is a")
+    L.append("different repo — a module run from either still reads as")
+    L.append("unreferenced. Confirm before removing anything.")
     L.append("")
     # ── orientation, emitted every run (v4.1, 2026-08-20) ──────────────────
     # ⚠️ THIS BELONGS IN THE GENERATOR, NOT THE OUTPUT. A hand-edit to
@@ -205,8 +319,22 @@ def render(root, files, calls, called_by, broken, unparsed, absent_block):
             L.append(f"- **called by:** {', '.join('`'+x+'`' for x in b)}")
         elif p in ENTRY_POINTS or os.path.basename(p) in ENTRY_POINTS:
             L.append("- **called by:** (entry point)")
+        elif MENTIONS.get(p):
+            # 🔑 REFERENCED WITHOUT BEING IMPORTED — a check the lander runs, a
+            # script a unit file launches, a study a doc cites. This is the
+            # distinction that makes the orphan column usable.
+            where = sorted(MENTIONS[p])[:4]
+            more = f" +{len(MENTIONS[p]) - 4}" if len(MENTIONS[p]) > 4 else ""
+            L.append("- **called by:** (not imported) — referenced in "
+                     + ", ".join("`" + w + "`" for w in where) + more)
         else:
-            L.append("- **called by:** (nothing - orphan or leaf)")
+            # ⚠️ NOW IT MEANS SOMETHING: no importer, and its name appears in no
+            # script, unit, or document in this repo. ⚠️ IT MAY STILL BE RUN
+            # FROM day_trader_pro's MENU OR FROM A `land.spec CHECK` LINE, which
+            # ships in a tarball and is never committed here — so this is a
+            # candidate for review, never an instruction to delete.
+            L.append("- **called by:** (nothing — no importer and no mention "
+                     "in any script, unit or doc here)")
         L.append("")
     L.append(absent_block.rstrip())
     # ⚠️ NORMALISE THE TAIL OR THE MAP DRIFTS FROM ITSELF. `render` appended a
