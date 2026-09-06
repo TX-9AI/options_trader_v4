@@ -1,13 +1,5 @@
 """
-data/candle_feed.py  v4.12
-v4.12 2026-09-06  r288 / DEV.11 — THE DISK GUARD MOVES OUT, to main.py's tick
-      loop. v4.11 put it at the top of `run()`'s `while True`, which is the
-      RECONNECT loop rather than a tick loop, so the check ran ONCE PER
-      CONNECTION — at startup, then not again until the stream dropped.
-      📊 MEASURED, NOT INFERRED: the feed restarted 17:24:14 UTC, a drill was
-      armed a minute later, and the flag was still sitting there.
-      🔑 `main.py` ticks on POLL_INTERVAL_SECONDS and is the service the deploy
-      path restarts, so a bake arms the guard without a separate feed bounce.
+data/candle_feed.py  v4.11
 v4.11 2026-09-06  r285 / DEV.7 — THE BOX SAYS IT IS FULL. NOBODY ASKS IT.
       Operator: *"it should be a statement, not the answer to a question that
       we're constantly asking."* A control-side poller would ask fifteen boxes
@@ -177,6 +169,7 @@ from tastytrade.dxfeed import (Candle, Greeks, Quote, Trade,
 
 from config import INSTRUMENT, TIMEFRAMES
 from data.tasty_client import get_session, get_loop
+from data import disk_watch as _disk_watch
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +202,21 @@ def feed_db_path() -> str:
 # ─── Tunables ──────────────────────────────────────────────────────────────────
 
 SESSION_OPEN_HM   = (9, 30)          # ET
+
+def _disk_sender():
+    """The box's own Telegram sender, built once and cached. -> sender | None.
+
+    ⚠️ LAZY AND SWALLOWED. Building it at import would put a credential read on
+    the feed's import path; failing to build it must cost the ALERT, never the
+    FEED.
+    """
+    if not hasattr(_disk_sender, "_s"):
+        try:
+            from notifications.telegram_sender import TelegramSender
+            _disk_sender._s = TelegramSender()
+        except Exception:                                   # noqa: BLE001
+            _disk_sender._s = None
+    return _disk_sender._s
 
 FLUSH_INTERVAL_S  = 2.0              # buffer -> SQLite cadence (also heartbeat)
 PRUNE_FACTOR      = 4                # legacy; unused while PRUNE_KEEP_ROWS is 0
@@ -1601,11 +1609,22 @@ class CandleFeed:
             # inside the session fell straight through and connected anyway.
             # The hard-off was silently defeated in exactly the hours a fleet
             # update is most disruptive. Standing down is now unconditional.
-            # ⚠️ r288 — THE DISK GUARD WAS HERE AND HAS MOVED TO main.py's TICK
-            # LOOP. This `while True` is the RECONNECT loop, not a tick loop: an
-            # `async with DXLinkStreamer` below opens the stream and an inner
-            # loop handles events for the life of that connection, so a check
-            # here ran ONCE PER CONNECTION.
+            # ── 🔴 r285 / DEV.7 — THE BOX SAYS IT IS FULL. NOBODY ASKS IT. ──
+            # Operator: *"it should be a statement, not the answer to a
+            # question that we're constantly asking."* This costs ONE
+            # `os.statvfs` per cycle and is rate-limited inside `check()` to
+            # OT_DISK_CHECK_S; the expensive half — walking for the five
+            # largest files — runs only on the CROSSING, once per episode.
+            # ⚠️ TOTALLY GUARDED. This is the feed's loop on fifteen live
+            # boxes: a bug here does not cost an alert, it costs the TAPE.
+            # `check()` is written never to raise, and this catches anyway.
+            # ⚠️ IT SITS ABOVE THE STAND-DOWN GATE ON PURPOSE. A box parked for
+            # maintenance still has a disk, and a maintenance window is exactly
+            # when nobody is watching it.
+            try:
+                _disk_watch.check(sender=_disk_sender(), instrument=INSTRUMENT)
+            except Exception:                               # noqa: BLE001
+                logger.debug("disk_watch: skipped", exc_info=True)
             if self._feed_stood_down():
                 await asyncio.sleep(60)
                 continue

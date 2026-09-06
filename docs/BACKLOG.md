@@ -1,4 +1,4 @@
-# BACKLOG.md — v2.03
+# BACKLOG.md — v2.04
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -120,6 +120,7 @@ feed plumbing and are not warehouse candidates.
 | **DEV.8** | 🔴 **THE ALERT REPORTED SUCCESS AND DELIVERED NOTHING — IN BOTH THE TEST AND THE LIVE GUARD.** | otv4 r286 / dtp r307 | ◐ **BUILT + PUSHED.** 📊 **OBSERVED, NOT REASONED:** the operator ran the test item, the box printed the message, the item reported *"1/1 succeeded"*, and **no Telegram arrived** — while `OptionsBot STARTED` alerts from the same boxes landed two minutes earlier. 🔑 **CAUSE:** Telegram credentials reach the bot through systemd's `EnvironmentFile=.../options-trader/.env`; `config` reads them from `os.environ` and loads no dotenv, so a bare `venv/bin/python -c` over SSH has **no token** — and `TelegramSender.send()` returns **False silently**. The menu item now sources `.env` (sourcing is not printing, so §18a holds) and prints `CONFIGURED=` and `DELIVERED=`. ⚠️ **AND THE SAME BUG WAS IN THE LIVE GUARD:** `disk_watch.check` called `sender.send(msg)` and returned True **regardless of the result** — a box with Telegram down would have logged a successful alert and paged nobody. Now the return is honoured, **and a failed send RE-ARMS**: leaving the episode marked as reported would have kept every later cycle silent, which is worse than never having the alert. 🔑 **The live guard was otherwise sound** — it runs inside `candle-feed`, a unit with the same EnvironmentFile, so the token is present. `tests/check_disk_watch.py` v1.1, 14 checks, D7/D7b/D7c. |
 | **DEV.9** | 🔴 **A REHEARSAL THAT TAKES A DIFFERENT PATH FROM THE LIVE ALERT IS NOT A REHEARSAL.** | otv4 r287 / dtp r308 | ◐ **BUILT + PUSHED — needs a bake.** Two drills failed the same way and both reported success. 📊 **THE CAUSE, READ AT SOURCE:** `setup_ec2.sh:290` writes **`Environment=TELEGRAM_TOKEN=` into the systemd UNIT**, so a plain `venv/bin/python` over SSH has no token and never could. r307's fix sourced `.env` — a mechanism `optionsbot` does not use — and the box answered `CONFIGURED=False`. 🔑 **THE HOUSE IDIOM ALREADY SOLVED THIS SHAPE:** `MAINT_FLAG` is a file the RUNNING feed checks each cycle, which main.py describes as *"no restart, and it survives a bake"*. The drill now touches `data/DRILL_DISK`; **the service sends it, in its own environment, by the real code path.** ⚠️ **CONSUMED BEFORE THE SEND** — a surviving flag would re-page every cycle, a rehearsal turning the alert channel into a loop. ⚠️ **AND IT IS NOT INSTANT** (up to `OT_DISK_CHECK_S`); the item says so and asks the operator to confirm the flag was consumed rather than claiming a delivery it cannot see. `tests/check_disk_watch.py` v1.2, 18 checks. |
 | **DEV.10** | ⬜ **`blind_alert_selftest.py` DOES NOT EXIST IN otv4 — THE DRILL ITEM HAS NEVER WORKED HERE.** | ⬜ | 📊 Observed 2026-09-06: every box answered *"can't open file .../tests/blind_alert_selftest.py"* and the item still reported **15/15 succeeded**, because of its own `; true`. **Its banner already warned about exactly that:** *"READ THE PER-BOX 'DRILL PASSED/FAILED' LINE, NOT the tally — the tally cannot see the drill's exit code."* ⚠️ **THE ALERT PATH ITSELF IS SOUND** — the operator confirms a real blind alert fired last week when QQQ seized up from a full disk. **Only the rehearsal is missing.** Two live citations dangle: `notifications/alert_manager.py:100` and **`WORKING_AGREEMENT.md:463`, which REQUIRES drills to exercise that file.** 🔑 **REBUILDING IT AS AN SSH SCRIPT WOULD REPRODUCE DEV.8/DEV.9 A THIRD TIME** — it must be a sentinel the running service consumes, like `DRILL_DISK`. |
+| **DEV.11** | 🔴 **`while True` WAS THE RECONNECT LOOP, NOT A TICK LOOP.** | otv4 r288 | ◐ **BUILT + PUSHED — needs a bake.** The disk guard sat at the top of `candle_feed.run()`'s `while True` — but an `async with DXLinkStreamer` below it opens the stream and an **INNER** loop handles events for the life of that connection, so the check ran **ONCE PER CONNECTION**: at startup, then not again until the stream dropped. 📊 **MEASURED, NOT INFERRED:** feed restarted 17:24:14 UTC, drill armed a minute later, `flag=present` still. ⚠️ **I READ `while True` AND ASSUMED PERIODICITY** without following what the loop does — the same failure as RPT.5's trigger-price key, and it produced a guard that looks periodic and is not. 🔑 **MOVED TO `main.py`'s TICK LOOP**, beside `_apply_log_level()` (*"one stat; DEBUG flips with no restart"*) — the identical idiom, and that loop genuinely ticks on `POLL_INTERVAL_SECONDS`. ⚠️ **ABOVE THE RTH BRANCH ON PURPOSE:** a box left up over a weekend is exactly when nobody is watching, and the disk does not care whether the market is open. 🔑 **AND THE OPERATOR CALLED THE HOST FIRST** — *"optionsbot service would have been a better choice"* — for a second, independent reason: it is the service the deploy path restarts, so a bake arms the guard without a separate feed bounce. |
 | **S3.21** | 🔴 **EVERY REPORT READ THE WRONG ROWS, IN BOTH DIRECTIONS, SINCE THE CACHE WAS WRITTEN.** | dtp r290 | ◐ **BUILT + PUSHED.** `WarehouseCache.load` listed only the requested `dt=` partitions and filtered nothing afterwards — but a DERIVED partition carries the **PUSH day**, not the row's ET day (C.9, which is why the coverage board grades those streams `pusher` grain). **A row whose session was in range but which pushed the next morning was NEVER READ** — silently, so the report showed a smaller, plausible number with nothing to indicate a hole — **and a row pushed inside the range whose own day fell before it was read anyway.** Neither consumer compensated: `collect()` takes `dates` and does not filter on them, `screen_plan_gates` bounds by strategy and symbol. 🔑 **`load_derived` HAS DONE THIS CORRECTLY SINCE r184** — scan forward, keep rows whose OWN timestamp lands in range — and it has no production callers (S3.11), so the right behaviour sat on the road with no traffic while every real report used the wrong one. ⚠️ **THE FILTER IS PER ROW IN PYTHON, NOT AN SQL OFFSET:** `_et_offset()` applies TODAY's UTC offset to every row — right for eight months, an hour wrong for four — the exact DST trap its own docstring warns about, one level up. ⚠️ Forward scanning is **derived-only**; raw streams are partitioned by the day they describe. |
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
@@ -361,6 +362,37 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v2.04 — 2026-09-06 — otv4 r288 — DEV.11: A GUARD THAT LOOKED PERIODIC AND WAS
+NOT.**
+
+The disk check sat at the top of `candle_feed.run()`'s `while True`. **That is
+the reconnect loop.** Below it, `async with DXLinkStreamer(...)` opens the
+stream and an inner loop handles events for the life of that connection — so
+the check ran **once per connection**: at startup, then not again until the
+stream dropped.
+
+📊 **MEASURED RATHER THAN INFERRED.** The feed restarted at 17:24:14 UTC, the
+drill was armed about a minute later, and the flag was still sitting there —
+`code=4` proving the new module was loaded, `flag=present` proving nothing had
+looked at it.
+
+⚠️ **I READ `while True` AND ASSUMED PERIODICITY** without following what the
+loop actually does. Same failure as RPT.5's trigger-price key: a plausible
+reading of structure, never checked against behaviour, producing something that
+looks right at every glance.
+
+🔑 **MOVED TO `main.py`'s TICK LOOP**, beside `_apply_log_level()` — whose own
+comment is *"one stat; DEBUG flips with no restart"*, the identical idiom for
+the identical reason. That loop ticks on `POLL_INTERVAL_SECONDS`.
+
+⚠️ **PLACED ABOVE THE RTH BRANCH.** A box left up over a weekend is exactly when
+nobody is watching it, and the disk does not care whether the market is open.
+
+🔑 **AND THE OPERATOR NAMED THE RIGHT HOST BEFORE THE MEASUREMENT DID** —
+*"optionsbot service would have been a better choice"* — on a second and
+independent ground: `optionsbot` is what the deploy path restarts, so a bake
+arms the guard without the separate `candle-feed` bounce this one needed.
 
 **v2.03 — 2026-09-06 — otv4 r287 / dtp r308 — DEV.9: THE DRILL MOVES INSIDE THE
 SERVICE.**

@@ -1,20 +1,5 @@
 """
-main.py  v4.38
-v4.38 2026-09-06  r288 / DEV.11 — THE DISK GUARD LIVES HERE NOW. It was at the
-      top of `candle_feed.run()`'s `while True`, which is the RECONNECT loop,
-      not a tick loop: an `async with DXLinkStreamer` below it opens the stream
-      and an INNER loop handles events for the life of that connection, so the
-      check ran ONCE PER CONNECTION — at startup, then not again until the
-      stream dropped. 📊 MEASURED: the feed restarted 17:24:14 UTC, a drill was
-      armed a minute later, and the flag was still present.
-      🔑 THIS loop ticks on POLL_INTERVAL_SECONDS, and the call sits beside
-      `_apply_log_level()` — "one stat; DEBUG flips with no restart" — the same
-      idiom for the same reason.
-      ⚠️ ABOVE THE RTH BRANCH: a box left up over a weekend is exactly when
-      nobody is watching, and the disk does not care whether the market is open.
-      ⚠️ AND `optionsbot` IS THE SERVICE THE DEPLOY PATH RESTARTS, so a bake
-      arms the guard without a separate candle-feed bounce — the operator's own
-      point, made before the measurement confirmed it.
+main.py  v4.37
 v4.37  2026-09-04  r239 — 🔴 `_note_evaluation` CANONICALISES THE DISPATCH
       LABEL. `DISPATCH_ALIAS` has existed since r147 and is applied by the plan
       board (plan.py:791, :833) and by `gate_report` (:118) — and NOT by the
@@ -1043,7 +1028,6 @@ from utils.time_utils import (
     seconds_until_rth_open, is_hard_close_time, entries_open
 )
 from data.data_cache import get_cache
-from data import disk_watch as _disk_watch
 from data.macro_data import get_macro_manager
 
 from data.options_chain import get_chain_fetcher
@@ -1152,23 +1136,6 @@ from utils.blindness_latch import BlindnessLatch, ALERT as _BLIND_ALERT, \
     RECOVERED as _BLIND_RECOVERED
 from data.market_data import last_blindness, clear_blindness
 from notifications.alert_manager import get_alert_manager
-
-
-def _disk_sender():
-    """The box's own Telegram sender for the disk guard. -> sender | None.
-
-    ⚠️ LAZY AND SWALLOWED. The guard needs only `send()`, and building anything
-    on the import path would put a credential read where a failure costs the
-    BOT rather than the alert.
-    """
-    if not hasattr(_disk_sender, "_s"):
-        try:
-            from notifications.telegram_sender import TelegramSender
-            _disk_sender._s = TelegramSender()
-        except Exception:                                   # noqa: BLE001
-            _disk_sender._s = None
-    return _disk_sender._s
-
 
 
 # Strategy singletons
@@ -4320,26 +4287,6 @@ def main_loop(state: BotState):
 
         try:
             _apply_log_level()      # r112 — one stat; DEBUG flips with no restart
-            # ── 🔴 r288 / DEV.11 — DISK GUARD MOVED HERE FROM candle_feed ───
-            # It was at the top of the feed's `while True`, which is the
-            # RECONNECT loop, not a tick loop: below it an `async with
-            # DXLinkStreamer` opens the stream and an INNER loop handles events
-            # for the life of that connection, so the check ran ONCE PER
-            # CONNECTION — at startup, then not again until the stream dropped.
-            # 📊 MEASURED: the feed restarted 17:24:14 UTC, a drill was armed a
-            # minute later, and the flag was still sitting there.
-            # 🔑 THIS LOOP GENUINELY TICKS, on POLL_INTERVAL_SECONDS, and it
-            # sits beside `_apply_log_level()` — the same one-stat-per-tick
-            # idiom, for the same reason.
-            # ⚠️ ABOVE THE RTH BRANCH ON PURPOSE: a box left up over a weekend
-            # is exactly when nobody is watching, and the disk does not care
-            # whether the market is open.
-            # ⚠️ AND `optionsbot` IS THE SERVICE THE DEPLOY PATH RESTARTS, so a
-            # bake arms this without a separate candle-feed bounce.
-            try:
-                _disk_watch.check(sender=_disk_sender(), instrument=INSTRUMENT)
-            except Exception:                               # noqa: BLE001
-                logger.debug("disk_watch: skipped", exc_info=True)
             # ── OUTSIDE RTH: OBSERVE, DO NOT TRADE ─────────────────────────
             # 🔴 v4.7, 2026-08-24 — TRADING AND OBSERVATION WERE THE SAME GATE.
             # Operator: "TRADING can only occur during RTH, the feed should be
