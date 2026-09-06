@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""tests/check_disk_watch.py — v1.2
+"""tests/check_disk_watch.py — v1.3
+v1.3  2026-09-06 — r290 / DEV.12. D9 pins that no message contains a character
+`parse_mode="HTML"` will choke on. The WAL marker was `<-- WAL`; Telegram
+answered 400 "Unsupported start tag" and `send()` returned False, which reads
+exactly like an unconfigured token.
+
 v1.2  2026-09-06 — r287 / DEV.9. D8 pins the SENTINEL DRILL: it fires through
 the live path, it is consumed so it cannot loop, and it bypasses the rate limit.
 
@@ -197,11 +202,25 @@ def main():
               s3.sent and s3.sent[0].startswith("TEST - NOT REAL"),
               (s3.sent[0][:20] if s3.sent else ""))
 
+    # ══ 🔴 D9 — NOTHING WE SEND CAN BREAK THE HTML PARSER ════════════════
+    # `TelegramSender.send()` posts parse_mode="HTML" and returns False on a
+    # non-200 — the SAME return as an unconfigured token, which is why one
+    # character cost three rounds of credential hunting.
+    check("D9 the drill message contains no raw `<`",
+          "<" not in D.test_message("QQQ"))
+    D._state.update(over=False, last_check=0.0)
+    _arm(D, 93.0)
+    s9 = _Sender()
+    D.check(sender=s9, instrument="QQQ")
+    check("D9b ...and neither does a real alert, whose lines carry FILE PATHS",
+          s9.sent and "<" not in s9.sent[0],
+          ("has <" if s9.sent and "<" in s9.sent[0] else "clean"))
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 18 checks")
+    print("GREEN — 20 checks")
     return 0
 
 

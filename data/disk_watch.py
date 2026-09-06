@@ -1,4 +1,15 @@
-"""data/disk_watch.py — v1.2
+"""data/disk_watch.py — v1.3
+
+v1.3 (2026-09-06) — r290 / DEV.12. 🔴 THE WAL MARKER WAS `<-- WAL`, AND
+`TelegramSender` POSTS WITH parse_mode="HTML". Telegram answered 400: *"can't
+parse entities: Unsupported start tag \"--\" at byte offset 120"*. `send()`
+returns False on a non-200, which is INDISTINGUISHABLE from an unconfigured
+token — so three rounds went to credentials for one character. `alert_manager`
+never hit it because its own v1.10 note says "escape BEFORE sending". This guard
+calls the sender directly and now does both: the marker is `(WAL)`, and the
+message is `html.escape`d, because a FILE PATH is not ours to trust either.
+
+
 
 v1.2 (2026-09-06) — r287 / DEV.9. 🔴 THE DRILL IS A SENTINEL FILE NOW, BECAUSE
 TWO ATTEMPTS TO REHEARSE FROM OUTSIDE THE SERVICE FAILED THE SAME WAY. A test
@@ -63,6 +74,7 @@ fit and for a box to be stopped deliberately rather than die.
 """
 from __future__ import annotations
 
+import html
 import logging
 import os
 import stat
@@ -238,14 +250,24 @@ def check(sender=None, instrument: str = "?") -> bool:
 
     lines = [f"🔴 DISK {pct:.0f}% on {instrument} — act before the close."]
     for size, path in files:
-        mark = "  <-- WAL" if path.endswith("-wal") else ""
+        mark = "  (WAL)" if path.endswith("-wal") else ""
         lines.append(f"  {_human(size):>8}  {os.path.basename(path)}{mark}")
     if any(p.endswith("-wal") for _, p in files):
         # 🔑 SAID ONLY WHEN IT APPLIES. A -wal among the largest files means
         # checkpoints are not landing — one cannot complete while a connection
         # holds a read, which is why the nightly reclaim stops services first.
         lines.append("  a WAL that large means checkpoints are not landing.")
-    msg = "\n".join(lines)
+    # 🔴 r290 — ESCAPED, AND THE MARKER NO LONGER CONTAINS `<`.
+    # `TelegramSender.send()` posts with parse_mode="HTML". The marker was
+    # "<-- WAL", so Telegram answered: 400 Bad Request, "can't parse entities:
+    # Unsupported start tag \"--\"" — and `send()` returns False on a non-200,
+    # which read exactly like an unconfigured token. Three rounds were spent on
+    # credentials for one character.
+    # ⚠️ `alert_manager` NEVER HIT THIS because its v1.10 note says "escape
+    # BEFORE sending — TelegramSender uses parse_mode=HTML". This guard calls
+    # the sender directly and so must do the same: a FILE PATH is not ours to
+    # trust either.
+    msg = html.escape("\n".join(lines))
 
     if sender is None:
         log.error("disk_watch: no sender — alert NOT delivered:\n%s", msg)
@@ -275,9 +297,11 @@ def check(sender=None, instrument: str = "?") -> bool:
 
 def test_message(instrument: str = "QQQ") -> str:
     """The alert as it would read, for the menu's test prompt. Sends nothing."""
-    return ("TEST - NOT REAL\n"
+    # ⚠️ ESCAPED FOR THE SAME REASON — the drill must travel the same bytes as
+    # the real alert, or it is not a rehearsal.
+    return html.escape("TEST - NOT REAL\n"
             f"🔴 DISK 93% on {instrument} — act before the close.\n"
             "     1.4GB  feed_store.db\n"
-            "   820.0MB  feed_store.db-wal  <-- WAL\n"
+            "   820.0MB  feed_store.db-wal  (WAL)\n"
             "   210.0MB  trades.db\n"
             "  a WAL that large means checkpoints are not landing.")
