@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-236 Python modules across 13 local packages.
+238 Python modules across 13 local packages.
 
-**Reached by:** 98 imported · 9 declared entry points · 69 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 99 imported · 9 declared entry points · 70 referenced from a script, unit or doc but never imported · **60 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -188,10 +188,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/__init__.py`
 - **calls:** (none)
-- **called by:** `tests/check_audit_20260823.py`, `tests/check_feed_always_on.py`, `tests/check_pin_bounded.py`
+- **called by:** `data/candle_feed.py`, `tests/check_audit_20260823.py`, `tests/check_feed_always_on.py`, `tests/check_pin_bounded.py`
 
 ### `data/candle_feed.py`
-- **calls:** `config.py`, `data/tasty_client.py`
+- **calls:** `config.py`, `data/__init__.py`, `data/disk_watch.py`, `data/tasty_client.py`, `notifications/telegram_sender.py`
 - **called by:** `analysis/tape_at_level.py`, `data/candle_logger.py`, `data/market_data.py`, `derived/counterfactual.py`, `derived/surface.py`, `tests/check_audit_20260823.py`, `tests/check_ext_polarity.py`, `tests/check_feed_always_on.py`
 
 ### `data/candle_logger.py`
@@ -205,6 +205,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `data/derived_store.py`
 - **calls:** (none)
 - **called by:** `analysis/gate_report.py`, `derived/registry.py`, `strategy/plan.py`, `tests/check_derived_layer.py`, `tests/check_engine_status.py`
+
+### `data/disk_watch.py`
+- **calls:** (none)
+- **called by:** `data/candle_feed.py`, `tests/check_disk_watch.py`
 
 ### `data/gex_data.py`
 - **calls:** `data/options_chain.py`
@@ -360,7 +364,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `notifications/telegram_sender.py`
 - **calls:** `config.py`
-- **called by:** `notifications/alert_manager.py`
+- **called by:** `data/candle_feed.py`, `notifications/alert_manager.py`
 
 ### `query.py`
 - **calls:** `config.py`, `data/market_data.py`, `strategy/structure.py`
@@ -573,6 +577,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_derived_layer.py`
 - **calls:** `analysis/__init__.py`, `analysis/second_order.py`, `analysis/volatility_measures.py`, `data/derived_store.py`, `derived/base.py`, `derived/registry.py`
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_disk_watch.py`
+- **calls:** `data/disk_watch.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_dispatch.py`
 - **calls:** `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`

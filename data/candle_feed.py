@@ -1,5 +1,25 @@
 """
-data/candle_feed.py  v4.10
+data/candle_feed.py  v4.11
+v4.11 2026-09-06  r285 / DEV.7 — THE BOX SAYS IT IS FULL. NOBODY ASKS IT.
+      Operator: *"it should be a statement, not the answer to a question that
+      we're constantly asking."* A control-side poller would ask fifteen boxes
+      every few minutes, almost always to hear "no", and would inherit S3.19:
+      `ssh_run` gives 22s, returns `rc=255 ssh timeout`, and LEAVES THE REMOTE
+      PROCESS RUNNING — and a `find /` on a nearly-full box is exactly the walk
+      that outlasts 22s, so the poller would abandon scans that then compete
+      for the disk it was worried about.
+      🔑 AND THE EC2 API CANNOT ANSWER IT ANYWAY: it knows a volume's SIZE,
+      never how full it is. Something must run ON the box, and this process
+      already is — it writes the candles, holds the WAL open, and fills the
+      disk. The thing consuming the space notices.
+      ⚠️ ONE `os.statvfs` PER CYCLE, rate-limited to OT_DISK_CHECK_S. The walk
+      for the five largest files runs only on the CROSSING, once per episode.
+      ⚠️ TOTALLY GUARDED, because this is the feed's loop on fifteen live boxes:
+      a bug here does not cost an alert, it costs the TAPE. `disk_watch.check()`
+      is written never to raise and the call site catches anyway.
+      ⚠️ PLACED ABOVE THE STAND-DOWN GATE ON PURPOSE — a box parked for
+      maintenance still has a disk, and a maintenance window is exactly when
+      nobody is watching it.
 v4.10 2026-08-25  r118 REVERT of r116's TheoPrice subscription. SPX lost its
       whole per-contract subscription this morning at 13:27 UTC — greeks,
       quotes, marks and theo frozen together while ticker events kept flowing —
@@ -149,6 +169,7 @@ from tastytrade.dxfeed import (Candle, Greeks, Quote, Trade,
 
 from config import INSTRUMENT, TIMEFRAMES
 from data.tasty_client import get_session, get_loop
+from data import disk_watch as _disk_watch
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +202,22 @@ def feed_db_path() -> str:
 # ─── Tunables ──────────────────────────────────────────────────────────────────
 
 SESSION_OPEN_HM   = (9, 30)          # ET
+
+def _disk_sender():
+    """The box's own Telegram sender, built once and cached. -> sender | None.
+
+    ⚠️ LAZY AND SWALLOWED. Building it at import would put a credential read on
+    the feed's import path; failing to build it must cost the ALERT, never the
+    FEED.
+    """
+    if not hasattr(_disk_sender, "_s"):
+        try:
+            from notifications.telegram_sender import TelegramSender
+            _disk_sender._s = TelegramSender()
+        except Exception:                                   # noqa: BLE001
+            _disk_sender._s = None
+    return _disk_sender._s
+
 FLUSH_INTERVAL_S  = 2.0              # buffer -> SQLite cadence (also heartbeat)
 PRUNE_FACTOR      = 4                # legacy; unused while PRUNE_KEEP_ROWS is 0
 # FEED.3: 0 = NO PRUNING (default). Set OT_PRUNE_KEEP_ROWS to a positive row
@@ -1572,6 +1609,22 @@ class CandleFeed:
             # inside the session fell straight through and connected anyway.
             # The hard-off was silently defeated in exactly the hours a fleet
             # update is most disruptive. Standing down is now unconditional.
+            # ── 🔴 r285 / DEV.7 — THE BOX SAYS IT IS FULL. NOBODY ASKS IT. ──
+            # Operator: *"it should be a statement, not the answer to a
+            # question that we're constantly asking."* This costs ONE
+            # `os.statvfs` per cycle and is rate-limited inside `check()` to
+            # OT_DISK_CHECK_S; the expensive half — walking for the five
+            # largest files — runs only on the CROSSING, once per episode.
+            # ⚠️ TOTALLY GUARDED. This is the feed's loop on fifteen live
+            # boxes: a bug here does not cost an alert, it costs the TAPE.
+            # `check()` is written never to raise, and this catches anyway.
+            # ⚠️ IT SITS ABOVE THE STAND-DOWN GATE ON PURPOSE. A box parked for
+            # maintenance still has a disk, and a maintenance window is exactly
+            # when nobody is watching it.
+            try:
+                _disk_watch.check(sender=_disk_sender(), instrument=INSTRUMENT)
+            except Exception:                               # noqa: BLE001
+                logger.debug("disk_watch: skipped", exc_info=True)
             if self._feed_stood_down():
                 await asyncio.sleep(60)
                 continue

@@ -1,4 +1,4 @@
-# BACKLOG.md — v2.00
+# BACKLOG.md — v2.01
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -115,6 +115,8 @@ feed plumbing and are not warehouse candidates.
 | **DEV.3** | 🔴 **SERVICE STATUS REPORTED TWO OF THE THREE UNITS EVERY BOX RUNS.** | dtp r303 | ◐ **BUILT + PUSHED.** The item echoed `optionsbot` and `candle-feed` and said nothing about **`shadow-observer`** — the unit that writes the fitting corpus and the one the 09:40 guard (`tools/shadow_watch.py`, dtp r299) watches. **A wedged observer was invisible on the menu, and the first sign would have been a page.** ⚠️ **EACH `is-active` IS NOW `|| true`d:** it exits non-zero for an inactive unit, and a fleet command that exits non-zero has its **STDOUT DISCARDED** — so one dead service would have reported as a dead BOX, the wrong fault entirely. 📊 Verified `is-active` PRINTS `inactive` and exits 3, so the word survives and only the exit code needed fixing. 🔑 **LABEL-ONLY REGISTRY CHANGE — 86 items before and after, nothing renumbers, the LAND item does not move.** |
 | **DEV.4** | 🔴 **THE DEVTOOLS MENU: 86 ITEMS -> 71, AND THE LAND ITEM MOVES 54 -> 41.** | dtp r304 | ◐ **BUILT + PUSHED.** A full pass with the operator, item by item, on his Sunday ruling: *"we're just going to go down the menu one by one. I don't use a lot of this stuff."* **TEN CUT** — five mock/offline items (they prove the code runs and say nothing about the fleet); the dry-run EOD aggregate, which dry-ran a report **DISABLED in the live chain**; the two box->control PULLS on *"it would be a strange thing to pull candles onto control after we spent so much time severing those connections"* (the S3-native rebuild already exists); **RETIRE, which ran the BYTE-IDENTICAL command to EMERGENCY STOP**; and the LAND dry run. **THREE MERGES**, each a flag matrix rendered as menu lines: four repoint items -> one that prompts; two S3 compares -> one where ENTER means every date; and the warehouse trade breakdown, which 📊 **r187 had ALREADY made the default** — the same report with a redundant argument, not a second source. 🔑 **MAINTENANCE IS NOW IN PREREQUISITE ORDER** (Wake -> Bake -> Leave-on -> Hotfix -> FULL -> EMERGENCY STOP): *"they have to be awake to synch, hence wake is before them."* ⚠️ **NINE MENU-NUMBER CITATIONS FIXED AND EVERY ONE WAS ALREADY WRONG** — items now cite each other BY LABEL. ⚠️ UTILITIES was eleven items across four subjects; now CREDENTIALS (read first, write last), ALERT PATHS, SESSION TOGGLES, DIAGNOSTICS, with disk usage moved to S3 WAREHOUSE. |
 | **DEV.5** | ✅ **TWO MOVES AND A RENAME — AND THE RENAME IS THE POINT.** | dtp r305 | ◐ **BUILT + PUSHED.** Operator: *"move 63 to Alert Paths and rename that section to External Resources. Move 64 to right after number 10."* **ORB budget & spot -> FLEET**, directly after `status.py + query.py`: it reads LIVE box state, so it sat oddly in DIAGNOSTICS next to an external data fetch, and beside the per-box status view it is the same kind of question. **OHLC 21-day fetch (yfinance) -> the alert-path section, renamed EXTERNAL RESOURCES.** 🔑 Telegram and yfinance are both **third parties the fleet depends on**, so the section now means *prove an outside path still works* rather than *alerting* — which is a better question than either item posed alone. **DIAGNOSTICS removed**, both items having left; an empty heading is a line on a menu scrolled on a phone. 🔴 **LAND MOVES 41 -> 42.** Count is unchanged at 71, but ORB crossed from BELOW LAND to ABOVE it. |
+| **DEV.6** | ✅ **`Largest files on /` — WHICH FILE, NOT WHICH DIRECTORY.** | dtp r306 | ◐ **BUILT + PUSHED.** `Disk usage` reports `du -xsh /*` — **top-level directories** — so a 400MB file inside `/home` is folded into one number and never appears as itself. The new item names the five largest FILES, largest first. 🔑 **WAL FILES RANK IN PLACE AND ARE MARKED**, per the operator: *"I want the WAL part included in the largest files search and ordered where it stands, size-wise"* — and *"I'm not concerned about it until it makes the list, then I have something that needs attention."* ⚠️ **CONSEQUENCE, STATED:** a WAL growing but not yet top-five stays invisible, so a clean list is not proof that checkpoints are landing. ⚠️ `|| true` — a non-zero exit DISCARDS a fleet command's stdout, which is how a full disk would report as a dead box. Sits BELOW the LAND item, so LAND does not move. |
+| **DEV.7** | 🔴 **THE BOX SAYS IT IS FULL. NOBODY ASKS IT.** | otv4 r285 / dtp r306 | ◐ **BUILT + PUSHED — needs a bake.** Operator: *"it should be a statement, not the answer to a question that we're constantly asking."* 🔑 **A CONTROL-SIDE POLLER WOULD INHERIT S3.19:** `ssh_run` gives 22s, returns `rc=255 ssh timeout`, and **leaves the remote process running** — and a `find /` on a nearly-full box is exactly the walk that outlasts 22s, so the poller would abandon scans that then compete for the disk it was worried about. 🔑 **AND THE EC2 API CANNOT ANSWER IT:** it knows a volume's SIZE, never how full it is, so no amount of IAM substitutes — something must run ON the box, and the candle feed already does. **The thing consuming the space notices.** ⚠️ **92%, NOT 99%:** on a 14G volume 99% is ~140MB, and SQLite needs room for the WAL **plus a checkpoint that writes a second copy** — so at 99% the reclaim's gated vacuum REFUSES and the box cannot dig itself out. This fleet has been there: roots at 100%, blind mid-session, QQQ and MU crash-looping. ⚠️ **ONCE PER EPISODE, RE-ARMED ON RECOVERY.** ⚠️ **ONE `statvfs` PER CYCLE**; the walk runs only on the crossing. ⚠️ **TOTALLY GUARDED** — the feed's loop on 15 live boxes: a bug costs the TAPE, not an alert. `tests/check_disk_watch.py`, 11 checks, D5 pinning that it never raises. |
 | **S3.21** | 🔴 **EVERY REPORT READ THE WRONG ROWS, IN BOTH DIRECTIONS, SINCE THE CACHE WAS WRITTEN.** | dtp r290 | ◐ **BUILT + PUSHED.** `WarehouseCache.load` listed only the requested `dt=` partitions and filtered nothing afterwards — but a DERIVED partition carries the **PUSH day**, not the row's ET day (C.9, which is why the coverage board grades those streams `pusher` grain). **A row whose session was in range but which pushed the next morning was NEVER READ** — silently, so the report showed a smaller, plausible number with nothing to indicate a hole — **and a row pushed inside the range whose own day fell before it was read anyway.** Neither consumer compensated: `collect()` takes `dates` and does not filter on them, `screen_plan_gates` bounds by strategy and symbol. 🔑 **`load_derived` HAS DONE THIS CORRECTLY SINCE r184** — scan forward, keep rows whose OWN timestamp lands in range — and it has no production callers (S3.11), so the right behaviour sat on the road with no traffic while every real report used the wrong one. ⚠️ **THE FILTER IS PER ROW IN PYTHON, NOT AN SQL OFFSET:** `_et_offset()` applies TODAY's UTC offset to every row — right for eight months, an hour wrong for four — the exact DST trap its own docstring warns about, one level up. ⚠️ Forward scanning is **derived-only**; raw streams are partitioned by the day they describe. |
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
@@ -356,6 +358,56 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v2.01 — 2026-09-06 — otv4 r285 / dtp r306 — DEV.6 & DEV.7: THE DISK REPORTS
+ITSELF.**
+
+Two items and one guard, from a question that reframed the whole design.
+
+**DEV.6 — `Largest files on /`.** `Disk usage` reports `du -xsh /*`: top-level
+directories. A 400MB file inside `/home` is one number for `/home` and never
+appears as itself. The new item names the five largest FILES, WAL entries
+ranking naturally and marked. ⚠️ **And the consequence is stated rather than
+discovered:** a WAL growing but not yet top-five stays invisible, so a clean
+list is not proof that checkpoints are landing.
+
+🔴 **DEV.7 — AND THEN THE OPERATOR ASKED HOW IT WOULD TRIGGER.** *"It should be
+a statement, not the answer to a question that we're constantly asking."* That
+killed the control-side poller, and for two independent reasons.
+
+**It would have inherited S3.19.** `ssh_run` gives 22 seconds, returns `rc=255
+ssh timeout`, and **leaves the remote process running** — and a `find /` on a
+nearly-full box is precisely the walk that outlasts 22 seconds. The poller would
+abandon scans that then competed for the disk it was worried about.
+
+🔑 **And the EC2 API cannot answer the question at all.** It knows a volume's
+SIZE, never how full it is. No amount of IAM substitutes; something must run ON
+the box. **The candle feed already does** — it writes the candles, holds the WAL
+open, and is the reason the disk fills. The thing consuming the space notices.
+
+⚠️ **92%, NOT 99%.** On a 14G volume, 99% is about 140MB — and SQLite needs room
+for the WAL **plus a checkpoint that writes a second copy before replacing the
+original**, so at 99% the nightly reclaim's gated vacuum refuses and the box
+cannot dig itself out. This fleet has been there: roots at 100%, the fleet blind
+mid-session, QQQ and MU crash-looping. A page at 99% arrives while it is
+happening.
+
+⚠️ **ONE `statvfs` PER CYCLE.** The expensive half — walking for the five
+largest files — runs only on the crossing, once per episode, on a box that has
+already earned the attention. Once per episode, re-armed only when it drops
+back: a box at 93% paging every cycle would train the operator to skim exactly
+the alert that matters.
+
+⚠️ **TOTALLY GUARDED, AND THAT IS THE PROPERTY THAT OUTRANKS THE REST.** This
+runs in the feed's loop on fifteen live boxes, where a bug does not cost an
+alert — **it costs the tape.** `check()` is written never to raise and the call
+site catches anyway; `tests/check_disk_watch.py` D5 pins all three failure
+paths. ⚠️ A first cut of the file walk had a garbled regular-file guard that
+always evaluated False and filtered nothing — it "worked" only because
+`os.walk`'s filenames are already non-directories.
+
+**One menu item, prompting**, not two: *"don't ship 2 menu options, just prompt
+for the test."* The live guard is not on the menu at all.
 
 **v2.00 — 2026-09-06 — dtp r305 — DEV.5: EXTERNAL RESOURCES.**
 
