@@ -1,4 +1,4 @@
-# BACKLOG.md — v2.04
+# BACKLOG.md — v2.05
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -121,6 +121,7 @@ feed plumbing and are not warehouse candidates.
 | **DEV.9** | 🔴 **A REHEARSAL THAT TAKES A DIFFERENT PATH FROM THE LIVE ALERT IS NOT A REHEARSAL.** | otv4 r287 / dtp r308 | ◐ **BUILT + PUSHED — needs a bake.** Two drills failed the same way and both reported success. 📊 **THE CAUSE, READ AT SOURCE:** `setup_ec2.sh:290` writes **`Environment=TELEGRAM_TOKEN=` into the systemd UNIT**, so a plain `venv/bin/python` over SSH has no token and never could. r307's fix sourced `.env` — a mechanism `optionsbot` does not use — and the box answered `CONFIGURED=False`. 🔑 **THE HOUSE IDIOM ALREADY SOLVED THIS SHAPE:** `MAINT_FLAG` is a file the RUNNING feed checks each cycle, which main.py describes as *"no restart, and it survives a bake"*. The drill now touches `data/DRILL_DISK`; **the service sends it, in its own environment, by the real code path.** ⚠️ **CONSUMED BEFORE THE SEND** — a surviving flag would re-page every cycle, a rehearsal turning the alert channel into a loop. ⚠️ **AND IT IS NOT INSTANT** (up to `OT_DISK_CHECK_S`); the item says so and asks the operator to confirm the flag was consumed rather than claiming a delivery it cannot see. `tests/check_disk_watch.py` v1.2, 18 checks. |
 | **DEV.10** | ⬜ **`blind_alert_selftest.py` DOES NOT EXIST IN otv4 — THE DRILL ITEM HAS NEVER WORKED HERE.** | ⬜ | 📊 Observed 2026-09-06: every box answered *"can't open file .../tests/blind_alert_selftest.py"* and the item still reported **15/15 succeeded**, because of its own `; true`. **Its banner already warned about exactly that:** *"READ THE PER-BOX 'DRILL PASSED/FAILED' LINE, NOT the tally — the tally cannot see the drill's exit code."* ⚠️ **THE ALERT PATH ITSELF IS SOUND** — the operator confirms a real blind alert fired last week when QQQ seized up from a full disk. **Only the rehearsal is missing.** Two live citations dangle: `notifications/alert_manager.py:100` and **`WORKING_AGREEMENT.md:463`, which REQUIRES drills to exercise that file.** 🔑 **REBUILDING IT AS AN SSH SCRIPT WOULD REPRODUCE DEV.8/DEV.9 A THIRD TIME** — it must be a sentinel the running service consumes, like `DRILL_DISK`. |
 | **DEV.11** | 🔴 **`while True` WAS THE RECONNECT LOOP, NOT A TICK LOOP.** | otv4 r288 | ◐ **BUILT + PUSHED — needs a bake.** The disk guard sat at the top of `candle_feed.run()`'s `while True` — but an `async with DXLinkStreamer` below it opens the stream and an **INNER** loop handles events for the life of that connection, so the check ran **ONCE PER CONNECTION**: at startup, then not again until the stream dropped. 📊 **MEASURED, NOT INFERRED:** feed restarted 17:24:14 UTC, drill armed a minute later, `flag=present` still. ⚠️ **I READ `while True` AND ASSUMED PERIODICITY** without following what the loop does — the same failure as RPT.5's trigger-price key, and it produced a guard that looks periodic and is not. 🔑 **MOVED TO `main.py`'s TICK LOOP**, beside `_apply_log_level()` (*"one stat; DEBUG flips with no restart"*) — the identical idiom, and that loop genuinely ticks on `POLL_INTERVAL_SECONDS`. ⚠️ **ABOVE THE RTH BRANCH ON PURPOSE:** a box left up over a weekend is exactly when nobody is watching, and the disk does not care whether the market is open. 🔑 **AND THE OPERATOR CALLED THE HOST FIRST** — *"optionsbot service would have been a better choice"* — for a second, independent reason: it is the service the deploy path restarts, so a bake arms the guard without a separate feed bounce. |
+| **EOD.3** | ✅ **MIDNIGHT ET BACKSTOP — IF A BOX IS STILL UP, STOP IT. NO DRAIN.** | r289 | ◐ **BUILT + PUSHED — needs a bake and `install_midnight_halt.sh` run once per box.** Operator: *"I do sometimes work on them late & might forget… another self shutdown at midnight eastern time to catch anything I accidentally left up. No drain, or anything else. Just stop, that's it."* 🔑 **IT SITS BELOW `optbot-self-close.timer`, NOT BESIDE IT.** That runs 16:45, drains to S3, verifies, and deliberately STAYS UP IF SHORT; this runs 00:00 and only halts. Seven hours apart, so they cannot race, and **the later one carries none of the earlier one's machinery — every step `self_close` takes is a way to hang, and a backstop that can hang is not a backstop.** 🔑 **HALTS THE SAME WAY `self_close` DOES** (`sudo shutdown -h now`), for the reason recorded there: *"the box stops the MACHINE, which is what actually ends the EC2 bill."* ⚠️ **A FIRST CUT USED IMDS + boto3 `stop_instances`** — reinventing a solved problem and adding a metadata round trip and an IAM permission to the one script whose value is that it cannot fail in novel ways. ⚠️ **EVERY DAY, NOT Mon-Fri:** the 16:45 close is weekday because sessions are; this exists because a box was left up BY HAND, which happens on a Sunday. ⚠️ **`Persistent=false`**, or a box woken at 09:15 would run a missed midnight halt and stop itself mid-morning — the backstop causing the outage it prevents. ⚠️ **ESCAPE HATCH:** `data/NO_MIDNIGHT_HALT`, the FEED_MAINTENANCE sentinel idiom, survives a bake. ⚠️ **IT OVERRIDES A DELIBERATE HOLD:** a box kept up by `self_close` on unverified data WILL be stopped, stranding that data until the next wake — not lost, but the trade is recorded rather than left to be re-derived. |
 | **S3.21** | 🔴 **EVERY REPORT READ THE WRONG ROWS, IN BOTH DIRECTIONS, SINCE THE CACHE WAS WRITTEN.** | dtp r290 | ◐ **BUILT + PUSHED.** `WarehouseCache.load` listed only the requested `dt=` partitions and filtered nothing afterwards — but a DERIVED partition carries the **PUSH day**, not the row's ET day (C.9, which is why the coverage board grades those streams `pusher` grain). **A row whose session was in range but which pushed the next morning was NEVER READ** — silently, so the report showed a smaller, plausible number with nothing to indicate a hole — **and a row pushed inside the range whose own day fell before it was read anyway.** Neither consumer compensated: `collect()` takes `dates` and does not filter on them, `screen_plan_gates` bounds by strategy and symbol. 🔑 **`load_derived` HAS DONE THIS CORRECTLY SINCE r184** — scan forward, keep rows whose OWN timestamp lands in range — and it has no production callers (S3.11), so the right behaviour sat on the road with no traffic while every real report used the wrong one. ⚠️ **THE FILTER IS PER ROW IN PYTHON, NOT AN SQL OFFSET:** `_et_offset()` applies TODAY's UTC offset to every row — right for eight months, an hour wrong for four — the exact DST trap its own docstring warns about, one level up. ⚠️ Forward scanning is **derived-only**; raw streams are partitioned by the day they describe. |
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
@@ -362,6 +363,45 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v2.05 — 2026-09-06 — r289 — EOD.3: THE MIDNIGHT BACKSTOP.**
+
+Operator: *"I do sometimes work on them late & might forget… another self
+shutdown at midnight eastern time to catch anything I accidentally left up. No
+drain, or anything else. Just stop, that's it."*
+
+🔑 **IT SITS BELOW THE 16:45 SELF-CLOSE, NOT BESIDE IT.** That one drains to S3,
+verifies, and **stays up if short** — because *"a box that shuts down on
+unverified data is worse than one that stays up."* That reasoning is about the
+CLOSE. By midnight the close is seven hours gone, and whatever is still running
+is running for a reason nobody is awake for.
+
+⚠️ **SO IT DELIBERATELY HAS NONE OF THAT MACHINERY.** No drain, no verify, no
+report. Every step `self_close` takes is a way to hang, and **a backstop that
+can hang is not a backstop.** The checker pins the absence: no boto3 import, no
+push, no purge, no IMDS.
+
+🔑 **AND IT HALTS THE WAY `self_close` ALREADY DOES** — `sudo shutdown -h now`,
+for the reason recorded there: *"the box stops the MACHINE, which is what
+actually ends the EC2 bill. Stopping services would leave it running and idle,
+which is the expensive half of the old failure mode."* ⚠️ **A first cut read the
+instance ID from IMDS and called `stop_instances` via boto3** — reinventing a
+solved problem, and adding a metadata round trip plus an IAM permission to the
+one script whose entire value is that it cannot fail in novel ways.
+
+⚠️ **EVERY DAY, NOT Mon-Fri.** The 16:45 close is weekdays because that is when
+a session ends. This exists because a box was left up by hand, and that happens
+on a Sunday as readily as a Tuesday — the operator's own example.
+
+⚠️ **`Persistent=false`**, mirroring the 16:45 timer: a box woken at 09:15 must
+not run a missed midnight halt and stop itself mid-morning, which would be the
+backstop causing the outage it exists to prevent.
+
+⚠️ **AND IT OVERRIDES A DELIBERATE HOLD.** A box kept up by `self_close` because
+its data was unverified will be stopped at midnight, and that data is stranded
+until the next wake — not lost, but not reachable either. `data/NO_MIDNIGHT_HALT`
+is the escape hatch, on the FEED_MAINTENANCE sentinel idiom, and it survives a
+bake.
 
 **v2.04 — 2026-09-06 — otv4 r288 — DEV.11: A GUARD THAT LOOKED PERIODIC AND WAS
 NOT.**
