@@ -1,5 +1,17 @@
 """
-notifications/alert_manager.py  v4.1
+notifications/alert_manager.py  v4.2
+v4.2  2026-09-06  r292 / DEV.10 — `send_blind_alert`'s DRILL CALLER IS GONE.
+      `tests/blind_alert_selftest.py` never existed in otv4: the devtools item
+      shelling it answered "can't open file" on all fifteen boxes and STILL
+      reported 15/15, because of its own `; true` — which its own banner had
+      warned about ("the tally cannot see the drill's exit code").
+      🔑 THE ITEM WAS CUT RATHER THAN THE SCRIPT REBUILT. This alert has FIRED
+      FOR REAL — QQQ, seized on a full disk — which is better evidence than any
+      rehearsal: real conditions, real path, real delivery. A drill proves a
+      path BEFORE you need it; this one was proven BY needing it.
+      ⚠️ `drill=True` IS KEPT. It costs nothing, and if a drill is ever built it
+      must take the REAL path, which means calling this rather than a parallel
+      script.
 v4.1  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -96,8 +108,15 @@ send_blind_alert() / send_sight_restored_alert(): the
         that Telegram is an EMERGENCY SERVICES channel — nothing routine goes
         there, or it stops being read. Detection and the record stay on outside
         RTH; only the paging and the log level are gated.
-        drill=True prefixes an unmistakable DRILL marker and is used by
-        tests/blind_alert_selftest.py, which exercises this exact function.
+        drill=True prefixes an unmistakable DRILL marker.
+        ⚠️ ITS CALLER IS GONE (r310). `tests/blind_alert_selftest.py` never
+        existed in otv4 — the devtools item shelling it answered "can't open
+        file" on every box and still reported 15/15, because of its own
+        `; true`. The item was CUT rather than the script rebuilt: this alert
+        has FIRED FOR REAL, on QQQ, when it seized up from a full disk, which
+        is better evidence than a rehearsal. `drill=True` is kept because it
+        costs nothing and the next drill — if there is one — must take the real
+        path, which means calling this.
         failing to import degraded all 15 boxes to the v1.3 classifier for a
         full session and announced it only as a WARNING in each box's log —
         nobody saw it until the logs were read by hand. Trading was unaffected,

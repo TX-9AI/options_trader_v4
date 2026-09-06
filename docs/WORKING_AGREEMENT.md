@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v4.5 · 2026-09-05 — §0 plus 39 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v4.6 · 2026-09-06 — §0 plus 39 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -459,10 +459,23 @@ and fails the one time it matters.
   already uses. A first attempt at the trend-vote starvation warning logged every
   tick and buried the log; an alarm that spams is an alarm that gets filtered,
   which is how three dead timeframes went unnoticed in the first place.
-- **A drill must be unmistakably a drill.** Test alerts carry a `DRILL — NOT REAL`
-  prefix and exercise the REAL code path (`tests/blind_alert_selftest.py`, devtools
-  56). A test that looks real IS a false alarm, and a channel that has cried wolf
-  once gets read more slowly forever.
+- **A drill must be unmistakably a drill, and must take the REAL path.** Test
+  alerts carry an unmistakable marker (`DRILL — NOT REAL`, `TEST - NOT REAL`) and
+  must travel the same code, in the same process, as the live alert. A test that
+  looks real IS a false alarm, and a channel that has cried wolf once gets read
+  more slowly forever.
+  🔴 **AND A DRILL RUN OUTSIDE THE SERVICE IS NOT A DRILL** (2026-09-06, r287).
+  Two attempts to rehearse the disk alert over SSH both reported success and
+  delivered nothing: credentials reach a box through systemd's `Environment=`
+  lines, so a bare `venv/bin/python` has no token and never could. The working
+  shape is a SENTINEL FILE the running service consumes — `data/DRILL_DISK`, on
+  the `FEED_MAINTENANCE` idiom.
+  ⚠️ **CITE BY LABEL, NOT BY NUMBER OR FILENAME.** This rule previously named
+  `tests/blind_alert_selftest.py` and "devtools 56"; the file does not exist in
+  otv4 and the number had moved twice.
+  ⚠️ **AND A DRILL IS NOT ALWAYS WORTH BUILDING.** The blind alert fired FOR
+  REAL when a box seized on a full disk — better evidence than a rehearsal, so
+  its drill item was cut (r310) rather than rebuilt.
 - **An alarm that has never fired is one nobody knows works.** Alerts fire in
   PAPER too (tagged `[PAPER]`, without the manage-manually line) so the path is
   exercised daily before live capital depends on it.
@@ -1160,6 +1173,14 @@ directions.
 ---
 
 ## CHANGELOG
+
+**v4.6 — 2026-09-06 — r292 — THE DRILL RULE REWRITTEN.**
+It required drills to exercise `tests/blind_alert_selftest.py` — **a file that
+does not exist in otv4** — and cited "devtools 56", a menu number that had moved
+twice. It now states the principle (unmistakable marker, REAL path, same
+process), records the 2026-09-06 finding that **a drill run outside the service
+is not a drill**, and notes that a drill is not always worth building: the blind
+alert fired for real, which is better evidence than a rehearsal.
 
 **v4.5 — 2026-09-05 — r272 — §36a ADDED: EVERY S3-SOURCED READER GOES THROUGH
 `WarehouseCache.load`.**
