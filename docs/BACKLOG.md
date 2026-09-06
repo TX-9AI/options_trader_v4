@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.98
+# BACKLOG.md — v1.99
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -113,6 +113,7 @@ feed plumbing and are not warehouse candidates.
 | **DEV.1** | 🔴 **`--bake-only`'s DOCSTRING SAID IT STOPS THE FLEET. IT DOES NOT.** | dtp r301 | ◐ **BUILT + PUSHED.** The Modes block read *"PING → BAKE → VERIFY, **then STOP**"*. 📊 **READ AT SOURCE:** the `finally` block stops boxes only when `mode == "full"`, its own comment reads *"wake/bake modes intentionally leave the fleet up"*, and bake's last act logs *"files synced to disk — bots NOT restarted (bake-only)"*. ⚠️ **WRONG IN THE DIRECTION THAT COSTS SOMETHING** — a reader under pressure would believe a helper-script sync takes the fleet down mid-session and reach for something heavier, or for nothing. Operator's intent: *"update helper scripts without restarting services."* ⚠️ **STRUCK, NOT SILENTLY REWRITTEN**, following this file's own 2026-08-25 precedent for the RTH-guard sentence. 📊 Found while ordering the MAINTENANCE menu by prerequisite — `--bake-only` sits between Wake and Hotfix, and a mode that stopped boxes there would break the chain for everything below. ⚠️ **THE OTHER SUSPECT WAS ALREADY HANDLED:** `:82`'s RTH-guard sentence carries an explicit CORRECTION dated 2026-08-25 — I had listed it as a second defect and it was not one. |
 | **DEV.2** | ✅ **THE WAKE ITEM SAID TOO MUCH — DISPLAY ONLY.** | dtp r302 | ◐ **BUILT + PUSHED.** Operator: *"all I want is an IAM-based wake and then an SSH ping confirming they're all up"* — which is exactly what it does; **the prose was the problem, not the function.** Four strings: the `wake` mode label loses *"(and leave running)"* (a wake has no other outcome, so it said nothing, on every line of every run); the START banner loses the `wake_and_bake` prefix, which **announced a BAKE the run does not perform**; the confirm loses its *"This will …"* preamble; the wake summary loses *", left running"*. 🔑 **THE FULL-LEAVE-ON SUMMARY IS UNTOUCHED** — there *"left running"* is the **distinguishing fact**, because that mode is the same cycle as `full` and **`full` RETIRES the boxes after the sync.** Redundant on a wake, essential on leave-on. 📊 Verified nothing parses these lines before touching them. |
 | **DEV.3** | 🔴 **SERVICE STATUS REPORTED TWO OF THE THREE UNITS EVERY BOX RUNS.** | dtp r303 | ◐ **BUILT + PUSHED.** The item echoed `optionsbot` and `candle-feed` and said nothing about **`shadow-observer`** — the unit that writes the fitting corpus and the one the 09:40 guard (`tools/shadow_watch.py`, dtp r299) watches. **A wedged observer was invisible on the menu, and the first sign would have been a page.** ⚠️ **EACH `is-active` IS NOW `|| true`d:** it exits non-zero for an inactive unit, and a fleet command that exits non-zero has its **STDOUT DISCARDED** — so one dead service would have reported as a dead BOX, the wrong fault entirely. 📊 Verified `is-active` PRINTS `inactive` and exits 3, so the word survives and only the exit code needed fixing. 🔑 **LABEL-ONLY REGISTRY CHANGE — 86 items before and after, nothing renumbers, the LAND item does not move.** |
+| **DEV.4** | 🔴 **THE DEVTOOLS MENU: 86 ITEMS -> 71, AND THE LAND ITEM MOVES 54 -> 41.** | dtp r304 | ◐ **BUILT + PUSHED.** A full pass with the operator, item by item, on his Sunday ruling: *"we're just going to go down the menu one by one. I don't use a lot of this stuff."* **TEN CUT** — five mock/offline items (they prove the code runs and say nothing about the fleet); the dry-run EOD aggregate, which dry-ran a report **DISABLED in the live chain**; the two box->control PULLS on *"it would be a strange thing to pull candles onto control after we spent so much time severing those connections"* (the S3-native rebuild already exists); **RETIRE, which ran the BYTE-IDENTICAL command to EMERGENCY STOP**; and the LAND dry run. **THREE MERGES**, each a flag matrix rendered as menu lines: four repoint items -> one that prompts; two S3 compares -> one where ENTER means every date; and the warehouse trade breakdown, which 📊 **r187 had ALREADY made the default** — the same report with a redundant argument, not a second source. 🔑 **MAINTENANCE IS NOW IN PREREQUISITE ORDER** (Wake -> Bake -> Leave-on -> Hotfix -> FULL -> EMERGENCY STOP): *"they have to be awake to synch, hence wake is before them."* ⚠️ **NINE MENU-NUMBER CITATIONS FIXED AND EVERY ONE WAS ALREADY WRONG** — items now cite each other BY LABEL. ⚠️ UTILITIES was eleven items across four subjects; now CREDENTIALS (read first, write last), ALERT PATHS, SESSION TOGGLES, DIAGNOSTICS, with disk usage moved to S3 WAREHOUSE. |
 | **S3.21** | 🔴 **EVERY REPORT READ THE WRONG ROWS, IN BOTH DIRECTIONS, SINCE THE CACHE WAS WRITTEN.** | dtp r290 | ◐ **BUILT + PUSHED.** `WarehouseCache.load` listed only the requested `dt=` partitions and filtered nothing afterwards — but a DERIVED partition carries the **PUSH day**, not the row's ET day (C.9, which is why the coverage board grades those streams `pusher` grain). **A row whose session was in range but which pushed the next morning was NEVER READ** — silently, so the report showed a smaller, plausible number with nothing to indicate a hole — **and a row pushed inside the range whose own day fell before it was read anyway.** Neither consumer compensated: `collect()` takes `dates` and does not filter on them, `screen_plan_gates` bounds by strategy and symbol. 🔑 **`load_derived` HAS DONE THIS CORRECTLY SINCE r184** — scan forward, keep rows whose OWN timestamp lands in range — and it has no production callers (S3.11), so the right behaviour sat on the road with no traffic while every real report used the wrong one. ⚠️ **THE FILTER IS PER ROW IN PYTHON, NOT AN SQL OFFSET:** `_et_offset()` applies TODAY's UTC offset to every row — right for eight months, an hour wrong for four — the exact DST trap its own docstring warns about, one level up. ⚠️ Forward scanning is **derived-only**; raw streams are partitioned by the day they describe. |
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
@@ -354,6 +355,50 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.99 — 2026-09-06 — dtp r304 — DEV.4: THE MENU, 86 -> 71.**
+
+🔴 **THE LAND ITEM MOVES FROM 54 TO 41.** Everything cut sat above it.
+
+A full pass with the operator, item by item. *"The last thing I want to do with
+devtools this weekend is clean it up. We're just going to go down the menu one
+by one. I don't use a lot of this stuff."*
+
+**TEN CUT.** Five mock/offline items — they prove the code runs and say nothing
+about the fleet. The dry-run EOD aggregate, which dry-ran a report **disabled in
+the live chain** since `install_eod_v2.sh` turned it off. The two box->control
+pulls: *"it would be a strange thing to pull candles onto control after we spent
+so much time severing those connections"* — and `eod_analysis` already records
+why the local folder is the wrong source, since it *"would give an empty night
+for any date whose harvest never ran even though S3 held the data."* **RETIRE,
+which ran the byte-identical command to EMERGENCY STOP** — its own comment
+conceded *"the difference is INTENT AND TIMING, not plumbing."* And the LAND dry
+run, whose capability survives as a CLI flag.
+
+**THREE MERGES, each a flag matrix rendered as menu lines.** Four repoint items
+differing by one flag -> one that prompts for scope, wake and restart. Two S3
+compares -> one where ENTER means every in-coverage date. 📊 **And the warehouse
+trade breakdown turned out not to be a second source at all**: r187 made the
+warehouse the DEFAULT — *"a default pointing at a folder nobody fills does not
+fail, it QUIETLY REPORTS OLD NUMBERS"* — so the item passed `--bundles-dir` with
+the value it already had.
+
+🔑 **MAINTENANCE IS ORDERED BY PREREQUISITE, NOT BY FORCE.** Wake -> Bake ->
+Leave-on -> Hotfix -> FULL -> EMERGENCY STOP. *"They have to be awake to synch,
+hence wake is before them."* Reading top to bottom now tells you what each item
+ASSUMES about fleet state.
+
+⚠️ **NINE MENU-NUMBER CITATIONS FIXED — EVERY ONE ALREADY WRONG.** Labels and
+banners pointing at "option 33", "option 38", "option 14", "run 40 & 41", on a
+menu that had renumbered at least twice. Numbers come from a loop and are
+guaranteed to move; items now cite each other by LABEL. The operator declined a
+checker for it — *"that seems like a one-time cleanup job"* — which holds
+because this pass is the last renumber.
+
+⚠️ **UTILITIES WAS A DUMPING GROUND:** eleven items, four subjects. Now
+CREDENTIALS (ordered read-first, write-last, so rotate is not adjacent to
+audit), ALERT PATHS, SESSION TOGGLES and DIAGNOSTICS — with disk usage moved to
+S3 WAREHOUSE, where the disk-ceiling work lives.
 
 **v1.98 — 2026-09-06 — dtp r303 — DEV.3: THE THIRD UNIT WAS INVISIBLE.**
 
