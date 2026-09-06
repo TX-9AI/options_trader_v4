@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.94
+# BACKLOG.md — v1.95
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -118,6 +118,7 @@ feed plumbing and are not warehouse candidates.
 | **CHK.1** | ✅ **`check_no_regime` RETIRED — THE EXORCISM IS DONE.** | r278 | ✅ **CLOSED.** Operator: *"any mention of it now is degrees of separation from active code."* It was RED with **3 mentions in 1 file — all `config.py`, all mine** — from the r269 doctrine lift, which records why the classifier was removed and therefore must name it. ⚠️ **NOT A FALSE POSITIVE:** a real collision between *the word must not appear* and *the finding must be preserved where it is read*. `TRADES.md`'s lesson on permanent exemptions is kept with its citation redirected; `GENESIS` rows are history and untouched. |
 | **CHK.2** | 🔴 **`check_retention_armed` R5 WENT RED WHEN r255 LANDED AND NOTHING NOTICED.** | r278 | ◐ **PUSHED.** It asserted *"VACUUM is still not EXECUTED at shutdown"*; r255 made that false **on purpose**. Red since that afternoon. ⚠️ **THIRD INSTANCE OF THIS CLASS IN ONE DAY** — the conductor's C7 and the `head -3` truncation were the same shape, and this one was missed because it lives in the OTHER repo. 🔑 The property is unchanged — **a vacuum must never stall the halt** — r255 enforces it by REFUSING when free disk is under the live size. R5/R5b/R5c pin the gate rather than the absence. **Its five other checks were green throughout.** |
 | **CHK.3** | ⬜ **REHOME THE AXIOMS INTO THE STRATEGIES. NOT THIS WEEKEND — IT TOUCHES TRADING CODE.** | ⬜ | Operator: *"We have strategies (execution) and we have plans (information). Plans inform and strategies execute. Those 'checks' sound like definitional axioms for the strategy's construction."* 🔑 **THE 91 SPLIT ON THAT LINE, AND THE REPO ALREADY SAYS SO** — `FILE_MAP`: *"foundational conditions are tested inline against no constant, since there is nothing to relax even by mistake."* **AXIOMS** belong in the strategy's declared conditions; an external checker restating one is a SECOND COPY that can drift. **STRUCTURAL GUARDS** cannot move and are the real landing suite: `check_exit_executes` asserts methods exist ON THE CLASS after a column-0 insertion bisected it, `check_singletons` that no name resolves nowhere, `check_lone_stop` that a formula is GONE — **absence cannot be asserted from inside the thing that is absent.** 📊 **WORKED EXAMPLE THAT CORRECTED ME:** the fork-slope rule is credit-spread geometry, not condor geometry, and is ALREADY shared and inline at `strategy/credit_vertical.py:303` — I inferred a gap from where the CHECK was filed instead of reading where the CODE was. ⚠️ The mechanism is uneven: `iron_condor_strategy.py:162` has a populated `GATES`, `trend_credit_spread.py:277` has `GATES = {}`. |
+| **SHD.2** | ✅ **A GUARD FIRES IF SHADOW IS NOT SCORING BY 09:40 ET.** | dtp r299 | ◐ **BUILT + PUSHED — needs `install_shadow_watch.sh` run once on control.** Operator: *"I'm going to assume it runs. If it's ever not running by 0930, alert me."* 🔴 **WHY A GUARD IS NEEDED AT ALL:** stage 2 runs `scorer.score()` per tick inside RTH and the handler catches and warns, so a scorer that throws writes **`scores: []` — the same shape stage 1 wrote for seven weeks.** Service `active`, log quiet, rows present, corpus empty; nothing distinguishes *no scores* from *scores that are all empty*. ⚠️ **SILENT ON SUCCESS (§17)** — no nightly "shadow fine", because an operator who gets one learns to skip it. Silent on a non-trading day and when `control_state` is disabled: **a fleet stopped on purpose is not a fault.** ⚠️ **09:40, NOT 09:30** — the accumulator needs `MIN_TYPICAL_SAMPLES` trailing ROCs and a box woken at 09:15 enters RTH with an empty deque, so a 09:30 check would page every morning for a warm-up; 09:40 is past it and still inside the ORB window. ⚠️ **A THIRD TIMER, SAID PLAINLY:** it must fire even when the 09:15 orchestrator CRASHED — exactly when shadow would be dark — so hanging it off the morning unit would make it absent in the case it exists for. Overrulable; two-line change. 📅 **Monday 2026-09-07 is LABOR DAY and `market_calendar` already knows it** — first tape is Tuesday 09-08. |
 | **DOC.17** | ◐ **THE EIGHT ARE ENUMERATED — IN A SUPERSEDED LANDING RECIPE.** | r278 | ◐ **HALF ANSWERED.** `docs/HANDOFF.md:158` carries a hand-run land command from before `land.sh` existed and it names them: **`check_imports`, `check_gates`, `check_no_regime`, `check_condor_spec`, `check_dispatch`, `stress_entry_path`, `check_exit_executes`, `test_candle_routing`.** That line is the ONLY enumeration in the repo, it sits in a recipe nobody should follow, and one of the eight is retired here. 📊 There are **91 `check_*.py`** today. 🔴 **THE OPEN HALF IS THE REAL ONE:** a run of all 91 gave **34 PASS · 2 FAIL · 55 unrunnable in a sandbox for want of box deps** — live pins, and **nothing invokes them**; a `land.spec` names two or three from memory. ⚠️ **AND TWO OF THE EIGHT CANNOT RUN ON CONTROL AT ALL** — `check_imports` and `stress_entry_path` need the box venv, so any suite must know which checks run where or it fails for ENVIRONMENT rather than content. |
 | **TZ.1** | 🔴 **ONE ET/UTC BOUNDARY FOR EVERY CONTROL-SIDE SCRIPT.** | dtp r287 | ◐ **BUILT + PUSHED.** Operator, 2026-09-05: *"Store everything as UTC, but when a report prompt asks me for a date, convert my choice assuming I mean ET. It's incredibly annoying when I run a report for 'today' at 6pm and it says nothing to report, because UTC has already started the next day."* 📊 **SURVEYED BEFORE WRITING A LINE: NINE naive sites against FIVE correct ones, and the five each carried their own private copy** — so this was never a missing translator, it was the absence of a boundary. The naive nine: `eod_analysis`, `eod_conductor_v2`, `fit_readiness`, `pnl_s3`, `excursion_report`, `orchestrator`, `tools/report_parity`, `trade_report`, and **`market_calendar` — the module that decides what a trading day IS, asking a UTC box**. ⚠️ **THE ROLL IS 20:00 ET IN SUMMER, 19:00 IN WINTER**, and past it a report finds nothing and SAYS SO rather than erroring — a defect in the clock reading as a fact about the market. `ettime.py` now owns `now_et`, `today_et`, `operator_date`, `days_back`, `stamp_et`, `et_day`, `et_bounds`; the five copies delegate. 🔑 **T4 IS THE DURABLE HALF** — it sweeps the repo for naive clock calls and fails on a NEW one, because fixing nine sites without a guard buys a year at most (C.30 turned into something that runs). |
 | **TZ.2** | 🔴 **THREE MENU PROMPTS BYPASSED THE BOUNDARY IN SHELL — r287's SWEEP READ ONLY PYTHON.** | dtp r288 | ◐ **BUILT + PUSHED.** Found by the operator asking whether a 19:30 report would know he meant Monday. It would — **unless he pressed ENTER at one of three prompts**, which fell back to `$(date +%F)`: UTC on this box, handing the script tomorrow's date BEFORE any Python default could apply. `menu_functions.sh:220/395/577`, against three sibling prompts in the same file already using `TZ=America/New_York date +%F`. ⚠️ **THE MISS WAS THE GUARD'S SCOPE, NOT THE FIX.** r287's T4 walked `*.py` and I called it the repo; the gap was in the language the checker did not read, which is the same shape as the defect it exists to catch. **T6 now sweeps `.sh`** and was proven red against the three real sites before they were fixed — editing three lines without extending the sweep would have left the next `.sh` prompt free to do it again. ⚠️ Also worth recording: **at 19:30 ET in SUMMER it is not yet Tuesday in UTC** — the roll is 20:00 EDT / 19:00 EST, so this is a winter-hours failure and would have looked intermittent. |
@@ -350,6 +351,47 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.95 — 2026-09-05 — dtp r299 — SHD.2: THE SHADOW GUARD, BECAUSE MONDAY IS A
+HOLIDAY AND NOBODY WILL REMEMBER.**
+
+Operator: *"I'm going to assume it runs. If it's ever not running by 0930,
+alert me."*
+
+🔴 **THE FAILURE IT WATCHES FOR IS SILENT BY CONSTRUCTION.** Stage 2 calls
+`scorer.score()` per tick inside RTH, and the tick handler catches and warns —
+so a scorer that throws writes **`scores: []`, the same shape stage 1 wrote for
+seven weeks.** The service reads `active`, the log is quiet, the jsonl has rows,
+and the fitting corpus is empty. Nothing in the fleet distinguishes *no scores*
+from *scores that are all empty*, which is why this needed an instrument rather
+than a glance.
+
+⚠️ **SILENT ON SUCCESS, BY THE OPERATOR'S OWN RULE.** Telegram is an emergency
+channel; a nightly "shadow fine" is how an operator learns to skip the one that
+matters. It is also silent on a non-trading day and when `control_state` is
+disabled — **a fleet stopped on purpose is not a fault** — while the detection
+itself stays honest either way.
+
+⚠️ **09:40 RATHER THAN THE 09:30 ASKED FOR, AND THE REASON IS MECHANICAL.**
+`typical_roc` needs `MIN_TYPICAL_SAMPLES` trailing ROCs, and a box woken at
+09:15 enters RTH with an empty deque, so a 09:30 check would page every single
+morning for a warm-up. Ten minutes clears it and is still inside the ORB window.
+
+⚠️ **IT IS A THIRD TIMER ON A FLEET CUT FROM SIX TO TWO**, said plainly so it
+can be overruled: the guard has to fire even when the 09:15 orchestrator run
+CRASHED — precisely when shadow would be dark — so hanging it off the morning
+unit would make it absent in the case it exists for.
+
+📅 **Monday 2026-09-07 is Labor Day**, and `market_calendar.is_trading_day`
+already returns False for it. First tape is **Tuesday 2026-09-08**.
+
+`tests/test_shadow_watch.py`, **9 checks**, driving both directions — a dark box
+pages and names itself without listing the healthy one, a scoring fleet sends
+nothing, a holiday and a disabled control are silent, and **a box that did not
+answer is reported rather than assumed healthy.** ⚠️ Two API assumptions were
+caught before shipping rather than after: `ettime.as_date` does not exist, and
+`fleet.cmd_run` PRINTS and returns an int — a guard built on it could have known
+something failed but never WHICH box was dark.
 
 **v1.94 — 2026-09-05 — r278 / dtp r298 — TWO RED GATES, THE "EIGHT" FOUND, AND A
 LANDER THAT COULD NOT DELETE CLEANLY.**
