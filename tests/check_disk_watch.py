@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""tests/check_disk_watch.py — v1.1
+"""tests/check_disk_watch.py — v1.2
+v1.2  2026-09-06 — r287 / DEV.9. D8 pins the SENTINEL DRILL: it fires through
+the live path, it is consumed so it cannot loop, and it bypasses the rate limit.
+
 v1.1  2026-09-06 — r286 / DEV.8. D7 pins that a send which RETURNS FALSE is
 reported as a failure and RE-ARMS. v1.0 returned True regardless of the result,
 so an unconfigured Telegram would have logged a successful alert and paged
@@ -20,6 +23,7 @@ the opposite failure, silent on the next crossing. Both directions are pinned.
 import os
 import sys
 import tempfile
+import time
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
@@ -169,11 +173,35 @@ def main():
     check("D7c ...and it does try again", D.check(sender=s2, instrument="QQQ")
           and len(s2.sent) == 1, f"sent={len(s2.sent)}")
 
+    # ══ 🔴 D8 — THE SENTINEL DRILL GOES THROUGH THE LIVE PATH ════════════
+    # A drill invoked over SSH runs in a process with no credentials — that is
+    # how two earlier versions reported success and delivered nothing.
+    D._pct_used = real_pct
+    with tempfile.TemporaryDirectory() as tmp:
+        flag = os.path.join(tmp, "DRILL_DISK")
+        D.DRILL_FLAG = flag
+        open(flag, "w").close()
+        s3 = _Sender()
+        D._state.update(over=False, last_check=time.time())   # rate limit ARMED
+        got = D.check(sender=s3, instrument="QQQ")
+        check("D8 a drill flag sends through the live sender, bypassing the "
+              "rate limit", got and len(s3.sent) == 1, f"sent={len(s3.sent)}")
+        # 🔴 CONSUMED. A surviving flag would re-page every cycle until someone
+        # noticed — a rehearsal turning the alert channel into a loop.
+        check("D8b ...and the flag is consumed, so it cannot loop",
+              not os.path.exists(flag))
+        D.check(sender=s3, instrument="QQQ")
+        check("D8c ...so the next cycle is silent", len(s3.sent) == 1,
+              f"sent={len(s3.sent)}")
+        check("D8d ...and the message is marked TEST",
+              s3.sent and s3.sent[0].startswith("TEST - NOT REAL"),
+              (s3.sent[0][:20] if s3.sent else ""))
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 14 checks")
+    print("GREEN — 18 checks")
     return 0
 
 

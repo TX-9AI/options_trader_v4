@@ -1,4 +1,21 @@
-"""data/disk_watch.py — v1.1
+"""data/disk_watch.py — v1.2
+
+v1.2 (2026-09-06) — r287 / DEV.9. 🔴 THE DRILL IS A SENTINEL FILE NOW, BECAUSE
+TWO ATTEMPTS TO REHEARSE FROM OUTSIDE THE SERVICE FAILED THE SAME WAY. A test
+invoked over SSH runs with NO credentials: `setup_ec2.sh` writes
+`Environment=TELEGRAM_TOKEN=` into the systemd UNIT, so a plain
+`venv/bin/python` never had a token and never could. The second attempt sourced
+`.env` — a mechanism `optionsbot` does not use — and reported `CONFIGURED=False`.
+🔑 `MAINT_FLAG` in `candle_feed` already solved this shape: a file the RUNNING
+service checks each cycle, "no restart, and it survives a bake". Touch
+`data/DRILL_DISK`; the service sends the marked message through the REAL sender
+in the REAL process. **A rehearsal that takes a different path from the live
+alert is not a rehearsal** — which is precisely why the last two proved nothing.
+⚠️ It is therefore NOT INSTANT: it fires within OT_DISK_CHECK_S. The menu item
+says so, and confirms the flag was CONSUMED rather than claiming a delivery it
+cannot see.
+
+
 
 v1.1 (2026-09-06) — r286 / DEV.8. 🔴 IT RETURNED SUCCESS WITHOUT DELIVERING.
 v1.0 called `sender.send()` and returned True regardless of the result, so an
@@ -61,7 +78,41 @@ TOP_N = 5
 # filesystem only (no /proc, no mounts), and a wall-clock ceiling.
 WALK_BUDGET_S = float(os.environ.get("OT_DISK_WALK_S", "20"))
 
+# 🔴 r287 — THE DRILL IS A SENTINEL FILE, BECAUSE A DRILL RUN OUTSIDE THE
+# SERVICE IS NOT A DRILL. Two attempts failed the same way: a test invoked over
+# SSH runs in a process with NO credentials — `setup_ec2.sh` writes
+# `Environment=TELEGRAM_TOKEN=` into the systemd UNIT, so a plain
+# `venv/bin/python` never had a token and never could. The second attempt
+# sourced `.env`, a mechanism `optionsbot` does not use, and reported
+# `CONFIGURED=False`.
+# 🔑 THE HOUSE IDIOM ALREADY SOLVES IT. `MAINT_FLAG` in `candle_feed` is a file
+# the RUNNING service checks each cycle — main.py's own note: "no restart, and
+# it survives a bake". The operator touches a file; the SERVICE does the work,
+# in its own environment, by the REAL code path.
+DRILL_FLAG = os.environ.get(
+    "OT_DISK_DRILL_FLAG",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "data", "DRILL_DISK"))
+
 _state = {"over": False, "last_check": 0.0}
+
+
+def _drill_requested() -> bool:
+    """True if a drill sentinel is present. Consumes it.
+
+    ⚠️ CONSUMED BEFORE THE SEND. If the unlink failed afterwards the box would
+    re-page every cycle until someone noticed — a rehearsal turning the alert
+    channel into a loop. Mirrors `_maintenance_now`'s discipline, inverted:
+    the safe default here is silence, not action.
+    """
+    try:
+        if not os.path.exists(DRILL_FLAG):
+            return False
+        os.unlink(DRILL_FLAG)
+        return True
+    except Exception:                                       # noqa: BLE001
+        log.warning("disk_watch: drill flag unreadable", exc_info=True)
+        return False
 
 
 def _pct_used(path: str = "/") -> float:
@@ -139,6 +190,22 @@ def check(sender=None, instrument: str = "?") -> bool:
     🔑 THE CHEAP CHECK IS THE ONLY THING THAT RUNS NORMALLY. `_pct_used` is a
     statvfs; the walk happens after the threshold is crossed and not before.
     """
+    # ⚠️ CHECKED BEFORE THE RATE LIMIT. A rehearsal the operator just asked for
+    # must not wait out an interval that exists to keep the STEADY STATE cheap.
+    if _drill_requested():
+        msg = test_message(instrument)
+        log.warning("disk_watch: DRILL requested — sending via the live path")
+        if sender is None:
+            log.error("disk_watch: DRILL not delivered — no sender")
+            return False
+        try:
+            ok = bool(sender.send(msg))
+            log.warning("disk_watch: DRILL delivered=%s", ok)
+            return ok
+        except Exception as exc:                            # noqa: BLE001
+            log.error("disk_watch: DRILL send failed (%s)", exc)
+            return False
+
     now = time.time()
     if now - _state["last_check"] < CHECK_EVERY_S:
         return False
