@@ -1,4 +1,4 @@
-# BACKLOG.md — v1.90
+# BACKLOG.md — v1.91
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -84,7 +84,7 @@ feed plumbing and are not warehouse candidates.
 | **BFLY.5** | ⬜ **DOES A CHEAPER AFTERNOON FLY ACTUALLY BUY MORE SIZE?** | ⬜ | The noon floor's NEW justification (r200) rests partly on this, so it is load-bearing and unmeasured. The butterfly sizes through `_size_budget` on `net_debit`, so a cheaper body should mean more contracts for the same dollars. **Comparison set exists and is closed:** the three tagged 09:45 flies of 2026-08-31 (MU, TSLA, NFLX) against every afternoon fly from r196 onward. Wants `contracts` and `net_debit` per butterfly row, afternoon vs pre-noon. If it does not hold, reason 2 comes out of the config and noon rests on pin probability alone. |
 | **BFLY.6** | 🔴 **THE NOON RULE'S ORIGINAL PREMISE WAS FALSIFIED, AND THE COUNTEREXAMPLE IS THE ONLY SAMPLE THERE WILL BE.** | ⬜ | 2026-08-31: BFLY.1's relaxed floor let four flies open at 09:45; **three carried to the 15:40 hard close in profit** — MU +$637.50, TSLA +$692.00, NFLX +$47.00, together most of a +$1,543.50 fleet day. The retired premise said exactly this could not happen. ⚠️ **ONE SESSION, AND A PINNING TAPE** — GEX read PINNING or AMPLIFYING across the panel, which is the day an early fly works and precisely the population the rule distrusted. Not enough to overturn anything. 🔑 **The sample is now CLOSED**: r196 is baked, so no further pre-noon flies will occur unless deliberately reopened. Operator's call 2026-08-31: noon going forward. Recorded so the counterexample is not lost, and so nobody re-derives the retired premise from scratch. |
 | **RPT.4** | 🔴 **BOTH DASHBOARDS SHOWED ONE OPEN POSITION AND CALLED IT THE BOOK.** | r199 | ◐ **PUSHED.** `status.py:290` and `query.py:194` both carried `ORDER BY entry_time DESC LIMIT 1`. **Latent since r161 made the butterfly additive** — before that, one position per box was TRUE and the limit was correct; nothing swept the readers when the rule changed. Measured 2026-08-31 on CRM, holding a runaway AND a butterfly, showing one, with `2 × $100 = $1010.00 at risk` describing the runaway alone. ⚠️ **r197 makes multi-position boxes the norm**, so this stopped being latent. Both now render every position, oldest-first, with the COUNT and the SUMMED exposure in the header — D3 pins the sum, because listing two cards while printing one card's risk recreates the r121 confusion (*"How is 2 contracts at $96 costing me $800???"*) one level up. |
-| **RPT.5** | ◐ **INSTRUMENTED — THE TWO EXPLANATIONS ARE OPPOSITE AND A COLLAPSE HID THAT.** | dtp r295 | ◐ **BUILT + PUSHED — the probe, not the answer.** `plan_ledger.open_plan()` mints `uuid4().hex[:16]` per call, so two rows means `_ledger_open` RAN TWICE — and r212 already closes the previous unfilled plan first with `terminal_reason = "superseded — never filled"`. 🔑 **SO TWO ROWS MAY BE ENTIRELY CORRECT:** two genuine intents, the first refused an entry and superseded. Or a real double-write. **Those look identical under r199's display collapse and are opposite findings.** `tools/plan_dupe_probe.py` clusters on (symbol, strategy, trigger_price) and names the mechanism from the earlier row's state: `superseded` → the r212 path working, a STRATEGY question about re-arming after a refused entry; still LIVE or terminal for another reason → a genuine double-write and the ledger is wrong. ⚠️ **EXIT CODE IS NON-ZERO ONLY FOR THE UNEXPLAINED**, because supersession is the designed path and a study that flags its own system's correct behaviour gets ignored. ⚠️ **AND A SAME-SECOND PAIR IS CALLED OUT REGARDLESS** — r212's reasoning is that *"take() and the entry attempt happen on the SAME tick, so by the time the next one fires the previous has resolved"*; two rows inside a second means that assumption did not hold, whatever the states say. **Run it over a real range to close this.** |
+| **RPT.5** | ◐ **RE-KEYED ONTO OVERLAP — v1.0 REPORTED THE TRADE LOG AS A DEFECT.** | dtp r296 | ◐ **BUILT + PUSHED — instrument only; run it to close.** 🔴 **v1.0 CLUSTERED ON (symbol, strategy, trigger_price), AND A TRIGGER PRICE IS A SESSION LEVEL, NOT AN EVENT.** ORB's opening range and Runaway's breakout level are fixed for the day, so every re-entry shares one. First real run 09-01..09-04: **32 clusters "unexplained"**, including META `RunawayContinuation @ 594.10` with **27 rows — 27 separate completed trades**, each with its own exit and P&L. **Zero were the double-write RPT.5 asks about**, and CRM @ 259.38 was not even in range. ⚠️ **MY FIXTURES CERTIFIED THE WRONG KEY** because every case shared a price; only the real bucket exposed it. 🔑 **v1.1 KEYS ON OVERLAP:** `live_plans()` selects `closed_ts IS NULL`, so two intents at once means one plan opened while another of the SAME strategy was still live — the question RPT.5 actually poses, answerable without guessing what a trigger means. An earlier plan that NEVER closed is named separately: `close_unfilled` exists so that cannot happen, and one still live when the next fires is exactly the r212 leak. Trigger price is kept as CONTEXT. ⚠️ Different strategies live at once is normal and is never compared. |
 | **BFLY.3** | 🔴 **THE BUTTERFLY'S WINGS WERE COMPUTED ON A STRIKE GRID THAT DOES NOT EXIST.** | r198 | ◐ **PUSHED.** `config.STRIKE_INCREMENT` is ONE global number for fifteen symbols, and `round_to_strike()` returns an **int** — so every wing quantised to whole dollars regardless of the symbol's ladder. **Measured 2026-08-31: PLTR pin 190, EM 3.25 → wing 1 → legs 189/191 on a $2.50 ladder; AMD pin 472.5 → legs 470.5/474.5.** Neither pair is listed, so the `legs` gate refused for **242 and 243 minutes** (~900 ticks each) on both boxes — an arithmetic problem wearing the costume of a market judgement. `_chain_increment()` now reads the real ladder off the chain (MEDIAN gap near the pin, so one stray half-strike cannot set the grid) and the wing snaps to it, float-safe. 🔑 **THE APEX NEVER MOVES** — both pins were LISTED strikes; only the wings were off-grid, so *"a nearest-strike substitute is a different one"* is untouched and W3 pins it. Operator ruled a wider-than-intended wing ACCEPTED (*"it will bear out in the metrics later on if that is viable"*), so `wing_intended`, `grid_increment` and `wing_stretch` ride on the signal — a ruling that defers to metrics needs the metrics to see it. |
 | **BFLY.2** | 🔴 **AN OPEN BUTTERFLY BLOCKED EVERY OTHER ENTRY ON THE BOX — the reciprocal of r161, never built.** | r197 | ◐ **PUSHED.** r161 exempted the butterfly from the single-position rule ON ENTRY (*"no position slot, no capital, no competition"*), but `has_open_position()` still counted it — no slot going IN, one slot occupied once THERE. **Measured 2026-08-31: MU, NFLX and TSLA each held a 09:45 butterfly and each sat in the second-leg-only branch when the credit windows opened, `CondorManagement=HOLD(no credit verticals open)` on all three.** One opportunistic trade removed three boxes from the credit side for the session. `has_blocking_position()` counts everything except a butterfly. ⚠️ **CREDIT IS STILL BLOCKED BY AN OPEN ORB OR RUNAWAY DEBIT** — B3 pins that every non-butterfly strategy still blocks, so this cannot degrade into "nothing blocks". The branch was NOT flipped (that would leave a butterfly-only box unmanaged); the ENTRY half is added back after management. |
 | **BFLY.1** | 🔴 **THE BUTTERFLY'S NOON FLOOR WAS RELAXABLE, AND THE FIRST LIVE-FLEET OPEN SPENT IT.** | r196 | ◐ **PUSHED.** Operator, watching butterflies at 09:45: *"the noon floor is non-negotiable."* Confirmed from the fleet's own logs: `DORMANT(entry_window: outside the butterfly slot 09:45-...)` and `Entry: gex_pin_butterfly_relaxed` on `[PAPER]` boxes — 09:45 is `relaxed.window()`'s `relaxed_earliest` DEFAULT exactly, not a pin forming early. `EARLIEST_ET` moves **SELECTION → FOUNDATIONAL** and is pinned via `relaxed_earliest=EARLIEST_ET`; `LATEST_ET` stays relaxable. Verified in paper with relaxed ON: window was `09:45-15:30`, is now `12:00-15:30`. |
@@ -344,6 +344,42 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v1.91 — 2026-09-05 — dtp r296 — RPT.5: THE PROBE WAS MEASURING THE WRONG
+THING, AND ONLY THE REAL BUCKET SHOWED IT.**
+
+🔴 **v1.0 CLUSTERED ON A TRIGGER PRICE, WHICH IS A SESSION LEVEL RATHER THAN AN
+EVENT.** ORB's opening range and Runaway's breakout level are fixed for the day,
+so every re-entry shares one. Its first real run over 09-01..09-04 reported **32
+clusters "unexplained"** — among them META `RunawayContinuation @ 594.10` with
+**27 rows, which are 27 separate completed trades**, each with its own exit and
+its own P&L. **Not one of the 32 was the double-write RPT.5 asks about**, and
+the original CRM @ 259.38 case was not even in the range.
+
+⚠️ **AND MY OWN CASES CERTIFIED THE WRONG KEY.** Every fixture shared a trigger
+price, so the classification logic looked right while the grouping underneath it
+was meaningless. A checker can only fail on the thing its fixtures vary — mine
+varied the states and held the key constant, which is the same shape as testing
+the wrong entrypoint (RPT.14) one level along.
+
+🔑 **v1.1 KEYS ON WHAT THE LEDGER ITSELF MEANS BY "LIVE".** `live_plans()`
+selects on `closed_ts IS NULL`, so two intents at once is one plan opening while
+another of the SAME strategy is still live. That is RPT.5's question stated in
+the ledger's own terms, and it needs no assumption about what a trigger price
+identifies. An earlier plan that **never closed at all** is reported separately
+and by name — `close_unfilled` exists precisely so that cannot happen, and one
+still live when the next fires is the r212 leak itself.
+
+⚠️ The trigger price is kept as CONTEXT, never as the key: **re-entering a level
+is what these strategies do.** And two DIFFERENT strategies live at once on one
+symbol is normal — the ledger separates them on purpose — so they are never
+compared.
+
+`tests/test_plan_dupe_probe.py` v1.1, 5 checks. **P1 is the one that carries the
+weight:** eight clean re-entries at a single level produce no output at all,
+which is exactly what v1.0 called a defect thirty-two times.
+
+**RPT.5 stays OPEN** — this is the instrument, and the answer needs a run.
 
 **v1.90 — 2026-09-05 — dtp r295 — RPT.5: THE INSTRUMENT, NOT THE ANSWER.**
 
