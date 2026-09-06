@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""tests/check_disk_watch.py — v1.0
+"""tests/check_disk_watch.py — v1.1
+v1.1  2026-09-06 — r286 / DEV.8. D7 pins that a send which RETURNS FALSE is
+reported as a failure and RE-ARMS. v1.0 returned True regardless of the result,
+so an unconfigured Telegram would have logged a successful alert and paged
+nobody — and left `over` set, so every later cycle stayed silent too.
+
 v1.0  2026-09-06 — r285 / DEV.7.
 
 🔴 THIS RUNS INSIDE `candle_feed`'s LOOP, ON FIFTEEN LIVE BOXES. A bug here does
@@ -142,11 +147,33 @@ def main():
         check("D6b symlinks are not counted as files",
               not any(p.endswith("/link") for _, p in D.largest_files(tmp, top=9)))
 
+    # ══ 🔴 D7 — A SEND THAT RETURNS FALSE IS A FAILURE, AND RE-ARMS ═══════
+    # `TelegramSender.send` returns False silently when Telegram is
+    # unconfigured. v1.0 ignored the result: it logged success and paged
+    # nobody, and left the episode marked as reported so every later cycle
+    # stayed quiet as well.
+    class _Quiet:
+        def send(self, msg):
+            return False
+
+    D._state.update(over=False, last_check=0.0)
+    _arm(D, 93.0)
+    sent = D.check(sender=_Quiet(), instrument="QQQ")
+    check("D7 a send that returns False is reported as NOT delivered",
+          sent is False, f"returned {sent}")
+    check("D7b ...and re-arms, so the next cycle can try again",
+          D._state["over"] is False)
+    D._state["last_check"] = 0.0
+    s2 = _Sender()
+    D._pct_used = lambda path="/": 93.0
+    check("D7c ...and it does try again", D.check(sender=s2, instrument="QQQ")
+          and len(s2.sent) == 1, f"sent={len(s2.sent)}")
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 11 checks")
+    print("GREEN — 14 checks")
     return 0
 
 

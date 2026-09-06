@@ -1,4 +1,16 @@
-"""data/disk_watch.py — v1.0
+"""data/disk_watch.py — v1.1
+
+v1.1 (2026-09-06) — r286 / DEV.8. 🔴 IT RETURNED SUCCESS WITHOUT DELIVERING.
+v1.0 called `sender.send()` and returned True regardless of the result, so an
+unconfigured or down Telegram would have logged a successful alert and paged
+NOBODY. `TelegramSender.send` returns False SILENTLY when `telegram_configured()`
+is false — which is exactly how the menu's own test printed the message, exited
+0, reported "1/1 succeeded" and delivered nothing.
+⚠️ AND A FAILED SEND NOW RE-ARMS. Leaving `over` set would mark the episode as
+reported when the operator never heard it, and every later cycle would stay
+silent — a disk alert that goes quiet because the FIRST attempt failed is worse
+than one that never existed.
+
 
 v1.0 (2026-09-06) — r285 / DEV.7. THE BOX SAYS IT IS FULL. NOBODY ASKS IT.
 
@@ -172,9 +184,24 @@ def check(sender=None, instrument: str = "?") -> bool:
         log.error("disk_watch: no sender — alert NOT delivered:\n%s", msg)
         return False
     try:
-        sender.send(msg)
-        return True
+        # 🔴 r286 — THE RETURN VALUE IS HONOURED. v1.0 called `send()` and
+        # returned True regardless, so an unconfigured or down Telegram would
+        # have logged a successful alert and paged NOBODY. `TelegramSender.send`
+        # returns False silently when `telegram_configured()` is false — which
+        # is exactly how the 2026-09-06 menu test printed the message, exited 0,
+        # reported "1/1 succeeded" and delivered nothing.
+        # ⚠️ AND A FAILED SEND RE-ARMS. Leaving `over` set would mark the
+        # episode as reported when the operator never heard it, and the next
+        # cycle would stay silent — a disk alert that is silent because the
+        # FIRST attempt failed is the worst of both designs.
+        ok = bool(sender.send(msg))
+        if not ok:
+            _state["over"] = False
+            log.error("disk_watch: NOT DELIVERED (sender returned false — "
+                      "Telegram unconfigured or down); alert text:\n%s", msg)
+        return ok
     except Exception as exc:                                # noqa: BLE001
+        _state["over"] = False
         log.error("disk_watch: send failed (%s); alert text:\n%s", exc, msg)
         return False
 

@@ -1,4 +1,4 @@
-# BACKLOG.md — v2.01
+# BACKLOG.md — v2.02
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -117,6 +117,7 @@ feed plumbing and are not warehouse candidates.
 | **DEV.5** | ✅ **TWO MOVES AND A RENAME — AND THE RENAME IS THE POINT.** | dtp r305 | ◐ **BUILT + PUSHED.** Operator: *"move 63 to Alert Paths and rename that section to External Resources. Move 64 to right after number 10."* **ORB budget & spot -> FLEET**, directly after `status.py + query.py`: it reads LIVE box state, so it sat oddly in DIAGNOSTICS next to an external data fetch, and beside the per-box status view it is the same kind of question. **OHLC 21-day fetch (yfinance) -> the alert-path section, renamed EXTERNAL RESOURCES.** 🔑 Telegram and yfinance are both **third parties the fleet depends on**, so the section now means *prove an outside path still works* rather than *alerting* — which is a better question than either item posed alone. **DIAGNOSTICS removed**, both items having left; an empty heading is a line on a menu scrolled on a phone. 🔴 **LAND MOVES 41 -> 42.** Count is unchanged at 71, but ORB crossed from BELOW LAND to ABOVE it. |
 | **DEV.6** | ✅ **`Largest files on /` — WHICH FILE, NOT WHICH DIRECTORY.** | dtp r306 | ◐ **BUILT + PUSHED.** `Disk usage` reports `du -xsh /*` — **top-level directories** — so a 400MB file inside `/home` is folded into one number and never appears as itself. The new item names the five largest FILES, largest first. 🔑 **WAL FILES RANK IN PLACE AND ARE MARKED**, per the operator: *"I want the WAL part included in the largest files search and ordered where it stands, size-wise"* — and *"I'm not concerned about it until it makes the list, then I have something that needs attention."* ⚠️ **CONSEQUENCE, STATED:** a WAL growing but not yet top-five stays invisible, so a clean list is not proof that checkpoints are landing. ⚠️ `|| true` — a non-zero exit DISCARDS a fleet command's stdout, which is how a full disk would report as a dead box. Sits BELOW the LAND item, so LAND does not move. |
 | **DEV.7** | 🔴 **THE BOX SAYS IT IS FULL. NOBODY ASKS IT.** | otv4 r285 / dtp r306 | ◐ **BUILT + PUSHED — needs a bake.** Operator: *"it should be a statement, not the answer to a question that we're constantly asking."* 🔑 **A CONTROL-SIDE POLLER WOULD INHERIT S3.19:** `ssh_run` gives 22s, returns `rc=255 ssh timeout`, and **leaves the remote process running** — and a `find /` on a nearly-full box is exactly the walk that outlasts 22s, so the poller would abandon scans that then compete for the disk it was worried about. 🔑 **AND THE EC2 API CANNOT ANSWER IT:** it knows a volume's SIZE, never how full it is, so no amount of IAM substitutes — something must run ON the box, and the candle feed already does. **The thing consuming the space notices.** ⚠️ **92%, NOT 99%:** on a 14G volume 99% is ~140MB, and SQLite needs room for the WAL **plus a checkpoint that writes a second copy** — so at 99% the reclaim's gated vacuum REFUSES and the box cannot dig itself out. This fleet has been there: roots at 100%, blind mid-session, QQQ and MU crash-looping. ⚠️ **ONCE PER EPISODE, RE-ARMED ON RECOVERY.** ⚠️ **ONE `statvfs` PER CYCLE**; the walk runs only on the crossing. ⚠️ **TOTALLY GUARDED** — the feed's loop on 15 live boxes: a bug costs the TAPE, not an alert. `tests/check_disk_watch.py`, 11 checks, D5 pinning that it never raises. |
+| **DEV.8** | 🔴 **THE ALERT REPORTED SUCCESS AND DELIVERED NOTHING — IN BOTH THE TEST AND THE LIVE GUARD.** | otv4 r286 / dtp r307 | ◐ **BUILT + PUSHED.** 📊 **OBSERVED, NOT REASONED:** the operator ran the test item, the box printed the message, the item reported *"1/1 succeeded"*, and **no Telegram arrived** — while `OptionsBot STARTED` alerts from the same boxes landed two minutes earlier. 🔑 **CAUSE:** Telegram credentials reach the bot through systemd's `EnvironmentFile=.../options-trader/.env`; `config` reads them from `os.environ` and loads no dotenv, so a bare `venv/bin/python -c` over SSH has **no token** — and `TelegramSender.send()` returns **False silently**. The menu item now sources `.env` (sourcing is not printing, so §18a holds) and prints `CONFIGURED=` and `DELIVERED=`. ⚠️ **AND THE SAME BUG WAS IN THE LIVE GUARD:** `disk_watch.check` called `sender.send(msg)` and returned True **regardless of the result** — a box with Telegram down would have logged a successful alert and paged nobody. Now the return is honoured, **and a failed send RE-ARMS**: leaving the episode marked as reported would have kept every later cycle silent, which is worse than never having the alert. 🔑 **The live guard was otherwise sound** — it runs inside `candle-feed`, a unit with the same EnvironmentFile, so the token is present. `tests/check_disk_watch.py` v1.1, 14 checks, D7/D7b/D7c. |
 | **S3.21** | 🔴 **EVERY REPORT READ THE WRONG ROWS, IN BOTH DIRECTIONS, SINCE THE CACHE WAS WRITTEN.** | dtp r290 | ◐ **BUILT + PUSHED.** `WarehouseCache.load` listed only the requested `dt=` partitions and filtered nothing afterwards — but a DERIVED partition carries the **PUSH day**, not the row's ET day (C.9, which is why the coverage board grades those streams `pusher` grain). **A row whose session was in range but which pushed the next morning was NEVER READ** — silently, so the report showed a smaller, plausible number with nothing to indicate a hole — **and a row pushed inside the range whose own day fell before it was read anyway.** Neither consumer compensated: `collect()` takes `dates` and does not filter on them, `screen_plan_gates` bounds by strategy and symbol. 🔑 **`load_derived` HAS DONE THIS CORRECTLY SINCE r184** — scan forward, keep rows whose OWN timestamp lands in range — and it has no production callers (S3.11), so the right behaviour sat on the road with no traffic while every real report used the wrong one. ⚠️ **THE FILTER IS PER ROW IN PYTHON, NOT AN SQL OFFSET:** `_et_offset()` applies TODAY's UTC offset to every row — right for eight months, an hour wrong for four — the exact DST trap its own docstring warns about, one level up. ⚠️ Forward scanning is **derived-only**; raw streams are partitioned by the day they describe. |
 | **S3.20** | 🔴 **THE QQQ 2026-09-03 RE-BASELINE — TWO ABSENCES, INVESTIGATED AND CLOSED.** | dtp r284 | ◐ **BUILT + PUSHED.** `warehouse_coverage` v1.4 gains `ACCEPTED_LOSS`, a fourth explanation beside `NOT_A_SESSION`, `PARTIAL_BY_DESIGN` and `DEAD`. Two entries: **QQQ/`eod`/2026-09-03** — `pnl_today.json` is a fixed filename and the 09-04 session overwrote it — and **QQQ/`ohlc`/2026-09-03** — date-partitioned so nothing overwrote it, but the directory was never written and `eod_backfill` returned STILL MISSING because DXFeed history is same-evening only. 🔴 **THE ALTERNATIVE WAS CONSIDERED AND REFUSED:** uploading placeholder objects would satisfy the check BY LYING TO IT — `raw/` is the durable record, an object there is a claim that a box wrote something, and `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states what is stored rather than what was intended. ⚠️ **IT PRINTS EVERY RUN** with its reason and the date accepted; an absence silently deleted from the board is as bad as one that cries wolf. ⚠️ **AND IT AUDITS ITSELF** — if the data ever turns up the row renders **RESOLVED and FAILS**, because a stale exemption is precisely what would suppress the next real gap on that stream. Keyed per (stream, day, box), never a wildcard. |
 | **RPT.13** | 🔴 **`fit_readiness` PRINTED A COLLAPSE THAT NEVER TOUCHED ITS DATA.** | dtp r286 | ◐ **PUSHED.** The SOURCE banner read *"N after collapse by (_rid, ts)"* — a number computed over the cache — while the docstring above it claimed the real collapse ran upstream in `load_derived`. **Neither was true.** The count was real and the sentence was false, and **the sentence is the worse half**: a number nobody can check against a rule nobody applied. It now asks `cache.collapse_note()` which rule actually ran. ⚠️ **AND A FIRST CUT OF THE FIX REPRODUCED THE SAME DEFECT ONE LAYER DOWN** — `load()` returned the INSERT count, so a caller would print *"4 row(s), collapsed on …"* for two logical rows. Caught by the new checker's own detail line showing 2 in the table against 4 in the ticker; `load()` now returns what the table holds. |
@@ -358,6 +359,41 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v2.02 — 2026-09-06 — otv4 r286 / dtp r307 — DEV.8: "1/1 SUCCEEDED" AND
+NOTHING ARRIVED.**
+
+📊 **Observed, not reasoned.** The operator ran the disk-alert test. The box
+printed the message, the item reported **1/1 succeeded**, and no Telegram
+arrived — while `OptionsBot STARTED` alerts from the same fifteen boxes had
+landed two minutes earlier, so the channel itself was plainly fine.
+
+🔑 **The credentials come from systemd.** `EnvironmentFile=.../options-trader/
+.env` is how `optionsbot` and `candle-feed` get `TELEGRAM_TOKEN`; `config` reads
+it straight from `os.environ` and loads no dotenv. **A bare `venv/bin/python -c`
+over SSH has no token at all** — and `TelegramSender.send()` returns False
+silently when unconfigured. So the drill printed, exited 0, and delivered
+nothing.
+
+🔴 **AND THE SAME BUG WAS IN THE LIVE GUARD, WHICH IS THE HALF THAT MATTERS.**
+`disk_watch.check` called `sender.send(msg)` and returned True **regardless of
+the result**. A box with Telegram down would have logged a successful alert and
+paged nobody — the identical false negative, in the code written to catch a full
+disk.
+
+⚠️ **A failed send now re-arms.** Leaving `over` set would mark the episode as
+reported when the operator never heard it, and every later cycle would stay
+quiet. **A disk alert that goes silent because the FIRST attempt failed is worse
+than one that never existed.**
+
+🔑 **The guard was otherwise sound**: it runs inside `candle-feed`, a systemd
+unit with the same EnvironmentFile, so the token is present in production. Only
+the harness lacked the environment — which is worse than it sounds, because **a
+drill that cannot fail proves nothing**, and this one had already been declared
+proof.
+
+The menu item now sources `.env` — sourcing is not printing, so §18a holds — and
+prints `CONFIGURED=` and `DELIVERED=` so a false return is visible.
 
 **v2.01 — 2026-09-06 — otv4 r285 / dtp r306 — DEV.6 & DEV.7: THE DISK REPORTS
 ITSELF.**
