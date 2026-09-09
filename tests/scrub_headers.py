@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-tests/scrub_headers.py — v4.1
+tests/scrub_headers.py — v4.2
+v4.2  2026-09-09  r324 — the `s2 if False else s` undefined-name removed; pyflakes-clean.
 
 RESET EVERY PORTED FILE'S HEADER TO 4.0. TOUCH NOTHING ELSE.
 
@@ -282,7 +283,7 @@ def _autodescribe(header, rel):
         # line alone — which is why DESCRIPTIONS exists and this is a fallback.
         if VER_ANY.search(ln) or re.search(r"\d{4}-\d{2}-\d{2}", ln):
             continue
-        if not re.match(r"^[A-Z][a-z]", s2 if False else s):
+        if not re.match(r"^[A-Z][a-z]", s):
             continue          # a sentence, not a shouted changelog title
         # "path  vX.Y  date  TITLE" -> keep TITLE; "path  Description." -> keep it
         s2 = re.sub(r"^\S*" + re.escape(os.path.basename(rel)) + r"\s*", "", s)

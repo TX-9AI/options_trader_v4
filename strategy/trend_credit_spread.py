@@ -1,5 +1,10 @@
 """
-strategy/trend_credit_spread.py  v4.12
+strategy/trend_credit_spread.py  v4.13
+v4.13  2026-09-09  r324 — FIX (ported from OTV4TEST r8): the two bare returns in
+      prepare() get HOLDs that name what they wait on, and a terminal epilogue in
+      a finally block writes every structural refusal's named DECLINE. Since r238
+      every tick without an accepted 50 wrote NOT ASKED / dispatch gap. The spec
+      is untouched — mechanism only.
 v4.12  2026-09-04  r238 — 🔴 THE CREDIT VERSION OF THE RUNAWAY. Operator's
       spec, 2026-09-04. TRIGGER is `fifty_accepted` — a 1m close beyond
       `target_50pct` HELD at the next tick — reused from the ORB engine rather
@@ -387,6 +392,17 @@ class TrendCreditSpread:
                 if _acc and (_fifty <= 0 or not _bdir):
                     prep.starved.append("target_50pct")
                     t.starved("target_50pct")
+                    return prep
+                # r324 (ported from OTV4TEST r8) — THIS RETURN HAD NO TERMINAL. Every
+                # tick without an accepted 50 left the tick OPEN, so the board wrote
+                # "NOT ASKED — dispatch gap" for TCS through the whole credit window.
+                # A wiring defect since r238, not a market fact.
+                _bd = getattr(orb, "break_direction", "") or "no break yet"
+                t.hold(f"ORB {getattr(orb, 'state', '?')} ({_bd}): waiting on: the 50% "
+                       f"level ACCEPTED (a 1m close beyond {_fifty:.2f}, held)"
+                       if _fifty > 0 else
+                       f"ORB {getattr(orb, 'state', '?')}: no range or 50% level yet — "
+                       f"waiting on: an ORB break and the 50 accepted")
                 return prep
             t.check("fifty", round(_fifty, 4), True)
 
@@ -412,6 +428,8 @@ class TrendCreditSpread:
                       self.CONDITIONS["holds_fifty"], _holds)
             t.check("dist_from_fifty_pts", round(abs(current_price - _fifty), 4), None)
             if prep.unmet:
+                t.hold(f"the 50 ({_fifty:.2f}) was accepted but price {current_price:.2f} "
+                       f"has retaken it — waiting on: holds_fifty")
                 return prep
 
             # ── THE SHORT: NEAREST OTM FROM CURRENT PRICE ────────────────────
@@ -536,6 +554,24 @@ class TrendCreditSpread:
             logger.error("[tcs] prepare raised: %s", exc, exc_info=True)
             prep.starved.append("exception")
             t.starved("exception")
+        finally:
+            # r324 (ported from OTV4TEST r8) — THE TERMINAL EPILOGUE, in `finally`
+            # so every `return prep` inside the try reaches it: each structural
+            # refusal appended its reason and returned with the tick OPEN.
+            from strategy.plan import tick_now as _tn
+            _n, _ = _tn()
+            _last = getattr(t.plan, "_last", None)
+            _already = bool(_last) and _last[0] == _n
+            if not t.closed and not _already:
+                if prep.starved:
+                    t.starved(*prep.starved)
+                elif prep.structural:
+                    gate, why = prep.structural[0]
+                    t.refuse(gate, why)
+                elif prep.unmet:
+                    t.hold("waiting on: " + ", ".join(str(u) for u in prep.unmet))
+                elif not prep.ready:
+                    t.hold("prepared, not ready — no condition named (r324 epilogue)")
         return prep
 
     def generate_signal(self, ms, vol_state, chain, macro,

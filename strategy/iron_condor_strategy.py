@@ -1,5 +1,6 @@
 """
-strategy/iron_condor_strategy.py  v4.9
+strategy/iron_condor_strategy.py  v4.10
+v4.10  2026-09-09  r324 — FIX (ported from OTV4TEST r10): manage() recognises a lone credit vertical.
 v4.9  2026-08-27  r166: manage() takes ctx and writes the condor's r66 vector
       (VRP, channel over EM, fork) to strategy_note with outcome "manage" —
       that vector had stopped being recorded when r158 took the condor out of
@@ -371,7 +372,11 @@ class IronCondorStrategy(BaseOptionsStrategy):
         if not hasattr(self, "_mgmt_planner"):
             self._mgmt_planner = Plan("CondorManagement", self.MGMT_CHECKS, self_ledgers=True)
         t = self._mgmt_planner.tick(current_price)
-        legs = [r for r in pos_mgr.get_open_records() if r.get("is_condor_leg")]
+        # r324 (ported from OTV4TEST r10) — every open CREDIT VERTICAL is the plan's
+        # business: a lone sweep/TCS vertical read as "no credit verticals open".
+        from strategy.structure import is_credit_vertical as _is_cv
+        legs = [r for r in pos_mgr.get_open_records()
+                if r.get("is_condor_leg") or _is_cv(r)]
         t.check("legs", len(legs), len(legs) == 2)
         # r166 — the condor's r66 vector (VRP, channel over EM, fork) lives
         # again: written here every tick a leg is open, phase "manage".

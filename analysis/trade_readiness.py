@@ -1,5 +1,6 @@
 """
-analysis/trade_readiness.py  v4.2
+analysis/trade_readiness.py  v4.3
+v4.3  2026-09-09  r324 — FIX (ported from OTV4TEST r12): `_combine`/`momentum_val` dedented out of ramp().
 v4.2  2026-08-25  r65 EXORCISM: every mention of the retired classification
       system removed - identifiers, comments, docstrings, schema. The word
       does not appear in this tree. Full accounting: REMOVAL_LOG (delivery).
@@ -247,20 +248,25 @@ def ramp(x, lo, hi):
         return 1.0 if x >= hi else 0.0
     return min(max((x - lo) / (hi - lo), 0.0), 1.0)
 
-    def _combine(hard_vetoes, soft_necessary, corroborators):
-        for v in hard_vetoes:
-            if v <= 0.0:
-                return 0.0
-        prod = 1.0
-        for s in soft_necessary:
-            prod *= max(0.0, min(1.0, s))
-        csum = sum(w * max(0.0, min(1.0, val)) for w, val in corroborators) \
-            if corroborators else 1.0
-        return max(0.0, min(1.0, prod * csum))
 
-    def momentum_val(mom):
-        return {"ACCELERATING": 1.0, "FLAT": 0.5, "DECELERATING": 0.0,
-                "": 0.0}.get(mom, 0.0)
+# r324 (ported from OTV4TEST r12) — these two were INDENTED UNDER ramp() and so
+# were nested functions nobody could reach; every module-level call raised
+# NameError, masked by the engine's import guard. Dedented, unchanged inside.
+def _combine(hard_vetoes, soft_necessary, corroborators):
+    for v in hard_vetoes:
+        if v <= 0.0:
+            return 0.0
+    prod = 1.0
+    for s in soft_necessary:
+        prod *= max(0.0, min(1.0, s))
+    csum = sum(w * max(0.0, min(1.0, val)) for w, val in corroborators) \
+        if corroborators else 1.0
+    return max(0.0, min(1.0, prod * csum))
+
+
+def momentum_val(mom):
+    return {"ACCELERATING": 1.0, "FLAT": 0.5, "DECELERATING": 0.0,
+            "": 0.0}.get(mom, 0.0)
 
 
 def _envf(name: str, default: float) -> float:

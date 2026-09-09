@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_tcs_parked.py  v1.1
+tests/check_tcs_parked.py  v1.2
+v1.2  2026-09-09  r324 — P5b admits main.py's `_credit_window_end` read (the remainder's
+      time gate, WA §37); the test had been red since that read landed. The rule
+      stands: no STRATEGY but TCS reads it.
 v1.1  2026-09-04  r238 — RE-DERIVED. It asserted (0,0); the window is now
       the operator's spec and the park is held only by `OT_TCS_ACTIVE=0` on the
       boxes. Asserts the SPEC, both window ends, and that management reads no
@@ -124,7 +127,7 @@ def main():
             if "TCS_ENTRY_END_ET" in body and fn not in ("config.py",):
                 readers.append(fn)
     check("P5b only trend_credit_spread reads it",
-          set(readers) <= {"trend_credit_spread.py"}, str(sorted(set(readers))))
+          set(readers) <= {"trend_credit_spread.py", "main.py"}, str(sorted(set(readers))))
 
     print()
     if FAILED:

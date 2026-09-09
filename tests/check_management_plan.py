@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-tests/check_management_plan.py  v1.3  (2026-08-27)
+tests/check_management_plan.py  v1.4
+v1.4  2026-09-09  r324 — the `esrc` undefined-name (a dir() guard) removed; pyflakes-clean.  (2026-08-27)
 v1.3  r169: the butterfly rides to the 15:45 flatten or the 25% floor — D12
       re-pinned (above the old target -> HOLD), D12a the floor, D12c the
       engine acts on neither target nor max hold; M5 re-pinned.
@@ -299,7 +300,7 @@ def main():
     it = MP.decide(dict(bf, current_premium=0.13), 0.13, df_1m=_df([100.9, 101.0]), exit_engine=eng)
     check("D12a the butterfly at 0.13 <= the 25% floor 0.135 -> CLOSE stop_25%",
           it and it.action == "CLOSE" and it.condition == "stop" and "25%" in it.reason, str(it and it.reason))
-    bfb = next(n for n in ast.walk(ast.parse(esrc if 'esrc' in dir() else open(os.path.join(_root, "execution", "exit_engine.py"), encoding="utf-8").read()))
+    bfb = next(n for n in ast.walk(ast.parse(open(os.path.join(_root, "execution", "exit_engine.py"), encoding="utf-8").read()))
                if isinstance(n, ast.FunctionDef) and n.name == "_evaluate_butterfly")
     bfs = "\n".join(l for l in ast.unparse(bfb).split("\n") if not l.strip().startswith("#"))
     check("D12c the engine's butterfly path acts on neither a target nor a max hold any more",

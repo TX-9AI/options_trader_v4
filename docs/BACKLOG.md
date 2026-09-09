@@ -1,4 +1,4 @@
-# BACKLOG.md — v2.35
+# BACKLOG.md — v2.36
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -216,6 +216,13 @@ against each box. That is right **during** a session and wrong after it.
 | **BFLY.10** | Charm vs. butterfly outcomes. | ⬜ | Operator, 2026-09-01: "later, we are going to look at what charm was doing for all of our winners and losers." NO BUILD NEEDED — `derived/snapshot.py:99` already writes charm onto the fire snapshot and `_capture_fire_snapshot` runs on every fill (r144), so this is a join, not a collection problem. |
 | **ORB.1** | Could ORB select long contracts via an OTM gamma play scaled by breakout/retest strength? | ⬜ | Operator's open question raised 2026-08-28 before r181 landed. Agreed to bring the design **after a session of r181 fills**, with the delta-aware geometry interaction for him to rule on. Filed here so it does not live only in a thread. |
 
+### Parity with OTV4TEST — fixes only
+
+| id | item | state |
+|---|---|---|
+| **PORT.1** | ✅ (r324) **FIVE MECHANISM FIXES PORTED FROM THE FORK, NOTHING ELSE.** (1) TCS `prepare()` returned with the tick OPEN on its common path since r238 — NOT ASKED / "dispatch gap" through every credit window; two HOLDs and a terminal epilogue. (2) OI fetch lost the first batch of every cycle to a closed event loop. (3) a bound test store reached the live plan_ledger (`TestStrat` rows). (4) `trade_readiness._combine` nested under `ramp()`, NameError on every readiness path. (5) the condor management plan did not recognise a lone credit vertical. Plus two pyflakes undefined-names in tests, `check_tcs_parked` P5b (red since the remainder's read landed), and `check_tcs_narrates` added. **No ruling from the fork's untangle crossed over** — the trades are isolated for the head-to-head. | ✅ r324 |
+| **PORT.2** | ⬜ **KNOWN UNAPPLIED ON MAINLINE, APPLIED ON THE FORK:** `TCS_MIN_POP` (0.70) is a config constant this repo never reads. Applying it would change which TCS trades fire, so it stays OFF here by the operator's ruling for the duration of the comparison. Revisit with the trades port. | 🔲 OPEN |
+
 ### Awaiting an operator ruling
 
 | ID | question | status |
@@ -398,6 +405,15 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v2.36 — 2026-09-09 — r324 — PORT.1: FIXES-ONLY PARITY WITH OTV4TEST.**
+
+Five mechanism defects found on the fork ported here as fixes and nothing
+else: the TCS row (r238's bare returns), the OI event loop, the bound test
+store reaching the live ledger, `_combine` nested under `ramp()`, and the
+condor management plan blind to a lone vertical. Tests pyflakes-clean;
+`check_tcs_parked` P5b green; `check_tcs_narrates` added. `TCS_MIN_POP`
+stays unapplied here (PORT.2). The trades untangle stays on the fork.
 
 **v2.35 — 2026-09-08 — r322 — SH.1: FOUR SHELL SCRIPTS THAT NEVER RAN.**
 
