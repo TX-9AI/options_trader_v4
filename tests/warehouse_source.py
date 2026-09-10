@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-tests/warehouse_source.py  v1.4
+tests/warehouse_source.py  v1.5
+v1.5  2026-09-10  r332 - `iter_versioned` / `load_trades_versioned`: read objects
+that sit behind a DELETE MARKER. dtp r314's epoch strip soft-deleted 8,313
+pre-09-01 trade objects; the bytes are intact as noncurrent versions and
+nothing expires them. The ENGINE'S VIEW IS UNCHANGED - every existing caller
+still goes through `_iter` and sees exactly what the strip left. A study that
+wants the longer history asks for versions explicitly and is told how many
+objects it reached past a marker (`meta.severed`), because an unannounced
+wider window is how a severed sample gets re-contaminated by accident.
 v1.4  2026-09-09  r328 - `iter_series`, a STREAMING sibling of load_series.
 load_series returns a list, so a caller holds the whole window at once;
 exit_replay was OOM-killed on a single date of quote_series even after r326
@@ -69,6 +77,7 @@ class Meta:
         self.listed = 0
         self.read = 0
         self.bad = 0
+        self.severed = 0
         self.error = ""
 
     def banner(self) -> str:
@@ -78,6 +87,7 @@ class Meta:
         return (f"SOURCE: s3://{BUCKET}/{PREFIX} [{self.what}] — "
                 f"{self.listed} object(s) listed, {self.read} read"
                 + (f", {self.bad} unreadable" if self.bad else "")
+                + (", %d behind a delete marker" % self.severed if self.severed else "")
                 + ("  (a real, empty result — not a missing path)"
                    if self.listed == 0 else ""))
 
@@ -93,6 +103,103 @@ def _iter(s3, prefix, meta):
         for o in page.get("Contents", []) or []:
             meta.listed += 1
             yield o["Key"]
+
+
+def _iter_versions(s3, prefix, meta):
+    """(key, version_id, behind_marker) for every object the bucket still holds.
+
+    🔴 r332 — READS PAST A DELETE MARKER, DELIBERATELY AND READ-ONLY. The
+    epoch strip (dtp r314) SOFT-deleted 8,313 pre-09-01 trade objects: the
+    bytes are intact as noncurrent versions and a delete marker sits on top,
+    which is why `list_objects_v2` cannot see them. Bucket versioning is ON
+    and there is no lifecycle rule on noncurrent versions, so nothing has
+    expired.
+    🔑 THE ENGINE'S VIEW IS NOT TOUCHED. `pnl_s3`, the R suite and the
+    conductor all go through `_iter`, which still sees exactly what the strip
+    left. Only a caller that asks for versions reaches further, and it is told
+    HOW MANY objects it reached past a marker so the reach-back is never
+    silent — an unannounced wider window is how a severed sample gets
+    re-contaminated by accident.
+    ⚠️ PER KEY: take the CURRENT version when there is one; when the latest
+    is a delete marker, take the newest version UNDER it. Never both, and
+    never an older version when a current one exists — that would double-count
+    a re-pushed object and read as duplicate trades.
+    """
+    pg = s3.get_paginator("list_object_versions")
+    versions, markers = {}, {}
+    for page in pg.paginate(Bucket=BUCKET, Prefix=prefix):
+        for v in page.get("Versions", []) or []:
+            k, st = v["Key"], str(v["LastModified"])
+            if v.get("IsLatest") or k not in versions or st > versions[k][1]:
+                versions.setdefault(k, ("", ""))
+                if v.get("IsLatest"):
+                    versions[k] = (v["VersionId"], "LATEST")
+                elif versions[k][1] != "LATEST" and st > versions[k][1]:
+                    versions[k] = (v["VersionId"], st)
+        for m in page.get("DeleteMarkers", []) or []:
+            if m.get("IsLatest"):
+                markers[m["Key"]] = True
+    for k, (vid, when) in versions.items():
+        if not vid:
+            continue
+        behind = bool(markers.get(k)) and when != "LATEST"
+        if markers.get(k) and when == "LATEST":
+            continue        # a marker over a "latest" is contradictory; skip
+        meta.listed += 1
+        yield k, vid, behind
+
+
+def iter_versioned(datatype, dates, meta, symbols=None, s3=None):
+    """Envelopes for `datatype`, INCLUDING objects behind a delete marker.
+
+    Yields the same parsed envelopes `_envelopes` yields, so a caller swaps
+    one for the other. `meta.severed` counts how many came from behind a
+    marker; read it after the loop and SAY SO in the report.
+    """
+    s3 = s3 or client()
+    meta.severed = 0
+    for d in dates:
+        for key, vid, behind in _iter_versions(
+                s3, "%s/%s/dt=%s/" % (PREFIX, datatype, d), meta):
+            if symbols:
+                sym = next((p[4:] for p in key.split("/")
+                            if p.startswith("sym=")), "")
+                if sym not in symbols:
+                    continue
+            try:
+                body = s3.get_object(Bucket=BUCKET, Key=key,
+                                     VersionId=vid)["Body"].read()
+                meta.read += 1
+                if behind:
+                    meta.severed += 1
+                yield json.loads(body)
+            except Exception:                                   # noqa: BLE001
+                meta.bad += 1
+
+
+def load_trades_versioned(dates, s3=None):
+    """Deduped closed+open trades INCLUDING pre-epoch. -> (rows, meta).
+
+    ⚠️ SAME DEDUPE AS `load_trades`: latest `pushed_at_utc` per `trade_id`
+    wins. A trade pushed before the strip and again after it must not appear
+    twice, and the version that survived is not necessarily the newer record.
+    """
+    meta = Meta("trades(versioned) %s..%s" % (dates[0], dates[-1]))
+    best = {}
+    for env in iter_versioned("trades", dates, meta, s3=s3):
+        rec = env.get("record") or {}
+        tid = rec.get("trade_id")
+        if tid is None:
+            continue
+        stamp = str(env.get("pushed_at_utc") or "")
+        if tid not in best or stamp >= best[tid][0]:
+            best[tid] = (stamp, rec, env.get("dt"))
+    rows = []
+    for _s, rec, dt_ in best.values():
+        if dt_ and not rec.get("_dt"):
+            rec["_dt"] = dt_        # the partition day, for a per-session join
+        rows.append(rec)
+    return rows, meta
 
 
 def _envelopes(s3, datatype, dates, meta, symbols=None):
