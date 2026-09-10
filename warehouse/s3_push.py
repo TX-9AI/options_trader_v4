@@ -1,5 +1,17 @@
 """
-warehouse/s3_push.py  v4.6
+warehouse/s3_push.py  v4.7
+v4.7  2026-09-10  r349 - `--reconcile` WAITS FOR THE PUSH LOCK, AND SAYS SO WHEN
+IT CANNOT GET IT. It passed 0 and took the normal-run branch: lose the race,
+return 0, print nothing, exit 0 - so an operator-initiated repair was
+indistinguishable from a box with nothing to say. Measured 2026-09-10: a fleet
+reconcile at 19:16 collided with s3-push.timer, re-armed by the conductor's own
+REARM step, and box after box reported NO ANSWER; the reconcile never ran, the
+July prefixes the epoch strip emptied kept their counts, --verify kept
+reporting got=0, r180's heal kept correctly refusing, and the fleet was HELD
+FOR THREE NIGHTS over a race that exits silently. A scheduled push may skip
+because the run in flight is doing the same work; a repair a human asked for
+may not, because nothing else will do it. rc=3 and a named line when the wait
+times out.
 v4.6  2026-09-05  r270 / ASK.1 — `character_axis_sample` JOINS
       `DERIVED_SERIES_TABLES`. Operator ruled: push it. Append-only and keyed
       `(symbol, ts_epoch)`, so it takes the HIGH-WATER path, not CDC.
@@ -1143,10 +1155,34 @@ def main(argv=None) -> int:
         # A normal run that loses the race exits silently: the run already in
         # flight is doing exactly this work. --verify waits, because the EOD
         # conductor is blocking on its answer, and falls back to verify-only.
-        lock = acquire_lock(LOCK_WAIT if do_verify else 0)
+        # 🔴 r349 — `--reconcile` WAITS FOR THE LOCK, LIKE `--verify`. It used
+        # to pass 0 and take the "normal run" branch: lose the race, `return 0`,
+        # print NOTHING, exit 0. An operator-initiated repair then looked
+        # exactly like a box that had nothing to say.
+        # ⚠️ MEASURED 2026-09-10: a fleet reconcile launched at 19:16 hit
+        # `s3-push.timer` — re-armed by the conductor's own [REARM] step — and
+        # box after box came back "NO ANSWER — counters NOT proven reset (no
+        # output)". The reconcile never ran, the July prefixes the epoch strip
+        # emptied kept their counts, `--verify` kept reporting got=0, r180's
+        # heal kept correctly refusing, and the fleet was held for THREE
+        # NIGHTS over a race that exits silently.
+        # 🔑 THE DISTINCTION THAT WAS MISSING: a scheduled push may skip — the
+        # run in flight is doing the same work. A REPAIR a human asked for may
+        # not, because nothing else will do it and no one is watching the
+        # exit code.
+        _wants_lock = do_verify or do_reconcile
+        lock = acquire_lock(LOCK_WAIT if _wants_lock else 0)
         drained = lock is not None
-        if lock is None and not do_verify:
+        if lock is None and not _wants_lock:
             return 0
+        # ⚠️ AND IF THE WAIT STILL TIMES OUT, SAY SO. Silence is what made this
+        # invisible; a reconcile that could not start must never look like one
+        # that found nothing to do.
+        if lock is None and do_reconcile:
+            print("reconcile: COULD NOT ACQUIRE THE PUSH LOCK after {}s — "
+                  "another pusher is running. NOTHING was reset."
+                  .format(LOCK_WAIT))
+            return 3
 
         import boto3  # imported late so a missing SDK cannot break --report
 
