@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-262 Python modules across 13 local packages.
+264 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 85 referenced from a script, unit or doc but never imported · **67 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 87 referenced from a script, unit or doc but never imported · **67 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -582,8 +582,16 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** (not imported) — referenced in `README.md`, `docs/BACKLOG.md`
 
+### `tests/check_credit_marks_short.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
 ### `tests/check_credit_remainder.py`
 - **calls:** `database/trade_logger.py`, `execution/__init__.py`, `execution/credit_remainder.py`, `execution/entry_engine.py`, `execution/entry_ladder.py`, `execution/ladder_registry.py`, `execution/position_manager.py`, `main.py`, `strategy/base_strategy.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_credit_sign_history.py`
+- **calls:** (none)
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_criteria.py`

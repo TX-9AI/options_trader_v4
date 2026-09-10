@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-tests/r_ledger.py  v1.6
+tests/r_ledger.py  v1.7
+v1.7  2026-09-10  r344 - `is_credit()`: the flag first, `credit_received > 0`
+as the fallback. `is_short_position` had NO WRITER anywhere until r343, so
+every row already in the book carries the schema default 0 and every credit
+trade's MFE and MAE were exchanged - in EXCURSIONS, in capture and giveback,
+in the never-favourable split and in stop_sweep. The credit value is the row's
+own evidence and has been written at every credit entry site all along, so the
+history is recovered WITHOUT REWRITING A SINGLE ROW. Debits are untouched.
 v1.6  2026-09-07  r301 - the --all-history help no longer HARDCODES the epoch
 date. A second copy of a constant in a help string is a copy that goes stale
 silently, which is exactly what the epoch move exposed.
@@ -143,11 +150,39 @@ def _f(v):
     return None if f != f else f
 
 
+def is_credit(row: dict) -> bool:
+    """Is this a SHORT/credit position? The flag first, the credit as fallback.
+
+    🔴 r344 — THE FLAG HAD NO WRITER UNTIL r343, so every row logged before it
+    carries the schema default of 0 — credit spreads included. Trusting the
+    flag alone would leave the whole historical book mis-signed: a credit
+    position's favourable move is the premium FALLING, so its MFE comes off
+    `mae_premium`, and reading it as a long swaps MFE with MAE.
+    🔑 `credit_received > 0` IS THE ROW'S OWN EVIDENCE. It is written at every
+    credit entry site and has been since long before the flag existed, so it
+    recovers the history WITHOUT REWRITING A SINGLE ROW — the reports simply
+    read what was always there.
+    ⚠️ THE FLAG STILL WINS WHEN IT IS SET. The fallback only speaks where the
+    flag is absent or 0, so a genuine long that somehow carries a credit value
+    cannot be flipped by it, and r343's forward-written rows are authoritative.
+    ⚠️ AND A DEBIT IS UNTOUCHED: ORB and Runaway write no credit, so they take
+    the long branch exactly as before. That is the half that was accidentally
+    correct all along and must not move.
+    """
+    if row.get("is_short_position"):
+        return True
+    return (_f(row.get("credit_received")) or 0.0) > 0.0
+
+
 def position_dollars(row: dict):
     """(mfe_usd, mae_usd) in POSITION dollars, sign-aware, or (None, None).
 
     Long/debit: favourable = premium UP  -> mfe$ = (mfe_prem − entry)·100·k
     Short/credit: favourable = premium DOWN -> mfe$ = (entry − mae_prem)·100·k
+
+    r344 — the side comes from `is_credit()`, which falls back to
+    `credit_received > 0` because the flag had no writer before r343 and the
+    whole historical book carries 0.
     ⚠️ For a short position the tracker's *premium* mfe (highest premium seen)
     is the ADVERSE extreme — the mapping below is the whole reason this helper
     exists, and the selftest plants both directions.
@@ -158,7 +193,7 @@ def position_dollars(row: dict):
     k = _f(row.get("contracts")) or 1
     if entry is None:
         return None, None
-    short = bool(row.get("is_short_position"))
+    short = is_credit(row)
     lot = 100.0 * k
     if short:
         mfe = (entry - mae_p) * lot if mae_p is not None else None

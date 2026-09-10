@@ -1,5 +1,8 @@
 """
-strategy/condor_roll.py  v4.6
+strategy/condor_roll.py  v4.7
+v4.7  2026-09-10  r343 — a roll OPENS A CREDIT POSITION, so both record sites
+      write `is_short_position = 1`. The column had no writer anywhere in the
+      tree; see main.py v4.40 for what that cost the excursion reports.
 v4.6  2026-08-26  r146 — THE ROLL HAS A PLAN. `check_and_execute_roll` writes
       a `CreditRoll` row through strategy/plan.py at every decision: HOLD
       (no paired condor / already final form / neither side tested / no
@@ -464,6 +467,8 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
             long_strike     = plan.new_long_strike,
             spread_width    = new_width,
             credit_received = roll_credit_fill,       # CONFIRMED credit, not plan
+            # r343 — a roll opens a CREDIT position; the flag had no writer.
+            is_short_position = 1,
             contracts       = roll_qty,               # CONFIRMED quantity
             entry_premium   = roll_credit_fill,
             total_cost      = new_maxloss,
@@ -791,7 +796,7 @@ def _execute_tent(pos_mgr, winner: dict, keep: dict, hedge, hedge_ask: float,
         long_strike=keep.get("long_strike"),
         lower_strike=float(getattr(hedge, "strike", 0.0) or 0.0),
         spread_width=float(keep.get("spread_width") or 0.0),
-        credit_received=cum, contracts=qty,
+        credit_received=cum, contracts=qty, is_short_position=1,  # r343
         entry_premium=cum,                       # the floor's basis
         stop_premium=cum * (1 + TENT_FLOOR_PCT),
         total_cost=abs(cum) * qty * CONTRACT_MULTIPLIER,

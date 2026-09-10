@@ -1,5 +1,13 @@
 """
-main.py  v4.39
+main.py  v4.40
+v4.40 2026-09-10  r343 — `is_short_position = 1` ON THE CREDIT VERTICAL ENTRY.
+      The column was READ by exit_engine, position_manager and the adopted-
+      position alert and WRITTEN BY NOTHING, so every trade ever logged took
+      the schema default of 0 — credit spreads included. `position_dollars`
+      keys the excursion SIGN on it, so MFE and MAE were exchanged for every
+      credit trade in EXCURSIONS, in capture/giveback, in the never-favourable
+      split and in stop_sweep. The debit strategies were accidentally correct
+      (0 is right for them), which is why it never looked wrong.
 v4.39 2026-09-08  r315 — THE CREDIT LADDER WALKS THE WAY THE OPERATOR SPECIFIED,
       AND A PARTIAL FINISHES FILLING. War-gamed 2026-09-08 on synthetic tape,
       real entry_ladder/ladder_registry, driver reproduced from this file at
@@ -2608,6 +2616,20 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         # is_condor_leg is what _condor_sibling_open and condor_roll key on,
         # and condor_leg_num=2 on every TC.6 row was data pollution.
         is_condor_leg    = 1,   # v4.3: all credit verticals are condor-eligible
+        # 🔴 r343 — THE COLUMN HAD NO WRITER ANYWHERE. `is_short_position`
+        # was read by exit_engine, position_manager and the adopted-position
+        # alert, and written by NOTHING on any entry path — so every trade
+        # ever logged took the schema default of 0, including every credit
+        # spread. `r_ledger.position_dollars` keys the excursion SIGN on this
+        # flag, so a credit trade's MFE and MAE have been SWAPPED in every
+        # report that uses it: EXCURSIONS, the R ledger's capture and
+        # giveback, the never-favourable split, and stop_sweep.
+        # 🔑 THE DEBIT STRATEGIES WERE ACCIDENTALLY CORRECT, which is why it
+        # never looked broken: 0 is the right answer for ORB and Runaway, and
+        # they are most of the book.
+        # ⚠️ This is the credit-vertical entry — TCS, the sweep and a condor
+        # leg all land here — so the value is unconditionally 1.
+        is_short_position = 1,
         # 🔴 r106 — ALWAYS 0. Operator, 2026-08-24: "There is no condor implied,
         # it is merely PERMITTED." Leg 1 / leg 2 is plan vocabulary from the
         # state machine r90 removed — it numbered verticals by FILL ORDER as if
