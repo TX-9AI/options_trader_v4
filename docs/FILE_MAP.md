@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-252 Python modules across 13 local packages.
+254 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 76 referenced from a script, unit or doc but never imported · **66 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 78 referenced from a script, unit or doc but never imported · **66 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -618,6 +618,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `execution/exit_engine.py`, `utils/time_utils.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`
 
+### `tests/check_exit_replay_streams.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
 ### `tests/check_ext_polarity.py`
 - **calls:** `config.py`, `data/candle_feed.py`
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
@@ -853,6 +857,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_status_panel.py`
 - **calls:** (none)
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_stop_sweep_renders.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_strike_beyond.py`
 - **calls:** `strategy/sweep_credit_spread.py`

@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-tests/exit_replay.py  v1.3
+tests/exit_replay.py  v1.4
+v1.4  2026-09-09  r326 - THE S3 PATH READ ONE DATE AT A TIME; IT USED TO READ THE
+WHOLE WINDOW AND GOT OOM-KILLED. `load_series("quote_series", dates)` returned
+every batch row for every date in one list before a single trade was replayed,
+and quote_series is the warehouse's highest-volume stream (1,437 objects for
+2026-08-24 alone). Over `all` history the kernel killed it mid-listing and the
+menu printed `Killed` with no traceback - indistinguishable from a crash in the
+report. run() is split into accumulate() + render() so run_s3 can stream: one
+date's quotes in memory at a time, and a date with NO closed trades never loads
+quotes at all (60+ skipped sessions on the first run, the pre-epoch dates r314
+emptied among them). Per DATE is not per TRADE - every trade on a date still
+shares one indexed load, so r86's batching argument is untouched.
 v1.3  2026-09-07  r299 - relaxed rows kept (operator ruling: it is all paper, and paper vs live is the split that matters).
 v1.2  2026-09-07  r297 - --all-history added: `_r_tool` is shared and now passes it. The default
 window also moves from TODAY to DAY ONE ONWARD via warehouse_source.
@@ -179,27 +190,42 @@ def _s3_fetch(qrows):
     return fetch
 
 
-def run(rows, fetch) -> int:
-    refused = defaultdict(int)
-    totals = defaultdict(lambda: defaultdict(float))
-    counts = defaultdict(int)
-    recon_fail = 0
+def blank_acc() -> dict:
+    """One accumulator, filled a date at a time and rendered once at the end."""
+    return {"refused": defaultdict(int),
+            "totals": defaultdict(lambda: defaultdict(float)),
+            "counts": defaultdict(int),
+            "recon_fail": 0}
+
+
+def accumulate(rows, fetch, acc: dict) -> None:
+    """Replay one batch of trades into `acc`. NOTHING IS PRINTED HERE.
+
+    🔴 r326 — SPLIT OUT OF run() SO THE S3 PATH CAN WORK ONE DATE AT A TIME.
+    The old shape loaded every quote batch in the window into ONE list before
+    a single trade was replayed, and quote_series is the highest-volume
+    stream in the warehouse — 1,437 objects for 2026-08-24 alone. Over an
+    `all` window that is not slow, it is FATAL: the kernel killed the process
+    mid-listing on 2026-09-09 and the menu reported `Killed`, which looks
+    like a crash in a report rather than a tool asking for more memory than
+    control has.
+    """
     for r in rows:
         t0, t1 = _ts(r.get("entry_time")), _ts(r.get("exit_time"))
         if not t0 or not t1 or t1 <= t0:
-            refused["bad timestamps"] += 1
+            acc["refused"]["bad timestamps"] += 1
             continue
         legs, why = legs_of(r)
         if legs is None:
-            refused[why] += 1
+            acc["refused"][why] += 1
             continue
         path, why = path_for(fetch, legs, t0, t1)
         if not path:
-            refused[why or "empty path"] += 1
+            acc["refused"][why or "empty path"] += 1
             continue
         cov = len(path) / max(1.0, (t1 - t0) / POLL_S)
         if cov < MIN_COVERAGE:
-            refused[f"coverage<{MIN_COVERAGE:.0%}"] += 1
+            acc["refused"][f"coverage<{MIN_COVERAGE:.0%}"] += 1
             continue
         entry_val = path[0][1]
         entry_prem = _f(r.get("entry_premium")) or abs(entry_val) or 1.0
@@ -209,16 +235,20 @@ def run(rows, fetch) -> int:
         rec = replay(path, entry_val, entry_prem, ("stop", rec_stop)) * lot
         pnl = _f(r.get("pnl_usd")) or 0.0
         if abs(rec - pnl) > max(50.0, RECONCILE_TOL * rec_stop * entry_prem * lot * 4):
-            recon_fail += 1
+            acc["recon_fail"] += 1
         key = (r.get("strategy") or "?", (r.get("option_side") or "?").lower())
-        counts[key] += 1
-        totals[key]["recorded"] += pnl
+        acc["counts"][key] += 1
+        acc["totals"][key]["recorded"] += pnl
         for s in STOPS:
-            totals[key][f"stop {s:.2f}"] += replay(path, entry_val, entry_prem,
+            acc["totals"][key][f"stop {s:.2f}"] += replay(path, entry_val, entry_prem,
                                                    ("stop", s)) * lot
         for arm, give in TRAILS:
-            totals[key][f"trail a{arm:.2f}/g{give:.2f}"] += replay(
+            acc["totals"][key][f"trail a{arm:.2f}/g{give:.2f}"] += replay(
                 path, entry_val, entry_prem, ("trail", 1.0, arm, give)) * lot
+
+def render(acc: dict) -> int:
+    refused, totals = acc["refused"], acc["totals"]
+    counts, recon_fail = acc["counts"], acc["recon_fail"]
     print("=" * 70)
     print("  EXIT REPLAY — real premium paths from quote_series, dollars")
     print("=" * 70)
@@ -241,23 +271,56 @@ def run(rows, fetch) -> int:
     return 0
 
 
+def run(rows, fetch) -> int:
+    """Whole-book path: the --db escape hatch and the selftest. Unchanged."""
+    acc = blank_acc()
+    accumulate(rows, fetch, acc)
+    return render(acc)
+
+
 def run_s3(a) -> int:
+    """ONE DATE AT A TIME. Memory is bounded by the busiest single session.
+
+    🔴 r326 — THIS IS THE FIX FOR THE OOM. v1.1's comment said "ONE LIST CALL,
+    NOT ONE PER TRADE", and that half was right: a fetch per trade would be
+    the expensive path. But it loaded the whole WINDOW's quote batches into
+    one list before replaying anything, and over `all` history the process was
+    killed by the kernel — the menu printed `Killed` with no traceback, which
+    is indistinguishable from a crash in the report itself.
+    ⚠️ PER DATE IS NOT PER TRADE. Every trade on a date still shares one
+    indexed load, so the r86 batching argument is preserved exactly; only the
+    window shrinks, from ~70 sessions to one.
+    🔑 AND A DATE WITH NO TRADES NEVER LOADS QUOTES AT ALL. Over `all` that
+    skipped 60+ sessions of listing on 2026-09-09, including the pre-epoch
+    dates r314 emptied — work whose result was guaranteed to be nothing.
+    ⚠️ A trade is replayed against its OWN date's quotes. `dt=` is the ET
+    trading day in every stream by design, so a same-session position finds
+    its path; a hypothetical trade held across a date boundary would not, and
+    would refuse BY NAME rather than score wrongly.
+    """
     import warehouse_source as ws
     dates = ws.dates_of(a)
-    trades, m1 = ws.load_trades(dates)
-    print("  " + m1.banner())
-    if m1.error:
-        return 1
-    rows = [t for t in trades if (t.get("status") or "").lower() == "closed"
-]
-    # ⚠️ ONE LIST CALL, NOT ONE PER TRADE. The quote batches for the window
-    # are loaded once and indexed per symbol; per-trade fetches against S3
-    # would be the expensive path the handoff warns this tool already is.
-    qrows, m2 = ws.load_series("quote_series", dates)
-    print("  " + m2.banner())
-    if m2.error:
-        return 1
-    return run(rows, _s3_fetch(qrows))
+    acc = blank_acc()
+    replayed_dates = 0
+    for d in dates:
+        trades, m1 = ws.load_trades([d])
+        if m1.error:
+            print("  " + m1.banner())
+            return 1
+        rows = [t for t in trades if (t.get("status") or "").lower() == "closed"]
+        if not rows:
+            continue
+        print("  " + m1.banner())
+        qrows, m2 = ws.load_series("quote_series", [d])
+        print("  " + m2.banner())
+        if m2.error:
+            return 1
+        accumulate(rows, _s3_fetch(qrows), acc)
+        replayed_dates += 1
+        del qrows                      # the batch is finished with; let it go
+    if not replayed_dates:
+        print("  no closed trades in the window — nothing to replay.")
+    return render(acc)
 
 
 def selftest() -> int:

@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-tests/stop_sweep.py  v1.3
+tests/stop_sweep.py  v1.4
+v1.4  2026-09-09  r326 - RENDER HAS NEVER DRAWN A SURFACE. `sorted(merged.items())`
+compared a None tp against a float tp and raised TypeError; because sweep()
+emits every tp in the grid for any stop that clears MIN_N, two tps ALWAYS
+share a stop, so the comparison happened on any non-empty surface. Every run
+since v1.0 either printed "fewer than 20 usable rows" or died - the table
+itself has never appeared, and the traceback landed AFTER the header and
+column rule, which is why it read as a formatting fault rather than a
+function that had never worked. The gate is `tests/check_stop_sweep_renders.py`,
+which DRIVES render() - `--selftest` covered replay_row from v1.0 and never
+touched render(), so the arithmetic was gated and the only function the
+operator sees was not. Also: the docstring still said "relaxed excluded"
+three revisions after r299 kept them.
 v1.3  2026-09-07  r299 - relaxed rows kept (operator ruling); the dead
 `include_relaxed` assignment goes with the filter it fed.
 v1.2  2026-09-07  r297 - --all-history added: `_r_tool` is shared and now passes it. The default
@@ -35,7 +47,7 @@ MECHANICS, stated so the approximation is honest:
 
 ⚠️ THIS TOOL PROPOSES NOTHING. It prints the R surface; a level moves into
 config only with the number cited (AUDIT.md §5.1) and only after edge_scan's
-sample gates are met. Calls/puts separate; relaxed excluded.
+sample gates are met. Calls/puts separate; relaxed rows KEPT (r299).
 
 Run:  python3 tests/stop_sweep.py [--db trades.db] [--strategy ORB]
       python3 tests/stop_sweep.py --selftest
@@ -139,7 +151,16 @@ def render(rows: list, label: str) -> None:
     merged = {}
     for c in cells:
         merged.setdefault((c["stop"], c["tp"]), {})[c["bound"]] = c
-    for (stop, tp), b in sorted(merged.items()):
+    # 🔴 r326 — SORT ON A TOTAL ORDER. `TP_GRID` opens with None ("no take
+    # profit") and Python 3 refuses None < float, so sorting the raw
+    # (stop, tp) tuples raised TypeError the moment two tp values shared a
+    # stop — which is EVERY time this function had a surface to draw, since
+    # sweep() walks the whole grid for any stop that clears MIN_N. None sorts
+    # first, matching the grid's own order and reading as "no TP" at the top
+    # of each stop block.
+    for (stop, tp), b in sorted(
+            merged.items(),
+            key=lambda kv: (kv[0][0], -1.0 if kv[0][1] is None else kv[0][1])):
         p, o = b.get("pess"), b.get("opt")
         if not p or not o:
             continue
