@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_brief_bias_join.py  v1.0
+tests/check_brief_bias_join.py  v1.1
+v1.1  2026-09-10  r335 - J7 and J8 for `--rows`. J7 asserts table C's net
+      RECONCILES with the bucket totals, because both views come off one join
+      and a divergence between them would mean the grain was recomputed rather
+      than re-rendered. J8 pins MIXED for a symbol-day traded both ways.
 v1.0  2026-09-10  r333 / BRF.1 — the land gate for the brief-bias study.
 
 Drives `main()` end to end against a fixture brief DB, a fixture tape and a
@@ -16,6 +20,9 @@ arithmetic alone.
       counts as AGREE with a BULLISH brief
   J4  a symbol-day with no prior-session close is EXCLUDED, not a miss
   J5  the severed count is surfaced when trades come from behind a marker
+  J7  --rows prints one line per symbol-day, and its net RECONCILES with
+      the bucket totals (same join, two views — they cannot disagree)
+  J8  a symbol-day traded both ways reads MIXED, never one direction
   J6  it REFUSES if load_trades_versioned is absent — no quiet fallback to
       the post-epoch window
 """
@@ -132,6 +139,20 @@ def main():
           "excluded line present")
     check("J5", "behind a delete marker" in out, "severed surfaced")
 
+    buf2 = io.StringIO()
+    with redirect_stdout(buf2):
+        bj.main(["--from", "2026-09-01", "--to", "2026-09-03", "--rows"])
+    out2 = buf2.getvalue()
+    crows = [l for l in out2.splitlines()
+             if l.strip().startswith(("2026-09-02", "2026-09-03"))]
+    net_c = sum(float(l.split()[-1].replace(",", "")) for l in crows)
+    net_b = 100.0 - 40.0
+    check("J7", len(crows) == 1 and abs(net_c - net_b) < 1e-6,
+          "{} row(s), table C net {} vs bucket net {}".format(
+              len(crows), net_c, net_b))
+    check("J8", any(" MIXED " in l for l in crows),
+          crows[0].strip() if crows else "no rows")
+
     del ws.load_trades_versioned
     try:
         with redirect_stdout(io.StringIO()):
@@ -146,7 +167,7 @@ def main():
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (7)")
+    print("ALL PASS (9)")
     return 0
 
 

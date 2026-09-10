@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/check_versioned_reader.py  v1.0
+tests/check_versioned_reader.py  v1.1
+v1.1  2026-09-10  r335 - V7 and V8. The reader was passing a VersionId on
+      EVERY key and `s3:GetObjectVersion` is a permission control does not
+      hold, so AWS denied all 10,741 objects - including CURRENT ones it could
+      read plainly. V7 pins that a current object is fetched WITHOUT a version
+      id. V8 pins that a read failure keeps its FIRST error and puts it in the
+      banner, because r332 counted failures and printed nothing else, so the
+      denial rendered as an empty table with no cause on screen.
+      Also: the FIXTURE was stricter than the S3 it stands in for - it keyed
+      objects by (key, version) and raised on a VersionId-less read. A fixture
+      that cannot represent the real behaviour cannot catch a bug in it.
 v1.0  2026-09-10  r332 / BRF.1 — the land gate for warehouse_source's
       version-aware reader.
 
@@ -18,6 +28,10 @@ so its failure modes are the two that would quietly corrupt a study:
   V4  load_trades_versioned dedupes by trade_id on pushed_at_utc
   V5  the banner reports the severed count
   V6  the symbols filter applies
+  V7  a CURRENT object is fetched WITHOUT a VersionId (passing one needs
+      s3:GetObjectVersion, which control does not hold — r332 denied itself
+      all 10,741 objects this way)
+  V8  a read failure keeps its FIRST error and puts it in the banner
 """
 import json
 import os
@@ -85,9 +99,17 @@ class FakeS3:
                     yield {}
         return P()
 
+    # the LATEST version id per key, so a VersionId-less read resolves the
+    # way S3 does rather than raising — the fixture must not be stricter
+    # than the thing it stands in for.
+    LATEST = {"raw/trades/dt=2026-09-02/sym=NVDA/live.json": "v-live"}
+
     def get_object(self, Bucket=None, Key=None, VersionId=None):
         self.reads.append((Key, VersionId))
-        env = self.objects[(Key, VersionId)]
+        vid = VersionId or self.LATEST.get(Key)
+        if vid is None:
+            raise KeyError("no current version for " + Key)
+        env = self.objects[(Key, vid)]
 
         class B:
             @staticmethod
@@ -142,11 +164,25 @@ def main():
     check("V6", len(only) == 1 and only[0]["record"]["trade_id"] == 3,
           "{} env(s) with symbols=[AMD]".format(len(only)))
 
+    check("V7", ("raw/trades/dt=2026-09-02/sym=NVDA/live.json", None)
+          in s3.reads,
+          "current read: {}".format([r for r in s3.reads if r[0].endswith("live.json")]))
+
+    class Boom(FakeS3):
+        def get_object(self, **_kw):
+            raise RuntimeError("AccessDenied: no s3:GetObjectVersion")
+
+    mb = ws.Meta("t")
+    list(ws.iter_versioned("trades", ["2026-07-08"], mb, s3=Boom()))
+    check("V8", mb.read == 0 and mb.bad and "AccessDenied" in mb.banner(),
+          "read={} bad={} banner-has-error={}".format(
+              mb.read, mb.bad, "AccessDenied" in mb.banner()))
+
     print("")
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (6)")
+    print("ALL PASS (8)")
     return 0
 
 

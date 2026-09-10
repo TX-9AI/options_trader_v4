@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """
-tests/brief_bias_join.py  v1.0
+tests/brief_bias_join.py  v1.2
+v1.2  2026-09-10  r335 - `--rows`: ONE LINE PER SYMBOL-DAY. Operator, on reading
+v1.1's output: *"It's not by sym by day like I asked for."* The JOIN was always
+per symbol-day; the OUTPUT collapsed straight to five bucket totals, so a single
+busy name - META traded 28 times in one session - can carry a bucket with nobody
+able to see it happen. Table C prints what the brief said, what the tape did,
+what we did and what it made, per symbol per day, off the SAME join, so the two
+views cannot disagree. `ours` reads MIXED when a symbol-day holds trades both
+ways, because averaging those would invent a position nobody took.
+v1.1  2026-09-10  r334 - REFUSES WHEN EVERY TRADE READ FAILED. v1.0 printed
+"no closed trades in the window" while all 10,741 objects had been denied by
+IAM - an absence the tool manufactured, rendered in the same font as a real
+one. That is the shape this whole session has been finding, and it reached
+production inside the tool built to avoid it.
 v1.0  2026-09-10  r333 / BRF.1 step 2 — DOES THE MORNING BRIEF PREDICT THE
       TAPE, AND DOES TRADING AGAINST IT COST MONEY? Operator's experiment.
 
@@ -230,6 +243,60 @@ def trades_vs_brief(trades, comps, bias_of):
     return out
 
 
+def symbol_day_rows(trades, comps, closes, prev, bias_of):
+    """One row per (date, symbol) — what the brief said, what the tape did,
+    what we did, and what it made.
+
+    🔑 THE BUCKETS ANSWER "DID IT COST US"; THIS ANSWERS "ON WHAT". The join
+    was always per symbol-day, but collapsing straight to five totals means a
+    single busy name — META traded 28 times on one session — can carry a
+    bucket, and nobody can see it happen. Both views come off the same join,
+    so they cannot disagree.
+    ⚠️ `ours` is MIXED when a symbol-day holds trades in both directions.
+    Averaging those into one direction would invent a position nobody took.
+    """
+    agg = {}
+    for t in trades:
+        if str(t.get("status") or "").lower() != "closed":
+            continue
+        try:
+            pnl = float(t.get("pnl_usd"))
+        except (TypeError, ValueError):
+            continue
+        d, sym = str(t.get("_dt") or ""), t.get("symbol") or "?"
+        side = bias_of(t.get("option_side"), t.get("is_short_position"),
+                       t.get("is_condor_leg", 0), t.get("center_symbol", ""))
+        a = agg.setdefault((d, sym), {"n": 0, "net": 0.0, "sides": set()})
+        a["n"] += 1
+        a["net"] += pnl
+        a["sides"].add(side)
+    rows = []
+    for (d, sym), a in sorted(agg.items()):
+        called = (comps.get((d, sym)) or ("—", None, None))[0] or "—"
+        actual, pct = realized(closes, prev, d, sym)
+        sides = a["sides"] - {"?"}
+        ours = (sides.pop() if len(sides) == 1 else
+                ("MIXED" if len(sides) > 1 else "?"))
+        verdict = ("—" if called in ("—", "?", "NEUT") or ours not in
+                   ("LONG", "SHORT") else
+                   ("agree" if ours == called else "AGAINST"))
+        rows.append((d, sym, called, actual or "—", pct, ours, verdict,
+                     a["n"], a["net"]))
+    return rows
+
+
+def render_rows(rows):
+    print("\n  C. EVERY SYMBOL-DAY WE TRADED")
+    print("     {:<10} {:<5} {:<6} {:<6} {:>7} {:<6} {:>8} {:>3} {:>9}".format(
+        "date", "sym", "brief", "tape", "move%", "ours", "vs brief", "n", "net"))
+    print("     " + "-" * 68)
+    for d, sym, called, actual, pct, ours, verdict, n, net in rows:
+        print("     {:<10} {:<5} {:<6} {:<6} {:>7} {:<6} {:>8} {:>3} {:>9,.0f}"
+              .format(d, sym[:5], called, actual,
+                      ("%+.2f" % pct) if pct is not None else "—",
+                      ours, verdict, n, net))
+
+
 def render(per, base, unmeasured, buckets, window, severed):
     print("=" * 72)
     print("  BRIEF BIAS JOIN — close-to-close, gap included   [{}]".format(window))
@@ -318,6 +385,19 @@ def selftest() -> int:
             "record": "ts,open,close\n1,1,5.0\n2,1,7.5\n"}]
     ok &= closes_from_envelopes(env) == {("2026-09-02", "N"): 7.5}
     # the lookback: the window's first session must have a prior day fetched
+    # table C: MIXED when a symbol-day was traded both ways
+    _cl = {("2026-09-01", "N"): 10.0, ("2026-09-02", "N"): 11.0}
+    _pv = prior_sessions(_cl)
+    _tr = [{"status": "closed", "pnl_usd": 5.0, "_dt": "2026-09-02",
+            "symbol": "N", "option_side": "call", "is_short_position": 0},
+           {"status": "closed", "pnl_usd": -2.0, "_dt": "2026-09-02",
+            "symbol": "N", "option_side": "put", "is_short_position": 0}]
+    _rows = symbol_day_rows(_tr, {("2026-09-02", "N"): ("LONG", 1, 1)},
+                            _cl, _pv, lambda side, sh, *_a: (
+                                "LONG" if (side == "call") != bool(int(sh))
+                                else "SHORT"))
+    ok &= len(_rows) == 1 and _rows[0][5] == "MIXED" and _rows[0][7] == 2
+    ok &= abs(_rows[0][8] - 3.0) < 1e-9
     wl = with_lookback(["2026-09-02", "2026-09-03"])
     ok &= wl[-2:] == ["2026-09-02", "2026-09-03"] and "2026-08-27" in wl
     print("brief_bias_join selftest:", "ALL PASS" if ok else "FAIL")
@@ -329,6 +409,8 @@ def main(argv=None) -> int:
     ap.add_argument("--from", dest="frm")
     ap.add_argument("--to", dest="to")
     ap.add_argument("--all-history", action="store_true")
+    ap.add_argument("--rows", action="store_true",
+                    help="one line per symbol-day: brief, tape, ours, net")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -360,12 +442,23 @@ def main(argv=None) -> int:
 
     trades, meta_t = ws.load_trades_versioned(sessions)
     print("  TRADES: " + meta_t.banner())
+    # 🔴 r334 — AN EMPTY TABLE B IS A RESULT; A FAILED READ IS NOT. r333
+    # rendered "no closed trades in the window" while every one of 10,741
+    # objects had been denied, which reads as a finding about the book.
+    if meta_t.listed and not meta_t.read:
+        raise SystemExit(
+            "  🔴 {} trade object(s) listed and NONE could be read. That is a\n"
+            "     read failure, not an empty book, and table B would have\n"
+            "     rendered it as 'no closed trades'. Refusing.\n"
+            "     {}".format(meta_t.listed, meta_t.first_error or ""))
 
     prev = prior_sessions(closes)
     per, base, unmeasured = brief_vs_tape(comps, closes, prev)
     buckets = trades_vs_brief(trades, comps, bias_of)
     render(per, base, unmeasured, buckets, "{}..{}".format(lo, hi),
            getattr(meta_t, "severed", 0))
+    if a.rows:
+        render_rows(symbol_day_rows(trades, comps, closes, prev, bias_of))
     return 0
 
 

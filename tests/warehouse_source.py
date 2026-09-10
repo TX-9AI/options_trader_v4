@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-tests/warehouse_source.py  v1.5
+tests/warehouse_source.py  v1.6
+v1.6  2026-09-10  r334 - TWO DEFECTS IN r332's READER, both found by running it.
+(1) It passed a VersionId on EVERY key, and passing one AT ALL requires
+`s3:GetObjectVersion`, which day-trader-control does not hold - so AWS denied
+all 10,741 objects including CURRENT ones the role can read plainly. A version
+id is now sent only to reach BEHIND a delete marker. (2) It counted failures
+into `bad` and printed nothing else, so 10,741 AccessDenied responses rendered
+as an empty table with no cause on screen. The FIRST error is now kept and
+printed in the banner - a count is not a diagnosis.
 v1.5  2026-09-10  r332 - `iter_versioned` / `load_trades_versioned`: read objects
 that sit behind a DELETE MARKER. dtp r314's epoch strip soft-deleted 8,313
 pre-09-01 trade objects; the bytes are intact as noncurrent versions and
@@ -78,6 +86,7 @@ class Meta:
         self.read = 0
         self.bad = 0
         self.severed = 0
+        self.first_error = ""
         self.error = ""
 
     def banner(self) -> str:
@@ -88,6 +97,8 @@ class Meta:
                 f"{self.listed} object(s) listed, {self.read} read"
                 + (f", {self.bad} unreadable" if self.bad else "")
                 + (", %d behind a delete marker" % self.severed if self.severed else "")
+                + ("\n     🔴 FIRST ERROR: " + self.first_error
+                   if self.first_error else "")
                 + ("  (a real, empty result — not a missing path)"
                    if self.listed == 0 else ""))
 
@@ -142,7 +153,14 @@ def _iter_versions(s3, prefix, meta):
     for k, (vid, when) in versions.items():
         if not vid:
             continue
+        # 🔴 r334 — A CURRENT OBJECT IS READ WITHOUT A VersionId. Passing one
+        # at all requires `s3:GetObjectVersion`, which `day-trader-control`
+        # does not hold: r332 asked for a version on EVERY key and AWS denied
+        # all 10,741, including objects the role could read plainly. The
+        # version id is only needed to reach BEHIND a marker.
         behind = bool(markers.get(k)) and when != "LATEST"
+        if when == "LATEST":
+            vid = None
         if markers.get(k) and when == "LATEST":
             continue        # a marker over a "latest" is contradictory; skip
         meta.listed += 1
@@ -167,14 +185,23 @@ def iter_versioned(datatype, dates, meta, symbols=None, s3=None):
                 if sym not in symbols:
                     continue
             try:
-                body = s3.get_object(Bucket=BUCKET, Key=key,
-                                     VersionId=vid)["Body"].read()
+                kw = {"Bucket": BUCKET, "Key": key}
+                if vid:
+                    kw["VersionId"] = vid
+                body = s3.get_object(**kw)["Body"].read()
                 meta.read += 1
                 if behind:
                     meta.severed += 1
                 yield json.loads(body)
-            except Exception:                                   # noqa: BLE001
+            except Exception as exc:                            # noqa: BLE001
+                # 🔴 r334 — THE FIRST ERROR IS KEPT AND PRINTED. r332 counted
+                # failures into `bad` and said nothing else, so 10,741
+                # AccessDenied responses rendered as an empty table with no
+                # cause on screen. A count is not a diagnosis.
                 meta.bad += 1
+                if not meta.first_error:
+                    meta.first_error = "{}: {}".format(
+                        type(exc).__name__, str(exc)[:180])
 
 
 def load_trades_versioned(dates, s3=None):
