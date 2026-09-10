@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_brief_bias_join.py  v1.1
+tests/check_brief_bias_join.py  v1.2
+v1.2  2026-09-10  r336 - J9 and J10 for table D. J9 plants conviction on a
+      0..8 scale and asserts the quartiles still SPREAD: hardcoded 0..1 cut
+      points would put every call in one bucket and print a flat correlation
+      that is an artefact of the scale, not of the data. J10 pins that a NULL
+      conviction is excluded and counted rather than bucketed as zero.
 v1.1  2026-09-10  r335 - J7 and J8 for `--rows`. J7 asserts table C's net
       RECONCILES with the bucket totals, because both views come off one join
       and a divergence between them would mean the grain was recomputed rather
@@ -20,6 +25,9 @@ arithmetic alone.
       counts as AGREE with a BULLISH brief
   J4  a symbol-day with no prior-session close is EXCLUDED, not a miss
   J5  the severed count is surfaced when trades come from behind a marker
+  J9  conviction buckets are QUARTILES OF THE DATA, so an unexpected scale
+      cannot collapse every call into one bucket
+  J10 a NULL conviction is excluded and counted, never bucketed as zero
   J7  --rows prints one line per symbol-day, and its net RECONCILES with
       the bucket totals (same join, two views — they cannot disagree)
   J8  a symbol-day traded both ways reads MIXED, never one direction
@@ -153,6 +161,22 @@ def main():
     check("J8", any(" MIXED " in l for l in crows),
           crows[0].strip() if crows else "no rows")
 
+    # J9/J10 — conviction on a 0..8 scale must still spread across quartiles,
+    # and a None must not become a zero.
+    comps = {("2026-09-0%d" % d, "N"): ("SHORT", 1.0, v)
+             for d, v in zip(range(1, 9), [0.4, 1.9, 3.1, 4.4, 5.2, 6.6, 7.1, 8.0])}
+    comps[("2026-09-09", "N")] = ("SHORT", 1.0, None)
+    cl = {("2026-09-0%d" % d, "N"): 100.0 - d for d in range(0, 10)}
+    pv = bj.prior_sessions(cl)
+    cv, cbase, cuts, nulls = bj.by_conviction(comps, cl, pv)
+    qs = sorted({q for (_c, q) in cv})
+    check("J9", len(cuts) == 3 and len(qs) >= 3,
+          "cuts={} quartiles used={}".format(
+              [round(c, 2) for c in cuts], qs))
+    check("J10", nulls == 1 and all(
+        b["n"] for b in cv.values()),
+        "null conviction(s) excluded={}".format(nulls))
+
     del ws.load_trades_versioned
     try:
         with redirect_stdout(io.StringIO()):
@@ -167,7 +191,7 @@ def main():
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (9)")
+    print("ALL PASS (11)")
     return 0
 
 

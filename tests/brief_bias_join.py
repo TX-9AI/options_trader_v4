@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/brief_bias_join.py  v1.2
+tests/brief_bias_join.py  v1.3
+v1.3  2026-09-10  r336 - TABLE D (conviction) and TABLE E (per symbol). Operator:
+*"I also want to know if per symbol conviction correlates."* D buckets each
+call by conviction QUARTILE OF THE DATA rather than an assumed 0..1 scale -
+the range is documented nowhere this repo owns, and hardcoded cut points are
+how `selector` silently broke when the brief's `scores` payload changed scale.
+Cut points are printed. BOTH tables are PER DIRECTION: the LONG calls carry
+~0 edge and the SHORT calls may carry some, so pooling would let three times
+as many uninformative LONG calls dilute the SHORT signal, or let the LONG base
+rate masquerade as conviction working. A conviction of NULL is EXCLUDED and
+counted, never bucketed as zero.
 v1.2  2026-09-10  r335 - `--rows`: ONE LINE PER SYMBOL-DAY. Operator, on reading
 v1.1's output: *"It's not by sym by day like I asked for."* The JOIN was always
 per symbol-day; the OUTPUT collapsed straight to five bucket totals, so a single
@@ -243,6 +253,121 @@ def trades_vs_brief(trades, comps, bias_of):
     return out
 
 
+def _quartiles(vals):
+    """Cut points from the DATA, not from an assumed 0..1 scale.
+
+    ⚠️ `conviction`'s range is not documented anywhere this repo owns, and
+    hardcoding 0.25/0.50/0.75 would silently put every row in one bucket if
+    the scale were 0..8 — which is exactly what happened to `selector` when
+    the brief's `scores` payload changed scale (the frozen-file incident).
+    Quartiles of what is actually there cannot be wrong about the scale, and
+    the cut points are PRINTED so the reader can see them.
+    """
+    xs = sorted(v for v in vals if v is not None)
+    if len(xs) < 8:
+        return []
+    return [xs[int(len(xs) * f)] for f in (0.25, 0.50, 0.75)]
+
+
+def by_conviction(comps, closes, prev):
+    """Does a stronger call hit more often? Per direction, per quartile.
+
+    🔑 PER DIRECTION, ALWAYS. The brief's LONG calls carry ~0 edge and its
+    SHORT calls may carry some; pooling them would let the SHORT signal be
+    diluted by three times as many uninformative LONG calls, or worse, let
+    the LONG base rate masquerade as conviction working.
+    """
+    cuts = _quartiles([c for (_d, _t), (_dir, _s, c) in comps.items()])
+    out = collections.defaultdict(lambda: {"n": 0, "hit": 0, "sum": 0.0})
+    base = collections.Counter()
+    nulls = 0
+    for (d, t), (called, _score, conv) in comps.items():
+        actual, pct = realized(closes, prev, d, t)
+        if actual is None or actual == "FLAT":
+            continue
+        base[actual] += 1
+        if called not in ("LONG", "SHORT"):
+            continue
+        if conv is None:
+            nulls += 1
+            continue
+        q = 0
+        for i, c in enumerate(cuts):
+            if conv >= c:
+                q = i + 1
+        b = out[(called, q)]
+        b["n"] += 1
+        b["sum"] += pct
+        if actual == called:
+            b["hit"] += 1
+    return out, base, cuts, nulls
+
+
+def by_symbol(comps, closes, prev):
+    """Per ticker: does the brief read some names better than others?"""
+    out = collections.defaultdict(lambda: collections.defaultdict(
+        lambda: {"n": 0, "hit": 0, "sum": 0.0}))
+    for (d, t), (called, _s, _c) in comps.items():
+        if called not in ("LONG", "SHORT"):
+            continue
+        actual, pct = realized(closes, prev, d, t)
+        if actual is None or actual == "FLAT":
+            continue
+        b = out[t][called]
+        b["n"] += 1
+        b["sum"] += pct
+        if actual == called:
+            b["hit"] += 1
+    return out
+
+
+def render_conviction(out, base, cuts, nulls):
+    print("\n  D. DOES CONVICTION CORRELATE?  (quartiles of the data)")
+    if not cuts:
+        print("     too few scored composites to cut into quartiles.")
+        return
+    tot = sum(base.values()) or 1
+    print("     cut points: {}".format(
+        " · ".join("%.3f" % c for c in cuts)))
+    print("     {:<8} {:<4} {:>5} {:>8} {:>9} {:>9}".format(
+        "called", "q", "n", "hit%", "edge", "avg move"))
+    print("     " + "-" * 47)
+    for call in ("LONG", "SHORT"):
+        br = base.get(call, 0) / tot
+        for q in range(4):
+            b = out.get((call, q))
+            if not b or not b["n"]:
+                continue
+            hit = b["hit"] / b["n"]
+            print("     {:<8} {:<4} {:>5} {:>7.1%} {:>+9.1%} {:>+8.2f}%".format(
+                call, "q%d" % (q + 1), b["n"], hit, hit - br, b["sum"] / b["n"]))
+    if nulls:
+        print("     ⚠️ {} call(s) had NO conviction value and are excluded, "
+              "not bucketed as zero.".format(nulls))
+    print("     ⚠️ edge is against that DIRECTION's base rate, as in table A.")
+    print("        A rising edge down the quartiles is conviction working;")
+    print("        a flat one means the number is decoration.")
+
+
+def render_by_symbol(out):
+    print("\n  E. PER SYMBOL — where the brief reads the tape")
+    print("     {:<6} {:>4} {:>7} {:>9} {:>4} {:>7} {:>9}".format(
+        "sym", "nL", "L hit%", "L move", "nS", "S hit%", "S move"))
+    print("     " + "-" * 50)
+    for t in sorted(out, key=lambda k: -(out[k]["SHORT"]["n"])):
+        L, S = out[t]["LONG"], out[t]["SHORT"]
+        def _f(b, key):
+            if not b["n"]:
+                return "—"
+            return ("%.0f%%" % (100.0 * b["hit"] / b["n"]) if key == "hit"
+                    else "%+.2f%%" % (b["sum"] / b["n"]))
+        print("     {:<6} {:>4} {:>7} {:>9} {:>4} {:>7} {:>9}".format(
+            t[:6], L["n"] or "—", _f(L, "hit"), _f(L, "mv"),
+            S["n"] or "—", _f(S, "hit"), _f(S, "mv")))
+    print("     ⚠️ Thin per-symbol counts. This is for spotting a name the")
+    print("        brief cannot read at all, not for ranking the good ones.")
+
+
 def symbol_day_rows(trades, comps, closes, prev, bias_of):
     """One row per (date, symbol) — what the brief said, what the tape did,
     what we did, and what it made.
@@ -409,6 +534,8 @@ def main(argv=None) -> int:
     ap.add_argument("--from", dest="frm")
     ap.add_argument("--to", dest="to")
     ap.add_argument("--all-history", action="store_true")
+    ap.add_argument("--by-symbol", action="store_true",
+                    help="add table E: per-ticker hit rates")
     ap.add_argument("--rows", action="store_true",
                     help="one line per symbol-day: brief, tape, ours, net")
     ap.add_argument("--selftest", action="store_true")
@@ -457,6 +584,10 @@ def main(argv=None) -> int:
     buckets = trades_vs_brief(trades, comps, bias_of)
     render(per, base, unmeasured, buckets, "{}..{}".format(lo, hi),
            getattr(meta_t, "severed", 0))
+    cv, cbase, cuts, nulls = by_conviction(comps, closes, prev)
+    render_conviction(cv, cbase, cuts, nulls)
+    if a.by_symbol:
+        render_by_symbol(by_symbol(comps, closes, prev))
     if a.rows:
         render_rows(symbol_day_rows(trades, comps, closes, prev, bias_of))
     return 0
