@@ -1,5 +1,13 @@
 """
-database/trade_logger.py  v4.11
+database/trade_logger.py  v4.12
+v4.12  2026-09-10  r345 — `is_credit_position(record)`: ONE resolver for
+      "is this a short/credit position", because `is_short_position` had no
+      writer until r343 and every older row carries the default 0. The EXIT
+      PATH trusted that flag alone in two places, where the mistake is an
+      order in the wrong direction rather than a wrong number. Flag first,
+      then `credit_received > 0`, then `is_condor_leg`, then the condor's
+      name — the same evidence `position_manager` already used for P&L
+      signing, in one place instead of copied.
 v4.11  2026-09-08  r315 — `log_accretion`: a credit vertical that PARTIAL-filled
       and later fills more of the same structure is ONE position, so the row's
       size and basis move together — contracts, blended entry_premium, and the
@@ -260,6 +268,42 @@ class TradeRecord(dict):
     a typed object and a sqlite3.Row-compatible mapping.
     """
     pass
+
+
+def is_credit_position(record) -> bool:
+    """Is this record a SHORT/credit position? The flag first, then evidence.
+
+    🔴 r345 — `is_short_position` HAD NO WRITER UNTIL r343, so every row logged
+    before it carries the schema default 0 — credit spreads included. Any
+    consumer that trusts the flag ALONE therefore reads a credit spread as a
+    long, and two of those consumers are on the EXIT PATH, where the mistake
+    is an order in the wrong direction rather than a wrong number:
+      · `_close_order` picked SELL_TO_CLOSE instead of BUY_TO_CLOSE
+      · the stop's `pnl_pct` used the long formula, so the stop measured the
+        wrong direction of premium move
+    On paper that cost nothing. At a live broker it is a real order.
+    🔑 THE ROW'S OWN EVIDENCE, IN PRIORITY ORDER. `credit_received > 0` is
+    written at every credit entry site and always has been; `is_condor_leg` is
+    stamped on every credit vertical (v4.3); the strategy name is the last
+    resort. `position_manager` already resolved P&L signing this way, and the
+    close path is the one place that trusted a single field — which is why it
+    is the one place with a live consequence.
+    ⚠️ THE FLAG STILL WINS WHERE IT IS SET, so r343's forward-written rows are
+    authoritative and a genuine long cannot be flipped by a stray credit value.
+    ⚠️ AND A DEBIT IS UNTOUCHED: ORB and Runaway write no credit, carry
+    `is_condor_leg = 0` and are not the condor, so every branch returns False —
+    that half was accidentally correct and must not move.
+    """
+    if record.get("is_short_position"):
+        return True
+    try:
+        if float(record.get("credit_received") or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    if record.get("is_condor_leg"):
+        return True
+    return str(record.get("strategy") or "") == "IronCondorStrategy"
 
 
 def make_record(**kwargs) -> TradeRecord:

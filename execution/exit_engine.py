@@ -1,5 +1,14 @@
 """
-execution/exit_engine.py  v4.10
+execution/exit_engine.py  v4.11
+v4.11  2026-09-10  r345 — THE EXIT PATH STOPS TRUSTING `is_short_position` ALONE.
+      That column had NO WRITER anywhere until r343, so every credit spread
+      reached this file as 0. Two consequences, and only one was cosmetic:
+      `_close_order` resolved to SELL_TO_CLOSE — selling MORE short rather
+      than buying to close — and the stop's `pnl_pct` used the long formula,
+      measuring the wrong direction of premium move. Both now go through
+      `trade_logger.is_credit_position`, which takes the flag when set and
+      otherwise reads the row's own evidence. Paper cost nothing here; a live
+      broker would have received a real order in the wrong direction.
 v4.10 2026-09-05  r269 — 🔴 THE FORMED CONDOR'S LOSS BOUNDARY IS SETTLED: there
       is NONE, deliberately. Operator: *"The current architecture covers all
       condor management. It's a settled issue."* The 15:45 close, the nickel
@@ -1989,7 +1998,11 @@ class ExitEngine:
         entry_prem = record.get("entry_premium", 0) or 0
         stop_prem  = record.get("stop_premium", 0) or 0
         contracts  = record.get("contracts", 0) or 0
-        is_short   = bool(record.get("is_short_position", 0))
+        # 🔴 r345 — RESOLVED, NOT READ. The flag had no writer before r343, so
+        # a credit spread arrived here as `0` and the stop measured the wrong
+        # direction of premium move.
+        from database.trade_logger import is_credit_position as _is_credit
+        is_short   = _is_credit(record)
 
         # sign-correct P&L: a long gains as premium rises, a short as it falls
         if is_short:
@@ -2716,7 +2729,12 @@ class ExitEngine:
             logger.error("Cannot close: no option_symbol in record")
             return None
         # v3.5: an adopted SHORT leg must BUY to close, not sell more short.
-        action = (OrderAction.BUY_TO_CLOSE if record.get("is_short_position")
+        # 🔴 r345 — THE ONE PLACE WHERE THIS WAS A LIVE ORDER, NOT A REPORT.
+        # With `is_short_position` unwritten, every credit spread resolved to
+        # SELL_TO_CLOSE — selling MORE short instead of buying to close.
+        # Harmless on paper; a real order at a broker.
+        from database.trade_logger import is_credit_position as _is_credit
+        action = (OrderAction.BUY_TO_CLOSE if _is_credit(record)
                   else OrderAction.SELL_TO_CLOSE)
         leg = Leg(
             instrument_type = InstrumentType.EQUITY_OPTION,
