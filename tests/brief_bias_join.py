@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-tests/brief_bias_join.py  v1.4
+tests/brief_bias_join.py  v1.5
+v1.5  2026-09-10  r339 - `leg_weight` and `composite_call` extracted so the
+DAILY BOARD and this study share ONE weighting rule. `tools/brief_sigint.py`
+now prints an SPX call every morning and this file scores it against the tape;
+two implementations would drift and the board would end up advertising a
+signal the study never measured. Same reason `price_bias` lives in exactly one
+place. No behaviour change to table F - `spx_composite` calls the extracted
+helper and its numbers are unchanged.
 v1.4  2026-09-10  r338 - TABLE F: an SPX call built from the constituents the
 brief DOES score. Operator: *"we cannot have our largest net symbol be silent
 on that brief."* SPX is in market_brief's `_NON_EQUITY`, never polled, and is
@@ -387,6 +394,44 @@ SPX_PROXY = ("NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "UNH", "CRM",
              "AMD", "NFLX", "MU", "CVX", "PLTR")
 
 
+def leg_weight(called, conv, floor=None):
+    """One constituent's signed contribution, or None if it does not count.
+
+    🔑 EXTRACTED AT r338 SO THE DAILY BOARD AND THE STUDY SHARE ONE RULE.
+    `tools/brief_sigint.py` prints the SPX call every morning and this file
+    scores it against the tape; if each implemented the weighting separately
+    they would drift, and the board would then be advertising a signal the
+    study never measured. Same reason `price_bias` lives in exactly one place.
+    """
+    if called not in ("LONG", "SHORT") or conv is None:
+        return None
+    if floor is not None and conv < floor:
+        return None
+    return conv if called == "LONG" else -conv
+
+
+def composite_call(rows, floor=None, members=SPX_PROXY):
+    """[(ticker, LONG|SHORT|NEUT, score, conviction)] -> (call, avg, n).
+
+    The single-day form the board needs. `call` is NEUT when the signed sum
+    is exactly zero or when nothing cleared the floor — a composite with no
+    contributors is not a neutral view, and the caller is told n=0 so it can
+    say which.
+    """
+    tot, k = 0.0, 0
+    for t, called, _score, conv in rows:
+        if t not in members:
+            continue
+        w = leg_weight(called, conv, floor)
+        if w is None:
+            continue
+        tot += w
+        k += 1
+    if not k or tot == 0:
+        return "NEUT", 0.0, k
+    return ("LONG" if tot > 0 else "SHORT"), tot / k, k
+
+
 def spx_composite(comps, closes, prev, floor=None, members=SPX_PROXY):
     """Can the constituents' calls stand in for the SPX call the brief never makes?
 
@@ -407,12 +452,13 @@ def spx_composite(comps, closes, prev, floor=None, members=SPX_PROXY):
     """
     per_day = collections.defaultdict(lambda: {"sum": 0.0, "n": 0})
     for (d, t), (called, _s, conv) in comps.items():
-        if t not in members or called not in ("LONG", "SHORT") or conv is None:
+        if t not in members:
             continue
-        if floor is not None and conv < floor:
+        w = leg_weight(called, conv, floor)
+        if w is None:
             continue
         b = per_day[d]
-        b["sum"] += conv if called == "LONG" else -conv
+        b["sum"] += w
         b["n"] += 1
     rows, base = [], collections.Counter()
     for d, b in sorted(per_day.items()):
