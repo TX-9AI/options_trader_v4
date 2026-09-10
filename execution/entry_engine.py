@@ -1,5 +1,20 @@
 """
-execution/entry_engine.py  v4.8
+execution/entry_engine.py  v4.9
+v4.9  2026-09-10  r340 — 🔴 THE CONTRACT IS ON THE ROW NOW. A single-leg entry
+      recorded `symbol = INSTRUMENT` — the UNDERLYING — and nothing naming the
+      option, so ORB and Runaway trades were never replayable against
+      `quote_series`. `exit_replay` refused 301 of 337 rows with "no leg
+      symbols on row", and no symbol-format join could rescue them because
+      there was nothing on the row to join. The credit-spread path in main.py
+      has written `option_symbol` all along; this factory never did.
+      🔑 ONE LINE, IN THE SHARED FACTORY, which is §7 working as intended:
+      `enter()` and the supervisor's standing-offer path both go through
+      `_record_kwargs`, so neither can drift from the other. A butterfly
+      leaves it empty and keeps lower/center/upper.
+      ⚠️ FORWARD-ONLY. Trades already in the book stay unreplayable — this
+      stops the wall being hit a fourth time, it does not undo it.
+      ⚠️ No schema change: `option_symbol` has existed in the trades table
+      since the credit path needed it.
 v4.8  2026-09-04  r240 — 🔴 THE ORB BOUNDS ARE WRITTEN BY CAPABILITY,
       NOT BY NAME — rebuilding r226, which was cut on 2026-09-03 and NEVER
       LANDED (no commit on any branch; its BACKLOG entry reached git only
@@ -620,8 +635,25 @@ class EntryEngine:
         construction site is WORKING_AGREEMENT 7's exact failure — two versions
         that look correct in isolation and drift on the field nobody compares.
         """
+        # 🔴 r340 — THE CONTRACT ITSELF, ON THE ROW. Until now a single-leg
+        # entry recorded `symbol = INSTRUMENT` (the underlying) and NOTHING
+        # naming the option, so ORB and Runaway trades could never be replayed
+        # against `quote_series`: `exit_replay` refused 301 of 337 rows with
+        # "no leg symbols on row", and no join could fix it because there was
+        # nothing on the row to join. The credit-spread path in main.py has
+        # written `short_symbol`/`option_symbol` all along; the single-leg
+        # factory never did.
+        # 🔑 IT GOES HERE AND ONLY HERE. Both lineages — `enter()` on a
+        # confirmed fill, and the supervisor discovering a standing offer
+        # minutes later with no signal in memory — call this function, which
+        # is the whole point of §7. A butterfly leaves it empty and keeps its
+        # lower/center/upper columns; the getattr chain never raises.
+        # ⚠️ FORWARD-ONLY. Trades already in the book stay unreplayable; this
+        # stops the wall being hit a fourth time, it does not undo it.
         return dict(
             symbol            = INSTRUMENT,
+            option_symbol     = (getattr(getattr(signal, "contract", None),
+                                         "symbol", "") or ""),
             strategy          = signal.strategy_name,
             setup_type        = signal.setup_type,
             direction         = signal.direction,
