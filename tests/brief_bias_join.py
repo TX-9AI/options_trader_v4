@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-tests/brief_bias_join.py  v1.3
+tests/brief_bias_join.py  v1.4
+v1.4  2026-09-10  r338 - TABLE F: an SPX call built from the constituents the
+brief DOES score. Operator: *"we cannot have our largest net symbol be silent
+on that brief."* SPX is in market_brief's `_NON_EQUITY`, never polled, and is
+the largest net symbol in the book. Thirteen panel names are members and are
+scored daily. Conviction-weighted sum, NOT a vote count - a count would let
+five weak calls outrank two strong ones, and r336 established a call below the
+floor is worse than no call. Printed twice, ungated and floor-gated, so the
+floor's effect on the composite is visible rather than assumed. EQUAL WEIGHT
+is a limitation and is labelled as one: index weights are nowhere in these
+repos, so this tests DIRECTION only and buys real weights only if direction
+works. QQQ and SPX are excluded from the members - an index and an ETF are not
+constituents, and including SPX would put the predicted thing on both sides.
 v1.3  2026-09-10  r336 - TABLE D (conviction) and TABLE E (per symbol). Operator:
 *"I also want to know if per symbol conviction correlates."* D buckets each
 call by conviction QUARTILE OF THE DATA rather than an assumed 0..1 scale -
@@ -368,6 +380,92 @@ def render_by_symbol(out):
     print("        brief cannot read at all, not for ranking the good ones.")
 
 
+# SPX constituents among the scored panel. QQQ and SPX are excluded: an index
+# and an ETF are not members, and including either would let the thing being
+# predicted appear on both sides of the join.
+SPX_PROXY = ("NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "UNH", "CRM",
+             "AMD", "NFLX", "MU", "CVX", "PLTR")
+
+
+def spx_composite(comps, closes, prev, floor=None, members=SPX_PROXY):
+    """Can the constituents' calls stand in for the SPX call the brief never makes?
+
+    🔴 WHY THIS EXISTS. SPX sits in market_brief's `_NON_EQUITY` and is never
+    polled, so the largest net symbol in the book is silent on the brief every
+    single day. These names ARE scored, and most of them move the index.
+
+    ⚠️ EQUAL WEIGHT, DELIBERATELY, AND IT IS A LIMITATION NOT A CHOICE OF
+    TASTE. Index weights are nowhere in these repos; NVDA and CRM do not move
+    SPX comparably. Equal weight is defensible for DIRECTION and wrong for
+    magnitude, so this tests direction only and buys weights only if the
+    direction works.
+
+    ⚠️ CONVICTION-WEIGHTED SUM, NOT A VOTE COUNT. A vote count would let five
+    weak calls outrank two strong ones, and r336 established that a call below
+    the floor is worse than no call — so `floor` drops those entirely rather
+    than letting them dilute the sum.
+    """
+    per_day = collections.defaultdict(lambda: {"sum": 0.0, "n": 0})
+    for (d, t), (called, _s, conv) in comps.items():
+        if t not in members or called not in ("LONG", "SHORT") or conv is None:
+            continue
+        if floor is not None and conv < floor:
+            continue
+        b = per_day[d]
+        b["sum"] += conv if called == "LONG" else -conv
+        b["n"] += 1
+    rows, base = [], collections.Counter()
+    for d, b in sorted(per_day.items()):
+        if not b["n"]:
+            continue
+        actual, pct = realized(closes, prev, d, "SPX")
+        if actual is None or actual == "FLAT":
+            continue
+        base[actual] += 1
+        called = "LONG" if b["sum"] > 0 else "SHORT" if b["sum"] < 0 else "FLAT"
+        rows.append((d, called, b["sum"] / b["n"], b["n"], actual, pct))
+    return rows, base
+
+
+def render_spx(rows, base, floor_label):
+    print("\n  F. SPX COMPOSITE from constituents  [{}]".format(floor_label))
+    if not rows:
+        print("     no measurable SPX sessions — the composite cannot be scored.")
+        return
+    tot = sum(base.values()) or 1
+    print("     SPX base rate: LONG {:.1%} · SHORT {:.1%}   (n={})".format(
+        base.get("LONG", 0) / tot, base.get("SHORT", 0) / tot, tot))
+    per = collections.defaultdict(lambda: {"n": 0, "hit": 0, "sum": 0.0})
+    for _d, called, _str, _k, actual, pct in rows:
+        if called == "FLAT":
+            continue
+        b = per[called]
+        b["n"] += 1
+        b["sum"] += pct
+        if called == actual:
+            b["hit"] += 1
+    print("     {:<8} {:>5} {:>8} {:>8} {:>9} {:>9}".format(
+        "called", "n", "hit%", "base%", "edge", "avg move"))
+    print("     " + "-" * 51)
+    for call in ("LONG", "SHORT"):
+        b = per.get(call)
+        if not b or not b["n"]:
+            print("     {:<8} {:>5}        —        —         —         —"
+                  .format(call, 0))
+            continue
+        hit = b["hit"] / b["n"]
+        br = base.get(call, 0) / tot
+        print("     {:<8} {:>5} {:>7.1%} {:>8.1%} {:>+9.1%} {:>+8.2f}%".format(
+            call, b["n"], hit, br, hit - br, b["sum"] / b["n"]))
+    strong = [r for r in rows if abs(r[2]) >= 0.5 and r[1] != "FLAT"]
+    if strong:
+        h = sum(1 for r in strong if r[1] == r[4]) / len(strong)
+        print("     agreement |avg conv| >= 0.50: n={} hit {:.1%}".format(
+            len(strong), h))
+    print("     ⚠️ EQUAL WEIGHT — index weights are not in these repos, so this")
+    print("        tests DIRECTION only. Magnitude would need real weights.")
+
+
 def symbol_day_rows(trades, comps, closes, prev, bias_of):
     """One row per (date, symbol) — what the brief said, what the tape did,
     what we did, and what it made.
@@ -534,6 +632,10 @@ def main(argv=None) -> int:
     ap.add_argument("--from", dest="frm")
     ap.add_argument("--to", dest="to")
     ap.add_argument("--all-history", action="store_true")
+    ap.add_argument("--spx", action="store_true",
+                    help="table F: an SPX call built from its constituents")
+    ap.add_argument("--floor", type=float, default=0.640,
+                    help="conviction floor for the gated composite (r336)")
     ap.add_argument("--by-symbol", action="store_true",
                     help="add table E: per-ticker hit rates")
     ap.add_argument("--rows", action="store_true",
@@ -586,6 +688,11 @@ def main(argv=None) -> int:
            getattr(meta_t, "severed", 0))
     cv, cbase, cuts, nulls = by_conviction(comps, closes, prev)
     render_conviction(cv, cbase, cuts, nulls)
+    if a.spx:
+        r_all, b_all = spx_composite(comps, closes, prev, floor=None)
+        render_spx(r_all, b_all, "all calls")
+        r_fl, b_fl = spx_composite(comps, closes, prev, floor=a.floor)
+        render_spx(r_fl, b_fl, "floor {:.3f}".format(a.floor))
     if a.by_symbol:
         render_by_symbol(by_symbol(comps, closes, prev))
     if a.rows:

@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_brief_bias_join.py  v1.2
+tests/check_brief_bias_join.py  v1.3
+v1.3  2026-09-10  r338 - J11 and J12 for table F. J11 plants five weak LONG
+      calls against two strong SHORT ones: a vote count returns LONG and a
+      conviction-weighted sum returns SHORT, which is the whole difference
+      between the two designs. J12 pins that the floor drops sub-floor calls
+      entirely rather than shrinking them, and that SPX and QQQ can never be
+      members of the composite that predicts SPX.
 v1.2  2026-09-10  r336 - J9 and J10 for table D. J9 plants conviction on a
       0..8 scale and asserts the quartiles still SPREAD: hardcoded 0..1 cut
       points would put every call in one bucket and print a flat correlation
@@ -25,6 +31,10 @@ arithmetic alone.
       counts as AGREE with a BULLISH brief
   J4  a symbol-day with no prior-session close is EXCLUDED, not a miss
   J5  the severed count is surfaced when trades come from behind a marker
+  J11 the SPX composite is conviction-WEIGHTED, not a vote count: two strong
+      calls outrank five weak ones
+  J12 the floor-gated composite drops sub-floor calls entirely, and SPX/QQQ
+      are never members of their own predictor
   J9  conviction buckets are QUARTILES OF THE DATA, so an unexpected scale
       cannot collapse every call into one bucket
   J10 a NULL conviction is excluded and counted, never bucketed as zero
@@ -177,6 +187,30 @@ def main():
         b["n"] for b in cv.values()),
         "null conviction(s) excluded={}".format(nulls))
 
+    # J11 — five weak LONGs vs two strong SHORTs on one day. A vote count says
+    # LONG; a conviction-weighted sum says SHORT.
+    day = "2026-09-02"
+    weak = {(day, t): ("LONG", 1.0, 0.20) for t in
+            ("NVDA", "AMZN", "GOOGL", "META", "AVGO")}
+    strong = {(day, t): ("SHORT", 1.0, 0.95) for t in ("TSLA", "UNH")}
+    cmix = dict(weak); cmix.update(strong)
+    clx = {("2026-09-01", "SPX"): 100.0, (day, "SPX"): 99.0}
+    pvx = bj.prior_sessions(clx)
+    rws, _b = bj.spx_composite(cmix, clx, pvx, floor=None)
+    check("J11", len(rws) == 1 and rws[0][1] == "SHORT",
+          "5x0.20 LONG vs 2x0.95 SHORT -> {}".format(
+              rws[0][1] if rws else "no row"))
+
+    # J12 — with the floor, the five weak calls vanish and SPX itself is
+    # never a member of the composite that predicts it.
+    rwf, _b2 = bj.spx_composite(cmix, clx, pvx, floor=0.640)
+    poisoned = dict(cmix); poisoned[(day, "SPX")] = ("LONG", 1.0, 0.99)
+    rwp, _b3 = bj.spx_composite(poisoned, clx, pvx, floor=0.640)
+    check("J12", rwf and rwf[0][3] == 2 and "SPX" not in bj.SPX_PROXY
+          and "QQQ" not in bj.SPX_PROXY and rwp[0][3] == 2,
+          "gated members={} spx_self_excluded={}".format(
+              rwf[0][3] if rwf else "-", rwp[0][3] if rwp else "-"))
+
     del ws.load_trades_versioned
     try:
         with redirect_stdout(io.StringIO()):
@@ -191,7 +225,7 @@ def main():
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (11)")
+    print("ALL PASS (13)")
     return 0
 
 
