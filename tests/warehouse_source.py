@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/warehouse_source.py  v1.3
+tests/warehouse_source.py  v1.4
+v1.4  2026-09-09  r328 - `iter_series`, a STREAMING sibling of load_series.
+load_series returns a list, so a caller holds the whole window at once;
+exit_replay was OOM-killed on a single date of quote_series even after r326
+narrowed it from the window to one session. The generator lets a consumer
+index only the symbols it needs. load_series is unchanged and still used by
+every other caller.
 v1.3  2026-09-07  r301 - DAY_ONE 2026-08-25 -> 2026-09-01, epoch 3. Moves in
 lockstep with day_trader_pro's ENGINE_EPOCH: two constants in two repos meaning
 one thing is the drift this codebase keeps finding, so they ship together.
@@ -158,6 +164,32 @@ def load_series(table, dates, symbols=None, s3=None):
         if isinstance(rec, list):
             rows.extend(r for r in rec if isinstance(r, dict))
     return rows, meta
+
+
+def iter_series(table, dates, meta, symbols=None, s3=None):
+    """Rows of one series table, ONE OBJECT AT A TIME. Nothing accumulates.
+
+    🔴 r328 — ADDED BECAUSE `load_series` CANNOT BE MADE SMALL ENOUGH.
+    It returns a list, so the caller holds every row in the window at once;
+    r326 narrowed exit_replay from the whole window to one DATE and control
+    was still OOM-killed on a single session, because `quote_series` is a
+    per-tick stream over ~250 chain symbols and one day of it does not fit
+    either. Narrowing the window further only moves the wall.
+    🔑 THE CALLER DECIDES WHAT TO KEEP. A consumer that needs five leg
+    symbols out of two hundred can now index only those, and its memory is
+    bounded by what it wants rather than by what the day happened to hold.
+    ⚠️ `meta` is passed IN and filled as the generator is consumed, so the
+    banner is only truthful AFTER the loop. Read `meta.error` at the end,
+    never before — an error mid-stream is real and the partial rows are not
+    a result.
+    """
+    s3 = s3 or client()
+    for env in _envelopes(s3, table, dates, meta, symbols):
+        rec = env.get("record")
+        if isinstance(rec, list):
+            for r in rec:
+                if isinstance(r, dict):
+                    yield r
 
 
 def load_derived(table, dates, s3=None):

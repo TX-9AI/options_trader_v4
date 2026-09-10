@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_exit_replay_streams.py  v1.0
+tests/check_exit_replay_streams.py  v1.1
+v1.1  2026-09-09  r328 — E1 now asserts STREAMING, and that `load_series` is
+      never reached at all. The r326 version asserted one DATE per call, which
+      the code satisfied while still being OOM-killed on that one date: the
+      list was the problem, not the window. A gate can be right about the
+      thing it measures and wrong about the thing that matters.
 v1.0  2026-09-09  r326 — the land gate for exit_replay's S3 path.
 
 🔴 WHAT IT CATCHES. v1.3 called `load_series("quote_series", dates)` with the
@@ -11,7 +16,7 @@ the menu printed `Killed`. There is no traceback in that failure and no
 Python-level error to assert on — so the property has to be checked at the
 CALL, not at the outcome.
 
-  E1  run_s3 asks for ONE date per load_series call, never the window
+  E1  run_s3 STREAMS quote_series per symbol-day; it never calls load_series
   E2  a date with no closed trades never loads quotes at all
   E3  every date that HAS trades is replayed
   E4  render() still draws from a filled accumulator
@@ -47,7 +52,7 @@ class _Meta:
 
 
 def main():
-    calls = {"series": [], "trades": []}
+    calls = {"series": [], "trades": [], "load_series": []}
     DATES = ["2026-09-01", "2026-09-02", "2026-09-03"]
     WITH_TRADES = {"2026-09-02"}
 
@@ -58,15 +63,26 @@ def main():
         calls["trades"].append(list(dates))
         d = dates[0]
         rows = ([{"status": "closed", "trade_id": 1, "strategy": "S",
-                  "option_side": "call"}] if d in WITH_TRADES else [])
+                  "option_side": "call", "symbol": "NVDA",
+                  "short_symbol": ".X"}] if d in WITH_TRADES else [])
         return rows, _Meta("trades " + d)
 
     def load_series(table, dates, symbols=None, s3=None):
-        calls["series"].append((table, list(dates)))
+        # 🔴 r328 — REACHING THIS AT ALL IS THE FAILURE. load_series returns a
+        # list, which is what got the process OOM-killed on a single date.
+        calls["load_series"].append((table, list(dates)))
         return [], _Meta("{} {}".format(table, dates[0]))
 
+    def iter_series(table, dates, meta, symbols=None, s3=None):
+        calls["series"].append((table, list(dates), list(symbols or [])))
+        meta.read = 1
+        return iter([{"streamer_symbol": ".X", "ts_epoch": 1.0,
+                      "bid_price": 1.0, "ask_price": 1.1}])
+
+    ws.Meta = _Meta
     ws.load_trades = load_trades
     ws.load_series = load_series
+    ws.iter_series = iter_series
     sys.modules["warehouse_source"] = ws
 
     import exit_replay as er
@@ -75,11 +91,12 @@ def main():
     er.accumulate = lambda rows, fetch, acc: seen.append(len(rows))
     rc = er.run_s3(types.SimpleNamespace(all_history=True))
 
-    one_date = all(len(d) == 1 for _t, d in calls["series"])
-    check("E1", bool(calls["series"]) and one_date,
-          "load_series calls: {}".format(calls["series"]))
+    one_date = all(len(d) == 1 and len(sy) == 1 for _t, d, sy in calls["series"])
+    check("E1", bool(calls["series"]) and one_date and not calls["load_series"],
+          "iter_series {} · load_series {}".format(calls["series"],
+                                                   calls["load_series"] or "never"))
     check("E2", len(calls["series"]) == len(WITH_TRADES),
-          "{} quote load(s) for {} date(s) with trades, {} dates total"
+          "{} streamed load(s) for {} date(s) with trades, {} dates total"
           .format(len(calls["series"]), len(WITH_TRADES), len(DATES)))
     check("E3", seen == [1], "replayed batches: {}".format(seen))
 

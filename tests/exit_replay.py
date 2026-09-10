@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-tests/exit_replay.py  v1.4
+tests/exit_replay.py  v1.5
+v1.5  2026-09-09  r328 - STILL OOM-KILLED AFTER r326, ON ONE DATE. Per-date was
+the right direction and not far enough: quote_series is a per-tick stream over
+~250 chain symbols and a single session does not fit control's memory either.
+Now streams via warehouse_source.iter_series and INDEXES ONLY THE STREAMER
+SYMBOLS THIS DATE'S TRADES NAME, taken from legs_of - the same function the
+replay uses. Memory is bounded by what the trades need rather than by what the
+tape held. Progress prints per symbol-day, so a slow one is visible while it is
+slow.
 v1.4  2026-09-09  r326 - THE S3 PATH READ ONE DATE AT A TIME; IT USED TO READ THE
 WHOLE WINDOW AND GOT OOM-KILLED. `load_series("quote_series", dates)` returned
 every batch row for every date in one list before a single trade was replayed,
@@ -279,29 +287,31 @@ def run(rows, fetch) -> int:
 
 
 def run_s3(a) -> int:
-    """ONE DATE AT A TIME. Memory is bounded by the busiest single session.
+    """ONE SYMBOL-DAY AT A TIME, STREAMED, INDEXING ONLY THE LEGS WE NEED.
 
-    🔴 r326 — THIS IS THE FIX FOR THE OOM. v1.1's comment said "ONE LIST CALL,
-    NOT ONE PER TRADE", and that half was right: a fetch per trade would be
-    the expensive path. But it loaded the whole WINDOW's quote batches into
-    one list before replaying anything, and over `all` history the process was
-    killed by the kernel — the menu printed `Killed` with no traceback, which
-    is indistinguishable from a crash in the report itself.
-    ⚠️ PER DATE IS NOT PER TRADE. Every trade on a date still shares one
-    indexed load, so the r86 batching argument is preserved exactly; only the
-    window shrinks, from ~70 sessions to one.
-    🔑 AND A DATE WITH NO TRADES NEVER LOADS QUOTES AT ALL. Over `all` that
-    skipped 60+ sessions of listing on 2026-09-09, including the pre-epoch
-    dates r314 emptied — work whose result was guaranteed to be nothing.
-    ⚠️ A trade is replayed against its OWN date's quotes. `dt=` is the ET
-    trading day in every stream by design, so a same-session position finds
-    its path; a hypothetical trade held across a date boundary would not, and
-    would refuse BY NAME rather than score wrongly.
+    🔴 r328 — r326 WAS THE RIGHT DIRECTION AND NOT FAR ENOUGH. It narrowed the
+    load from the whole window to one date, and control was still OOM-killed
+    on a SINGLE session: `quote_series` is a per-tick stream over ~250 chain
+    symbols, and one day of it does not fit either. Narrowing the window again
+    only moves the wall — the list itself had to go.
+    🔑 TWO CHANGES, AND THE SECOND IS THE ONE THAT MATTERS. (1) `iter_series`
+    streams envelopes instead of returning a list. (2) **We index only the
+    streamer symbols this date's trades actually name.** A session's quotes
+    cover the whole chain; a day's trades touch a handful of contracts, and
+    `legs_of` already knows exactly which. Memory is now bounded by what the
+    trades need, not by what the tape held.
+    ⚠️ PER SYMBOL-DAY IS STILL NOT PER TRADE. Every trade on one underlying
+    shares one pass, so r86's batching argument is intact; the pass is just
+    filtered on the way through.
+    ⚠️ The refusal path is unchanged: a leg with no quotes in the window
+    refuses BY NAME. A leg dropped by this filter would be indistinguishable
+    from a leg the tape never carried, which is why `wanted` is built from
+    `legs_of` — the same function the replay uses — and never guessed.
     """
     import warehouse_source as ws
     dates = ws.dates_of(a)
     acc = blank_acc()
-    replayed_dates = 0
+    replayed = 0
     for d in dates:
         trades, m1 = ws.load_trades([d])
         if m1.error:
@@ -310,15 +320,47 @@ def run_s3(a) -> int:
         rows = [t for t in trades if (t.get("status") or "").lower() == "closed"]
         if not rows:
             continue
-        print("  " + m1.banner())
-        qrows, m2 = ws.load_series("quote_series", [d])
-        print("  " + m2.banner())
-        if m2.error:
-            return 1
-        accumulate(rows, _s3_fetch(qrows), acc)
-        replayed_dates += 1
-        del qrows                      # the batch is finished with; let it go
-    if not replayed_dates:
+        by_sym = defaultdict(list)
+        for r in rows:
+            by_sym[str(r.get("symbol") or "?")].append(r)
+        print(f"  {d}: {len(rows)} closed trade(s), {len(by_sym)} symbol(s)")
+        for sym in sorted(by_sym):
+            srows = by_sym[sym]
+            wanted = set()
+            for r in srows:
+                legs, _why = legs_of(r)
+                for lsym, _sign in (legs or ()):
+                    wanted.add(lsym)
+            if not wanted:
+                # no leg columns at all — accumulate so it refuses BY NAME
+                accumulate(srows, lambda *_a: [], acc)
+                continue
+            print(f"    {d} {sym}: {len(srows)} trade(s), "
+                  f"{len(wanted)} contract(s)", end="", flush=True)
+            meta = ws.Meta(f"quote_series {d} {sym}")
+            idx = defaultdict(list)
+            kept = 0
+            for q in ws.iter_series("quote_series", [d], meta, symbols=[sym]):
+                ss = q.get("streamer_symbol")
+                if ss in wanted:
+                    idx[ss].append((q.get("ts_epoch") or 0,
+                                    q.get("bid_price"), q.get("ask_price")))
+                    kept += 1
+            if meta.error:
+                print()
+                print("  " + meta.banner())
+                return 1
+            for v in idx.values():
+                v.sort()
+            print(f" — {meta.read} object(s), {kept} quote(s) kept")
+
+            def fetch(s_, lo, hi, _idx=idx):
+                return [p for p in _idx.get(s_, ()) if lo <= p[0] <= hi]
+
+            accumulate(srows, fetch, acc)
+            replayed += 1
+            idx.clear()
+    if not replayed:
         print("  no closed trades in the window — nothing to replay.")
     return render(acc)
 
