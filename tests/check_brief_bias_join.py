@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""
+tests/check_brief_bias_join.py  v1.0
+v1.0  2026-09-10  r333 / BRF.1 — the land gate for the brief-bias study.
+
+Drives `main()` end to end against a fixture brief DB, a fixture tape and a
+fixture trade set, so the whole render path is exercised rather than the
+arithmetic alone.
+
+  J0  the lookback: the window's FIRST session is measurable, not dropped
+  J1  edge is ALWAYS hit% minus that direction's base rate, on every row —
+      the invariant the whole study rests on. (The zero-edge case, an
+      always-LONG call on an up-only tape, is pinned in the selftest.)
+  J2  a blended hit rate is NEVER printed
+  J3  AGREE / DISAGREE are assigned by price_bias, so a PUT CREDIT spread
+      counts as AGREE with a BULLISH brief
+  J4  a symbol-day with no prior-session close is EXCLUDED, not a miss
+  J5  the severed count is surfaced when trades come from behind a marker
+  J6  it REFUSES if load_trades_versioned is absent — no quiet fallback to
+      the post-epoch window
+"""
+import io
+import os
+import sqlite3
+import sys
+import tempfile
+from contextlib import redirect_stdout
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+FAILS = []
+
+
+def check(name, ok, detail=""):
+    print("  {:<4} {}  {}".format(name, "PASS" if ok else "FAIL", detail))
+    if not ok:
+        FAILS.append(name)
+
+
+def _brief_db(path):
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE composites (id INTEGER PRIMARY KEY, "
+                "report_date TEXT, ticker TEXT, score REAL, direction TEXT, "
+                "conviction REAL)")
+    rows = [("2026-09-02", "N", 0.8, "BULLISH", 0.9),
+            ("2026-09-03", "N", 0.8, "BULLISH", 0.9),
+            ("2026-09-02", "M", 0.8, "BULLISH", 0.9),   # no prior close -> excl
+            ("2026-09-03", "Q", 0.7, "BEARISH", 0.6)]
+    con.executemany("INSERT INTO composites (report_date,ticker,score,"
+                    "direction,conviction) VALUES (?,?,?,?,?)", rows)
+    con.commit()
+    con.close()
+
+
+def main():
+    tmp = tempfile.mkdtemp()
+    db = os.path.join(tmp, "screener.db")
+    _brief_db(db)
+    os.environ["SCREENER_DB"] = db
+
+    import warehouse_source as ws
+    try:
+        import brief_bias_join as bj
+    except Exception as exc:                                    # noqa: BLE001
+        print("  FAIL  brief_bias_join did not import: {}".format(exc))
+        return 1
+
+    # ── fixture tape: N rises both days, Q falls. M has one session only.
+    def _envs(_s3, datatype, dates, meta, symbols=None):
+        tape = {("2026-09-01", "N"): 10.0, ("2026-09-02", "N"): 11.0,
+                ("2026-09-03", "N"): 12.0,
+                ("2026-09-02", "Q"): 50.0, ("2026-09-03", "Q"): 49.0,
+                ("2026-09-02", "M"): 5.0}
+        for (d, s), c in tape.items():
+            if d in dates:
+                yield {"symbol": s, "dt": d,
+                       "record": "ts,close\n1,{}\n".format(c)}
+
+    class _Meta:
+        listed = read = bad = severed = 0
+
+        def banner(self):
+            return "SOURCE: fixture, 3 behind a delete marker"
+
+    # ── fixture trades: a PUT CREDIT spread on N (bullish) = AGREE.
+    def _trades(dates, s3=None):
+        m = _Meta()
+        m.severed = 3
+        return [
+            {"status": "closed", "pnl_usd": 100.0, "_dt": "2026-09-02",
+             "symbol": "N", "option_side": "put", "is_short_position": 1},
+            {"status": "closed", "pnl_usd": -40.0, "_dt": "2026-09-02",
+             "symbol": "N", "option_side": "call", "is_short_position": 1},
+        ], m
+
+    ws._envelopes = _envs
+    ws.client = lambda: None
+    ws.Meta = lambda *_a, **_k: _Meta()
+    ws.load_trades_versioned = _trades
+    ws._et_today = lambda: "2026-09-03"
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = bj.main(["--from", "2026-09-01", "--to", "2026-09-03"])
+    out = buf.getvalue()
+
+    long_line = [l for l in out.splitlines() if l.strip().startswith("LONG")]
+    check("J0", bool(long_line) and long_line[0].split()[1] == "2",
+          "LONG n={} (both sessions measurable)".format(
+              long_line[0].split()[1] if long_line else "-"))
+    def _pc(x):
+        return float(x.rstrip("%").lstrip("+"))
+    bad = []
+    for ln in out.splitlines():
+        f = ln.split()
+        if f[:1] and f[0] in ("LONG", "SHORT") and len(f) >= 5 and "%" in f[2]:
+            hit, base_, edge = _pc(f[2]), _pc(f[3]), _pc(f[4])
+            if abs((hit - base_) - edge) > 0.15:
+                bad.append((f[0], hit, base_, edge))
+    check("J1", not bad and bool(long_line),
+          "edge = hit - base on every row" if not bad else "mismatch: {}".format(bad))
+    check("J2", "blended" in out.lower() and "not printed" in out.lower(),
+          "blended-rate warning present")
+    b_rows = {l.split()[0]: l for l in out.splitlines()
+              if l.strip().startswith(("AGREE", "DISAGREE"))}
+    check("J3", "AGREE" in b_rows and "DISAGREE" in b_rows
+          and "100" in b_rows["AGREE"] and "-40" in b_rows["DISAGREE"],
+          "AGREE={} DISAGREE={}".format(
+              b_rows.get("AGREE", "-").split()[1:4],
+              b_rows.get("DISAGREE", "-").split()[1:4]))
+    check("J4", "EXCLUDED" in out and "1 composite(s)" in out,
+          "excluded line present")
+    check("J5", "behind a delete marker" in out, "severed surfaced")
+
+    del ws.load_trades_versioned
+    try:
+        with redirect_stdout(io.StringIO()):
+            bj.main(["--from", "2026-09-01", "--to", "2026-09-03"])
+        refused = False
+    except SystemExit:
+        refused = True
+    check("J6", refused, "refuses without the versioned reader"
+          if refused else "ran anyway — silent fallback")
+
+    print("")
+    if FAILS:
+        print("FAILED: {}".format(", ".join(FAILS)))
+        return 1
+    print("ALL PASS (7)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

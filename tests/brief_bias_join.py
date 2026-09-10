@@ -1,0 +1,373 @@
+#!/usr/bin/env python3
+"""
+tests/brief_bias_join.py  v1.0
+v1.0  2026-09-10  r333 / BRF.1 step 2 — DOES THE MORNING BRIEF PREDICT THE
+      TAPE, AND DOES TRADING AGAINST IT COST MONEY? Operator's experiment.
+
+🔑 TWO QUESTIONS, DELIBERATELY NOT COLLAPSED — different samples, different
+failure modes, and only one of them is about our P&L:
+
+  A. BRIEF vs TAPE — did `composites.direction` match the realized
+     close-to-close move? NO TRADES INVOLVED, so it holds on every symbol-day
+     the brief scored including days we never traded the name. It is the
+     larger sample and the one that decides whether a gate is worth building.
+  B. TRADES vs BRIEF — closed trades split AGREE / DISAGREE / NEUTRAL against
+     the brief's call for that symbol-day, compared on EXPECTANCY.
+
+A brief that predicts nothing cannot be worth trading with; a brief that
+predicts well may still cost nothing to trade against if we rarely do it.
+One table cannot answer both, so two are printed and neither is summed.
+
+🔴 CLOSE-TO-CLOSE, GAP INCLUDED — OPERATOR'S RULING, 2026-09-10: *"The gap
+should be included because the report is cut before the open."* The brief
+publishes ~09:00 ET, so the move it calls begins at the PRIOR SESSION'S close.
+Open-to-close would credit it for a call the gap had already resolved.
+
+🔴 THE BASE RATE IS THE TRAP, AND IT IS ALREADY VISIBLE. BULLISH 703 ·
+BEARISH 344 · NEUTRAL 156 across 50 sessions — roughly 2:1. If the tape rose
+on most days, a blended hit rate reads as skill on the skew alone. **Skill is
+reported PER DIRECTION against the tape's own base rate in the same window,
+and a blended number is never printed.**
+
+🔑 TWO IMPORTS, NO FALLBACKS, BY DESIGN:
+  · `price_bias` from day_trader_pro/standings.py — the ONLY definition of
+    which way a position leans (call-ness XOR credit-ness, because a call
+    credit spread is bearish). A local copy would drift from the report the
+    operator reads.
+  · `load_trades_versioned` from warehouse_source (r332) — reads the
+    pre-epoch trades r314 soft-deleted, so the study gets all 50 sessions.
+If either is missing this tool REFUSES. A fallback would silently answer a
+smaller question and print it in the same font as the real one.
+
+⚠️ PRIOR SESSION IS PER SYMBOL, FROM THE TAPE. Not "the calendar day before"
+and not "the previous row in the composites table": a holiday, a weekend, or
+a box that sat out would otherwise drop the session — and Monday, the highest
+gap of the week, is exactly the one you cannot afford to lose.
+
+⚠️ DESCRIPTIVE. Nothing here sizes or gates anything. A counter-bias veto
+changes WHAT GETS TRADED and is the operator's call on evidence, not this
+tool's (WA §31, §5).
+
+Run (CONTROL):
+    python3 tests/brief_bias_join.py                   # 09-01 onward
+    python3 tests/brief_bias_join.py --all-history     # every composite
+    python3 tests/brief_bias_join.py --from 2026-07-06 --to 2026-08-31
+    python3 tests/brief_bias_join.py --selftest
+"""
+from __future__ import annotations
+
+import argparse
+import collections
+import csv
+import io
+import os
+import sqlite3
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+BRIEF_DB = os.environ.get("SCREENER_DB",
+                          os.path.expanduser("~/market-brief/screener.db"))
+DTP_DIR = os.environ.get("DTP_DIR", os.path.expanduser("~/day_trader_pro"))
+EPOCH = "2026-09-01"
+DIR_MAP = {"BULLISH": "LONG", "BEARISH": "SHORT", "NEUTRAL": "NEUT"}
+
+
+def load_price_bias():
+    """The ONE definition, imported from the report the operator reads."""
+    if DTP_DIR not in sys.path:
+        sys.path.insert(0, DTP_DIR)
+    try:
+        from standings import price_bias                        # noqa: WPS433
+    except Exception as exc:                                    # noqa: BLE001
+        raise SystemExit(
+            "  🔴 cannot import price_bias from {}/standings.py: {}\n"
+            "     That module owns the call/put x debit/credit rule and this\n"
+            "     tool will not restate it. Set DTP_DIR if control's repo is\n"
+            "     elsewhere.".format(DTP_DIR, exc))
+    return price_bias
+
+
+def load_composites(lo, hi, db=None):
+    """{(date, ticker): (LONG|SHORT|NEUT, score, conviction)}"""
+    db = db or BRIEF_DB
+    if not os.path.exists(db):
+        raise SystemExit("  🔴 brief db not found: {} (set SCREENER_DB)".format(db))
+    con = sqlite3.connect("file:{}?mode=ro".format(db), uri=True)
+    con.row_factory = sqlite3.Row
+    out = {}
+    # ⚠️ ORDERED so the LAST composite of a day wins. A day can carry more
+    # than one report tier; the latest call is the one that stood when the
+    # bell rang, and averaging two calls would invent a third that nobody made.
+    for r in con.execute(
+            "SELECT report_date, ticker, score, direction, conviction "
+            "FROM composites WHERE report_date >= ? AND report_date <= ? "
+            "ORDER BY report_date, id", (lo, hi)):
+        out[(r["report_date"], r["ticker"])] = (
+            DIR_MAP.get(str(r["direction"] or "").upper(), "?"),
+            r["score"], r["conviction"])
+    con.close()
+    return out
+
+
+def with_lookback(sessions, days=6):
+    """The window's sessions PLUS the calendar days before the first one.
+
+    🔴 FOUND BY THE GATE, NOT BY READING: without this the tape is fetched
+    only for the composite sessions, so the FIRST session in every window has
+    no prior close and is silently dropped — systematically, and worst on a
+    short window where one day is a large share of the sample. Six calendar
+    days covers a weekend plus a Monday holiday; the extra listings are ~15
+    objects each and only the ones that exist are read.
+    """
+    import datetime as _dt
+    first = _dt.date.fromisoformat(sessions[0])
+    pre = [(first - _dt.timedelta(days=i)).isoformat()
+           for i in range(days, 0, -1)]
+    return pre + list(sessions)
+
+
+def closes_from_envelopes(envs):
+    """{(date, symbol): last close} from raw/ohlc day-CSVs.
+
+    ⚠️ The symbol and day come off the ENVELOPE, not off the key. `_wrap`
+    stamps both, and parsing a path for data the object already carries is a
+    second source of truth for one value.
+    """
+    out = {}
+    for env in envs:
+        sym, day = env.get("symbol"), env.get("dt")
+        body = env.get("record")
+        if not sym or not day or not isinstance(body, str):
+            continue
+        rows = list(csv.DictReader(io.StringIO(body)))
+        if not rows:
+            continue
+        last = rows[-1]
+        val = last.get("close", last.get("Close"))
+        try:
+            out[(day, sym)] = float(val)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def prior_sessions(closes):
+    """{(date, sym): prior_date} — the previous session THAT SYMBOL traded."""
+    by_sym = collections.defaultdict(list)
+    for (d, s) in closes:
+        by_sym[s].append(d)
+    prev = {}
+    for s, days in by_sym.items():
+        days.sort()
+        for i, d in enumerate(days):
+            if i:
+                prev[(d, s)] = days[i - 1]
+    return prev
+
+
+def realized(closes, prev, date, sym):
+    """(LONG|SHORT|FLAT, pct) close-to-close, gap included. (None, None) if
+    the prior session's close is missing — UNMEASURABLE IS NOT FLAT."""
+    pd_ = prev.get((date, sym))
+    if pd_ is None:
+        return None, None
+    a, b = closes.get((pd_, sym)), closes.get((date, sym))
+    if a is None or b is None or not a:
+        return None, None
+    pct = (b - a) / a * 100.0
+    return ("LONG" if pct > 0 else "SHORT" if pct < 0 else "FLAT"), pct
+
+
+def brief_vs_tape(comps, closes, prev):
+    per = collections.defaultdict(lambda: {"n": 0, "hit": 0, "sum": 0.0})
+    base = collections.Counter()
+    unmeasured = 0
+    for (d, t), (called, _s, _c) in sorted(comps.items()):
+        actual, pct = realized(closes, prev, d, t)
+        if actual is None:
+            unmeasured += 1
+            continue
+        if actual == "FLAT":
+            continue
+        base[actual] += 1
+        if called not in ("LONG", "SHORT"):
+            continue
+        b = per[called]
+        b["n"] += 1
+        b["sum"] += pct
+        if actual == called:
+            b["hit"] += 1
+    return per, base, unmeasured
+
+
+def trades_vs_brief(trades, comps, bias_of):
+    out = collections.defaultdict(lambda: {"n": 0, "net": 0.0, "wins": 0})
+    for t in trades:
+        if str(t.get("status") or "").lower() != "closed":
+            continue
+        try:
+            pnl = float(t.get("pnl_usd"))
+        except (TypeError, ValueError):
+            continue
+        d, sym = str(t.get("_dt") or ""), t.get("symbol") or "?"
+        side = bias_of(t.get("option_side"), t.get("is_short_position"),
+                       t.get("is_condor_leg", 0), t.get("center_symbol", ""))
+        called = (comps.get((d, sym)) or ("", None, None))[0]
+        if side in ("NEUT", "?"):
+            key = "our trade NEUT/unknown"
+        elif not called or called == "?":
+            key = "no brief that day"
+        elif called == "NEUT":
+            key = "brief NEUTRAL"
+        else:
+            key = "AGREE" if side == called else "DISAGREE"
+        b = out[key]
+        b["n"] += 1
+        b["net"] += pnl
+        if pnl > 0:
+            b["wins"] += 1
+    return out
+
+
+def render(per, base, unmeasured, buckets, window, severed):
+    print("=" * 72)
+    print("  BRIEF BIAS JOIN — close-to-close, gap included   [{}]".format(window))
+    print("=" * 72)
+    if severed:
+        print("  ⚠️ {} trade object(s) read from BEHIND a delete marker "
+              "(r314's strip".format(severed))
+        print("     is intact; nothing was restored and the engine's view is "
+              "unchanged).")
+    tot = sum(base.values())
+    print("\n  A. BRIEF vs TAPE — no trades involved")
+    if not tot:
+        print("     no measurable symbol-days — the tape side is empty.")
+    else:
+        print("     tape base rate: LONG {:.1%} · SHORT {:.1%}   (n={})".format(
+            base.get("LONG", 0) / tot, base.get("SHORT", 0) / tot, tot))
+        print("     {:<8} {:>5} {:>8} {:>8} {:>9} {:>9}".format(
+            "called", "n", "hit%", "base%", "edge", "avg move"))
+        print("     " + "-" * 51)
+        for call in ("LONG", "SHORT"):
+            b = per.get(call)
+            if not b or not b["n"]:
+                print("     {:<8} {:>5}        —        —         —         —"
+                      .format(call, 0))
+                continue
+            hit = b["hit"] / b["n"]
+            br = base.get(call, 0) / tot
+            print("     {:<8} {:>5} {:>7.1%} {:>8.1%} {:>+9.1%} {:>+8.2f}%"
+                  .format(call, b["n"], hit, br, hit - br, b["sum"] / b["n"]))
+        print("     ⚠️ edge = hit% MINUS the tape's own base rate for that")
+        print("        direction. The brief calls up about twice as often as")
+        print("        down, so a BLENDED hit rate would read as skill on the")
+        print("        skew alone. It is not printed.")
+    if unmeasured:
+        print("     ⚠️ {} composite(s) had no prior-session close and are "
+              "EXCLUDED,".format(unmeasured))
+        print("        not counted as misses.")
+
+    print("\n  B. TRADES vs BRIEF — this one is about us")
+    print("     {:<23} {:>5} {:>11} {:>10} {:>7}".format(
+        "bucket", "n", "net", "exp/trade", "win%"))
+    print("     " + "-" * 58)
+    any_row = False
+    for k in ("AGREE", "DISAGREE", "brief NEUTRAL", "no brief that day",
+              "our trade NEUT/unknown"):
+        b = buckets.get(k)
+        if not b or not b["n"]:
+            continue
+        any_row = True
+        print("     {:<23} {:>5} {:>11,.0f} {:>10,.0f} {:>6.0%}".format(
+            k, b["n"], b["net"], b["net"] / b["n"], b["wins"] / b["n"]))
+    if not any_row:
+        print("     no closed trades in the window.")
+    print("\n  ⚠️ DESCRIPTIVE. Nothing here sizes or gates anything. A")
+    print("     counter-bias veto changes WHAT GETS TRADED and is the")
+    print("     operator's call on evidence, not this tool's (WA §31).")
+
+
+def selftest() -> int:
+    ok = True
+    closes = {("2026-09-01", "N"): 100.0, ("2026-09-02", "N"): 102.0,
+              ("2026-09-03", "N"): 101.0}
+    prev = prior_sessions(closes)
+    ok &= prev[("2026-09-02", "N")] == "2026-09-01"
+    a, pct = realized(closes, prev, "2026-09-02", "N")
+    ok &= a == "LONG" and abs(pct - 2.0) < 1e-9
+    ok &= realized(closes, prev, "2026-09-03", "N")[0] == "SHORT"
+    # first session of a symbol has no prior close -> unmeasurable, not FLAT
+    ok &= realized(closes, prev, "2026-09-01", "N") == (None, None)
+    # a weekend gap: the prior SESSION, not the calendar day before
+    cl2 = {("2026-09-04", "N"): 10.0, ("2026-09-08", "N"): 11.0}
+    p2 = prior_sessions(cl2)
+    ok &= p2[("2026-09-08", "N")] == "2026-09-04"
+
+    # THE BASE-RATE GUARD: always-LONG on an up-only tape must show ZERO edge.
+    comps = {("2026-09-02", "N"): ("LONG", 1.0, 1.0),
+             ("2026-09-03", "N"): ("LONG", 1.0, 1.0)}
+    cl3 = {("2026-09-01", "N"): 10.0, ("2026-09-02", "N"): 11.0,
+           ("2026-09-03", "N"): 12.0}
+    per, base, _u = brief_vs_tape(comps, cl3, prior_sessions(cl3))
+    edge = per["LONG"]["hit"] / per["LONG"]["n"] - base["LONG"] / sum(base.values())
+    ok &= abs(edge) < 1e-9
+
+    # a CSV with a header and two rows yields the LAST close
+    env = [{"symbol": "N", "dt": "2026-09-02",
+            "record": "ts,open,close\n1,1,5.0\n2,1,7.5\n"}]
+    ok &= closes_from_envelopes(env) == {("2026-09-02", "N"): 7.5}
+    # the lookback: the window's first session must have a prior day fetched
+    wl = with_lookback(["2026-09-02", "2026-09-03"])
+    ok &= wl[-2:] == ["2026-09-02", "2026-09-03"] and "2026-08-27" in wl
+    print("brief_bias_join selftest:", "ALL PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--from", dest="frm")
+    ap.add_argument("--to", dest="to")
+    ap.add_argument("--all-history", action="store_true")
+    ap.add_argument("--selftest", action="store_true")
+    a = ap.parse_args(argv)
+    if a.selftest:
+        return selftest()
+
+    import warehouse_source as ws
+    if not hasattr(ws, "load_trades_versioned"):
+        raise SystemExit("  🔴 warehouse_source has no load_trades_versioned "
+                         "(r332). Refusing rather than silently reading only "
+                         "the post-epoch window.")
+    bias_of = load_price_bias()
+
+    lo = a.frm or ("2026-07-05" if a.all_history else EPOCH)
+    hi = a.to or ws._et_today()
+    comps = load_composites(lo, hi)
+    if not comps:
+        print("  no composites in {}..{} — nothing to join.".format(lo, hi))
+        return 0
+    sessions = sorted({d for d, _t in comps})
+    print("  BRIEF : {} — {} composite(s), {} session(s), {}..{}".format(
+        BRIEF_DB, len(comps), len(sessions), sessions[0], sessions[-1]))
+
+    tape_days = with_lookback(sessions)
+    meta_o = ws.Meta("ohlc {}..{}".format(tape_days[0], tape_days[-1]))
+    closes = closes_from_envelopes(
+        ws._envelopes(ws.client(), "ohlc", tape_days, meta_o))
+    print("  TAPE  : " + meta_o.banner())
+    print("          {} symbol-day close(s)".format(len(closes)))
+
+    trades, meta_t = ws.load_trades_versioned(sessions)
+    print("  TRADES: " + meta_t.banner())
+
+    prev = prior_sessions(closes)
+    per, base, unmeasured = brief_vs_tape(comps, closes, prev)
+    buckets = trades_vs_brief(trades, comps, bias_of)
+    render(per, base, unmeasured, buckets, "{}..{}".format(lo, hi),
+           getattr(meta_t, "severed", 0))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
