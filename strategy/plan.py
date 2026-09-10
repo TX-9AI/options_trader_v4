@@ -1,5 +1,21 @@
 """
-strategy/plan.py  v1.9
+strategy/plan.py  v1.10
+v1.10 2026-09-10  r341 — `IronCondorStrategy` JOINS `_MANAGEMENT_PLANS`. r213
+      ("every skip names itself") closed this for `CondorManagement`,
+      `CreditRoll` and every `<Strategy>/manage` row, and the condor slipped
+      the net because it is listed under ENTER ON — yet it is management-driven
+      too: `authorize(open_sides)` hands a side to the SWEEP and the condor
+      opens nothing itself. Its whole call site lives inside main.py's
+      `has_open_position()` branch, so on a FLAT box it is never reached, never
+      named, and falls to the default on every tick of every flat session —
+      precisely the shape r213 existed to remove.
+      ⚠️ THE MISS WAS NOT COSMETIC. The fallback asserts *"that is a dispatch
+      gap, not a market condition"*, which is confident, specific and WRONG
+      here — it sent a reader hunting a dispatch bug that does not exist. A
+      diagnostic that misattributes is worse than one that stays silent.
+      ⚠️ `setdefault` still governs: a tick where the condor DID speak, or was
+      skipped for a more specific cause (`authorize`'s own `why` via
+      `skipped_all`), keeps that cause. Nothing overwrites a real verdict.
 v1.9  2026-09-09  r324 — FIX (ported from OTV4TEST r6): `_ledger_open` returns when a store is BOUND.
 v1.8  2026-09-03  r231 — `PlanTick.level()` takes `spot` and passes it to
       `classify()`, which now requires it. Geometry asks role-vs-PRICE as well
@@ -172,7 +188,19 @@ REGISTRY: Dict[str, "Plan"] = {}
 # r213 — plans that only run while something is open. Named here rather than
 # in main.py so a new management plan is covered by REGISTERING, not by
 # remembering to add it to a list in another file (the r35 allow-list rot).
-_MANAGEMENT_PLANS = {"CondorManagement", "CreditRoll"}
+# 🔴 r341 — `IronCondorStrategy` BELONGS HERE, and r213 missed it because it
+# is listed under ENTER ON rather than as a `<Strategy>/manage` row. It is
+# management-driven all the same: `authorize(open_sides)` hands a side to the
+# SWEEP and the condor never opens anything itself, so with nothing open there
+# is nothing to pair. And the entire `authorize` call site sits INSIDE
+# main.py's `has_open_position()` branch — on a flat box it is not merely
+# unanswered, it is never REACHED, which is exactly the shape r213 closed for
+# its three neighbours.
+# ⚠️ THE COST OF THE MISS WAS NOT COSMETIC. The fallback asserts "that is a
+# dispatch gap, not a market condition" — a confident, specific and WRONG
+# accusation, which sent a reader chasing a dispatch bug that does not exist.
+# A diagnostic that misattributes is worse than one that says nothing.
+_MANAGEMENT_PLANS = {"CondorManagement", "CreditRoll", "IronCondorStrategy"}
 
 DISPATCH_ALIAS = {
     "ORB": "ORBStrategy",
