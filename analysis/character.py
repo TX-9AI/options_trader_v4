@@ -1,6 +1,16 @@
 """
-analysis/character.py  v4.1
+analysis/character.py  v4.2
 The tape's CHARACTER — two measured axes, a state, and a duration.
+
+v4.2  2026-09-11  r355 — `realised_vol_cc` AND `realised_vol_parkinson` NOW
+EXIST. main.py declared both as ports with `setdefault(..., None)` and NOTHING
+EVER COMPUTED THEM, so the character engine's `cc` was None on every tick:
+`_vol_hist` never appended, `base` never formed, `volatility_state` returned
+None, and vol_ratio was null on ALL 22,562 sample rows over 2026-09-05..09-10
+across fifteen symbols. That is HALF the engine — `vol_ratio` produces
+`volatile` and `compressing`, and `read_character` checks it FIRST — plus
+`close_capture`, whose two inputs are the same two keys. Not annualised: the
+only consumer is a ratio, where a constant scale cancels.
 
 v4.1  2026-08-23  F4: `persistence()` computed an INTRABAR WICK RATIO, not
 directional persistence — rv_cc/rv_parkinson are both per-bar volatility
@@ -60,6 +70,7 @@ character would manufacture the churn the acceptance gate exists to catch.
 from __future__ import annotations
 
 import logging
+import math as _math
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -150,6 +161,84 @@ def close_capture(rv_cc: Optional[float],
         return None
     r = float(rv_cc) / float(rv_parkinson)
     return max(0.0, min(1.0, r))
+
+
+RV_WINDOW_BARS = 12       # 5m bars — one hour of tape for "now"
+
+
+def realised_vol_cc(closes: Optional[list]) -> Optional[float]:
+    """Close-to-close realised volatility over the window. None if unmeasurable.
+
+    🔴 r355 — THIS DID NOT EXIST. `main.py` declared `realised_vol_cc` as a
+    port with `setdefault(..., None)` and NOTHING EVER COMPUTED IT, so the
+    character engine's `cc` was None on every tick since the engine was
+    written: `_vol_hist` never appended, `base` never formed, and
+    `volatility_state` returned None — **vol_ratio was null on all 22,562
+    sample rows over 2026-09-05..09-10, fifteen symbols, five sessions.**
+    That is HALF the engine: `vol_ratio` is the axis that produces `volatile`
+    and `compressing`, and `read_character` checks it FIRST.
+
+    ⚠️ NOT ANNUALISED, DELIBERATELY. The only consumer is a RATIO
+    (`volatility_state` = now / baseline), where any constant scale factor
+    cancels. Annualising would add a number that reads like information and
+    carries none.
+    ⚠️ SAMPLE STDEV (n-1). With ~12 bars the population form is biased low, and
+    a baseline built from biased samples is biased in the same direction — the
+    ratio survives it, but the stored axis should not be wrong.
+    ⚠️ A NON-POSITIVE OR MISSING CLOSE MAKES THE WINDOW UNMEASURABLE, not zero.
+    None here means "we could not measure"; 0.0 would mean "the tape did not
+    move", and the ledger must not confuse them.
+    """
+    if not closes or len(closes) < 3:
+        return None
+    try:
+        px = [float(c) for c in closes[-RV_WINDOW_BARS:]]
+    except (TypeError, ValueError):
+        return None
+    if any(p <= 0 for p in px) or len(px) < 3:
+        return None
+    rets = [_math.log(px[i] / px[i - 1]) for i in range(1, len(px))]
+    n = len(rets)
+    if n < 2:
+        return None
+    mean = sum(rets) / n
+    var = sum((r - mean) ** 2 for r in rets) / (n - 1)
+    return _math.sqrt(var) if var >= 0 else None
+
+
+def realised_vol_parkinson(highs: Optional[list],
+                           lows: Optional[list]) -> Optional[float]:
+    """Parkinson's high/low estimator over the window. None if unmeasurable.
+
+    🔑 IT IS THE CORROBORATOR, NOT A SECOND OPINION. `close_capture(cc, pk)`
+    compares the two: close-to-close sees only where each bar ENDED, Parkinson
+    sees how far it TRAVELLED. A tape that ranges violently and closes flat
+    reads low on one and high on the other, and that gap is the signal.
+
+    ⚠️ SAME SCALE AS `realised_vol_cc` — per-bar, not annualised — so the two
+    are comparable. Parkinson's 1/(4 ln 2) normalisation makes it an unbiased
+    estimator of the same per-bar sigma under a driftless random walk.
+    ⚠️ A BAR WITH high <= 0, low <= 0 OR high < low IS SKIPPED, not clamped: a
+    crossed or absent quote is not a zero-range bar.
+    """
+    if not highs or not lows:
+        return None
+    hs, ls = list(highs[-RV_WINDOW_BARS:]), list(lows[-RV_WINDOW_BARS:])
+    if len(hs) != len(ls) or len(hs) < 3:
+        return None
+    acc = n = 0
+    for h, l in zip(hs, ls):
+        try:
+            h, l = float(h), float(l)
+        except (TypeError, ValueError):
+            continue
+        if h <= 0 or l <= 0 or h < l:
+            continue
+        acc += _math.log(h / l) ** 2
+        n += 1
+    if n < 3:
+        return None
+    return _math.sqrt(acc / (4.0 * _math.log(2.0) * n))
 
 
 def volatility_state(rv_now: Optional[float],

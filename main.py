@@ -1,5 +1,12 @@
 """
-main.py  v4.41
+main.py  v4.42
+v4.42 2026-09-11  r355 — THE REALISED-VOL PORTS HAVE A PRODUCER. Both were
+      declared here with `setdefault(..., None)` and written by nothing, so the
+      character engine's vol axis was null on every tick since it was written —
+      22,562 sample rows, fifteen symbols, five sessions, not one value. That
+      is half the engine, plus `close_capture`. Computed from `df_5m`, which is
+      already on ctx and carries high/low/close; a missing frame leaves both
+      None, absent rather than zero.
 v4.41 2026-09-10  r352 — THE GEX PIN IS SELECTED IN EXPECTED MOVES. `compute_gex`
       now takes the session's expected move, so the pin it returns is one the
       butterfly can actually judge; without an ATM IV the old percent-of-spot
@@ -1740,6 +1747,30 @@ def run_analysis(state: BotState, chain=None) -> dict:
     # which is honest — the value is ABSENT, not zero.
     ctx["atm_iv"] = atm_iv_from_chain(chain)
     ctx.setdefault("iv_slope", None)
+    # 🔴 r355 — THESE TWO WERE DECLARED AND NEVER PRODUCED. They sat here as
+    # `setdefault(..., None)` ports with NO writer anywhere in the tree, so the
+    # character engine's `cc` was None on every tick it has ever run:
+    # `_vol_hist` never appended, `base` never formed, `volatility_state`
+    # returned None, and **vol_ratio was null on all 22,562 sample rows over
+    # 2026-09-05..09-10, fifteen symbols, five sessions.**
+    # 🔑 THAT IS HALF THE CHARACTER ENGINE. `vol_ratio` is the axis that
+    # produces `volatile` and `compressing`, and `read_character` checks it
+    # FIRST — so turning the bands on without this would have shipped a
+    # two-state engine with two states permanently unreachable, silently.
+    # `close_capture` died the same way: both its inputs are these keys.
+    # ⚠️ df_5m IS ALREADY ON ctx (line ~1452) and carries high/low/close, so
+    # nothing new is fetched. A missing frame leaves both None — ABSENT, not
+    # zero, exactly as the port convention above requires.
+    try:
+        from analysis.character import (realised_vol_cc as _rvcc,
+                                        realised_vol_parkinson as _rvpk)
+        _d5 = ctx.get("df_5m")
+        if _d5 is not None and len(_d5):
+            ctx["realised_vol_cc"] = _rvcc(list(_d5["close"]))
+            ctx["realised_vol_parkinson"] = _rvpk(list(_d5["high"]),
+                                                  list(_d5["low"]))
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("ctx realised vol: %s", exc)
     ctx.setdefault("realised_vol_cc", None)
     ctx.setdefault("realised_vol_parkinson", None)
     ctx.setdefault("variance_risk_premium", None)
