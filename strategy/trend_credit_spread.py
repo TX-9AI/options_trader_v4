@@ -1,5 +1,15 @@
 """
-strategy/trend_credit_spread.py  v4.13
+strategy/trend_credit_spread.py  v4.14
+v4.14 2026-09-10  r351 - THE BEST AVAILABLE R IS RECORDED WHEN THE WING FLOOR
+REFUSES. `wing_r_best` is the single most common last refusal in the book -
+over 2026-09-05..09-10 it was the ONLY failing rung on 8,381 TCS ticks, 52% of
+every "exactly one gate short", while the strategy cleared every gate 7 times
+in 34,686 - and the number that would settle its level was never written down.
+The failing branch appended a WHY STRING and no value, so `PLAN GATES` printed
+a BLANK fail range for it while `pin_concentration` beside it has percentiles.
+Now one numeric per tick: the best R the chain actually offered, plus the width
+it sat at. DESCRIPTIVE ONLY - the gate, the floor and every verdict are
+unchanged; a tick that refused still refuses, it just says by how much.
 v4.13  2026-09-09  r324 — FIX (ported from OTV4TEST r8): the two bare returns in
       prepare() get HOLDs that name what they wait on, and a terminal epilogue in
       a finally block writes every structural refusal's named DECLINE. Since r238
@@ -477,6 +487,9 @@ class TrendCreditSpread:
             # still clears the floor — the opposite search, and the reason this
             # does not call `cv.search_wing`.
             best = None
+            # r351 — the best R the chain offered this tick, win or lose.
+            _best_r = None
+            _best_r_width = None
             _sb = safe_float(getattr(short, "bid", 0.0)) or 0.0
             _sa = safe_float(getattr(short, "ask", 0.0)) or 0.0
             _why = ""
@@ -492,6 +505,19 @@ class TrendCreditSpread:
                 if width <= 0 or credit <= 0 or credit >= width:
                     continue
                 r_expiry = credit / (width - credit)
+                # 🔑 r351 — REMEMBER THE BEST R EVEN WHEN IT LOSES. The floor
+                # is the single most common last refusal in the book: over
+                # 2026-09-05..09-10, `wing_r_best` was the ONLY failing rung on
+                # 8,381 TCS ticks — 52% of every "exactly one gate short" — and
+                # the whole strategy cleared every gate 7 times in 34,686.
+                # ⚠️ AND THE NUMBER THAT WOULD SETTLE THE LEVEL WAS NEVER
+                # RECORDED. `PLAN GATES` printed a BLANK fail range for this
+                # rung, because the failing branch appended a WHY STRING and
+                # never a value — so the floor could only be argued, never
+                # fitted, while `pin_concentration` next to it has percentiles.
+                if _best_r is None or r_expiry > _best_r:
+                    _best_r = r_expiry
+                    _best_r_width = width
                 if r_expiry < TCS_R_FLOOR_EXPIRY:
                     _why = _why or (f"widest wing clearing 1:1 not found — best "
                                     f"R {r_expiry:.2f} at {width:g} wide")
@@ -509,6 +535,17 @@ class TrendCreditSpread:
                 if best is None or width > best[0]:
                     best = (width, c, credit, r_expiry, _sd)
             if best is None:
+                # 🔴 r351 — RECORD THE VALUE, NOT ONLY THE VERDICT. One numeric
+                # per tick: the best R the chain actually offered. `PLAN GATES`
+                # then prints p10/p25/median/p75/p90 for it exactly as it does
+                # for `pin_concentration`, and the floor becomes a choice
+                # against evidence instead of a prior nobody can check.
+                # ⚠️ DESCRIPTIVE ONLY — this changes NO behaviour. The gate,
+                # the floor and every verdict are untouched; the tick that
+                # refused still refuses, it just says by how much.
+                if _best_r is not None:
+                    t.check("r_expiry", round(_best_r, 4), False)
+                    t.check("wing_width_at_best_r", round(_best_r_width, 4), None)
                 prep.structural.append(
                     ("wing_r_best" if "1:1" in _why else "stop_vs_spread",
                      _why or f"no wing beyond {target:.2f} prices a credit"))

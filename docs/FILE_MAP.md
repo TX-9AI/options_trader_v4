@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-267 Python modules across 13 local packages.
+270 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 90 referenced from a script, unit or doc but never imported · **67 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 92 referenced from a script, unit or doc but never imported · **68 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -930,6 +930,14 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `config.py`, `strategy/criteria.py`, `strategy/trend_credit_spread.py`, `utils/time_utils.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
+### `tests/check_tcs_records_best_r.py`
+- **calls:** (none)
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_tcs_wing_study.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
 ### `tests/check_tent.py`
 - **calls:** `config.py`, `strategy/condor_roll.py`, `strategy/structure.py`
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
@@ -1053,6 +1061,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/tape_harness.py`
 - **calls:** (none)
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/tcs_wing_study.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/test_candle_routing.py`
 - **calls:** (none)
