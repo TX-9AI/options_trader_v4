@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-266 Python modules across 13 local packages.
+267 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 89 referenced from a script, unit or doc but never imported · **67 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 90 referenced from a script, unit or doc but never imported · **67 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -949,6 +949,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_versioned_reader.py`
 - **calls:** (none)
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_vix_ownership.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_wing_search.py`
 - **calls:** `strategy/__init__.py`, `strategy/credit_vertical.py`, `strategy/criteria.py`, `strategy/plan.py`

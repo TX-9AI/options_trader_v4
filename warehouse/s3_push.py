@@ -1,5 +1,17 @@
 """
-warehouse/s3_push.py  v4.7
+warehouse/s3_push.py  v4.8
+v4.8  2026-09-10  r350 - SPX OWNS THE WHOLE VIX FAMILY, NOT TWO LITERALS. The
+ownership test matched `VIX` and `^VIX` exactly and MISSED `VIX_EXT`, so all
+fifteen boxes pushed the extended-hours series into one shared `sym=VIX_EXT`
+prefix. Measured 2026-09-10: every box's reconcile rewrote identical rows -
+`VIX_EXT/interval=1m 8 -> 37`, `15m 4 -> 12`, `1h 1 -> 3` - the same targets on
+AMD, MU and NFLX, because each counter holds only its OWN PUTs while S3 holds
+the union of fifteen. So `n > expected` there permanently, and the reconcile
+then makes a box CLAIM 37 objects it never sent. The extended-hours series is
+precisely the one that matters: SPX is the only box that stops quoting after
+hours, so the other fourteen are awake, collecting, and writing over each
+other. Matched by ROOT now, so a future VIX_W or VIX_9D cannot slip the same
+way; VIXY is a different instrument and does not match.
 v4.7  2026-09-10  r349 - `--reconcile` WAITS FOR THE PUSH LOCK, AND SAYS SO WHEN
 IT CANNOT GET IT. It passed 0 and took the normal-run branch: lose the race,
 return 0, print nothing, exit 0 - so an operator-initiated repair was
@@ -876,7 +888,8 @@ def push_candles(s3, bucket, db_path, ledger, me, counters=None):
     newer than the last confirmed one, batched into a single object per
     symbol+interval per run.
 
-    VIX is logged by EVERY box. Operator's decision: SPX owns it, the other 28
+    VIX is logged by EVERY box. Operator's decision: SPX owns the whole VIX
+    FAMILY (VIX, ^VIX, VIX_EXT, ...), the other boxes
     skip it — otherwise the warehouse takes 29 identical copies. Safe because
     SPX trades every day without exception.
     """
@@ -889,8 +902,26 @@ def push_candles(s3, bucket, db_path, ledger, me, counters=None):
     except Exception:
         return 0, 0
     for sym, iv in pairs:
-        if str(sym).upper() in ("VIX", "^VIX") and me != "SPX":
-            continue                                  # SPX owns VIX
+        # 🔴 r350 — THE WHOLE VIX FAMILY, NOT TWO LITERALS. The operator's
+        # ruling is that SPX owns VIX and no other box pushes it; this test
+        # matched `VIX` and `^VIX` exactly and MISSED `VIX_EXT`, so all
+        # fifteen boxes pushed the extended-hours series into one shared
+        # `sym=VIX_EXT` prefix.
+        # ⚠️ MEASURED 2026-09-10: every box's reconcile rewrote the same rows —
+        # `VIX_EXT/interval=1m 8 -> 37`, `15m 4 -> 12`, `1h 1 -> 3` — identical
+        # targets on AMD, MU and NFLX because they were all counting ONE
+        # prefix that fifteen boxes fill. Each counter holds only its own PUTs
+        # while S3 holds the union, so `n > expected` there permanently, and
+        # the reconcile then makes the box CLAIM 37 objects it never sent.
+        # 🔑 AND THE EXTENDED-HOURS SERIES IS THE ONE THAT MATTERS: SPX is the
+        # only box that stops quoting after hours, so it is the only one whose
+        # ownership of VIX_EXT is meaningful — the other fourteen are awake,
+        # collecting, and writing over each other.
+        # ⚠️ FAMILY MATCH BY ROOT, so a future `VIX_W`/`VIX_9D` cannot slip the
+        # same way. `VIXY` does not match — it is a different instrument, not
+        # a VIX variant.
+        if str(sym).upper().split("_")[0] in ("VIX", "^VIX") and me != "SPX":
+            continue                                  # SPX owns the VIX family
         lk = "%s|%s" % (sym, iv)
         hwm = int(ledger.get(lk, 0) or 0)
         try:
