@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.1 · 2026-09-11 — §0 plus 40 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.2 · 2026-09-11 — §0 plus 40 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1248,6 +1248,13 @@ lifecycle change; any systemd unit or timer; any push to origin.
 ⚠️ THE APPROVAL IS PER DELIVERY AND IT IS THE OPERATOR'S "YES" ON A DESCRIBED
 ARCHIVE. That yes covers the push that delivery's land performs and nothing
 else: a second delivery is a second description and a second yes.
+⚠️ AND ANY CHANGE TO A BOX'S DISK IS NAMED BEFORE IT RUNS — swap, partitions,
+volume size, or reclaiming space. Operator, 2026-09-11: *"if you're gonna make
+future changes to the disk like this just let me know first."* This holds even
+where the command itself would otherwise be free: a reclaim does not look
+destructive until the thing reclaimed turns out to have been evidence, and this
+project has already deleted a live stream's history on a finding that was
+wrong (S3.13).
 ⚠️ THE LAND CHECKPOINT STAYS. A human reading the spec before it becomes a
 commit has caught a stale base, a version with no changelog entry, a duplicate
 GENESIS row and a payload that would have reverted a landed fix — all inside
@@ -1319,6 +1326,12 @@ remove.
 exact-command rules, not a general licence: anything else still stops and asks.
 
 ## CHANGELOG
+
+**v5.2 — 2026-09-11 — r363 — §38.1: A DISK CHANGE IS NAMED BEFORE IT RUNS.**
+Operator's instruction the evening control was resized: swap, partitions,
+volume size and space reclaims are told first, even when the command would
+otherwise fall inside the free list. The reasoning is S3.13's — a reclaim reads
+as housekeeping right up until the reclaimed thing turns out to be evidence.
 
 **v5.1 — 2026-09-11 — r362 — §38.7: THE DELIVERY LOOP LOSES ITS TRANSPORT.**
 The tarball no longer travels through a phone. Claude builds it in a scratch
