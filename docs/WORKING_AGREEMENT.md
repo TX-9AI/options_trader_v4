@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v4.9 · 2026-09-08 — §0 plus 39 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.0 · 2026-09-11 — §0 plus 40 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1229,7 +1229,74 @@ directions.
 
 ---
 
+## 38. HANDS ON THE BOX: WHAT WIDENS, WHAT DOES NOT.
+
+Claude runs on control directly. The operator is no longer the conduit for
+every read. This section says what that changes and — more importantly — what
+it does not.
+
+**38.1 — READ AND RUN ARE UNRESTRICTED. DECIDING IS NOT.**
+Free, without asking: read any file in any repo at HEAD or any revision; run
+any report, study, checker or menu item that only reads; query S3, the
+ledgers, the derived stores and the journals; write to `/tmp`, to a scratch
+path, or to `reports/`; build a tarball and run its gates.
+Brought to the operator as a proposal, every time: anything that changes
+**what gets traded** (a threshold, a gate, entry or exit behaviour, size);
+anything that stops, starts or resizes a box; any S3 delete, restore or
+lifecycle change; any systemd unit or timer; any push to origin.
+⚠️ THE LAND CHECKPOINT STAYS. A human reading the spec before it becomes a
+commit has caught a stale base, a version with no changelog entry, a duplicate
+GENESIS row and a payload that would have reverted a landed fix — all inside
+one session. Removing the download step removes waste; removing the read step
+removes the check that has been paying for itself.
+
+**38.2 — ACCESS REMOVES THE EXCUSE FOR GUESSING, NOT THE HABIT.**
+On 2026-09-10, with both repos cloned and open: TCS was nearly unified onto a
+stop `exit_engine` does not use; `prefix_counters.json` was guessed at instead
+of reading `COUNTERS_PATH`; the condor's "dispatch gap" was repeated as a
+finding without opening `authorize()`. **Every one of those files was already
+in hand.** Distance from the corpus explains the shell-escape that killed the
+fleet reconcile; it does not explain these. The rule is unchanged and now has
+no excuse behind it: **if a file settles the question, open it before
+answering.**
+
+**38.3 — A REPORT THAT STATES A CAUSE IS A CLAIM TO VERIFY, NOT A FINDING TO
+REPEAT.** `NOT ASKED — that is a dispatch gap, not a market condition` was
+confident, specific and wrong. `shadow=active files=1` was true and meaningless.
+A panel's own explanation of itself is evidence of what the panel believes.
+Quote it as that, or check it and report what the code says.
+
+**38.4 — A SCHEDULED RUN IS A TIMER THE OPERATOR INSTALLED, NOT A VIGIL.**
+Claude does not run continuously. Each invocation is a fresh instance that
+rebuilds context from the repo, the ledgers and memory. "I'll keep an eye on
+it" is false; "a timer at 09:20, 11:35 and 16:10 runs this and reports" is
+true. Any recurring presence is proposed with its cadence, its command and
+what it will report — and it is installed by the operator like any other unit.
+
+**38.5 — NO SILENT ACTION. EVERY AUTONOMOUS RUN LEAVES A RECORD.**
+Anything Claude runs unattended writes what it did, what it found and what it
+changed — to a log the operator can read after the fact, not only to the
+session that is gone when the window closes. A run nobody can reconstruct is
+indistinguishable from a run that never happened, which is the failure this
+codebase has found in the shadow corpus, the character engine, the drain and
+the P&L panel.
+
+**38.6 — WHAT BECOMES OBSOLETE.** Asking where a file lives. Handing over a
+command for the operator to paste when Claude can run it. Reasoning about a
+box's state from a screenshot. Those were conduit costs and they end here.
+
 ## CHANGELOG
+
+**v5.0 — 2026-09-11 — §38: HANDS ON THE BOX.** Claude runs on control
+directly; the operator is no longer the conduit for every read. Read and run
+are unrestricted; anything that changes what gets traded, touches the fleet or
+S3, or pushes to origin is still a proposal, and the land checkpoint stays —
+it caught a stale base, a version with no changelog entry and a payload that
+would have reverted a landed fix, all in one session. §38.2 records that most
+of the session's errors happened with the files ALREADY IN HAND, so access
+removes the excuse for guessing and not the habit. §38.4 states plainly that
+Claude does not run continuously: a recurring presence is a timer the operator
+installs, not a vigil.
 
 **v4.9 — 2026-09-08 — r320 — §35: GENESIS MAY SHIP TO CORRECT ITSELF.**
 
