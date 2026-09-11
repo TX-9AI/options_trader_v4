@@ -1,6 +1,19 @@
 """
-analysis/character.py  v4.2
+analysis/character.py  v4.3
 The tape's CHARACTER — two measured axes, a state, and a duration.
+
+v4.3  2026-09-11  r356 — BANDS_SET = True, AND THE PERSISTENCE BANDS ARE
+MEASURED. Operator: *"I can't see what it's doing if it's not on & it informs
+nothing, so there is no issue with turning it on."* NOTHING GATES ON CHARACTER,
+verified tree-wide, so the never-emit-a-guess rule — which exists for numbers
+that GATE — bought nothing here and cost an engine nobody could watch for three
+weeks. PERSIST_TREND/RANGE are now p70/p30 of 22,562 observed efficiency values
+(0.183 / 0.072); the old 0.62/0.38 came from an intrabar wick ratio and tag 0.0%
+trending against this sample. The VOL pair stays PROVISIONAL and labelled:
+vol_ratio had no producer until r355, so there is nothing to cut yet, and
+`read_character` checks that axis first — it falls through to persistence until
+real values exist. `bands_fingerprint()` goes on every ledger row so a later
+study can separate transitions across a band change.
 
 v4.2  2026-09-11  r355 — `realised_vol_cc` AND `realised_vol_parkinson` NOW
 EXIST. main.py declared both as ports with `setdefault(..., None)` and NOTHING
@@ -90,14 +103,55 @@ logger = logging.getLogger(__name__)
 # EXISTS TO SET BANDS FROM. The ledger still records both axes on every tick
 # the engine runs, which is exactly the sample needed. Flip this to True in the
 # same commit that replaces the four numbers below with measured ones.
-BANDS_SET = False
+# 🔴 r356 — ON. Operator's ruling 2026-09-11: *"I can't see what it's doing if
+# it's not on & it informs nothing, so there is no issue with turning it on."*
+# 🔑 AND HE IS RIGHT, ON A POINT THIS FILE HELD WRONG FOR THREE WEEKS. The
+# "never emit a guess" discipline exists because a wrong number that GATES
+# costs money. **NOTHING GATES ON CHARACTER** — verified across the tree: every
+# reference outside this module and the engine is a warehouse push, a retention
+# rule or a comment. No strategy reads `read_character`, no plan consults it,
+# no size depends on it. Applied to a read-only descriptor the rule bought
+# nothing and cost the opposite — an engine NOBODY COULD WATCH, broken the
+# whole time. With states emitting, "never once volatile, never once
+# compressing" is obvious in a day; off, it took a study to find.
+BANDS_SET = True
 
 MIN_WINDOW_BARS = 20      # below this an efficiency ratio is noise
 
-PERSIST_TREND = 0.62      # PROVISIONAL — calibrated against the WRONG measure
-PERSIST_RANGE = 0.38      # PROVISIONAL — same
-VOL_EXPAND = 1.25         # short-window vol vs its own baseline
-VOL_COMPRESS = 0.80
+# 🔴 MEASURED, from `character_axis_sample` over 2026-09-05..09-10 —
+# 22,562 rows, fifteen symbols, five sessions (`tests/character_band_study.py`):
+#     p10 0.023 · p25 0.058 · MEDIAN 0.123 · p75 0.199 · p90 0.268
+# Cut at p70/p30 of the OBSERVED distribution. ⚠️ The old 0.62/0.38 were fitted
+# to an INTRABAR WICK RATIO (F4) and are nowhere near this quantity's range:
+# against this sample they tag 0.0% trending and 97.3% ranging.
+# ⚠️ PERCENTILES, NOT A FIT — no outcome was consulted. This names the tape; it
+# does not predict it, and fitting a descriptor to returns is how the v3 argmax
+# ended up traded.
+PERSIST_TREND = 0.183     # p70 of observed efficiency
+PERSIST_RANGE = 0.072     # p30
+# ⚠️ STILL PROVISIONAL — AND SAYING SO IS THE POINT. `realised_vol_cc` had NO
+# PRODUCER until r355 (CHR.2), so `vol_ratio` was null on all 22,562 sampled
+# rows and there is no distribution to cut. `read_character` checks the vol
+# axis FIRST, so until real values exist it falls through to the persistence
+# read and these two never fire. They get set from the same study once a
+# session of real values exists — same-commit rule applies then too.
+VOL_EXPAND = 1.25         # PROVISIONAL — no measured vol_ratio yet (CHR.2)
+VOL_COMPRESS = 0.80       # PROVISIONAL — same
+
+
+def bands_fingerprint() -> str:
+    """The four numbers in effect, for the ledger row.
+
+    🔑 A BAND CHANGE MAKES OLD TRANSITIONS INCOMPARABLE. Pooling labels from
+    two band regimes is the error `ruleset` fingerprinting prevents for
+    signal_journal: the boundary must be VISIBLE in the data, not remembered
+    by whoever reads it. Recorded on every row so a later study can split on
+    it rather than assume continuity.
+    ⚠️ IT IS A FINGERPRINT, NOT AN INPUT. Nothing reads it back to make a
+    decision; it exists so a question about history can be answered honestly.
+    """
+    return "t{:.4g}/r{:.4g}/x{:.4g}/c{:.4g}".format(
+        PERSIST_TREND, PERSIST_RANGE, VOL_EXPAND, VOL_COMPRESS)
 
 # Hysteresis. From the v3 F7 result: protect-below-hold ALONE landed 3.3
 # switches/symbol-day with NO dwell and NO tuning, validated 20.8 -> 4.2 on

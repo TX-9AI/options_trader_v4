@@ -1,6 +1,12 @@
 """
-derived/character_engine.py  v4.1
+derived/character_engine.py  v4.2
 Owns `character_ledger`. Transitions, not per-tick values.
+
+v4.2  2026-09-11  r356 — the ledger row carries `bands`, the four numbers in
+effect when the transition was recorded. A band change makes older rows
+incomparable, and pooling two regimes is the error `ruleset` fingerprinting
+prevents for signal_journal: the boundary must be VISIBLE in the data rather
+than remembered. A fingerprint, never an input — nothing reads it back.
 
 v4.0  2026-08-25  See analysis/character.py for the measurement and the
 operator's rulings. This module only decides WHEN a change is real enough to
@@ -112,7 +118,16 @@ class CharacterEngine(DerivedEngine):
                     -- is the argument for its own column rather than a blend.
                     gap_pct     REAL,
                     gap_class   TEXT,
-                    price       REAL
+                    price       REAL,
+                    -- 🔑 r356 — THE BANDS IN EFFECT WHEN THIS TRANSITION WAS
+                    -- RECORDED. A band change makes older rows incomparable,
+                    -- and pooling two regimes is the error `ruleset`
+                    -- fingerprinting prevents for signal_journal. The boundary
+                    -- must be VISIBLE in the data, not remembered by whoever
+                    -- reads it later.
+                    -- ⚠️ A FINGERPRINT, NOT AN INPUT. Nothing reads it back to
+                    -- decide anything.
+                    bands       TEXT
                 );""")
             self._store.conn.execute(
                 "CREATE INDEX IF NOT EXISTS ix_char_sym "
@@ -197,7 +212,8 @@ class CharacterEngine(DerivedEngine):
         self._hydrate()
         from analysis.character import (efficiency, close_capture,
                                         volatility_state, read_character,
-                                        qualifies_to_displace)
+                                        qualifies_to_displace,
+                                        bands_fingerprint)
         if self._store is None:
             return 0
         cc = _f(ctx.get("realised_vol_cc"))
@@ -276,13 +292,14 @@ class CharacterEngine(DerivedEngine):
                 "INSERT INTO character_ledger (symbol, character, entered_ts,"
                 " from_character, persistence, vol_ratio, realised_vol_cc,"
                 " realised_vol_parkinson, adx, atr_normalized, gap_pct,"
-                " gap_class, price) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " gap_class, price, bands) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (self.symbol, challenger, now, self._state, p, vr, cc, pk,
                  _f(getattr(ctx.get("trend"), "primary_adx", None)),
                  _f(getattr(ctx.get("vol"), "atr_normalized", None)),
                  _f((ctx.get("gap") or {}).get("gap_pct")),
                  (ctx.get("gap") or {}).get("gap_class"),
-                 _f(ctx.get("price"))))
+                 _f(ctx.get("price")),
+                 bands_fingerprint()))
             self._row_id = cur.lastrowid
             self._store.commit()
         except Exception as exc:                                # noqa: BLE001
