@@ -1,5 +1,13 @@
 """
-config.py  v4.16
+config.py  v4.17
+v4.17 2026-09-10  r353 — `TCS_R_FLOOR_EXPIRY` 1.00 -> 0.75 on measured evidence.
+      `tcs_wing_study` over 2026-09-01..09-10 reconstructed the best wing R the
+      chain offered at 15,456 symbol-snapshots: median 0.587, p90 0.818, and
+      the old floor admitted 1.4%. It was not strict, it was outside the
+      distribution — which matches TCS clearing every gate 7 times in 34,686
+      live ticks. 0.75 admits ~18%. It also widens the spreads, because the
+      search takes the WIDEST wing clearing the floor: 0.75 over 0.50 keeps
+      that shift small. REVIEW 2026-09-18 after six sessions on real tape.
 v4.16  2026-09-08  r317 — `SWEEP_CS_LATEST_ET` EXISTS. The sweep read its END
       from `getattr(config, "SWEEP_CS_LATEST_ET", "14:00")` and that key was
       DEFINED NOWHERE, so the default was the only source — the third time
@@ -566,7 +574,31 @@ TCS_MIN_CREDIT_NICKEL_MULT  = float(os.environ.get("OT_TCS_NICKEL_MULT", "4.0"))
 # ⚠️ IT IS DELIBERATELY SEPARATE FROM `criteria.R_FLOOR_STOP`, which the SWEEP
 # uses on the stop basis (r234). One constant with two bases is the rot §35
 # names; each names its own.
-TCS_R_FLOOR_EXPIRY  = float(os.environ.get("OT_TCS_R_FLOOR_EXPIRY", "1.00"))
+# 🔴 r353 — 1.00 -> 0.75, ON MEASURED EVIDENCE. Operator's call 2026-09-10
+# after `tcs_wing_study` over 2026-09-01..09-10 reconstructed the best wing R
+# the chain actually offered at 15,456 symbol-snapshots:
+#     p10 0.316 · p25 0.462 · MEDIAN 0.587 · p75 0.712 · p90 0.818 · max 8.09
+#     floor 1.00 admits 1.4% · 0.75 admits 18.4% · 0.50 admits 67.9%
+# The old floor was not strict, it was OUTSIDE THE DISTRIBUTION — the 90th
+# percentile of what the tape offered is 0.818. It matches the live record
+# exactly: TCS cleared every gate 7 times in 34,686 ticks over 09-05..09-10,
+# and `wing_r_best` was the ONLY failing rung on 8,381 of them (52% of every
+# "exactly one gate short").
+# ⚠️ THIS ALSO WIDENS THE SPREADS, WHICH THE ADMIT RATE DOES NOT SHOW. The
+# search takes `width > best[0]` — the WIDEST wing clearing the floor, not the
+# best-R one — so the floor governs STRUCTURE as well as frequency. Lower it
+# and TCS selects wider: more credit, more absolute risk, and a bigger
+# gap-through loss if price jumps the 15%-of-credit stop. 0.75 was chosen over
+# 0.50 to keep that shift small; below 0.50 the floor stops constraining
+# structure at all and width would need its own cap.
+# ⚠️ THE STUDY'S NUMBERS ARE AN UPPER BOUND — `stop_survivable` was not applied
+# in the reconstruction, and the extreme tail (META 8.09, UNH 5.10) is almost
+# certainly crossed or stale quotes, not real spreads.
+# 📅 REVIEW 2026-09-18 — SIX SESSIONS ON REAL TAPE. Operator: *"we'll give it
+# the next six days to see how it looks on real tape."* r351 records the best
+# available R on every refusal now, so `PLAN GATES` will show the live
+# distribution against this floor rather than a reconstruction.
+TCS_R_FLOOR_EXPIRY  = float(os.environ.get("OT_TCS_R_FLOOR_EXPIRY", "0.75"))
 
 # 🔴 15% OF CREDIT, which is NOT what exit_engine's lone stop does (15% of
 # RISK) and not an oversight. Operator, 2026-09-04: *"stop out at 15% of credit
