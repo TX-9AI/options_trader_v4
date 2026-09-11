@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.0 · 2026-09-11 — §0 plus 40 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.1 · 2026-09-11 — §0 plus 40 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1239,11 +1239,15 @@ it does not.
 Free, without asking: read any file in any repo at HEAD or any revision; run
 any report, study, checker or menu item that only reads; query S3, the
 ledgers, the derived stores and the journals; write to `/tmp`, to a scratch
-path, or to `reports/`; build a tarball and run its gates.
+path, or to `reports/`; build a tarball and run its gates; and LAND a
+delivery the operator has read and approved (§38.7).
 Brought to the operator as a proposal, every time: anything that changes
 **what gets traded** (a threshold, a gate, entry or exit behaviour, size);
 anything that stops, starts or resizes a box; any S3 delete, restore or
 lifecycle change; any systemd unit or timer; any push to origin.
+⚠️ THE APPROVAL IS PER DELIVERY AND IT IS THE OPERATOR'S "YES" ON A DESCRIBED
+ARCHIVE. That yes covers the push that delivery's land performs and nothing
+else: a second delivery is a second description and a second yes.
 ⚠️ THE LAND CHECKPOINT STAYS. A human reading the spec before it becomes a
 commit has caught a stale base, a version with no changelog entry, a duplicate
 GENESIS row and a payload that would have reverted a landed fix — all inside
@@ -1285,7 +1289,46 @@ the P&L panel.
 command for the operator to paste when Claude can run it. Reasoning about a
 box's state from a screenshot. Those were conduit costs and they end here.
 
+**38.7 — THE DELIVERY LOOP: THE TRANSPORT GOES, THE GATES STAY.** Operator,
+2026-09-11: *"I want to cut out the extra steps... but I wanna keep the parts
+of the landing script that were doing real work — checking for headers getting
+bumped, the changelog, the write log, the Genesis getting updated, making sure
+the previous package landed. All of those things are incredibly important and I
+want those to continue."* And: *"you still build and stage the tarball, give me
+a description of its contents, and ask me if I'm ready to commit it, and then
+you follow the normal landing script sequence."*
+
+    build in a scratch clone -> run the gates -> cut the archive and STAGE it
+    in /home/ubuntu -> DESCRIBE it -> the operator's yes -> the normal land
+
+🔑 **WHAT WAS DROPPED IS TRANSPORT, NOT VERIFICATION.** The download to a phone
+and the upload through Termius existed to move bytes to a machine Claude could
+not reach. Every gate §15 requires is unchanged and runs from the archive:
+`BASE` against HEAD, the POS/NEG content assertions, the CHECK scripts
+EXECUTED, both maps regenerated, the GENESIS row appended before `git add`,
+`check_land_discipline`, staging by name, and all-halves-or-none.
+⚠️ **THE ARCHIVE IS STILL AN ARCHIVE** — §26 naming, single-use, one at a time
+in `/home/ubuntu` so the lander's own archive resolution cannot pick the wrong
+one and delete the other.
+⚠️ **THE DESCRIPTION IS THE CHECKPOINT §38.1 KEEPS**, and it is owed BEFORE the
+land, not after: what each file does, what the gates said, and what was born
+red. A land the operator did not read first is the step this section refuses to
+remove.
+⚠️ **IT RUNS UNDER THREE NARROW PERMISSION RULES** the operator installed
+(`tools/deploy.sh`, `install_eod_v2.sh`, starting the analysis unit). They are
+exact-command rules, not a general licence: anything else still stops and asks.
+
 ## CHANGELOG
+
+**v5.1 — 2026-09-11 — r362 — §38.7: THE DELIVERY LOOP LOSES ITS TRANSPORT.**
+The tarball no longer travels through a phone. Claude builds it in a scratch
+clone, runs the gates, stages the archive in `/home/ubuntu`, DESCRIBES it, and
+lands it on the operator's yes — which is the approval for that delivery's push
+and for nothing else (§38.1). Every gate stays: `BASE`, the content
+assertions, the CHECK scripts executed, both maps, the GENESIS append,
+`check_land_discipline`, named staging, all-halves-or-none. Proven on r361,
+landed this way: seven checks run from the archive, one GENESIS row, both repos
+pushed. The operator's reason for keeping the gates is quoted in place.
 
 **v5.0 — 2026-09-11 — §38: HANDS ON THE BOX.** Claude runs on control
 directly; the operator is no longer the conduit for every read. Read and run
