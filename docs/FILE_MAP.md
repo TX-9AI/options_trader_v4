@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-270 Python modules across 13 local packages.
+271 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 92 referenced from a script, unit or doc but never imported · **68 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 93 referenced from a script, unit or doc but never imported · **68 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -212,7 +212,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/gex_data.py`
 - **calls:** `data/options_chain.py`
-- **called by:** `main.py`, `tests/check_pin_bounded.py`
+- **called by:** `main.py`, `tests/check_pin_bounded.py`, `tests/check_pin_clamp_em.py`
 
 ### `data/macro_data.py`
 - **calls:** `config.py`, `data/market_data.py`, `utils/time_utils.py`
@@ -797,6 +797,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_pin_bounded.py`
 - **calls:** `data/__init__.py`, `data/gex_data.py`
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_pin_clamp_em.py`
+- **calls:** `data/gex_data.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_plan_lifecycle.py`
 - **calls:** `derived/plan_ledger.py`

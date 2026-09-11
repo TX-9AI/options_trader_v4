@@ -1,5 +1,11 @@
 """
-main.py  v4.40
+main.py  v4.41
+v4.41 2026-09-10  r352 — THE GEX PIN IS SELECTED IN EXPECTED MOVES. `compute_gex`
+      now takes the session's expected move, so the pin it returns is one the
+      butterfly can actually judge; without an ATM IV the old percent-of-spot
+      clamp still applies. `atm_iv_from_chain` and the butterfly's
+      `expected_move` are the fleet's single definitions of both quantities and
+      neither is recomputed here.
 v4.40 2026-09-10  r343 — `is_short_position = 1` ON THE CREDIT VERTICAL ENTRY.
       The column was READ by exit_engine, position_manager and the adopted-
       position alert and WRITTEN BY NOTHING, so every trade ever logged took
@@ -1840,7 +1846,24 @@ def run_analysis(state: BotState, chain=None) -> dict:
     try:
         if chain is not None:
             from data.gex_data import compute_gex as _cg
-            ctx["gex"] = _cg(chain, ctx.get("price"))
+            # 🔑 r352 — HAND THE SELECTOR THE SAME UNIT THE STRATEGY JUDGES IN.
+            # Without an expected move the pin is clamped in percent of spot
+            # while `pin_em_fraction` judges in EM, and the two are unrelated:
+            # on SPX a 3% clamp is roughly 8.5 EM, so the selector handed the
+            # butterfly candidates it was required to refuse — 52% of its
+            # one-gate-short ticks over 2026-09-05..09-10.
+            # ⚠️ `atm_iv_from_chain` and the butterfly's `expected_move` are
+            # already the fleet's single definitions of those two quantities.
+            # Nothing is recomputed here; a second definition of either is the
+            # drift this repo keeps finding.
+            # ⚠️ A MISSING ATM IV IS NOT A FAILURE: `em` stays None and the
+            # percent clamp applies, exactly as before r352.
+            try:
+                from strategy.gex_pin_butterfly import expected_move as _em
+                _emv = _em(ctx.get("price"), atm_iv_from_chain(chain))
+            except Exception:                                  # noqa: BLE001
+                _emv = None
+            ctx["gex"] = _cg(chain, ctx.get("price"), em=_emv)
         else:
             ctx.setdefault("gex", None)
     except Exception as exc:                                   # noqa: BLE001

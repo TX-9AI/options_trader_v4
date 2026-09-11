@@ -1,5 +1,18 @@
 """
-data/gex_data.py  v4.1
+data/gex_data.py  v4.2
+v4.2  2026-09-10  r352 - THE PIN IS CLAMPED IN EXPECTED MOVES, NOT PERCENT OF
+SPOT. `pin_strike` was selected within 3% of spot and then judged by the
+butterfly in EXPECTED MOVES (`pin_em_fraction`, 0.30-1.00) - two scales with no
+relationship. On SPX an expected move is about 0.35% of price, so a 3% clamp
+admitted pins up to ~8.5 EM away: candidates the strategy could only refuse.
+The data says exactly that - over 2026-09-05..09-10 `pin_em_fraction` was the
+ONLY failing rung on 2,412 ticks, 52% of every "exactly one gate short", with
+fail percentiles p25 1.10, MEDIAN 1.55, p75 1.94 against a ceiling of 1.00.
+Not near misses under a strict rule; pins that were never reachable. THE EM
+WINDOW IS THE TRADE'S PREMISE AND IS NOT LOOSENED - price must travel to the
+pin and sit; selecting in the same unit makes the candidate reachable by
+construction. `em` is optional and the percent bound still applies without one,
+with `pin_clamp_basis` recording which rule ran.
 v4.1  2026-09-01  r215 — 🔴 THE PIN STRIKE WAS A BARE ARGMAX OVER THE WHOLE
       CHAIN, UNBOUNDED. `max(strikes_sorted, key=net_gex)` with nothing
       constraining it to strikes near spot, so when net GEX is flat or noisy
@@ -106,6 +119,12 @@ GEX_PIN_CONCENTRATION = float(_os.environ.get("OT_GEX_PIN_CONC", "0.15"))
 # pin in the sample and excludes every implausible one — but it has NOT been
 # fitted against outcomes, and `pin_dist_pct` is recorded so it can be.
 PIN_MAX_DIST_PCT = float(_os.environ.get("OT_GEX_PIN_MAX_DIST_PCT", "0.03"))
+# r352 — the clamp in the unit the consumer judges in. 1.00 EM matches the
+# butterfly's own EM_MAX_FRAC ceiling, so the selector stops handing it
+# candidates it is required to refuse. A PRIOR, not a fit: `pin_dist_pct`,
+# `pin_clamp_basis` and `pin_clamp_limit` are recorded so it can be moved on
+# evidence.
+PIN_MAX_DIST_EM = float(_os.environ.get("OT_GEX_PIN_MAX_DIST_EM", "1.00"))
 #   PINNING additionally requires the pin strike to hold >= this share of gross |GEX|
 GEX_SIGN_RATIO        = float(_os.environ.get("OT_GEX_SIGN_RATIO", "0.20"))
 #   |net|/gross below this = NEUTRAL (no meaningful dealer-positioning signal)
@@ -141,6 +160,11 @@ class GEXSnapshot:
     pin_strike_raw:     float = 0.0       # r215: the UNBOUNDED argmax, recorded
                                            # so the bound can be fitted later
     pin_dist_pct:       float = 0.0       # r215: |raw pin - spot| / spot
+    # r352 — WHICH CLAMP PRODUCED `pin_strike`, and at what distance. A reader
+    # must never have to guess whether a pin came from the EM rule or the
+    # percent fallback; they can differ by an order of magnitude.
+    pin_clamp_basis:    str   = ""        # "em" | "pct"
+    pin_clamp_limit:    float = 0.0       # the absolute distance allowed
     flip_strike:        float = 0.0       # Strike where net GEX crosses zero
 
     # Per-strike breakdown (sorted by strike)
@@ -182,7 +206,8 @@ class GEXSnapshot:
         )
 
 
-def compute_gex(chain: OptionsChain, spot_price: float) -> GEXSnapshot:
+def compute_gex(chain: OptionsChain, spot_price: float,
+                em: float = None) -> GEXSnapshot:
     """
     Compute full GEX snapshot from the current options chain.
 
@@ -281,9 +306,37 @@ def compute_gex(chain: OptionsChain, spot_price: float) -> GEXSnapshot:
         snapshot.pin_strike_raw = pin.strike
         if spot_price and spot_price > 0:
             snapshot.pin_dist_pct = abs(pin.strike - spot_price) / spot_price
+            # 🔴 r352 — CLAMP IN EXPECTED MOVES WHEN ONE IS AVAILABLE. The pin
+            # was selected in PERCENT OF SPOT (3%) and then judged by the
+            # butterfly in EXPECTED MOVES (`pin_em_fraction`, window 0.30-1.00).
+            # Two scales with no relationship: on SPX an expected move is about
+            # 0.35% of price, so a 3% clamp admits pins up to ~8.5 EM away —
+            # candidates the strategy can only refuse.
+            # ⚠️ AND THE DATA SHOWS EXACTLY THAT. Over 2026-09-05..09-10
+            # `pin_em_fraction` was the ONLY failing rung on 2,412 ticks — 52%
+            # of every "exactly one gate short" — with fail percentiles p25
+            # 1.10, MEDIAN 1.55, p75 1.94 against a ceiling of 1.00. Those are
+            # not near misses being blocked by a strict rule; they are pins
+            # that were never reachable, chosen by a clamp that does not know
+            # how far an expected move is.
+            # 🔑 THE EM WINDOW IS THE TRADE'S PREMISE and is NOT being loosened:
+            # price must TRAVEL to the pin and then sit. Selecting in the same
+            # unit the premise is stated in makes the candidate reachable BY
+            # CONSTRUCTION, so `pin_em_fraction` returns to being a sanity
+            # check rather than the top blocker.
+            # ⚠️ NO EM MEANS THE OLD CLAMP, NOT NO CLAMP. `em` is optional
+            # because not every caller has an ATM IV; the percent bound still
+            # applies then, and `pin_clamp_basis` records WHICH ran so a reader
+            # is never guessing which rule produced a pin.
+            if em and em > 0:
+                _lim = em * PIN_MAX_DIST_EM
+                snapshot.pin_clamp_basis = "em"
+            else:
+                _lim = spot_price * PIN_MAX_DIST_PCT
+                snapshot.pin_clamp_basis = "pct"
+            snapshot.pin_clamp_limit = round(_lim, 6)
             near = [s for s in strikes_sorted
-                    if abs(s.strike - spot_price) / spot_price
-                    <= PIN_MAX_DIST_PCT]
+                    if abs(s.strike - spot_price) <= _lim]
             best = max(near, key=lambda s: s.net_gex, default=None)
             snapshot.pin_strike = best.strike if best else 0.0
         else:
