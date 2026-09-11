@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-272 Python modules across 13 local packages.
+274 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 93 referenced from a script, unit or doc but never imported · **69 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 95 referenced from a script, unit or doc but never imported · **69 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -502,6 +502,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
+### `tests/character_band_study.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
 ### `tests/check_age_gate_gone.py`
 - **calls:** `strategy/__init__.py`, `strategy/criteria.py`, `strategy/sweep_credit_spread.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
@@ -553,6 +557,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_chain_ordering.py`
 - **calls:** `derived/plans.py`, `strategy/__init__.py`, `strategy/plan.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_character_band_study.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_condor_pairing.py`
 - **calls:** `analysis/condor_trigger_map.py`, `database/trade_logger.py`
