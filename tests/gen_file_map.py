@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/gen_file_map.py  v4.3
+tests/gen_file_map.py  v4.4
+v4.4  2026-09-11  r358 — `handoffs` joins both skip sets. It is the operator's
+inbox on the box: manuals, notes and the occasional image handed to Claude.
+`.gitignore` alone is not enough because this file walks the FILESYSTEM, so a
+strategy manual mentioning `main.py` would register as a reference and drift
+FILE_MAP on the very next land.
+
 v4.3  2026-09-07  r312 / DEP.10 - AN ENTRY POINT IS MATCHED ON PATH, AND AN
 AMBIGUOUS BASENAME IS NOT EVIDENCE. Two halves, and the first alone did nothing
 visible. (1) ENTRY_POINTS fell back to os.path.basename, so ANY file anywhere
@@ -79,7 +85,12 @@ import ast
 import os
 import sys
 
-SKIP_DIRS = {".git", "__pycache__", "deploy", "reports", "blind_tapes", "venv"}
+# `handoffs` is the operator inbox (r358): untracked by design, and the walk
+# below reads the FILESYSTEM rather than git, so .gitignore alone would not
+# keep it out — a manual dropped there mentioning `main.py` would register as a
+# reference and drift the map on the next land.
+SKIP_DIRS = {".git", "__pycache__", "deploy", "reports", "blind_tapes", "venv",
+             "handoffs"}
 # ⚠️ AN ENTRY POINT IS NOT AN ORPHAN. A systemd service or a CLI helper SHOULD
 # have no importers - that is what being an entry point means. Listing them here
 # is not suppression: an orphan report that flags every service teaches the
@@ -135,7 +146,8 @@ ABSENT_MARK = "<!-- REMOVED-ON-PURPOSE -->"
 # is a different repo. A module referenced ONLY from there still reads as
 # unreferenced here, and the map says so rather than implying otherwise.
 MENTION_EXT = (".sh", ".service", ".timer", ".md", ".txt")
-MENTION_SKIP_DIRS = {".git", "__pycache__", "reports", "blind_tapes", "venv"}
+MENTION_SKIP_DIRS = {".git", "__pycache__", "reports", "blind_tapes", "venv",
+                     "handoffs"}
 
 
 def _mentions(root: str, names: set) -> dict:

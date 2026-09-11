@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/gen_write_map.py  v4.1
+tests/gen_write_map.py  v4.2
 Generates docs/WRITE_MAP.md — what every box writes, and who writes it.
+
+v4.2  2026-09-11  r358 — `handoffs` joins SKIP_DIRS. The operator's inbox on
+the box is untracked by design and this walk reads the FILESYSTEM, so
+.gitignore is invisible to it; a .py dropped there would drift WRITE_MAP.
 
 v4.1  2026-08-26  r146 — THE MAP WAS ORDER-DEPENDENT AND FAILED THE GATE ON
       CONTROL WHILE PASSING IN THE SANDBOX. `scan()` recorded a READ only if
@@ -47,7 +51,11 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "docs", "WRITE_MAP.md")
 
-SKIP_DIRS = {".git", "__pycache__", "venv", "docs", "node_modules"}
+# r358 — `handoffs` is the operator inbox: untracked by design, and this walk
+# reads the FILESYSTEM, so .gitignore does not keep it out. A .py dropped there
+# would enter WRITE_MAP and drift the next land.
+SKIP_DIRS = {".git", "__pycache__", "venv", "docs", "node_modules",
+             "handoffs"}
 
 RE_CREATE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+([a-z_]+)", re.I)
 RE_INSERT = re.compile(r"INSERT\s+(?:OR\s+\w+\s+)?INTO\s+([a-z_]+)", re.I)

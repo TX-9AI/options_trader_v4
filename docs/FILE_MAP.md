@@ -480,7 +480,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/brief_bias_join.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF_2026-09-11.md`
 
 ### `tests/butterfly_plan.py`
 - **calls:** (none)
@@ -1000,7 +1000,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/eod_compare.py`
 - **calls:** `config.py`
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF_2026-09-11.md`
 
 ### `tests/excursions.py`
 - **calls:** (none)
@@ -1024,7 +1024,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/gen_file_map.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`, `docs/TRADES.md` +2
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/HANDOFF_2026-09-11.md`, `docs/PORT_STATE.md` +3
 
 ### `tests/gen_write_map.py`
 - **calls:** (none)
@@ -1060,7 +1060,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/r_ledger.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF_2026-09-11.md`
 
 ### `tests/rejection_ledger.py`
 - **calls:** (none)

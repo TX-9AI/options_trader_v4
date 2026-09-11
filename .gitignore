@@ -77,3 +77,11 @@ trades.db
 trades.db-shm
 trades.db-wal
 venv/
+
+# Operator inbox — files handed to Claude on the box (manuals, images, notes).
+# NOT source: it is an inbox, and anything in it is untracked by design. The
+# bootstrap document itself lives in docs/ because a gitignored file cannot be
+# committed, and a handoff nobody can read from git is not a handoff.
+# ⚠️ `gen_file_map.py` walks the FILESYSTEM, not git, so this path must ALSO be
+# in SKIP_DIRS and MENTION_SKIP_DIRS there or FILE_MAP drifts on the next land.
+handoffs/
