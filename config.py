@@ -1,5 +1,20 @@
 """
-config.py  v4.17
+config.py  v4.18
+v4.18 2026-09-12  r376 — LVL.10: WHAT COUNTS AS A REJECTION NOW HAS AN
+      AUTHOR. `SWEEP_CS_MIN_REJECTION_PCT` and `SWEEP_CS_MAX_REJECTION_PCT`
+      were DEFINED NOWHERE, so the `getattr` fallback in
+      `sweep_credit_spread` was their only source — C.44, a constant read
+      by fallback is a constant nobody chose. Beside them sat
+      `SWEEP_MIN_REJECTION_PCT = 0.003` with ZERO readers tree-wide and a
+      value 15x larger, reading as authoritative. Same shape as CFG.2
+      (`SWEEP_CS_LATEST_ET`) in this same file, never swept.
+      ⚠️ THE LIVE VALUES ARE CODIFIED AND NOTHING MOVES — 0.0002 and
+      0.0025 are the strategy's own defaults, asserted identical. The
+      LEVEL is a measured decision and a trading change (§38.8); this is
+      only about the number being visible and choosable.
+      ⚠️ The two orphans are MARKED, not deleted: SWEEP.5 is the open row
+      asking exactly that, and an orphaned constant is what the next
+      person rewires (r190).
 v4.17 2026-09-10  r353 — `TCS_R_FLOOR_EXPIRY` 1.00 -> 0.75 on measured evidence.
       `tcs_wing_study` over 2026-09-01..09-10 reconstructed the best wing R the
       chain offered at 15,456 symbol-snapshots: median 0.587, p90 0.818, and
@@ -1188,8 +1203,34 @@ SWEEP_SETUP_FLOOR_SHORT = float(
 # OT_CONT_HANDOFF_IN_COMPRESSION=1 restores the old behaviour.
 CONT_HANDOFF_BLOCK_COMPRESSION = os.environ.get(
     "OT_CONT_HANDOFF_IN_COMPRESSION", "0").strip().lower() in ("0", "false", "no", "off")
-SWEEP_MIN_REJECTION_PCT     = 0.003
-SWEEP_MAX_AGE_BARS          = 8
+# 🔴 r376 / LVL.10 — THE TWO BELOW HAVE NO READERS, AND THE PAIR BENEATH THEM
+# IS WHY THAT MATTERS. `SWEEP_MIN_REJECTION_PCT` (0.003) and
+# `SWEEP_MAX_AGE_BARS` (8) are read by NOTHING tree-wide, while the value that
+# actually decides what counts as a rejection is `SWEEP_CS_MIN_REJECTION_PCT`
+# — 15x smaller and, until this revision, DEFINED NOWHERE, so a `getattr`
+# fallback in the strategy was its only source. C.44: a constant read by
+# fallback is a constant nobody chose, and an orphan sitting in config beside
+# it reads as authoritative. Same shape as CFG.2 (`SWEEP_CS_LATEST_ET`) in the
+# same file, never swept. ⚠️ The orphans are NOT deleted here — SWEEP.5 is the
+# open row asking exactly that of these two, and it is the operator's ruling,
+# not a tidy-up to fold into a levels delivery.
+SWEEP_MIN_REJECTION_PCT     = 0.003      # ORPHAN — no readers. See SWEEP.5.
+SWEEP_MAX_AGE_BARS          = 8          # ORPHAN — no readers. See SWEEP.5.
+
+# ── WHAT COUNTS AS A REJECTION, AND IT IS NOW WRITTEN DOWN ────────────────
+# Read by `strategy/sweep_credit_spread.py` as the admissible pierce band: a
+# touch shallower than MIN did not test the level, one deeper than MAX went
+# through it. 📊 The band is why the measurement matters — shallow <0.10%
+# survived 33% of the time, 0.10-0.25% 34%, 0.25-0.50% 21%, deep >0.50% 19%.
+# ⚠️ THESE CODIFY THE VALUES ALREADY LIVE. Nothing moves: the strategy's
+# `getattr` defaults were 0.0002 and 0.0025 and these are the same numbers,
+# now visible and choosable instead of buried in a fallback. Changing the
+# LEVEL is a separate, measured decision and a trading change (§38.8).
+# ⚠️ The `getattr` in the strategy is left in place — removing it edits a
+# strategy file, which is outside the scope of the levels consolidation. Once
+# these exist it is no longer the only source, which was the defect.
+SWEEP_CS_MIN_REJECTION_PCT  = 0.0002
+SWEEP_CS_MAX_REJECTION_PCT  = 0.0025
 # Entry-window tuning (separate pass from detection). The recovery window is now
 # ATR-aware: a fast reversal on a volatile name that has already moved isn't
 # rejected as "too far" — the window is the LARGER of a floor % or a multiple of

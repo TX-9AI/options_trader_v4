@@ -132,7 +132,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/pitchfork_observer.py`
 - **calls:** `analysis/pitchfork.py`
-- **called by:** `analysis/condor_trigger_map.py`, `main.py`, `tests/check_condor_rails.py`, `tests/check_fork_geometry_journal.py`
+- **called by:** `analysis/condor_trigger_map.py`, `derived/levels.py`, `main.py`, `tests/check_condor_rails.py`, `tests/check_fork_geometry_journal.py`, `tests/check_level_board.py`
 
 ### `analysis/second_order.py`
 - **calls:** (none)
@@ -271,7 +271,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `derived/registry.py`
 
 ### `derived/levels.py`
-- **calls:** `derived/base.py`
+- **calls:** `analysis/pitchfork_observer.py`, `derived/base.py`
 - **called by:** `derived/registry.py`, `tests/check_level_board.py`, `tests/check_level_vocabulary.py`
 
 ### `derived/notes.py`
@@ -715,7 +715,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_level_board.py`
-- **calls:** `derived/levels.py`
+- **calls:** `analysis/pitchfork_observer.py`, `derived/levels.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_level_vocabulary.py`

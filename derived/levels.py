@@ -1,6 +1,31 @@
 """
-derived/levels.py  v4.1
+derived/levels.py  v4.2
 Owns `level_ledger`. Tier 3 — stateful; the object has a biography.
+
+v4.2  2026-09-12  r376 — LVL.6: THE 1h TINES COME FROM THE OBSERVER, WHICH
+      IS THE RULING FINALLY REACHING THE CODE. r367 ruled that of the two
+      live 1h pitchfork builders the OBSERVER informs and `ForkEngine`
+      goes LOG-ONLY — and its code half changed only the observer's
+      journal fields. This engine went on binding `ForkEngine` and
+      `tines_now()` went on reading its `last_forks["1h"]`, so THE BOARD
+      WAS INFORMED BY THE BUILDER RULED OUT OF THE DECISION PATH for nine
+      revisions. It cost nothing only because nothing decides on the
+      board yet — the RULED-but-not-BUILT gap, the same shape as LVL.4's
+      row reading DONE while the fleet ran the old code.
+      🔑 THE RAILS ARE STASHED IN `derive()`, not looked up in
+      `tines_now()`: `rails_for` needs `ctx` and `tines_now(price)` has
+      none, and the registry already runs derive() before anything reads
+      the board. A failed or absent read stashes None and never a stale
+      value, so "no fork" stays one of the four distinct answers.
+      ⚠️ ForkEngine's 1h IS NOT REMOVED — still computing, still writing
+      `fork_series`. That is the log-only half and the other side of the
+      month-long comparison r367 started; deleting it would end the study.
+      ⚠️ PF.4 — the `tines_now` docstring claimed `pitchfork_lifecycle`
+      invalidates a broken rail. That module is imported by NOTHING; the
+      line was written in r364 and named a guarantee no running code
+      provides. What actually clears a dead fork is the builder returning
+      nothing on the next read, measured at 37% of 1h samples — the
+      behaviour was real and the mechanism was misattributed.
 
 v4.1  2026-09-12  r364 — ONE VOCABULARY, AND NOTHING INSIDE THE OPENING RANGE.
       (1) A POOL NOW ENTERS BY SIDE. `level_ledger.kind` is declared
@@ -102,7 +127,10 @@ class LevelEngine(DerivedEngine):
         super().__init__(store)
         self.symbol = symbol
         self._live: dict = {}          # level_id -> mutable state
-        self._forks = forks            # r364 — ForkEngine, for tine prices
+        self._forks = forks            # r364 — ForkEngine; 1d only since r376
+        # r376 / LVL.6 — the OBSERVER's 1h rails, restashed every derive().
+        # None until the first tick, and None again the moment the fork dies.
+        self._obs_rails = None
 
     def _sources(self, ctx: dict):
         """(provenance, price, kind, timeframe, is_live) for every known level.
@@ -187,6 +215,31 @@ class LevelEngine(DerivedEngine):
         except Exception:                                       # noqa: BLE001
             pass
 
+        # ── 🔴 r376 / LVL.6 — THE 1h TINES COME FROM THE OBSERVER NOW ────────
+        # OPERATOR'S RULING, r367: of the two live 1h pitchfork builders, the
+        # OBSERVER informs and ForkEngine's 1h goes LOG-ONLY. That was recorded
+        # and the code never moved — this engine went on taking its tines from
+        # `ForkEngine.last_forks["1h"]`, so the board was informed by the
+        # builder ruled out of the decision path. Nothing decided on it, which
+        # is the only reason it cost nothing.
+        # 🔑 STASHED HERE BECAUSE `rails_for` NEEDS ctx AND `tines_now` HAS NO
+        # ctx. The registry runs derive() every tick before anything reads the
+        # board, which is the same ordering that already guarantees the board
+        # prices its tines from THIS tick's fork and never the previous one.
+        # ⚠️ ForkEngine's 1h IS NOT REMOVED — it keeps computing and keeps
+        # writing `fork_series`, which is the log-only half of the ruling and
+        # the other side of the month-long comparison r367 started. Its 1d and
+        # the condor's 1d are untouched.
+        # ⚠️ A FAILED OR ABSENT READ STASHES None, NOT A STALE VALUE. "No fork"
+        # is one of the board's four distinct answers and must stay reachable:
+        # out of sight, out of mind.
+        self._obs_rails = None
+        try:
+            from analysis.pitchfork_observer import rails_for
+            self._obs_rails = rails_for(ctx, sym, "1h")
+        except Exception as exc:                                # noqa: BLE001
+            logger.debug("levels: observer 1h rails unavailable: %s", exc)
+
         now = time.time()
         written = 0
         # 🔴 r364 — NO LEVEL INSIDE THE OPENING RANGE (ported from OTV4TEST
@@ -260,31 +313,58 @@ class LevelEngine(DerivedEngine):
         🔴 r364, THE OPERATOR'S RULE: *"as long as there's a fork present, there
         should be a map of its points. And if the fork stops emitting, then the
         map has to go with it... out of sight, out of mind."* So a tine is NEVER
-        a stored level: `median_at(idx) = origin_price + slope * (idx -
-        origin_idx)` is a function, and the map is computed at read time from
-        the fork the ForkEngine holds RIGHT NOW. A dead fork yields nothing on
-        the next read — there is no row to go stale and no encounter to
+        a stored level: a rail is `origin_price + slope * (idx - origin_idx)`, a
+        FUNCTION, and the map is computed at read time. A dead fork yields
+        nothing on the next read — no row to go stale, no encounter to
         de-conflict.
+
+        🔴 r376 / LVL.6 — THE SOURCE IS THE OBSERVER, WHICH IS THE RULING
+        FINALLY REACHING THE CODE. Two builders ran the same algorithm on the
+        same 1h frame: `ForkEngine` (20-bar high-minus-low ATR) fed this board,
+        and `pitchfork_observer` (14-bar true-range ATR) fed the condor AND the
+        sweep. The ATR is not cosmetic — it scales the containment tolerance
+        that SELECTS the window, so the two can hold structurally different
+        forks from identical bars. r367 ruled the observer informs and
+        ForkEngine's 1h goes log-only; the row was written and the binding was
+        not changed, so until now the board read the builder ruled out of the
+        decision path. It cost nothing only because nothing decides on the
+        board yet.
+        ⚠️ ForkEngine KEEPS ITS 1h — still computing, still writing
+        `fork_series`. That is the log-only half, and it is the other side of
+        the comparison r367 started; deleting it would end the study.
+
         ⚠️ A TINE HAS A RATE, A LEVEL HAS A PRICE. `bars_to_contact` is the
         convergence at a STANDING price — the tine closing on us, not a
         forecast of price — and it is None when the two diverge.
-        ⚠️ THE PROJECTION IS VALID WHILE THE FORK IS. `pitchfork_lifecycle`
-        invalidates a broken rail; this reports what the structure says today.
+
+        ⚠️ THE ROLES ARE GEOMETRIC AND NOT NEGOTIABLE (operator, 2026-09-12:
+        *"the pitchfork tines have geometric restrictions on S/R — a top tine
+        can NEVER be support"*). Upper is a ceiling, lower is a floor,
+        regardless of where price sits; only the MEDIAN takes its role from the
+        side price is on. And a tine's authority is DEFINITIONAL — it carries
+        no touch count, because unlike a horizontal level it does not earn
+        standing by being defended.
+
+        ⚠️ NO LIFECYCLE MODULE STANDS BEHIND THIS, AND THE PREVIOUS VERSION OF
+        THIS DOCSTRING SAID OTHERWISE (PF.4, §0 correction). It read *"the
+        projection is valid while the fork is — `pitchfork_lifecycle`
+        invalidates a broken rail"*. `analysis/pitchfork_lifecycle.py` is
+        imported by NOTHING; `ForkTracker` is never instantiated in the live
+        path, and the repo's own generated map lists the module as an orphan. I
+        wrote that line in r364 and it named a guarantee no running code
+        provides. What actually clears a dead fork is this function returning
+        nothing when the builder has none — measured at 37% of 1h samples — so
+        the behaviour is real and the mechanism was misattributed.
         """
-        fe = self._forks
-        fork = (getattr(fe, "last_forks", {}) or {}).get("1h") if fe is not None else None
-        if fork is None:
+        r = self._obs_rails
+        if not r:
             return []
-        idx = _f((getattr(fe, "last_idx", {}) or {}).get("1h")) or 0.0
-        slope = _f(getattr(fork, "slope", None)) or 0.0
+        slope = _f(r.get("slope")) or 0.0
         out = []
-        for name, fn in (("fork1h/upper", "upper_at"),
-                         ("fork1h/median", "median_at"),
-                         ("fork1h/lower", "lower_at")):
-            try:
-                p = _f(getattr(fork, fn)(idx))
-            except Exception:                                   # noqa: BLE001
-                continue
+        for name, key in (("fork1h/upper", "upper"),
+                          ("fork1h/median", "median"),
+                          ("fork1h/lower", "lower")):
+            p = _f(r.get(key))
             if not p or p <= 0:
                 continue
             gap = p - (price or 0.0)
