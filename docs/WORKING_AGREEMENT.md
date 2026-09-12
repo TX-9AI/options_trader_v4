@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.3 · 2026-09-12 — §0 plus 40 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.4 · 2026-09-12 — §0 plus 40 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -226,16 +226,25 @@ layer** vs. a direct prompt. Nested quotes collide with that wrapping.
 - **Bot / fleet boxes:** the running bot's working directory is **`~/options-trader`**
   (NO suffix). Per-box `trades.db`, the live process, and per-box data live here.
   Fleet commands run via the menu fan-out (option 14) and execute in this dir.
-- **Control / reporter box** (`ip-...-32-218`): has TWO relevant dirs —
-  **`~/options-trader-v3`** = the clone of the GitHub repo (repo name is
-  `options-trader-v3`), and **`~/day_trader_pro`** = the reporter + devtools service
-  menu (`./dev*`), the replay harness, the diary, `reports/`, `fleet_trades_<date>.json`.
+- **Control / reporter box:** **`~/options-trader-v4`** = the clone of the GitHub
+  repo, and **`~/day_trader_pro`** = the reporter + devtools service menu (`./dev*`),
+  the replay harness, the diary, `reports/`, `fleet_trades_<date>.json`.
   The control box has NO running-bot `trades.db` of its own.
-- **The trap:** `~/options-trader` exists on **bot boxes**, NOT on the control box.
-  Sending `cd ~/options-trader` while the user is on the *control* box fails (this
-  happened, repeatedly). Always resolve the path to the box the user is actually on:
-  bot box → `~/options-trader`; control box → `~/options-trader-v3` (repo) or
-  `~/day_trader_pro` (tooling).
+- 🔴 **THE TRAP INVERTED ON 2026-09-11 AND IS NOW WORSE.** This section used to say
+  `~/options-trader` exists on bot boxes and NOT on control. **Control now HAS a
+  `~/options-trader/` — and it is NOT a git repo.** It holds a stray `bot.log`,
+  `trades.db` and `data/derived_store.db` written by checks that resolved config's
+  `~`-expanded defaults. So the same name means two different objects one box over,
+  and `cd ~/options-trader` no longer FAILS on control — it silently succeeds into
+  the wrong thing. Resolve explicitly: bot box → `~/options-trader` (the repo);
+  control → `~/options-trader-v4` (the repo) or `~/day_trader_pro` (tooling).
+- ⚠️ **AND A FAN-OUT THAT NAMES THE WRONG PATH REPORTS SUCCESS.** On 2026-09-12 a
+  fleet survey of `git -C ~/options-trader-v4 rev-parse --short HEAD` returned an
+  EMPTY field on all fifteen boxes and printed `15/15 succeeded`, because `$(...)`
+  of a failing command is the empty string and the enclosing `echo` still exits 0.
+  **Any `fleet.py run` that reads a repo or a file must fail LOUDLY when the target
+  is absent** — a clean table of blanks is the same failure class as the `\&\&`
+  escape that killed the reconcile on every box for three nights exiting 0 (S3.27).
 
 ## 4. Landed files go to /home/ubuntu, then get moved/extracted.
 When the user uploads files to a box — TAR archives or loose files — assume they land
@@ -1339,6 +1348,19 @@ remove.
 exact-command rules, not a general licence: anything else still stops and asks.
 
 ## CHANGELOG
+
+**v5.4 — 2026-09-12 — r366 — §3: THE PATH TRAP INVERTED, AND A FAN-OUT THAT NAMES
+THE WRONG ONE REPORTS SUCCESS.**
+§3 said `~/options-trader` exists on bot boxes and NOT on control. Control now has
+one — and it is not a git repo, just a stray `bot.log`/`trades.db`/`derived_store.db`
+written by checks resolving config's `~`-expanded defaults. So the name means two
+different objects one box over and `cd ~/options-trader` no longer fails on control,
+it silently succeeds into the wrong thing. Control's repo is also recorded as
+`~/options-trader-v4`, not the `-v3` the section still named. And the operational
+half: on 2026-09-12 a fleet survey naming the control-side path returned an empty
+field on all fifteen boxes and printed `15/15 succeeded`, because `$(...)` of a
+failing command is the empty string and the enclosing `echo` still exits 0. A
+fan-out that reads a repo must fail loudly when the target is absent.
 
 **v5.3 — 2026-09-12 — r364 — §38.8: TRADING CHANGES ARE BATCHED TO A WEEKEND.**
 One session at risk instead of five, in the operator's own arithmetic. With it,
