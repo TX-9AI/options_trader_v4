@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.4 · 2026-09-12 — §0 plus 40 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.5 · 2026-09-12 — §0 plus 40 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -238,6 +238,19 @@ layer** vs. a direct prompt. Nested quotes collide with that wrapping.
   and `cd ~/options-trader` no longer FAILS on control — it silently succeeds into
   the wrong thing. Resolve explicitly: bot box → `~/options-trader` (the repo);
   control → `~/options-trader-v4` (the repo) or `~/day_trader_pro` (tooling).
+- 🔴 **AND CONTROL HOLDS THREE GIT CHECKOUTS, NOT TWO** (OPS.11, 2026-09-12):
+  `~/day_trader_pro`, `~/market-brief` and `~/options-trader-v4`, beside the
+  non-repo `~/options-trader` stray above. **That is deliberate and it is why
+  a delivery stages in `/home/ubuntu`** — operator: *"that's why we always
+  land/stage out of home/ubuntu — we can update all 3 repos from a single
+  tarball there."* `land.sh` scans `$HOME/*/` for exactly this reason.
+  ⚠️ **THE CONSEQUENCE FOR ANY `land.spec`:** `REPO` markers must identify ONE
+  checkout. `main.py` and `config.py` are carried by BOTH `market-brief` and
+  `options-trader-v4`, and `devtools.sh` by all three, so a set built from
+  those resolves to whichever sorts first — `land.sh` takes the FIRST match and
+  never reports ambiguity. r371's first cut targeted `market-brief` on exactly
+  that mistake and only `BASE` refused it. Verify a marker set against every
+  checkout under `$HOME`, not against the two you had in mind.
 - ⚠️ **AND A FAN-OUT THAT NAMES THE WRONG PATH REPORTS SUCCESS.** On 2026-09-12 a
   fleet survey of `git -C ~/options-trader-v4 rev-parse --short HEAD` returned an
   EMPTY field on all fifteen boxes and printed `15/15 succeeded`, because `$(...)`
@@ -1248,12 +1261,22 @@ it does not.
 Free, without asking: read any file in any repo at HEAD or any revision; run
 any report, study, checker or menu item that only reads; query S3, the
 ledgers, the derived stores and the journals; write to `/tmp`, to a scratch
-path, or to `reports/`; build a tarball and run its gates; and LAND a
-delivery the operator has read and approved (§38.7).
+path, or to `reports/`; build a tarball and run its gates; **bring the fleet
+or an individual box up and down, run fleet commands, bake, and start, stop
+or restart services**; and LAND a delivery the operator has read and approved
+(§38.7), **including the commit, the bake and the push that land performs**.
 Brought to the operator as a proposal, every time: anything that changes
 **what gets traded** (a threshold, a gate, entry or exit behaviour, size);
-anything that stops, starts or resizes a box; any S3 delete, restore or
-lifecycle change; any systemd unit or timer; any push to origin.
+**WHAT GOES INTO A COMMIT** (§38.9 — he approves the described contents, and
+that approval is what releases the land); any box **RESIZE** or other change
+to a box's disk; any S3 delete, restore or lifecycle change; any systemd unit
+or timer; and any push that is not part of an approved land.
+🔴 **THE BOX-LIFECYCLE HALF INVERTED ON 2026-09-12 AND THE OLD WORDING IS THE
+REASON THIS IS SPELLED OUT.** Until then this paragraph put *"anything that
+stops, starts or resizes a box"* in the proposal column. The operator's
+ruling moved the lifecycle to Claude and kept the RESIZE — see §38.9 for the
+list in his words. Starting a box and resizing one were one clause and are
+now two, because only one of them moved.
 ⚠️ THE APPROVAL IS PER DELIVERY AND IT IS THE OPERATOR'S "YES" ON A DESCRIBED
 ARCHIVE. That yes covers the push that delivery's land performs and nothing
 else: a second delivery is a second description and a second yes.
@@ -1318,6 +1341,58 @@ branch beneath it fired on 10 of 115 ORB trades (8.7%), which is a trading
 change. Read the call site, then count it in the record, before calling anything
 free.
 
+**38.9 — THE STANDING PERMISSION LIST. ASSUME NOTHING BEYOND IT.**
+Operator, 2026-09-12, given as an explicit list after a land was refused for
+want of a rule nobody had written down: *"Your permissions MUST be modified and
+accurately scoped to accomplish this work."*
+
+**GRANTED — Claude's, without asking:**
+- **The fleet.** *"When needed, you should bring up the fleet or individual
+  boxes, using the fleet script and available tags (--only, etc) to run
+  commands, bake, start, stop and restart services, and bring them back down."*
+- **S3 from control.** *"You may and should access s3 from the control to run
+  studies, reports, comparisons and other things."*
+- **The commit and the bake.** *"Once you have my approval to land, the commit
+  and bake should be handled by you whenever it makes the most sense to synch
+  everything."* The timing is Claude's judgement; the contents are not.
+- **More checkers.** *"You may add more checkers to the land sequence, if we
+  encounter a need that isn't currently met."*
+
+**RESERVED — the operator's, always:**
+- **What gets committed.** *"As far as what gets committed, that's where you
+  describe the changes to the files & THAT is the part I approve PRIOR to
+  landing them."* And: *"I always retain approval over the land — you're
+  responsible for the rest."*
+
+**REFUSED — never, by anyone:**
+- *"You are not permitted to bypass the landing script or checkers — those
+  exist for our protection."* The lander is added to, never gone around. A
+  gate that is in the way is a gate to extend or to argue about with him; it
+  is not a gate to skip. **`--no-verify` is not an escape hatch** (LAND.8).
+
+**THE DEFAULT IS REFUSAL, AND IT IS TEMPORARY.** *"You should assume no other
+permissions are granted that hasn't been expressed here now. Do anticipate
+adding more permissions in the future to accomplish tasks that we haven't yet
+encountered a need to expand them."* So absence from this list means **NOT
+GRANTED YET** — ask, and expect the list to grow. It does not mean forbidden
+forever, and it does not mean infer it from an adjacent rule.
+
+🔴 **A GRANT IS NOT A HARNESS RULE, AND THE DIFFERENCE COST A LAND.** These are
+the operator's terms. Claude Code enforces its OWN permission rules, from
+`~/.claude/settings.json`, and the two are separate systems. On 2026-09-12 a
+thread read §38, built an archive, ran its gates, took his yes — and only then
+found `tools/deploy.sh` refused as a *Production Deploy*, because the three
+narrow rules OPS.2 records were not on the box at all. **A permission the
+document describes and the machine does not hold is worse than an absent one,
+because it is discovered at the last step**, after the work and after the
+approval. So: if a command ON this list is refused, the RULE is missing —
+say so plainly and let him add it.
+⚠️ **AND CLAUDE NEVER GRANTS ITSELF ONE.** The attempt is refused as
+self-modification and that refusal is correct, not an obstacle: the whole
+value of the list is that a human wrote it. Propose the exact rule, in full,
+and let him land it. r362 recorded this refusal once already; r371 hit it
+again and the answer was the same both times.
+
 **38.7 — THE DELIVERY LOOP: THE TRANSPORT GOES, THE GATES STAY.** Operator,
 2026-09-11: *"I want to cut out the extra steps... but I wanna keep the parts
 of the landing script that were doing real work — checking for headers getting
@@ -1348,6 +1423,30 @@ remove.
 exact-command rules, not a general licence: anything else still stops and asks.
 
 ## CHANGELOG
+
+**v5.5 — 2026-09-12 — r371 — §38.9 ADDED: THE STANDING PERMISSION LIST, AND
+§38.1's BOX-LIFECYCLE HALF INVERTS.**
+The operator gave the list explicitly — the fleet, S3, the commit and the bake
+are Claude's; WHAT GETS COMMITTED is his, always; the landing script and its
+checkers are never bypassed, only added to; and anything absent is NOT GRANTED
+YET rather than forbidden. §38.1's free list gains the fleet lifecycle and the
+commit/bake/push of an approved land; its proposal list keeps the RESIZE, which
+did not move, and gains the commit CONTENTS, which is the half he keeps.
+🔴 **AND §38.9 RECORDS THAT A GRANT IS NOT A HARNESS RULE**, because the gap
+cost a land the same day: a thread read §38, built the archive, ran the gates
+and took his yes, then found `deploy.sh` refused as a production deploy because
+the rules OPS.2 describes were not in `~/.claude/settings.json` at all. A
+permission the document asserts and the machine does not hold is discovered at
+the last step, after the work and after the approval. Claude proposes the exact
+rule; only he installs it — self-granting is refused, correctly, and r362
+recorded that once already.
+⚠️ **§3 GAINS THE THIRD CHECKOUT** (OPS.11): control holds `day_trader_pro`,
+`market-brief` and `options-trader-v4`, which is why staging happens in
+`/home/ubuntu` — one tarball can update all three. The consequence is a rule
+for `land.spec` authors: `main.py`/`config.py` are ambiguous across two of
+them and `devtools.sh` across all three, `land.sh` takes the FIRST match and
+never reports ambiguity, and r371's own first cut resolved an otv4 half into
+market-brief before `BASE` refused it.
 
 **v5.4 — 2026-09-12 — r366 — §3: THE PATH TRAP INVERTED, AND A FAN-OUT THAT NAMES
 THE WRONG ONE REPORTS SUCCESS.**
