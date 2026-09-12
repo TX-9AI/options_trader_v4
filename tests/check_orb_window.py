@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
-"""tests/check_orb_window.py  v1.0
+"""tests/check_orb_window.py  v1.1
 THE ORB ENTRY WINDOW IS 11:30, IT AGREES WITH THE DEBIT BLOCK, AND EVERY COPY
 OF IT AGREES WITH config.
 
+v1.1  2026-09-12  r365 — W6 widened and W7 added, both on the operator's
+      ruling that the ORB acts on NO awareness of levels, period. W6 no longer
+      asks only that the target is unadjusted; it asks that the read does not
+      exist — no map parameter, no analysis method, no result subscript. W7 is
+      new and pins the strike: the engine's selection on every path, never
+      re-derived from a pool. Born red at 6e193b98 on W6 and W7. BOTH ARE
+      ANCHORED ON CODE SHAPE rather than words, because v4.6's changelog must
+      name pools and levels to describe removing them and a bare word match
+      would go red on its own documentation (§20) — W7 did exactly that on its
+      first run and was re-anchored on the assignment.
 v1.0  2026-08-30  r193 — the window moved 11:00 -> 11:30 and the pool stopped
       moving the target. Born red at r192 (81a6233): the constant reads (11,0)
       there, two test files hardcode their own (11,0), and orb_strategy pulls
@@ -90,9 +100,28 @@ def main():
     check("W5 the target is the pure measured move, not a pool",
           "target_100 = orb.target_100pct" in st
           and 'target_100 = liq_result.get("adjusted_target"' not in st)
-    check("W6 pool presence is still RECORDED — the study stays possible",
-          'result["target_adjusted"]   = True' in st
-          and "RECORDED ONLY" in st)
+    # 🔴 W6 REWRITTEN WITH THE RULING (r365), NOT LOOSENED TO STAY GREEN. It
+    # asserted the pool was still RECORDED — the counterfactual r193 kept. The
+    # operator's 2026-09-12 ruling removes ORB's level awareness entirely, so
+    # the property to pin is the opposite one: this strategy holds NO liquidity
+    # read of any kind.
+    # ⚠️ ANCHORED ON CODE SHAPE, NOT THE WORDS. The v4.6 changelog above
+    # necessarily names pools and levels while describing their removal, so a
+    # bare word match would go red on its own documentation (§20). A definition
+    # header and a subscript cannot appear in prose.
+    check("W6 the ORB holds NO liquidity read — no map, no analysis, no result",
+          "def _analyze_liquidity(" not in st
+          and "liq_result[" not in st
+          and "liq_map" not in st)
+    # r365 — and the strike comes from the engine on EVERY path. The branch that
+    # re-derived it fired on 8.7% of ORB trades, which is why this is pinned.
+    # ⚠️ THE ASSIGNMENT, NOT THE CALL — and this check went red on its own
+    # documentation the first time it ran: v4.6's changelog quotes the old
+    # expression verbatim while explaining its removal, which is §20 exactly.
+    # A re-derivation is an ASSIGNMENT to target_strike; prose cannot be one.
+    check("W7 the strike is the engine's selection, never re-derived from a pool",
+          "target_strike = orb.target_strike" in st
+          and "target_strike = round_to_strike(" not in st)
 
     print()
     if _fails:

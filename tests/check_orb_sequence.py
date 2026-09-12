@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_orb_sequence.py  v1.1
+tests/check_orb_sequence.py  v1.2
+v1.2  2026-09-12  r365 — S4 no longer passes a liquidity map. The ORB stopped
+      taking one, so the kwarg was an unexpected keyword and the call raised
+      before the sequence it exists to test was reached. The fixture's own
+      reason for existing is unchanged: it sets the SEQS, not the bare boolean.
 v1.1  2026-09-04  r235 — S4's fixtures set the SEQS, not the bare
       boolean. Setting only `order_placed` no longer refuses, so the check
       would fall through to the liquidity analysis and die on a None map — a
@@ -180,7 +184,7 @@ def main() -> int:
         d.order_placed_seq = 1        # …and it already fired
         P.begin_tick()
         sig = strat.generate_signal(orb=d, ms=None, vol_state=None,
-                                    liq_map=None, chain=None, macro=None,
+                                    chain=None, macro=None,
                                     current_price=705.90)
         P.close_tick(st, "TEST")
         # ⚠️ `sig is None` ALONE IS NOT THE PROOF, and at r206 it passes for an

@@ -1,5 +1,8 @@
 """
-main.py  v4.43
+main.py  v4.44
+v4.44 2026-09-12  r365 — the ORB dispatch stops handing the strategy a liquidity
+      map; it no longer takes one. The sweep's two call sites are untouched —
+      its trigger IS a level event, and that is its own revision.
 v4.43 2026-09-12  r364 — THE LEVEL BOARD IS ON THE TICK. `ctx["level_board"]`
       carries the one map — three held levels beyond each opening-range edge
       plus the 1h tines when the fork exists — recorded BESIDE the existing
@@ -3696,7 +3699,6 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
                 orb           = orb,
                 ms        = ms,
                 vol_state     = ctx["vol"],
-                liq_map       = ctx["liq_map"],
                 chain         = chain,
                 macro         = macro,
             current_price = ctx["price"]

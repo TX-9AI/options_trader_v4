@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/check_atr_units.py  v1.0
+tests/check_atr_units.py  v1.1
+
+v1.1  2026-09-12  r365 — the ORB stopped taking a liquidity map, so the stub
+      this test passed became an unexpected keyword. The harness swallows
+      exceptions into `err`, so the TypeError read as "gate never reached" and
+      U3a and U4 went red. The kwarg is removed. NOTHING ABOUT THE ATR UNITS
+      CHANGED — this is the one gate in the sweep that DRIVES generate_signal
+      rather than reading its source, which is why it was the only one to
+      notice (WORKING_AGREEMENT §21, §23).
+v1.0  2026-08-24  r96 — ATR THRESHOLDS ARE IN PERCENT, THE PRODUCER EMITS A
+      FRACTION.
 
 r96 — ATR THRESHOLDS ARE IN PERCENT. THE PRODUCER EMITS A FRACTION.
 
@@ -134,10 +144,13 @@ def main() -> int:
 
     macro = type("M", (), {"vix": 15.0, "is_fed_day": False,
                            "butterfly_half_size": False})()
-    # _analyze_liquidity iterates liq_map.pools before the ATR gate, so a bare
-    # None returns early and the gate is never reached — which is exactly what
-    # the first draft of this test failed to notice.
-    liq = type("L", (), {"pools": []})()
+    # r365 — THE MAP IS GONE FROM THE CALL, AND THAT IS WHY THIS TEST WENT RED.
+    # Until r365 a `liq = type("L", (), {"pools": []})()` stub was passed here
+    # because _analyze_liquidity iterated liq_map.pools BEFORE the ATR gate, so
+    # a bare None returned early and the gate was never reached. The ORB no
+    # longer takes a map at all, so the stub became an unexpected keyword and
+    # the TypeError was absorbed into `err` below — which is exactly the shape
+    # U3a exists to catch, and it caught it. The kwarg is removed, not faked.
     # generate_signal also reads ms.adx before the gate. A real MarketState is
     # used rather than a stub so a future field addition surfaces here instead
     # of being silently absorbed by a permissive fake.
@@ -162,7 +175,7 @@ def main() -> int:
         err = None
         try:
             OS.ORBStrategy().generate_signal(
-                orb=orb, ms=ms_fix, vol_state=vol, liq_map=liq,
+                orb=orb, ms=ms_fix, vol_state=vol,
                 chain=object(), macro=macro, current_price=80.05)
         except Exception as exc:                               # noqa: BLE001
             err = exc

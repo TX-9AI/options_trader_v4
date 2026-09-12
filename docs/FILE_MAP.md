@@ -6,7 +6,7 @@ the canary fails on drift (WORKING_AGREEMENT 33).
 
 278 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 98 referenced from a script, unit or doc but never imported · **70 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 99 referenced from a script, unit or doc but never imported · **69 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -55,8 +55,8 @@ Change these with the most care; a break here reaches everything downstream.
 | `utils/time_utils.py` | 38 | alert_manager.py, broker_reconcile.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/__init__.py` | 34 | check_age_gate_gone.py, check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/plan.py` | 29 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
-| `utils/math_utils.py` | 16 | credit_vertical.py, entry_ladder.py, exit_engine.py, gex_pin_butterfly.py |
 | `database/trade_logger.py` | 15 | check_condor_pairing.py, check_condor_stop_suppression.py, check_credit_remainder.py, check_one_per_session.py |
+| `utils/math_utils.py` | 15 | credit_vertical.py, entry_ladder.py, exit_engine.py, gex_pin_butterfly.py |
 | `analysis/orb_engine.py` | 14 | base_strategy.py, check_atr_units.py, check_orb_one_order.py, check_orb_rearm_zone.py |
 | `strategy/criteria.py` | 14 | check_age_gate_gone.py, check_butterfly_foundational.py, check_criteria.py, check_plan_wiring.py |
 | `strategy/sweep_credit_spread.py` | 14 | check_age_gate_gone.py, check_atr_units.py, check_chain_ordering.py, check_dispatch.py |
@@ -108,7 +108,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/liquidity_mapper.py`
 - **calls:** `config.py`, `utils/math_utils.py`
-- **called by:** `main.py`, `shadow/observer.py`, `strategy/orb_strategy.py`, `tests/check_plan_prepares.py`, `tests/check_pool_geometry.py`
+- **called by:** `main.py`, `shadow/observer.py`, `tests/check_plan_prepares.py`, `tests/check_pool_geometry.py`
 
 ### `analysis/market_state.py`
 - **calls:** (none)
@@ -447,7 +447,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `execution/position_manager.py`, `main.py`, `tests/check_management_plan.py`
 
 ### `strategy/orb_strategy.py`
-- **calls:** `analysis/liquidity_mapper.py`, `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `strategy/base_strategy.py`, `strategy/plan.py`, `utils/math_utils.py`
+- **calls:** `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/volatility_engine.py`, `config.py`, `data/macro_data.py`, `data/options_chain.py`, `strategy/base_strategy.py`, `strategy/plan.py`
 - **called by:** `main.py`, `tests/check_atr_units.py`, `tests/check_orb_one_order.py`, `tests/check_orb_sequence.py`, `tests/check_plan_signal.py`
 
 ### `strategy/plan.py`
@@ -516,7 +516,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_atr_units.py`
 - **calls:** `analysis/market_state.py`, `analysis/orb_engine.py`, `analysis/volatility_engine.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
-- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_attr_fidelity.py`
 - **calls:** (none)
@@ -1148,7 +1148,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/math_utils.py`
 - **calls:** (none)
-- **called by:** `analysis/liquidity_mapper.py`, `analysis/orb_engine.py`, `analysis/pitchfork.py`, `analysis/structure_analyzer.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `data/options_chain.py`, `execution/entry_ladder.py`, `execution/exit_engine.py`, `risk/risk_manager.py`, `strategy/credit_vertical.py`, `strategy/gex_pin_butterfly.py`, `strategy/orb_strategy.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`
+- **called by:** `analysis/liquidity_mapper.py`, `analysis/orb_engine.py`, `analysis/pitchfork.py`, `analysis/structure_analyzer.py`, `analysis/trend_engine.py`, `analysis/volatility_engine.py`, `data/options_chain.py`, `execution/entry_ladder.py`, `execution/exit_engine.py`, `risk/risk_manager.py`, `strategy/credit_vertical.py`, `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `strategy/trend_credit_spread.py`
 
 ### `utils/mem_trace.py`
 - **calls:** (none)
