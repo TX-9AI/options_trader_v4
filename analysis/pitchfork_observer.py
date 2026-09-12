@@ -1,5 +1,16 @@
 """
-analysis/pitchfork_observer.py  v4.1
+analysis/pitchfork_observer.py  v4.2
+v4.2  2026-09-12  r367 — THE JOURNAL RECORDS THE TRAJECTORY, NOT ONLY THE
+      POSITION, because a month of log-only comparison against ForkEngine is
+      about to start and GEOMETRY is the question it has to answer. `_state`
+      gained `origin_idx` and `slope`; v4.1's note that "the journal records a
+      POSITION, not a trajectory" was right for a journal nobody compared and
+      wrong the moment `fork_series` became the other half of a study. RECORDS
+      ONLY — nothing reads these fields, no rail moves, no trigger changes.
+      🔑 WHY IT SHIPS NOW RATHER THAN WITH THE STUDY: the study is dated
+      ~2026-10-12 and can only read what was written between now and then.
+      A field added when the question is asked answers nothing — which is what
+      shadow spent three weeks proving (SHD.5).
 v4.1  2026-08-21  rails_for normalises the timeframe spelling. The cache is
       keyed "1d"/"1h" while CONDOR_PF_TIMEFRAME defaulted to "daily", so the
       condor never once received rails and stood down on every box, every
@@ -145,6 +156,20 @@ def _state(entry: Dict[str, Any], price: float) -> Optional[Dict[str, Any]]:
             "pos_pct": (round((price - lo) / w * 100.0, 2) if w > 0 else None),
             "dist_ml_atr": (round((price - ml) / entry["atr"], 3)
                             if entry.get("atr") else None),
+            # r367 — THE TWO FIELDS THAT MAKE THIS COMPARABLE TO `fork_series`.
+            # LVL.6: two builders construct a 1h fork from the same bars with
+            # different ATRs, and they tie on PRESENCE (57% of minutes each,
+            # disagreeing 1%) — so the open question is whether they select the
+            # same GEOMETRY, which presence cannot answer. `fork_series` already
+            # stores origin_idx and slope; this side stored neither, so the
+            # comparison was unanswerable from the record.
+            # ⚠️ A RAIL IS `origin_price + slope * (idx - origin_idx)`, so these
+            # two plus the rails above fully determine the line. Nothing reads
+            # them.
+            "origin_idx": (round(float(f.origin_idx), 4)
+                           if getattr(f, "origin_idx", None) is not None else None),
+            "slope": (round(float(f.slope), 6)
+                      if getattr(f, "slope", None) is not None else None),
         }
     except Exception:                                          # noqa: BLE001
         return None

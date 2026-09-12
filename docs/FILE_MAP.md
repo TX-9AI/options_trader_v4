@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-278 Python modules across 13 local packages.
+279 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 100 referenced from a script, unit or doc but never imported · **68 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 101 referenced from a script, unit or doc but never imported · **68 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -132,7 +132,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/pitchfork_observer.py`
 - **calls:** `analysis/pitchfork.py`
-- **called by:** `analysis/condor_trigger_map.py`, `main.py`, `tests/check_condor_rails.py`
+- **called by:** `analysis/condor_trigger_map.py`, `main.py`, `tests/check_condor_rails.py`, `tests/check_fork_geometry_journal.py`
 
 ### `analysis/second_order.py`
 - **calls:** (none)
@@ -684,6 +684,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_fill_basis.py`
 - **calls:** `strategy/credit_vertical.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_fork_geometry_journal.py`
+- **calls:** `analysis/pitchfork_observer.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_gates.py`
