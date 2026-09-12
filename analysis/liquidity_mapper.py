@@ -1,5 +1,31 @@
 """
-analysis/liquidity_mapper.py  v4.3
+analysis/liquidity_mapper.py  v4.4
+v4.4  2026-09-12  r377 — LVL.9: THE PIERCE IS MEASURED WHERE THE TOUCH WAS
+      JUDGED. `_detect_touch` tested CONTACT with `pool.price_at(ts)` per bar —
+      time-aware, always was — and then measured the DEPTH as
+      `abs(extreme - pool.price)`, the rail's position NOW. For a STATIC pool
+      those are the same number and the code was right; for a MOVING tine they
+      differ by slope x elapsed bars, and the defect arrived at r163 when tines
+      became pools and nothing revisited the arithmetic.
+      🔴 THE BEHAVIOUR IT PRODUCED IS WORSE THAN THE ARITHMETIC SUGGESTS. For a
+      clean touch the extreme sits ON the rail, so the reported depth was
+      `|slope| x bars_since` — THE STALENESS OF THE TOUCH, not its depth. A
+      graze 25 bars back on a fast rail read as a deep test; a genuine push on
+      the current bar read as nothing. The gate preferred stale touches over
+      fresh ones, and preferred them more the faster the rail moved.
+      📊 MEASURED BEFORE IT WAS CHANGED, 19,997 distinct 1h fork samples over 15
+      symbols and 5 sessions: at the full 30-bar lookback the error runs a
+      median of 10.3% of the admissible band and p90 27.1%, and ON 57.9% OF
+      SAMPLES IT ALONE EXCEEDS `MIN_REJECTION_PCT`. Concentrated, not diffuse —
+      AMD's median is 78.1% of the band against QQQ's 1.7%. AMD is the name
+      LVL.9's row estimated at 0.20%; measured, 0.18%.
+      ⚠️ `rejection_pct_legacy` RIDES ALONG, RECORD-ONLY, because the touching
+      BAR has never been recorded and the per-event crossing count could
+      therefore only be bounded, never counted. With both values on the row it
+      is a query after one session. r351's pattern: record, then judge.
+      ⚠️ A STATIC POOL IS UNAFFECTED BY CONSTRUCTION — `price_at()` returns
+      `price` when the pool does not move — and `check_touch_pierce` P2 is the
+      control that pins it.
 v4.3  2026-09-03  r231 — EQUAL HIGHS/LOWS ARE GONE; NEAREST REPLACES LAST.
       Operator, 2026-09-03: *"I don't want equal highs/lows identified at all.
       Those are not reliable enough."* The map is NAMED LEVELS and FORK TINES,
@@ -314,6 +340,17 @@ class LiquiditySweep:
     # v4.2 — a TOUCH of a MOVING level (a fork tine): born ready, no reclaim
     touch:          bool    = False
     moving:         bool    = False
+    # 🔴 LVL.9 / r377 — THE OLD, TIME-BLIND PIERCE, CARRIED FOR ONE
+    # PURPOSE: to make the correction MEASURABLE on live tape. The gate
+    # reads `rejection_pct`, which is now time-aware; this is what it
+    # WOULD have read, so the plan row can show both and the crossing
+    # count stops being an estimate. RECORD-ONLY — nothing gates on it,
+    # and `check_touch_pierce` P5 pins that.
+    # ⚠️ IDENTICAL TO `rejection_pct` FOR A STATIC POOL by construction,
+    # because `price_at()` returns `price` when the pool does not move.
+    # A non-zero difference is therefore, by itself, evidence the pool
+    # was a tine.
+    rejection_pct_legacy: float = 0.0
 
 
 @dataclass
@@ -1109,6 +1146,7 @@ def _detect_touch(pool: LiquidityPool, df_1m, now_ts: float) -> Optional[Liquidi
     upper = pool.kind == "high"
     first = last = -1
     extreme = None
+    extreme_lvl = None
     beyond = 0
     for i, ts in enumerate(stamps):
         lvl = pool.price_at(ts)
@@ -1118,7 +1156,14 @@ def _detect_touch(pool: LiquidityPool, df_1m, now_ts: float) -> Optional[Liquidi
                 first = i
             last = i
             ex = highs[i] if upper else lows[i]
-            extreme = ex if extreme is None else (max(extreme, ex) if upper else min(extreme, ex))
+            # 🔴 LVL.9 / r377 — REMEMBER WHERE THE RAIL STOOD WHEN THE EXTREME
+            # PRINTED. The contact test above is already time-aware; the DEPTH
+            # was not, and the two have to be measured at the same instant or
+            # the gate is comparing a price from one bar against a rail from
+            # another.
+            if extreme is None or (ex > extreme if upper else ex < extreme):
+                extreme = ex
+                extreme_lvl = lvl
         if first >= 0:
             if (closes[i] > lvl) if upper else (closes[i] < lvl):
                 beyond += 1
@@ -1127,13 +1172,32 @@ def _detect_touch(pool: LiquidityPool, df_1m, now_ts: float) -> Optional[Liquidi
     n = len(stamps)
     level_now = pool.price
     px = closes[-1] or level_now
-    pierce = abs(float(extreme) - level_now) / px if px else 0.0
+    # ── 🔴 LVL.9 / r377 — THE PIERCE IS MEASURED WHERE THE TOUCH WAS JUDGED ──
+    # The contact test uses `pool.price_at(ts)` per bar and always has; the
+    # DEPTH used `pool.price`, the rail NOW. For a STATIC pool those are the
+    # same number and the code was right. For a MOVING tine they differ by
+    # slope x elapsed bars, and the defect arrived with r163 when tines became
+    # pools and nothing revisited the arithmetic — half time-aware.
+    # 📊 MEASURED BEFORE CHANGING IT, on 19,997 distinct 1h fork samples across
+    # 15 symbols and 5 sessions (2026-09-08..12): at the full 30-bar lookback
+    # the error is a median of 10.3% of the admissible band and p90 27.1% — and
+    # ON 57.9% OF SAMPLES IT ALONE EXCEEDS `MIN_REJECTION_PCT`, so drift by
+    # itself could carry a touch with no real pierce past the floor. It is
+    # concentrated, not diffuse: AMD's median is 78.1% of the band, QQQ's 1.7%.
+    # AMD is the name LVL.9's row estimated at 0.20%; measured, 0.18%.
+    # ⚠️ THE LEGACY VALUE RIDES ALONG, RECORD-ONLY, so the per-event crossing
+    # count the bound could only estimate is answerable from the next session's
+    # tape instead of from a second delivery.
+    ref = extreme_lvl if extreme_lvl is not None else level_now
+    pierce = abs(float(extreme) - ref) / px if px else 0.0
+    pierce_legacy = abs(float(extreme) - level_now) / px if px else 0.0
     return LiquiditySweep(
         pool_price=round(level_now, 4),
         sweep_price=round(float(extreme), 4),
         kind="high_sweep" if upper else "low_sweep",
         rejection_candles=0,
         rejection_pct=round(pierce, 6),
+        rejection_pct_legacy=round(pierce_legacy, 6),
         confirmed=True,
         bar_index=first,
         reclaim_bar_index=last,

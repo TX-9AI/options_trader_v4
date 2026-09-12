@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-278 Python modules across 13 local packages.
+279 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 100 referenced from a script, unit or doc but never imported · **68 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 101 referenced from a script, unit or doc but never imported · **68 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -108,7 +108,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/liquidity_mapper.py`
 - **calls:** `config.py`, `utils/math_utils.py`
-- **called by:** `main.py`, `shadow/observer.py`, `tests/check_plan_prepares.py`, `tests/check_pool_geometry.py`
+- **called by:** `main.py`, `shadow/observer.py`, `tests/check_plan_prepares.py`, `tests/check_pool_geometry.py`, `tests/check_touch_pierce.py`
 
 ### `analysis/market_state.py`
 - **calls:** (none)
@@ -977,6 +977,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_tick_join.py`
 - **calls:** `data/options_chain.py`, `derived/notes.py`, `strategy/__init__.py`, `strategy/plan.py`
 - **called by:** (not imported) — referenced in `docs/PLAN_SPEC.md`
+
+### `tests/check_touch_pierce.py`
+- **calls:** `analysis/liquidity_mapper.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_trend_strength.py`
 - **calls:** `analysis/trend_strength.py`

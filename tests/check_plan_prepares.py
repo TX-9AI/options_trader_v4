@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.10
+tests/check_plan_prepares.py  v1.11
+v1.11  2026-09-12  r377 — T4 RE-DERIVED, T4b ADDED. T4's tape reaches the rail
+      exactly where it stood, so the honest depth is ZERO; it read 0.0502% only
+      because the depth was measured against the rail's LATER position, and the
+      check was asserting a TAKE that existed because a graze had been inflated
+      into a rejection. Under the operator's ruling a graze is a legitimate
+      interaction, so the TAKE is right for the right reason now and the row
+      must NAME which one it was. The r234 shape: a fixture certifying the
+      defect it pinned.
+      🔴 T4b IS THE CONTROL AND NOTHING PINNED IT BEFORE: a POOL sweep with a
+      sub-floor rejection must still be refused. The floor was repurposed for
+      tines, never removed, and a change that quietly dropped it for every
+      sweep would have gone green.
 v1.10  2026-09-04  r238 — C1–C5, T7 and T8 RETIRED, not patched. They
       pinned `adx`, `trend_vote`, `outside_range` and `drift_bar` — conditions
       the r238 rewrite DELETED. A check for a rule that no longer exists cannot
@@ -547,12 +559,38 @@ def main():
     sigt = S2.generate_signal(liq_map=lm, chain=_Chain([], calls_t), price_now=99.6,
                               now_et="13:30", atr_pct=0.08, orb_high=99.2, orb_low=98.4)
     rt4 = _row(st, "SweepCreditSpread", 30.0)
-    check("T4 a tine TOUCH fires leg one: call spread with the short BEYOND the touching high, "
-          "classed as a fork trigger",
+    # 🔴 T4 RE-DERIVED WITH THE RULING, NOT LOOSENED TO KEEP IT GREEN (r377).
+    # This tape's bar reaches the rail exactly where it stood — high 99.95
+    # against a rail then at 99.9500 — so the honest depth is ZERO. It used to
+    # read 0.0502% purely because the depth was measured against the rail's
+    # LATER position, and T4 was passing on that artefact: it asserted a TAKE
+    # that only occurred because a graze had been inflated into a rejection.
+    # Under the operator's ruling a graze IS a legitimate interaction, so the
+    # TAKE is now correct for the right reason, and the row must SAY which one
+    # it was. Same shape as the three fixtures r234 records certifying the
+    # defects they pinned.
+    check("T4 a tine GRAZE fires leg one — price reached the rail and turned — "
+          "call spread beyond the touching high, classed as a fork trigger and "
+          "NAMED as a graze",
           sigt is not None and sigt.option_side == "call" and sigt.short_call_contract.strike > 99.95
           and sigt.condor_trigger_source == "1h_fork" and getattr(sigt, "touch_of_tine", False)
-          and rt4 and rt4[0] == "TAKE" and "TOUCH" in rt4[1],
+          and rt4 and rt4[0] == "TAKE" and "GRAZE" in rt4[1],
           f"{rt4} short={sigt and sigt.short_call_contract.strike}")
+    # ⚠️ T4b — THE CONTROL, AND IT IS THE MOST IMPORTANT CHECK IN THIS FILE
+    # AFTER r377. The floor was REPURPOSED for tines, not removed: an ordinary
+    # POOL sweep must still require a rejection. Selling into a level price is
+    # still through is what §36 calls foundational, and r163's "a touch, not a
+    # reject" was said about moving tines — not about pools. Nothing pinned
+    # this before, so a change that quietly dropped the floor for every sweep
+    # would have gone green.
+    P.begin_tick(30.5)
+    lm_shallow = _LM(_Sweep("low_sweep", 96.0, "NY Low", reclaimed=True, rej=0.00001))
+    sig4b = S.generate_signal(liq_map=lm_shallow, chain=_Chain(good_puts), **common)
+    r4b = _row(st, "SweepCreditSpread", 30.5)
+    check("T4b a POOL sweep with a sub-floor rejection is STILL REFUSED — the "
+          "floor was repurposed for tines, never removed",
+          sig4b is None and r4b and r4b[0] != "TAKE" and "rejection" in (r4b[1] or ""),
+          str(r4b))
     # T5: under the condor's authorization (leg two) the same touch is NOT selected
     P.begin_tick(31.0)
     sig5 = S2.generate_signal(liq_map=lm, chain=_Chain([], calls_t), price_now=99.6,

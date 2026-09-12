@@ -1,5 +1,27 @@
 """
-strategy/sweep_credit_spread.py  v5.4
+strategy/sweep_credit_spread.py  v5.5
+v5.5  2026-09-12  r377 — A TINE INTERACTION IS CLASSIFIED, NOT FLOORED.
+      OPERATOR'S RULING, 2026-09-12: *"broken and reclaimed vs respected are
+      both legitimate setups, both leading to containment inside the channel,
+      so we want both, at the moment it happened, not measured later on a
+      drifted object. It should record the interaction on THAT tick & say which
+      one it was, a graze or a reclaim."*
+      🔑 THE FLOOR BECOMES A BOUNDARY. Below `MIN_REJECTION_PCT` is a GRAZE —
+      price reached the rail and turned, the channel containing it — and above
+      is a RECLAIM, through and back. Both fire; only a BREAK does not, and
+      `pierce_depth` (MAX) still refuses that for both.
+      ⚠️ TINE TOUCHES ONLY. A pool sweep still REQUIRES a rejection: selling
+      into a level price is still through is what §36 calls foundational, and
+      r163's *"a touch, not a reject"* was said about moving tines, not pools.
+      `check_plan_prepares` T4b is the control and nothing pinned it before.
+      🔴 IT ONLY BECAME A CHOICE ONCE THE DEPTH WAS HONEST (r377). Measured
+      against the rail's later position, a clean graze reported its own
+      staleness, so every stale touch already looked like a reclaim — the
+      distinction did not exist to be made.
+      ⚠️ `pierce_legacy` and `pierce_delta` ride the row RECORD-ONLY, so how
+      often the correction moves a real interaction is a query rather than an
+      estimate. For a static pool the delta is zero by construction, which
+      makes a non-zero one evidence the pool was a tine.
 v5.4  2026-09-08  r321 — 🔴 THE ENTRY WINDOW NO LONGER RELAXES AT EITHER END.
       Operator: *"The sweep window cannot be relaxed. It needs to remain strict
       at all times at 11:31."* The END was pinned already; the START fell to
@@ -800,7 +822,11 @@ class SweepPreparation:
                  # doing its job.
                  "judged",
                  "width", "stop_prem", "stop_dist", "r", "r_min", "r_stop_disp", "swept_px",
-                 "age", "rej", "ready")
+                 "age", "rej", "ready",
+                 # r377 — WHICH INTERACTION THIS WAS: "graze" or "reclaim".
+                 # Declared because __slots__ makes an undeclared attribute
+                 # raise rather than silently appear, which is the point.
+                 "interaction")
 
     def __init__(self, tick):
         self.tick = tick
@@ -813,6 +839,7 @@ class SweepPreparation:
         self.short = self.long = None
         self.credit = self.width = self.stop_prem = self.stop_dist = None
         self.judged = None
+        self.interaction = ""
         # \U0001f534 r234 - THE NARRATION NAMES THE BASIS IT WAS GATED ON. r219's
         # lesson one layer over: the plan line printed `credit N (bid/ask)`
         # while N had become the mark, and *"printing one and labelling it the
@@ -1042,7 +1069,35 @@ class SweepCreditSpreadStrategy:
             return prep
         rej = float(getattr(sweep, "rejection_pct", 0.0) or 0.0)
         prep.rej = rej
-        prep.cond("rejection", rej, self.CONDITIONS["rejection"], rej >= MIN_REJECTION_PCT)
+        # ── 🔴 r377 / LVL.9 — A TINE TOUCH IS CLASSIFIED, NOT FLOORED ────────
+        # OPERATOR'S RULING, 2026-09-12: *"broken and reclaimed vs respected are
+        # both legitimate setups, both leading to containment inside the
+        # channel, so we want both, at the moment it happened, not measured
+        # later on a drifted object. It should record the interaction on THAT
+        # tick & say which one it was, a graze or a reclaim."*
+        # 🔑 SO THE FLOOR BECOMES A BOUNDARY, NOT A REFUSAL. Depth below
+        # MIN_REJECTION_PCT is a GRAZE — price reached the rail and turned,
+        # which is the channel containing it — and depth above is a RECLAIM,
+        # price through and back. Both are contained; only a break is not, and
+        # `pierce_depth` (MAX) still refuses that, below, for both.
+        # ⚠️ IT APPLIES TO A TINE TOUCH ONLY. A real pool sweep still REQUIRES a
+        # rejection: selling into a level price is still through is the thing
+        # §36 calls foundational, and r163's *"a touch, not a reject"* was said
+        # about moving tines, not about pools.
+        # 🔴 AND THIS ONLY BECAME A CHOICE WHEN THE DEPTH BECAME HONEST (r377).
+        # Measured against the rail's LATER position, a clean graze reported
+        # `|slope| x bars_since` — so the old code cleared this floor on
+        # STALENESS, and measurement showed drift alone exceeding it on 57.9%
+        # of 1h forks. The distinction between a graze and a reclaim did not
+        # exist to be made; every stale touch looked like a reclaim.
+        if _touch:
+            prep.interaction = "graze" if rej < MIN_REJECTION_PCT else "reclaim"
+            # record-only, on the tick the interaction happened. 1 = graze,
+            # 2 = reclaim, matching the `sweep` row's own 1/2 encoding.
+            t.check("interaction", 1.0 if prep.interaction == "graze" else 2.0, None)
+        else:
+            prep.cond("rejection", rej, self.CONDITIONS["rejection"],
+                      rej >= MIN_REJECTION_PCT)
         _max_rej = relaxed.widen(MAX_REJECTION_PCT, 3.0, name="pierce_ceiling")
         prep.cond("pierce_depth", rej, f"<= {_max_rej*100:.3f}%", rej <= _max_rej)
         # \U0001f511 r233 RECORD-ONLY - HOW OFTEN THE DEEP CASE ACTUALLY FIRES, and
@@ -1058,6 +1113,26 @@ class SweepCreditSpreadStrategy:
             _sx = float(getattr(sweep, "sweep_price", 0.0) or 0.0)
             if _pp > 0 and _sx > 0:
                 t.check("pierce_pts", round(abs(_pp - _sx), 4), None)
+                # 🔴 LVL.9 / r377 — BOTH PIERCES ON THE ROW, SO THE CORRECTION
+                # IS MEASURABLE ON LIVE TAPE RATHER THAN ESTIMATED. `rej` above
+                # is now measured where the touch was JUDGED — the rail's
+                # position at the bar the extreme printed. `pierce_legacy` is
+                # what the gate WOULD have read: the extreme against the rail
+                # NOW. For a static pool they are identical by construction, so
+                # a non-zero `pierce_delta` is itself evidence the pool was a
+                # moving tine.
+                # ⚠️ WHY IT IS WORTH A COLUMN: the bound could only be
+                # estimated, because the touching BAR is recorded nowhere —
+                # `bar_index` and `reclaim_bar_index` live on the sweep object
+                # and neither reaches a plan row. With both values here, "how
+                # many touches crossed a gate boundary" is a query after one
+                # session instead of a second delivery. r351's pattern: record
+                # the quantity, then judge it.
+                # ⚠️ RECORD-ONLY. Nothing gates on either of these two; the
+                # verdict above is unchanged and reads `rej` alone.
+                _rl = float(getattr(sweep, "rejection_pct_legacy", 0.0) or 0.0)
+                t.check("pierce_legacy", round(_rl, 6), None)
+                t.check("pierce_delta", round(rej - _rl, 6), None)
                 t.check("level_dist_pts", round(abs(_pp - price_now), 4), None)
                 t.check("level_dist_pct",
                         round(abs(_pp - price_now) / price_now * 100.0, 4), None)
@@ -1228,7 +1303,7 @@ class SweepCreditSpreadStrategy:
 
         # ── the narration: which of the three states is this tick ──────────
         head = (f"{prep.name} {boundary} {pool:.2f} ({side} spread"
-                f"{', TOUCH of a moving tine' if _touch else ''})")
+                f"{', ' + prep.interaction.upper() + ' of a moving tine' if _touch else ''})")
         if prep.starved:
             t.starved(*prep.starved)
             return prep
