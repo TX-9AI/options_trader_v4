@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.2 · 2026-09-11 — §0 plus 40 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.3 · 2026-09-12 — §0 plus 40 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1296,6 +1296,19 @@ the P&L panel.
 command for the operator to paste when Claude can run it. Reasoning about a
 box's state from a screenshot. Those were conduit costs and they end here.
 
+**38.8 — TRADING CHANGES LAND ON A WEEKEND, BATCHED.** Operator, 2026-09-12:
+*"this weekend, like all others, is where we make trading modifications. I would
+rather field 5 untested changes to the trading behavior on a Monday than
+jeopardize 5 separate trading days with 5 separate changes. Rolling them out
+over the weekend means I jeopardize exactly one session instead of multiple by
+piecemealing the changes."* So anything that changes what gets traded is HELD
+and batched to the weekend; behaviour-neutral work lands whenever it is ready.
+⚠️ THE CLASSIFICATION IS MEASURED, NOT ASSERTED. r364 nearly shipped ORB's level
+removal as "record-only" on the strength of the backlog saying so; the strike
+branch beneath it fired on 10 of 115 ORB trades (8.7%), which is a trading
+change. Read the call site, then count it in the record, before calling anything
+free.
+
 **38.7 — THE DELIVERY LOOP: THE TRANSPORT GOES, THE GATES STAY.** Operator,
 2026-09-11: *"I want to cut out the extra steps... but I wanna keep the parts
 of the landing script that were doing real work — checking for headers getting
@@ -1326,6 +1339,12 @@ remove.
 exact-command rules, not a general licence: anything else still stops and asks.
 
 ## CHANGELOG
+
+**v5.3 — 2026-09-12 — r364 — §38.8: TRADING CHANGES ARE BATCHED TO A WEEKEND.**
+One session at risk instead of five, in the operator's own arithmetic. With it,
+the rule that the classification is measured: r364 nearly shipped ORB's level
+removal as behaviour-neutral because the backlog said "record-only" — the strike
+branch under it had fired on 8.7% of ORB trades.
 
 **v5.2 — 2026-09-11 — r363 — §38.1: A DISK CHANGE IS NAMED BEFORE IT RUNS.**
 Operator's instruction the evening control was resized: swap, partitions,

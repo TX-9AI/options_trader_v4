@@ -1,6 +1,11 @@
 """
-derived/registry.py  v4.0
+derived/registry.py  v4.1
 Builds the engine set for one box. The single place main.py touches.
+
+v4.1  2026-09-12  r364 — the ForkEngine is bound and handed to the LevelEngine
+      so the board can price the 1h tines. ⚠️ ORDER IS LOAD-BEARING: forks run
+      BEFORE levels, so the board reads THIS tick's fork and never the previous
+      one.
 
 v4.0  2026-08-22  See docs/DERIVED_STORES.md.
 
@@ -49,10 +54,13 @@ def build_engines(symbol: str) -> List:
         logger.warning("derived registry: engine import failed: %s", exc)
         return []
 
-    levels = LevelEngine(store, symbol)
+    forks = ForkEngine(store, symbol)
+    levels = LevelEngine(store, symbol, forks=forks)
     return [
         IndicatorEngine(store, symbol),
-        ForkEngine(store, symbol),
+        # ⚠️ ORDER: forks run BEFORE levels so the board prices its tines from
+        # THIS tick's fork, never the previous one.
+        forks,
         levels,
         SurfaceEngine(store, symbol),
         SnapshotEngine(store, symbol, levels=levels),

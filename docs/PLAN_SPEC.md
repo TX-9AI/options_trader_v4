@@ -1,5 +1,6 @@
 # PLAN_SPEC.md — every strategy declares its intent BEFORE the trigger
 
+**v1.24 · 2026-09-12 · r364 — the level board: one map, read from the ledger (§38).**
 **v1.23 · 2026-09-01 · r208 — the butterfly wing is searched, not computed (§28).**
 **v1.22 · 2026-09-01 · r207 — the ORB firing sequence is the gate (§27).**
 **v1.21 · 2026-08-28 · r181 — ORB risk-normalized sizing, pure geometry (§26).**
@@ -1102,3 +1103,51 @@ our winners and losers"* is a join whenever it is wanted (BFLY.10).
 Pinned by `tests/check_butterfly_foundational.py` (11 checks, 8 born red at
 f74818b) plus re-derived `check_butterfly_legs` v2.2, `check_butterfly_wing_grid`
 v1.1 and `check_plan_prepares` v1.5 — each born red 2 at HEAD.
+
+## 38. r364 — THE LEVEL BOARD: ONE MAP, READ FROM THE LEDGER
+
+Agreed with the operator 2026-09-12, in his words: *"one source of levels that
+all the strategies (plans) parse for decisions... 3 PREVIOUSLY HELD LEVELS ABOVE
+THREE PREVIOUSLY HELD LEVELS BELOW AND THE ONE HOUR FORK TINES, IF PRESENT?
+Nothing in memory and all of them correctly organized by their geometry,
+including the pitchfork and invalidating any level that sits within the opening
+range."*
+
+**THE REFERENCE IS THE OPENING RANGE, NOT SPOT.** Price has already been
+through everything between `orb_low` and `orb_high`; what a trade contends with
+is what stands BEYOND each edge. Levels inside the range retire TRAVERSED and
+leave every consumer at once.
+
+**HELD MEANS THE STRUCTURE HELD, NOT THAT WE COUNTED A TOUCH.** A session
+extreme nothing later exceeded is held by construction — the mapper's own ladder
+rule, *"newest first, keep only what nothing later exceeded"* — and the board
+inherits it: ordering outward from the range edge makes each rung higher than
+the last, which is the operator's *"the next one has to be higher than that one
+when you go back backwards."*
+
+**REACH IS WHAT THE LEDGER HAS, AND THE LEDGER IS NEVER PURGED.**
+`level_ledger` is in `NEVER_PURGE`. A level recorded weeks ago that has not been
+accepted through is still a held level; the frame only has to be deep enough to
+DISCOVER a level, never to remember it. Operator: *"the amount that you go back
+is only what's available in the store... we go back as far as we go and we map
+the levels with what we have."*
+
+**A TINE IS A LINE, NOT A ROW.** `median_at(idx) = origin_price + slope × (idx −
+origin_idx)`, so the 1h fork's rails are a FUNCTION and the board computes them
+at read time — price now, slope per bar, and bars-to-contact at a standing
+price. 🔴 THEY ARE NEVER STORED AS LEVELS, and that is the whole point:
+*"if the fork stops emitting, then the map has to go with it... out of sight,
+out of mind."* A dead fork yields nothing on the next read, so there is no stale
+rail to serve and no projected encounter to de-conflict. ⚠️ OTV4TEST writes
+tines INTO `level_ledger` and retires nothing when the fork dies — its rows go
+stale at their last price. That is a defect to carry across, not a pattern.
+
+**FOUR ANSWERS, NEVER MERGED:** no store · no range yet · no fork · no level on
+that side. Silence must never read as clearance, and *fewer than three is an
+answer* — near all-time highs there may be one above, or none, and the board
+reports the count rather than padding it.
+
+**WHAT THE BOARD IS NOT.** It does not decide. In OTV4 as written the strategies
+still hold their own triggers; the board is the one place levels come FROM.
+The plan/strategy separation (PLAN_SPEC §10, the OTV4TEST untangle) is the OTV5
+port and is deliberately not attempted here.

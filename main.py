@@ -1,5 +1,11 @@
 """
-main.py  v4.42
+main.py  v4.43
+v4.43 2026-09-12  r364 — THE LEVEL BOARD IS ON THE TICK. `ctx["level_board"]`
+      carries the one map — three held levels beyond each opening-range edge
+      plus the 1h tines when the fork exists — recorded BESIDE the existing
+      `ctx["levels"]` so the fire snapshot's series stays comparable across the
+      change. Nothing reads it for a decision yet: the strategies move in their
+      own revision, on a weekend, per the operator's batching rule.
 v4.42 2026-09-11  r355 — THE REALISED-VOL PORTS HAVE A PRODUCER. Both were
       declared here with `setdefault(..., None)` and written by nothing, so the
       character engine's vol axis was null on every tick since it was written —
@@ -1725,6 +1731,7 @@ def run_analysis(state: BotState, chain=None) -> dict:
     ctx.setdefault("charm", None)
     ctx.setdefault("vanna", None)
     ctx.setdefault("levels", None)
+    ctx.setdefault("level_board", None)
     # ── r205 — ATM IV IS COMPUTED AND WAS NEVER STORED ────────────────────
     # 🔴 MEASURED FROM THE BUCKET, NOT REASONED: every one of the 31
     # fire_snapshot rows from the fleet's first live session (2026-08-31)
@@ -1993,6 +2000,16 @@ def _apply_derived_ports(ctx: dict, state: "BotState", engines) -> None:
         for e in engines:
             if getattr(e, "name", "") == "levels":
                 ctx["levels"] = e.walk(ctx.get("price"), limit=3)
+                # r364 — THE BOARD: the one level map, referenced to the
+                # opening range rather than to spot. Recorded beside `levels`
+                # rather than replacing it, so the fire snapshot's existing
+                # series stays comparable across the change.
+                _orb_b = ctx.get("orb")
+                ctx["level_board"] = e.board(
+                    ctx.get("price"),
+                    orb_high=getattr(_orb_b, "orb_high", None),
+                    orb_low=getattr(_orb_b, "orb_low", None),
+                    limit=3)
                 break
     except Exception as exc:                                   # noqa: BLE001
         logger.debug("level walk unavailable: %s", exc)

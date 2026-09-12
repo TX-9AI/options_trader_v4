@@ -1,6 +1,13 @@
 """
-derived/forks.py  v4.0
+derived/forks.py  v4.1
 Owns `fork_series`. Tier 2 — regressive, and dies on restart today.
+
+v4.1  2026-09-12  r364 — THE LAST FORK IS REMEMBERED, AND FORGOTTEN, HERE.
+      `last_forks[tf]` and `last_idx[tf]` let the level board PRICE the tines
+      without building a second fork — one builder, one consumer. A failed
+      build CLEARS them, so a structure that died cannot be served as a live
+      rail on the next tick (operator, 2026-09-12: *"if the fork stops
+      emitting, then the map has to go with it"*).
 
 v4.0  2026-08-22  See docs/DERIVED_STORES.md.
 
@@ -66,6 +73,12 @@ class ForkEngine(DerivedEngine):
     def __init__(self, store=None, symbol: str = ""):
         super().__init__(store)
         self.symbol = symbol
+        # r364 — the last fork built per timeframe, and the frame's current bar
+        # index, so the level board can PRICE the tines without building a
+        # second fork. One builder, one consumer: a second `build_fork_contained`
+        # would be two answers to one question.
+        self.last_forks: dict = {}
+        self.last_idx: dict = {}
 
     def derive(self, ctx: dict) -> int:
         store = self._store
@@ -101,6 +114,15 @@ class ForkEngine(DerivedEngine):
                 fork = pf.build_fork_contained(sym, df, tf, atr)
             except Exception as exc:                            # noqa: BLE001
                 logger.debug("fork build raised for %s %s: %s", sym, tf, exc)
+            # r364 — REMEMBER, OR FORGET, IN ONE PLACE. A built fork is kept
+            # with the index it was priced at; a failed build CLEARS it, so a
+            # dead structure can never be served as a live tine one tick later.
+            if fork is not None:
+                self.last_forks[tf] = fork
+                self.last_idx[tf] = len(df) - 1
+            else:
+                self.last_forks.pop(tf, None)
+                self.last_idx.pop(tf, None)
             reason = None
             try:
                 reason = pf.last_reject_reason()
