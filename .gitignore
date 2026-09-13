@@ -68,6 +68,19 @@ data/signal_journal/
 # ship someone else's maintenance window to the fleet.
 data/FEED_MAINTENANCE
 data/REHEARSAL_OFF
+# ── r380 / LVL.19 — THE SAME CLASS, SWEPT RATHER THAN REMEMBERED ────────────
+# r108 ignored two sentinels and left three more beside them, plus a lock; r379
+# shipped a reader for the delivered level history with no line here at all.
+# `data/level_history/` is DELIVERED BY CONTROL to each box and is not source:
+# a `git clean -fd` would delete it with no error, and its absence reads as
+# "no prior record", which is a legitimate answer. `tests/check_runtime_ignored`
+# now reads the code for every `"data", "<name>"` path and fails on any that
+# git does not ignore, so the next one is caught at the land, not by luck.
+data/level_history/
+data/DEBUG_LOG
+data/DRILL_DISK
+data/NO_MIDNIGHT_HALT
+data/retention_purge.lock
 env/
 ohlc/
 orb_range.json

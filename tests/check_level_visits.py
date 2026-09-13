@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
-tests/check_level_visits.py  v1.1
+tests/check_level_visits.py  v1.2
+v1.2  2026-09-13  r380 / LVL.18 — V17 to V20: THE CACHE FOLLOWS THE FILE.
+      Every r379 history check called `_HISTORY_CACHE.clear()` before it read,
+      which is exactly why none of them could see LVL.18: the defect lives in
+      the SECOND read, and a check that wipes the cache between reads only ever
+      exercises the first. These deliberately never clear between steps.
+      🔴 V17 IS THE MONDAY CASE. A process reads before the file exists, the file
+      is then delivered, and the next level created must carry it — at r379 the
+      empty answer was cached for the life of the process, so a delivered,
+      readable history was never read.
+      ⚠️ V18 a REPLACED file is re-read (the weekly rebuild); V19 an UNCHANGED
+      file is served from the cache and not re-parsed, the control that the
+      cache still does its job; V20 a missing file is a WARNING, logged ONCE and
+      not once per level — at r379 it was DEBUG, which prints nothing at the
+      box's log level while [] is also the legitimate answer.
 v1.1  2026-09-13  r379 / LVL.17 — V12 to V16: THE DELIVERED HISTORY SEEDS
       DURABILITY AND CANNOT SEED AN EVENT.
       V9 already pinned that a level CARRYING `prior_*` opens with nothing to
@@ -246,7 +260,8 @@ def main():
     _has_hist = all(hasattr(LL, n) for n in
                     ("load_history", "_HISTORY_ROOT", "_HISTORY_CACHE"))
     if not _has_hist:
-        for _n in ("V12", "V12b", "V12c", "V13", "V14", "V15", "V16"):
+        for _n in ("V12", "V12b", "V12c", "V13", "V14", "V15", "V16",
+                   "V17", "V18", "V19", "V20"):
             check(_n, False, "this build has no delivered-history loader "
                              "(load_history/_HISTORY_ROOT/_HISTORY_CACHE)")
         print()
@@ -332,6 +347,94 @@ def main():
         check("V16", led4.levels[0].prior_touches == 0
               and led4.levels[0].defense_rate() is None,
               "no file -> no history, no exception")
+
+    # ══ V17-V20 — THE CACHE FOLLOWS THE FILE (r380 / LVL.18) ═════════════════
+    # ⚠️ NO `_HISTORY_CACHE.clear()` BETWEEN STEPS. That call is what hid the
+    # defect from V12-V16: it resets the exact state the second read depends on.
+    import logging as _logging
+
+    class _Cap(_logging.Handler):
+        def __init__(self):
+            super().__init__(_logging.DEBUG)
+            self.recs = []
+
+        def emit(self, rec):
+            self.recs.append(rec)
+
+    def _pdl(sym="T"):
+        led = LiquidityLedger(sym)
+        led.date = "2026-09-14"
+        led.add_level(100.05, "low", "PDL", True)
+        return led.levels[0]
+
+    with _tf.TemporaryDirectory() as tmp:
+        LL._HISTORY_ROOT = tmp
+        LL._HISTORY_CACHE.clear()          # once, at the start — never again
+        cap = _Cap()
+        _lg = _logging.getLogger(LL.__name__)
+        _old_level = _lg.level
+        _lg.addHandler(cap)
+        _lg.setLevel(_logging.DEBUG)
+        try:
+            # ── V20 (first half) — a missing file warns, and only once.
+            first = _pdl()
+            _pdl()                          # a second level, same missing file
+            warns = [r for r in cap.recs if r.levelno >= _logging.WARNING
+                     and "[history]" in r.getMessage()]
+            check("V20", len(warns) == 1 and first.prior_touches == 0,
+                  "missing file: {} WARNING line(s), want exactly 1 "
+                  "(levels seen: {})".format(
+                      len(warns), sorted({r.levelname for r in cap.recs})))
+
+            # ── V17 — the file ARRIVES after the empty read.
+            payload = {"history_schema": 1, "ledger_schema": SCHEMA_VERSION,
+                       "symbol": "T", "built_at_utc": "2026-09-13T00:00:00+00:00",
+                       "window": {"start": "2026-08-14", "end": "2026-09-11",
+                                  "sessions": 18},
+                       "touch_tol_pct": TOUCH_TOL_PCT, "last_close": 100.0,
+                       "zones": ZONES}
+            path = os.path.join(tmp, "T.json")
+            with io.open(path, "w", encoding="utf-8") as f:
+                _json.dump(payload, f)
+            arrived = _pdl()
+            check("V17", arrived.prior_touches == 12,
+                  "file delivered AFTER an empty read is picked up without a "
+                  "restart (prior_touches={}, want 12)".format(
+                      arrived.prior_touches))
+
+            # ── V19 — unchanged file: served from the cache, not re-parsed.
+            _loads = []
+            _orig_load = _json.load
+
+            def _counting(fp, *a, **k):
+                _loads.append(1)
+                return _orig_load(fp, *a, **k)
+            _json.load = _counting
+            try:
+                again = _pdl()
+                _pdl()
+            finally:
+                _json.load = _orig_load
+            check("V19", not _loads and again.prior_touches == 12,
+                  "unchanged file re-parsed {} time(s), want 0 "
+                  "(prior_touches={})".format(len(_loads), again.prior_touches))
+
+            # ── V18 — the file is REPLACED (the weekly rebuild).
+            z2 = [dict(ZONES[0], prior_touches=30, prior_holds=20,
+                       prior_sessions=19)]
+            payload["zones"] = z2
+            payload["window"]["sessions"] = 19
+            with io.open(path, "w", encoding="utf-8") as f:
+                _json.dump(payload, f, indent=1)     # different size too
+            st = os.stat(path)
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 2_000_000_000))
+            replaced = _pdl()
+            check("V18", replaced.prior_touches == 30,
+                  "replaced file is re-read (prior_touches={}, want 30)".format(
+                      replaced.prior_touches))
+        finally:
+            _lg.removeHandler(cap)
+            _lg.setLevel(_old_level)
 
     print()
     if FAILS:

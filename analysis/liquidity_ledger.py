@@ -1,5 +1,27 @@
 """
-analysis/liquidity_ledger.py  v4.2
+analysis/liquidity_ledger.py  v4.3
+v4.3  2026-09-13  r380 / LVL.18 — THE HISTORY CACHE FOLLOWS THE FILE, AND A
+      MISSING FILE SAYS SO. r379 cached `load_history()` per symbol with no
+      invalidation, and it cached the EMPTY answer too — so a process that read
+      before the file was delivered kept [] for its whole life, and the next
+      session's `reset_for_session` read the cache instead of the file. The
+      history would be on disk, readable, and never read; and because no history
+      is a legitimate state, the symptom was a plan row with no `level_prior_*`
+      values, indistinguishable from a symbol with no record.
+      🔑 THE CACHE IS NOW KEYED ON THE FILE'S (mtime_ns, size). One `stat` per
+      level creation — a handful per session, not per tick — and a delivered or
+      rebuilt file is picked up on the next level created, without a restart.
+      The delivery order (push, THEN restart) stops being load-bearing.
+      ⚠️ A REFUSED FILE IS CACHED AGAINST ITS STAMP TOO, so a schema or tolerance
+      mismatch is warned once rather than per level, and a corrected file with a
+      new stamp is read.
+      🔴 A MISSING FILE IS A WARNING, ONCE PER EPISODE. It was `logger.debug`,
+      which prints nothing at the box's log level — while [] is also the
+      legitimate answer. Every box is delivered a file now, so its absence is a
+      fact the log must carry (WA §0.5), logged on the transition only (§17's
+      one-per-episode idiom) and re-armed if the file appears and disappears.
+      ⚠️ `_stamp_history`'s own swallow moves from debug to warning for the same
+      reason: a failed stamp costs the level its record silently otherwise.
 v4.2  2026-09-13  r379 — THE DELIVERED DEFENSE HISTORY IS READ, AND IT CAN ONLY
       CARRY DURABILITY. `load_history()` reads `data/level_history/<SYM>.json`,
       built on CONTROL from banked tape by `day_trader_pro/tools/
@@ -173,7 +195,11 @@ _OUT_ROOT = os.environ.get(
 # is not version-controlled runtime state pretending to be source.
 _HISTORY_ROOT = os.environ.get(
     "OT_LEVEL_HISTORY_ROOT", os.path.join(_REPO_ROOT, "data", "level_history"))
-_HISTORY_CACHE: Dict[str, list] = {}
+# r380 / LVL.18 — symbol -> (stamp, zones). The stamp is (mtime_ns, size) of
+# the file, or a marker for "absent"/"stat failed", so a cached answer is served
+# only while the file it was read from is still the file on disk.
+_HISTORY_CACHE: Dict[str, tuple] = {}
+_HISTORY_ABSENT = ("absent",)
 
 # Operator: "capture at least 3 previous highs & lows".
 MIN_LEVELS_PER_SIDE = 3
@@ -209,16 +235,34 @@ def load_history(symbol: str) -> list:
     the same reasoning as the book hydrate's own guard and LIQ.7's before it.
     ⚠️ AND SO IS THE TOLERANCE, because a zone clustered at a different
     `touch_tol_pct` is not the same zone.
-    ⚠️ CACHED PER PROCESS. The file changes weekly and out of hours; re-reading
-    it every tick would be a syscall per level per tick for a constant.
+    ⚠️ CACHED PER PROCESS, KEYED ON THE FILE (r380 / LVL.18). The file changes
+    weekly and out of hours, so it is parsed once per version — but the cache
+    is served only while `(mtime_ns, size)` still matches, so a file delivered
+    or rebuilt after the first read is picked up on the next call. r379 cached
+    the empty answer forever, and a history pushed after a bot's first read was
+    never read at all.
     """
     sym = (symbol or "").upper()
-    if sym in _HISTORY_CACHE:
-        return _HISTORY_CACHE[sym]
-    zones: list = []
     path = os.path.join(_HISTORY_ROOT, f"{sym}.json")
     try:
-        if os.path.exists(path):
+        st = os.stat(path)
+        stamp = (st.st_mtime_ns, st.st_size)
+    except FileNotFoundError:
+        stamp = _HISTORY_ABSENT
+    except Exception as e:                                     # noqa: BLE001
+        stamp = ("stat-failed", type(e).__name__)
+    cached = _HISTORY_CACHE.get(sym)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    zones: list = []
+    try:
+        if stamp == _HISTORY_ABSENT:
+            # 🔴 r380 — WARNING, ONCE PER EPISODE. Reaching here means the
+            # previous answer was NOT "absent" (first read, or the file went
+            # away), so this does not repeat per level.
+            logger.warning("[history] %s: no file at %s — this session's levels "
+                           "carry NO prior defense record", sym, path)
+        else:
             with open(path) as f:
                 payload = json.load(f)
             if int(payload.get("ledger_schema", -1)) != SCHEMA_VERSION:
@@ -239,15 +283,13 @@ def load_history(symbol: str) -> list:
                             (payload.get("window") or {}).get("sessions"),
                             (payload.get("window") or {}).get("start"),
                             (payload.get("window") or {}).get("end"))
-        else:
-            logger.debug("[history] no file at %s — no prior defense record", path)
     except Exception as e:                                     # noqa: BLE001
         # ⚠️ NEVER FATAL. An unreadable history must cost the session its
         # CONTEXT, never its trading — and it is logged loudly rather than
         # returning [] quietly, because [] is also the legitimate answer.
         logger.warning("[history] %s unreadable (%s) — continuing with no "
                        "prior record", path, e)
-    _HISTORY_CACHE[sym] = zones
+    _HISTORY_CACHE[sym] = (stamp, zones)
     return zones
 
 
@@ -633,7 +675,10 @@ class LiquidityLedger:
             lv.prior_breaches = int(best.get("prior_breaches") or 0)
             lv.prior_sessions = int(best.get("prior_sessions") or 0)
         except Exception as e:                                 # noqa: BLE001
-            logger.debug("ledger _stamp_history skipped: %s", e)
+            # r380 — warning, not debug: a failed stamp costs the level its
+            # defense record, and nothing else would ever say so.
+            logger.warning("ledger _stamp_history skipped for %s %s %.2f: %s",
+                           self.symbol, lv.kind, float(lv.price), e)
 
     def interaction_at(self, price: float, kind: str = ""):
         """This level's OWN latest interaction, as recorded on a CLOSED bar.
