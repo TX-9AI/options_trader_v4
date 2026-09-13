@@ -1,5 +1,28 @@
 """
-analysis/liquidity_ledger.py  v4.1
+analysis/liquidity_ledger.py  v4.2
+v4.2  2026-09-13  r379 — THE DELIVERED DEFENSE HISTORY IS READ, AND IT CAN ONLY
+      CARRY DURABILITY. `load_history()` reads `data/level_history/<SYM>.json`,
+      built on CONTROL from banked tape by `day_trader_pro/tools/
+      build_level_history.py` and pushed to the box. Operator, 2026-09-12:
+      *"I'm not saying the bots would 'pull' from s3. I'm saying we could
+      construct their ledgers from that data."* — so no trading box ever reaches
+      S3, and §30's *the bot owns its own level book* still holds.
+      🔑 IT ANSWERS [[LVL.16]] AS WELL AS THE FIT. A level admitted at 14:00 is
+      `partial` because the box holds ~60 1m bars and can never backfill its
+      morning; only control has the tape. The history does not repair today's
+      session counters — nothing can — but it means a late level still arrives
+      with a defense record instead of nothing.
+      🔴 DURABILITY ONLY, AND THE ARTIFACT IS INCAPABLE OF EXPRESSING AN EVENT.
+      `_stamp_history` writes `prior_*` and nothing else; `last_result` and
+      `last_touch` stay empty, and the file itself carries no such field. A hold
+      from three days ago must never fire a trade today, and the guarantee is
+      structural rather than a rule someone remembers.
+      ⚠️ THE SCHEMA AND THE TOLERANCE ARE BOTH CHECKED. r378 changed what
+      `touches` COUNTS — a bar under a half-plane, a visit under containment,
+      16.5x apart on measured tape — so a file built for another schema is
+      REFUSED and named, and so is one clustered at a different `touch_tol_pct`.
+      ⚠️ MATCHED BY PRICE AND KIND, NEVER BY NAME: Monday's PDH is a different
+      price from Friday's, and [[LVL.15]] found the names are not unique anyway.
 Per-level touch / hold / breach accounting across the session.
 
 v4.1  2026-09-12  r378 — THE READ SIDE GETS A READER, WHICH IS THE ONLY THING
@@ -142,6 +165,15 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Tests point `OT_LEDGER_ROOT` at a temp dir; production is unchanged.
 _OUT_ROOT = os.environ.get(
     "OT_LEDGER_ROOT", os.path.join(_REPO_ROOT, "data", "liquidity_ledger"))
+# 🔑 r379 / LVL.17 — WHERE THE DELIVERED DEFENSE HISTORY LIVES. Built on CONTROL
+# from banked tape and pushed to the box; the bot READS it and never writes it,
+# and never reaches S3 itself. Operator: *"I'm not saying the bots would 'pull'
+# from s3. I'm saying we could construct their ledgers from that data."*
+# ⚠️ UNDER `data/`, LIKE THE BOOK BESIDE IT, so a bake never overwrites it and it
+# is not version-controlled runtime state pretending to be source.
+_HISTORY_ROOT = os.environ.get(
+    "OT_LEVEL_HISTORY_ROOT", os.path.join(_REPO_ROOT, "data", "level_history"))
+_HISTORY_CACHE: Dict[str, list] = {}
 
 # Operator: "capture at least 3 previous highs & lows".
 MIN_LEVELS_PER_SIDE = 3
@@ -161,6 +193,62 @@ MIN_LEVELS_PER_SIDE = 3
 # are not comparable; the ledger has collected nothing yet, so there is no
 # history to invalidate.
 TOUCH_TOL_PCT = float(os.environ.get("OT_LEDGER_TOUCH_TOL", "0.002"))
+
+
+def load_history(symbol: str) -> list:
+    """The delivered defense history for `symbol`, as a list of price zones.
+
+    Returns [] when there is no file, and [] IS "no history" — which the caller
+    must not confuse with "never defended". `Level.defense_rate()` returns None
+    on zero prior tests for exactly that reason.
+
+    🔴 THE SCHEMA IS CHECKED, NOT TRUSTED. A history built against a different
+    `SCHEMA_VERSION` counted something else — r378 changed `touches` from a BAR
+    count under a half-plane test to a VISIT count under containment, a 16.5x
+    difference on measured tape — so a mismatched file is REFUSED and named, on
+    the same reasoning as the book hydrate's own guard and LIQ.7's before it.
+    ⚠️ AND SO IS THE TOLERANCE, because a zone clustered at a different
+    `touch_tol_pct` is not the same zone.
+    ⚠️ CACHED PER PROCESS. The file changes weekly and out of hours; re-reading
+    it every tick would be a syscall per level per tick for a constant.
+    """
+    sym = (symbol or "").upper()
+    if sym in _HISTORY_CACHE:
+        return _HISTORY_CACHE[sym]
+    zones: list = []
+    path = os.path.join(_HISTORY_ROOT, f"{sym}.json")
+    try:
+        if os.path.exists(path):
+            with open(path) as f:
+                payload = json.load(f)
+            if int(payload.get("ledger_schema", -1)) != SCHEMA_VERSION:
+                logger.warning("[history] %s: built for ledger schema %s but "
+                               "this build is %s — the counts are not "
+                               "comparable, IGNORING the file",
+                               path, payload.get("ledger_schema"), SCHEMA_VERSION)
+            elif float(payload.get("touch_tol_pct", -1)) != TOUCH_TOL_PCT:
+                logger.warning("[history] %s: clustered at touch_tol %s but this "
+                               "build runs %s — the zones are not the same "
+                               "zones, IGNORING the file", path,
+                               payload.get("touch_tol_pct"), TOUCH_TOL_PCT)
+            else:
+                zones = [z for z in payload.get("zones", [])
+                         if z.get("kind") in ("high", "low") and z.get("price")]
+                logger.info("[history] %s: %d zone(s) over %s session(s) "
+                            "%s..%s", sym, len(zones),
+                            (payload.get("window") or {}).get("sessions"),
+                            (payload.get("window") or {}).get("start"),
+                            (payload.get("window") or {}).get("end"))
+        else:
+            logger.debug("[history] no file at %s — no prior defense record", path)
+    except Exception as e:                                     # noqa: BLE001
+        # ⚠️ NEVER FATAL. An unreadable history must cost the session its
+        # CONTEXT, never its trading — and it is logged loudly rather than
+        # returning [] quietly, because [] is also the legitimate answer.
+        logger.warning("[history] %s unreadable (%s) — continuing with no "
+                       "prior record", path, e)
+    _HISTORY_CACHE[sym] = zones
+    return zones
 
 
 class Level:
@@ -372,6 +460,7 @@ class LiquidityLedger:
                         abs(price) * TOUCH_TOL_PCT:
                     return                                     # already held
             lv = Level(price, kind, name, is_named, first_seen or self.date)
+            self._stamp_history(lv)
             if self.last_bar_ts:
                 lv.partial = True
                 logger.info("[ledger] %s %s %.2f joined AFTER bar %s — marked "
@@ -506,6 +595,45 @@ class LiquidityLedger:
             logger.debug("ledger on_closed_bar skipped: %s", e)
 
     # ── read side ────────────────────────────────────────────────────────────
+
+    def _stamp_history(self, lv) -> None:
+        """Apply the delivered defense record to a NEWLY created level.
+
+        🔴 DURABILITY ONLY, AND NEVER AN EVENT. This writes `prior_*` and nothing
+        else. `last_result`, `last_touch` and every session counter stay as the
+        constructor left them — empty and zero — because a hold from three days
+        ago is not an interaction that happened today, and seeding one would fire
+        a trade on a stale event. `check_level_visits` V9 pins it.
+        ⚠️ ONE WRITER PER FIELD: the history file owns `prior_*`, the session
+        owns the rest. Nothing merges the two, so neither can corrupt the other.
+        ⚠️ MATCHED BY PRICE AND KIND, NOT BY NAME. Monday's `PDH` is a different
+        price from Friday's, and what carries across sessions is the PRICE — the
+        operator's *"walk the tape and pull the historical levels against spot"*.
+        [[LVL.15]] is the second reason: level names are not unique.
+        ⚠️ NEAREST ZONE WINS inside the tolerance, so a cluster cannot make the
+        answer depend on file order.
+        """
+        try:
+            zones = load_history(self.symbol)
+            if not zones:
+                return
+            best, best_d = None, None
+            for z in zones:
+                if z.get("kind") != lv.kind:
+                    continue
+                d = abs(float(z["price"]) - lv.price)
+                if d > abs(lv.price) * TOUCH_TOL_PCT:
+                    continue
+                if best_d is None or d < best_d:
+                    best, best_d = z, d
+            if best is None:
+                return
+            lv.prior_touches = int(best.get("prior_touches") or 0)
+            lv.prior_holds = int(best.get("prior_holds") or 0)
+            lv.prior_breaches = int(best.get("prior_breaches") or 0)
+            lv.prior_sessions = int(best.get("prior_sessions") or 0)
+        except Exception as e:                                 # noqa: BLE001
+            logger.debug("ledger _stamp_history skipped: %s", e)
 
     def interaction_at(self, price: float, kind: str = ""):
         """This level's OWN latest interaction, as recorded on a CLOSED bar.

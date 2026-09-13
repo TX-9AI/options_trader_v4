@@ -68,7 +68,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/__init__.py`
 - **calls:** (none)
-- **called by:** `derived/forks.py`, `main.py`, `tests/check_audit_20260823.py`, `tests/check_condor_rails.py`, `tests/check_derived_layer.py`, `tests/check_orb_one_order.py`, `tests/check_orb_rearm_zone.py`, `tests/check_plan_wiring.py`, `tests/check_pool_geometry.py`
+- **called by:** `derived/forks.py`, `main.py`, `tests/check_audit_20260823.py`, `tests/check_condor_rails.py`, `tests/check_derived_layer.py`, `tests/check_level_visits.py`, `tests/check_orb_one_order.py`, `tests/check_orb_rearm_zone.py`, `tests/check_plan_wiring.py`, `tests/check_pool_geometry.py`
 
 ### `analysis/chain_snapshot.py`
 - **calls:** `config.py`
@@ -719,7 +719,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_level_visits.py`
-- **calls:** `analysis/liquidity_ledger.py`
+- **calls:** `analysis/__init__.py`, `analysis/liquidity_ledger.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_level_vocabulary.py`
