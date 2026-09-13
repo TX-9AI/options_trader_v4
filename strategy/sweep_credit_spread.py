@@ -1,5 +1,60 @@
 """
-strategy/sweep_credit_spread.py  v5.5
+strategy/sweep_credit_spread.py  v5.6
+v5.6  2026-09-12  r378 — THE TRADE FIRES ON AN INTERACTION NOW, NOT ON GATE
+      ALIGNMENT, AND THE NAMED LEVEL IS JUDGED BY ITS OWN RECORD.
+      OPERATOR'S RULING, 2026-09-12: *"Ungate the sweep trade on the definitions
+      we have for interactions on the named levels. And for the 1-hr fork, allow
+      ANY contact with a tine to trigger if it results in a 1-min candle close
+      back inside the channel on the 1-min candle where the contact occurred."*
+      🔴 WHAT WAS ACTUALLY WRONG, FOUND BY ASKING WHAT THE TRADE FIRES ON. There
+      was NO interaction identity anywhere in this path. `_spent_key` is
+      `(symbol, side, round(pool, 2))` — THE LEVEL, not the interaction — and
+      `mark_spent` is called from ONE site, `trade_logger`, inside
+      `if float(pnl_usd or 0.0) < 0`. So the lock armed only on a LOSS, and a
+      WINNING sweep left the level re-armed with the same touch still inside the
+      window. That is RUN.1's shape on a second strategy, and ORB already had
+      the answer at r235: `confirmation_seq`/`order_placed_seq`, because *"a bare
+      boolean can only say an order happened"*.
+      ⚠️ IT ALSO EXPLAINS A MEASUREMENT FAILURE. A p25 fit computed on 38,834
+      `plan_check` rows collapsed to 637 distinct events (1.6%) once deduped,
+      because `plan_check` writes the gate EVERY TICK and the sweeps that persist
+      unfired are the deep ones being refused — so the population was biased
+      toward exactly the tail being measured. The fit was withdrawn. The cause
+      was not sampling: **the event did not exist to count.** One gap, seen from
+      the trading end and the measurement end.
+      🔑 SO `event_ts` IS THE IDENTITY AND THE LATCH KEYS ON IT. One interaction
+      produces one entry however many ticks it stays aligned, and a NEW
+      interaction on the same level re-arms normally.
+      ⚠️ THE LATCH IS SET AT THE FILL, NOT AT ALIGNMENT, AND §37 IS WHY. *"normal
+      entries that weren't filled and weren't interrupted should keep trying"* —
+      a confirmation that simply has not filled (chain fetch failed, thin
+      liquidity, the dispatch slot taken) MUST keep being offered every tick
+      until its own window closes. Latching on alignment would have turned a
+      failed fill into a silent lockout, which is a §37 violation wearing the
+      costume of a bug fix.
+      🔑 THE NAMED LEVEL'S GATE IS NOW ITS OWN LEDGER ROW. `liquidity_ledger`
+      has implemented the operator's 2026-08-13 rule since the port — wick
+      reaches = touch, close beyond = BREACH (acceptance), close back on the
+      origin side = HOLD (rejection) — per closed bar, persisted, and read by
+      nothing: its own comment said *"read side (nothing gates on this in v1)"*.
+      A HOLD is the interaction this trade wants; a BREACH is the refusal.
+      ⚠️ THIS IS NOT A RELAXATION OF §36'S FOUNDATIONAL RECLAIM, IT IS THE SAME
+      CONDITION MEASURED BY A CLOSE INSTEAD OF A MAGNITUDE. `reclaimed` still
+      gates, unchanged. What goes is `MIN_REJECTION_PCT` as a floor and
+      `MAX_REJECTION_PCT` as a ceiling — a SELECTION band that was standing in
+      for a definition. Measured, the ceiling refused 95.5% of sweeps strict and
+      73.7% relaxed, and the gate's own recorded FAIL count (26,856) matched the
+      count above the relaxed ceiling exactly.
+      ⚠️ AND A MISSING LEDGER IS STARVED, NEVER REFUSED. `main.py` defers seeding
+      until the mapper produces named pools, so "no level found" is normal in the
+      first minutes of a session. Refusing there would cost trades invisibly —
+      the plausible-silence class in docs/PORT_STATE.md.
+      📊 RECORD-ONLY AND NEW: `level_touches`, `level_holds`, `level_breaches`
+      ride the plan row. That is the durability history the operator ruled must
+      drive the fit — *"the level type should determine how we fit the contact
+      gates... those named levels also have historical defense numbers that the
+      transient fork will never have"* — and it is recorded before it is judged,
+      which is r351's pattern and the reason this row can be fitted at all.
 v5.5  2026-09-12  r377 — A TINE INTERACTION IS CLASSIFIED, NOT FLOORED.
       OPERATOR'S RULING, 2026-09-12: *"broken and reclaimed vs respected are
       both legitimate setups, both leading to containment inside the channel,
@@ -314,14 +369,39 @@ GATE CATEGORIES — required by WA §36. Only SELECTION is ever relaxed.
   · it RECLAIMED - a bar CLOSED back inside. **A wick through a level is a
     touch, not a decision.** Without the reclaim there is no boundary, only a
     level price is currently through.
+    🔑 r378 — AND THE TINE PATH FINALLY SATISFIES THIS. From r163 to r377 a tine
+    event was born `reclaimed=True` and nothing asked whether price came back,
+    so the one condition this section calls foundational was VACUOUS on that
+    path for fourteen revisions. The operator's 2026-09-12 test supplies it: the
+    CONTACT BAR ITSELF must close back inside the channel.
+  · THE INTERACTION IS THE LEVEL'S OWN, r378. For a NAMED level the ledger
+    decides by CLOSE — a HOLD is a rejection, a BREACH is acceptance — and a
+    BREACH is refused. This replaced a retreat-magnitude band; it is the same
+    foundational question asked by a close instead of a percentage.
+  · ONE ENTRY PER INTERACTION, r378. `event_ts` identifies the interaction and
+    the latch is set AT THE FILL. Before this the trade fired on gate ALIGNMENT
+    and only a LOSS armed the level lock, so a winning exit left the same touch
+    live for the next tick — RUN.1's shape.
   · it is NOT INVALIDATED. Reclaimed-then-accepted-through is a BREAKOUT, and
     selling a boundary that has already given way is the worst version of this.
   · price is ALREADY on the profitable side. Otherwise the spread opens tested.
 
 **SELECTION — relaxed, and each was measured on 2,169 sweep events.**
   · window 13:00-15:00  -> 09:45-15:30   (39% survival vs 26% before 10:30)
-  · pierce ceiling 0.25% -> 0.75%        (33-34% survival vs 19-21% deeper)
-  · max age 6 bars      -> 18 bars       (age is measured from the RECLAIM)
+  · touch lookback 30 1m bars — how far back a qualifying contact bar may sit.
+    r378 made this an AGE LIMIT only; it no longer decides WHAT the interaction
+    was, which is the detector's single-bar test.
+  🔴 GONE FROM THIS LIST AT r378 — the pierce band. `MIN_REJECTION_PCT` survives
+    as the graze/reclaim LABEL boundary and `MAX_REJECTION_PCT` is read by
+    nothing in the decision path. Both are still declared in `GATES`: deleting a
+    constant in the same delivery that changes what trades makes the two
+    impossible to separate afterwards, and SWEEP.5 is the open row that asks.
+    Measured before removal: the strict ceiling refused 95.5% of sweeps and the
+    relaxed one 73.7%.
+  🔴 ALSO GONE, AT r241 — max age. Kept in this list until r378 as a relaxable
+    preference it had not been for 137 revisions; `invalidated` is the liveness
+    test. A stale line in a §36 declaration is a wrong answer about what can be
+    loosened, which is the one thing this block exists to state.
 
 **FEASIBILITY — never relaxed.**
   · ATR <= 0.20%. Above 0.20% the tape produced a 0.5% move on **92% of 90-bar
@@ -464,6 +544,13 @@ GATES = {
     # the same trade, which is what a debug session wants.
     "EARLIEST_ET":        "SELECTION",
     "LATEST_ET":          "SELECTION",
+    # 🔴 r378 — NEITHER GATES ANY LONGER, AND THEY ARE LEFT DECLARED ON
+    # PURPOSE. `MIN_REJECTION_PCT` is still READ, as the graze/reclaim LABEL
+    # boundary, and `MAX_REJECTION_PCT` is now read by nothing in the decision
+    # path. Deleting them is SWEEP.5's open question, not this row's: a constant
+    # removed in the same delivery that changes what trades makes the two
+    # impossible to separate if Monday goes wrong. Marked, not deleted — the
+    # r376 precedent.
     "MAX_REJECTION_PCT":  "SELECTION",
     "MIN_REJECTION_PCT":  "SELECTION",
     # FOUNDATIONAL - r230, operator ruling 2026-09-03. SWP.5's own words:
@@ -766,6 +853,102 @@ def is_spent(symbol: str, side: str, pool: float):
     return (k in _SPENT), _SPENT.get(k, "")
 
 
+# ── 🔑 r378 — THE ENTRY LATCH, PER INTERACTION ───────────────────────────────
+# `_SPENT` above keys on the LEVEL and arms only on a LOSS. That answers a
+# different question — "has this level already cost us money today" — and it
+# cannot stop one interaction firing twice. This keys on the INTERACTION:
+# (symbol, side, level, the bar that COMPLETED it).
+# ⚠️ SET FROM THE FILL PATH, NOT FROM HERE, AND §37 IS THE REASON. A live
+# confirmation that has not filled must keep being offered every tick until its
+# own window closes; latching at gate alignment would convert a failed fill into
+# a silent lockout. This mirrors `orb_engine`'s `order_placed_seq`, which is set
+# where the order is placed and nowhere else (r235).
+# ⚠️ A 0.0 `event_ts` IS NOT LATCHED, AND THAT IS DELIBERATE. An event with no
+# identity cannot be told apart from another; collapsing them onto one key would
+# make the FIRST such sweep lock out every later one on that level, silently.
+# It is logged instead, so an unstamped producer is visible rather than costly.
+_FIRED: dict = {}
+_FIRED_DAY: str = ""
+
+
+def event_key(symbol: str, side: str, level_key: float, event_ts: float) -> str:
+    """The interaction's identity as one string, so a Signal can carry it.
+
+    ⚠️ THE LEVEL IS ROUNDED TO THE CENT for the same reason `_spent_key` rounds:
+    the pool is recomputed per tick and drifts in the last decimal, and an exact
+    float would never match itself — a dead latch looks exactly like a latch
+    that has nothing to catch.
+    ⚠️ THE STAMP IS FLOORED TO THE SECOND. A bar's stamp is a second-resolution
+    instant; carrying float noise into the key would split one event in two.
+    """
+    return "%s|%s|%.2f|%d" % (symbol or "", side or "",
+                             round(float(level_key or 0.0), 2),
+                             int(float(event_ts or 0.0)))
+
+
+def _fired_today() -> str:
+    from datetime import datetime
+    try:
+        from config import ET
+        return datetime.now(ET).strftime("%Y-%m-%d")
+    except Exception:                                          # noqa: BLE001
+        return datetime.now().strftime("%Y-%m-%d")
+
+
+def mark_event_fired_key(key: str, why: str = "") -> None:
+    """An order was PLACED for this interaction. Called from the entry path."""
+    global _FIRED_DAY
+    if not key:
+        return
+    today = _fired_today()
+    if today != _FIRED_DAY:
+        _FIRED.clear()
+        _FIRED_DAY = today
+    if key.endswith("|0"):
+        # no identity -> nothing to latch. Said out loud (§0.5) rather than
+        # returning quietly, because the only way to notice otherwise is a
+        # repeated entry nobody can explain.
+        logger.warning("[sweep_cs] interaction %s carries NO event stamp — it "
+                       "CANNOT be latched and this level can fire again on the "
+                       "same interaction", key)
+        return
+    if key not in _FIRED:
+        _FIRED[key] = why or "an order was placed on this interaction"
+        logger.info("[sweep_cs] INTERACTION SPENT %s — %s; the next order needs "
+                    "a FRESH interaction on this level", key, _FIRED[key])
+
+
+def mark_event_fired(symbol: str, side: str, level_key: float,
+                     event_ts: float, why: str = "") -> None:
+    mark_event_fired_key(event_key(symbol, side, level_key, event_ts), why)
+
+
+def is_event_fired(symbol: str, side: str, level_key: float, event_ts: float):
+    """(fired, why). Day-scoped, like the level lock beside it."""
+    if not float(event_ts or 0.0):
+        return False, ""            # no identity -> never latched (see above)
+    if _fired_today() != _FIRED_DAY:
+        return False, ""
+    k = event_key(symbol, side, level_key, event_ts)
+    return (k in _FIRED), _FIRED.get(k, "")
+
+
+def _ledger_interaction(level_price: float, kind: str):
+    """The named level's OWN latest interaction, from `liquidity_ledger`.
+
+    Returns the ledger's dict, or None when it cannot answer — and None is
+    STARVED, never a refusal. Never raises: this feeds a gate, and an import
+    problem must not become a trading decision.
+    """
+    try:
+        from analysis.liquidity_ledger import get_ledger
+        led = get_ledger(_symbol_of())
+        return led.interaction_at(float(level_price), kind)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("[sweep_cs] ledger interaction unavailable: %s", exc)
+        return None
+
+
 def _sweep_at_level(liq_map, level: float, side: str = ""):
     """The sweep on a SUPPLIED level — an input the plan gathered, r158.
 
@@ -826,7 +1009,11 @@ class SweepPreparation:
                  # r377 — WHICH INTERACTION THIS WAS: "graze" or "reclaim".
                  # Declared because __slots__ makes an undeclared attribute
                  # raise rather than silently appear, which is the point.
-                 "interaction")
+                 "interaction",
+                 # r378 — THE INTERACTION'S IDENTITY, carried onto the Signal so
+                 # the fill path can latch it. Declared because __slots__ makes
+                 # an undeclared attribute raise rather than silently appear.
+                 "event_ts", "event_key")
 
     def __init__(self, tick):
         self.tick = tick
@@ -840,6 +1027,8 @@ class SweepPreparation:
         self.credit = self.width = self.stop_prem = self.stop_dist = None
         self.judged = None
         self.interaction = ""
+        self.event_ts = 0.0
+        self.event_key = ""
         # \U0001f534 r234 - THE NARRATION NAMES THE BASIS IT WAS GATED ON. r219's
         # lesson one layer over: the plan line printed `credit N (bid/ask)`
         # while N had become the mark, and *"printing one and labelling it the
@@ -892,12 +1081,19 @@ class SweepCreditSpreadStrategy:
     # reports (current, required, met). Thresholds are this file's GATES.
     CONDITIONS = {
         "named":        "the swept level is a NAMED pool",
-        "reclaimed":    "a bar has CLOSED back inside the pool (a wick is a touch) — "
-                        "or the level is a MOVING tine, whose TOUCH is the trigger",
+        # r378 — the tine half of this sentence is no longer an EXEMPTION. A
+        # tine event now requires the contact bar to CLOSE back inside the
+        # channel, so BOTH kinds of level are judged by a close.
+        "reclaimed":    "a bar has CLOSED back inside the pool — or, for a MOVING "
+                        "tine, the CONTACT BAR ITSELF closed back inside the channel",
         "invalidated":  "price has NOT accepted through it after the reclaim",
-
-        "rejection":    f"rejection >= {MIN_REJECTION_PCT*100:.3f}%",
-        "pierce_depth": f"pierce <= {MAX_REJECTION_PCT*100:.3f}% (relaxed x3)",
+        # 🔑 r378 — THE NAMED LEVEL'S OWN RECORD REPLACES THE MAGNITUDE BAND.
+        # `liquidity_ledger` decides by CLOSE on every closed bar: a HOLD is a
+        # rejection, a BREACH is acceptance. A retreat percentage never had
+        # definitional standing next to that.
+        "interaction_named": "the level's LAST closed-bar interaction was a HOLD "
+                             "(a rejection), not a BREACH (acceptance)",
+        "event_fresh":  "no order has been placed on THIS interaction yet",
         "side_of_pool": "price is on the profitable side of the pool",
         "entry_window": f"{EARLIEST_ET}-{LATEST_ET} ET (relaxed extends)",
         "atr_pct":      f"ATR <= {ATR_MAX_PCT:.2f}% or unmeasured",
@@ -1090,16 +1286,108 @@ class SweepCreditSpreadStrategy:
         # STALENESS, and measurement showed drift alone exceeding it on 57.9%
         # of 1h forks. The distinction between a graze and a reclaim did not
         # exist to be made; every stale touch looked like a reclaim.
+        # ── 🔑 r378 — ANY CONTACT, ONCE THE BAR TOOK IT BACK ─────────────
+        # OPERATOR, 2026-09-12: *"for the 1-hr fork, allow ANY contact with a
+        # tine to trigger if it results in a 1-min candle close back inside the
+        # channel on the 1-min candle where the contact occurred."*
+        # THE QUALIFYING TEST MOVED INTO THE DETECTOR, which is the only place
+        # that has the bar. `_detect_touch` emits nothing unless the contact bar
+        # closed between both rails, so by the time a tine event reaches this
+        # line the containment is already PROVEN and there is no depth left here
+        # to judge. Judging it again would be a second opinion competing with the
+        # verdict, which is what §31 warns about.
+        # ⚠️ THE GRAZE/RECLAIM LABEL SURVIVES AS NARRATION. r377's boundary still
+        # says WHICH interaction it was — reached and turned, or through and back
+        # — and both fire, as that ruling said. `MIN_REJECTION_PCT` is read HERE
+        # ONLY, as a label boundary, and gates nothing.
         if _touch:
             prep.interaction = "graze" if rej < MIN_REJECTION_PCT else "reclaim"
             # record-only, on the tick the interaction happened. 1 = graze,
             # 2 = reclaim, matching the `sweep` row's own 1/2 encoding.
             t.check("interaction", 1.0 if prep.interaction == "graze" else 2.0, None)
         else:
-            prep.cond("rejection", rej, self.CONDITIONS["rejection"],
-                      rej >= MIN_REJECTION_PCT)
-        _max_rej = relaxed.widen(MAX_REJECTION_PCT, 3.0, name="pierce_ceiling")
-        prep.cond("pierce_depth", rej, f"<= {_max_rej*100:.3f}%", rej <= _max_rej)
+            # ── 🔑 r378 — THE NAMED LEVEL IS JUDGED BY ITS OWN LEDGER ROW ──
+            # OPERATOR: *"Ungate the sweep trade on the definitions we have for
+            # interactions on the named levels."* Those definitions are his own,
+            # 2026-08-13, and `liquidity_ledger.on_closed_bar` has implemented
+            # them since the port: wick reaches = TOUCH, close beyond = BREACH
+            # (acceptance), close back on the origin side = HOLD (rejection).
+            # ⚠️ NOT A RELAXATION OF THE FOUNDATIONAL RECLAIM. `reclaimed` above
+            # still gates and is untouched; this replaces a retreat MAGNITUDE
+            # with the same question asked by a CLOSE. §36's own words — *"relax
+            # the sweep's reclaim and you are selling into a level price is still
+            # through"* — are satisfied more directly here than by a percentage.
+            _lp = float(getattr(sweep, "pool_price", 0.0) or 0.0)
+            _lk = "high" if str(getattr(sweep, "kind", "")).startswith("high") else "low"
+            _iv = _ledger_interaction(_lp, _lk)
+            if _iv is None:
+                # 🔴 STARVED, NOT REFUSED. `main.py` retries the ledger seed
+                # every tick until the mapper produces named pools, so an
+                # unseeded book is normal early in a session. A refusal here
+                # would cost trades with no red anywhere.
+                prep.starved.append("level_ledger")
+                t.starved("level_ledger")
+            else:
+                _res = str(_iv.get("result") or "")
+                # record-only, and this is the durability the operator ruled the
+                # fit must use: *"those named levels also have historical defense
+                # numbers that the transient fork will never have."* Recorded
+                # before it is judged (r351).
+                # TODAY'S record — tests, and how they went. A "test" is one
+                # VISIT from r378, not one bar: *"Leans on isn't the same as
+                # testing it."*
+                t.check("level_touches", float(_iv.get("touches") or 0), None)
+                t.check("level_holds", float(_iv.get("holds") or 0), None)
+                t.check("level_breaches", float(_iv.get("breaches") or 0), None)
+                t.check("level_contact_bars", float(_iv.get("contact_bars") or 0), None)
+                # THE DEFENSE RECORD from previous sessions, which is the thing
+                # the operator ruled the fit must be per level type against:
+                # *"those named levels also have historical defense numbers that
+                # the transient fork will never have."* Record-only in r378 —
+                # recorded before it is judged (r351), so Monday's tape can fit
+                # it instead of it being defended.
+                t.check("level_prior_tests", float(_iv.get("prior_touches") or 0), None)
+                t.check("level_prior_holds", float(_iv.get("prior_holds") or 0), None)
+                t.check("level_prior_sessions", float(_iv.get("prior_sessions") or 0), None)
+                _dr = _iv.get("defense_rate")
+                if _dr is not None:
+                    # ⚠️ ONLY RECORDED WHEN IT EXISTS. A level with no history is
+                    # NOT a level that has never held, and writing 0.0 here would
+                    # make those two indistinguishable in the corpus forever.
+                    t.check("level_defense_rate", round(float(_dr), 4), None)
+                _partial = bool(_iv.get("partial"))
+                if not _res and _partial:
+                    # 🔴 NOT OBSERVED, NOT UNTESTED — so STARVED, not refused.
+                    # The level joined the book after bars had been consumed
+                    # (every bake re-seeds) and the box cannot backfill from its
+                    # own 60-bar frame. Refusing here would silently cost trades
+                    # on exactly the levels a mid-session restart introduced.
+                    prep.starved.append("level_partial")
+                    t.starved("level_partial")
+                else:
+                    if not _res:
+                        # The map found a sweep where the 1m book records no
+                        # resolved test. They run on different bar grids (5m/15m
+                        # here, 1m there), so a disagreement is INFORMATION and is
+                        # said out loud rather than settled by picking a side.
+                        logger.warning("[sweep_cs] %s: the map reports a sweep at "
+                                       "%.2f but the ledger records NO resolved "
+                                       "test there (tests=%s, visit_open=%s) — "
+                                       "no event", name, _lp,
+                                       _iv.get("touches"), _iv.get("visit_open"))
+                    prep.cond("interaction_named", 1.0 if _res == "hold" else 0.0,
+                              self.CONDITIONS["interaction_named"], _res == "hold")
+                    prep.interaction = _res or "none"
+        # ⚠️ r378 — `pierce_depth` IS RECORD-ONLY NOW, ON BOTH PATHS. On the tine
+        # path a BREAK is excluded by construction: a bar that closed back inside
+        # the channel did not accept through it, so the ceiling had nothing left
+        # to refuse. On the named path a break IS the ledger's BREACH and is
+        # refused above, by a close rather than by a percentage. MEASURED before
+        # it was removed: the strict ceiling refused 95.5% of sweeps and the
+        # relaxed one 73.7%, and the gate's own FAIL count (26,856) matched the
+        # count above the relaxed ceiling exactly — an independent corroboration
+        # that this constant, not the setup, was doing the refusing.
+        t.check("pierce_depth", rej, None)
         # \U0001f511 r233 RECORD-ONLY - HOW OFTEN THE DEEP CASE ACTUALLY FIRES, and
         # how far the chosen level sat from spot. Both GATE NOTHING and are
         # written so the r233 rulings can be FITTED against outcomes instead of
@@ -1161,11 +1449,33 @@ class SweepCreditSpreadStrategy:
 
         # ── structural: untradeable regardless of the trigger ─────────────
         # a moving level's price drifts every bar: the lock is keyed by NAME
-        _spent, _spent_why = is_spent(_symbol_of(), side,
-                                      pool if not _touch else _name_key(name))
+        _lvl_key = pool if not _touch else _name_key(name)
+        _spent, _spent_why = is_spent(_symbol_of(), side, _lvl_key)
         t.check("spent_level", 1.0 if _spent else 0.0, not _spent)
         if _spent:
             prep.structural.append(("spent_level", f"{name} {pool:.2f} is SPENT — {_spent_why}"))
+        # ── 🔑 r378 — ONE ENTRY PER INTERACTION ───────────────────────────────
+        # The level lock above answers "has this level cost us money today".
+        # THIS answers "have we already traded THIS interaction", which nothing
+        # asked before: the sweep fired on gate ALIGNMENT, so a winning exit left
+        # the same touch live and the next tick could re-enter. RUN.1 one
+        # strategy over; ORB's r235 answer, keyed by the bar instead of a counter.
+        # ⚠️ STRUCTURAL, like the lock above — untradeable regardless of the
+        # trigger — and NOT a condition, because a spent interaction is not a
+        # setup that failed to qualify.
+        prep.event_ts = float(getattr(sweep, "event_ts", 0.0) or 0.0)
+        prep.event_key = event_key(_symbol_of(), side, _lvl_key, prep.event_ts)
+        t.check("event_ts", round(prep.event_ts, 0), None)
+        _efired, _ewhy = is_event_fired(_symbol_of(), side, _lvl_key, prep.event_ts)
+        t.check("event_fired", 1.0 if _efired else 0.0, not _efired)
+        if _efired:
+            prep.structural.append(("event_fresh",
+                f"{name}'s interaction at {int(prep.event_ts)} is already traded — {_ewhy}"))
+        elif not prep.event_ts:
+            # An unstamped event cannot be latched. It is NOT refused — that
+            # would be a silent trade-killer if a producer ever forgot the stamp
+            # — but it is named on the row so the gap is visible.
+            t.check("event_unstamped", 1.0, None)
         _geo = t.level(pool, boundary, name or "pool", orb_high, orb_low,
                        price_now)
         if _geo is False:
@@ -1353,6 +1663,12 @@ class SweepCreditSpreadStrategy:
         sig.pool_price = prep.pool
         sig.boundary = prep.boundary
         sig.swept_level_name = prep.name
+        # r378 — the interaction's identity travels WITH the trade, so the fill
+        # path can latch THIS interaction and nothing else. Set here because the
+        # Signal is the only bridge from the strategy to `entry_engine`, which is
+        # the same bridge `swept_level_name` uses and the same one AUDIT F4 found
+        # a field missing from.
+        sig.sweep_event_key = prep.event_key
         sig.sweep_age_bars = prep.age
         sig.rejection_pct = prep.rej
         sig.atr_pct_at_entry = atr_pct

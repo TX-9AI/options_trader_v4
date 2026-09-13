@@ -1,5 +1,49 @@
 """
-analysis/liquidity_mapper.py  v4.4
+analysis/liquidity_mapper.py  v4.5
+v4.5  2026-09-12  r378 — A TINE CONTACT IS AN EVENT WITH A CLOSE, AND A NAMED
+      LEVEL IS NO LONGER JUDGED BY A MAGNITUDE.
+      OPERATOR'S RULING, 2026-09-12: *"Ungate the sweep trade on the definitions
+      we have for interactions on the named levels. And for the 1-hr fork, allow
+      ANY contact with a tine to trigger if it results in a 1-min candle close
+      back inside the channel on the 1-min candle where the contact occurred."*
+      🔑 THE TINE FINALLY HAS A RECLAIM. Since r163 a touch was born
+      `reclaimed=True` — *"the TOUCH is the trigger"* — so the one condition §36
+      calls FOUNDATIONAL for this setup was VACUOUS on the tine path: nothing
+      about the tine event ever asked whether price came back. It does now, and
+      the test is the operator's: the SAME 1m bar that made contact must CLOSE
+      between BOTH rails. That is a STRICTER event than r377 shipped, not a
+      looser one, and it is why the depth band can go.
+      🔑 SO THE EVENT IS ONE BAR AND IT HAS AN IDENTITY. `event_ts` is the stamp
+      of that bar. r377 could not count per-event because the touching BAR
+      reached nothing — `bar_index` and `reclaim_bar_index` lived on the object
+      and died there — and a window scan that re-answers "is price near the
+      rail" every tick has no event to count in the first place. ORB solved the
+      same problem at r235 with `confirmation_seq`/`order_placed_seq`; this is
+      that shape, keyed by the bar instead of a counter.
+      ⚠️ THE FORMING BAR IS EXCLUDED, because a forming bar has no close to
+      judge. `liquidity_ledger.feed_frame` already states the house fact — *"the
+      LAST row is the forming bar and is never fed"* — and the ruling says
+      *"results in a 1-min candle close"*, so the freshest possible event is the
+      newest CLOSED bar. CONSEQUENCE, stated rather than discovered later: a
+      tine event's `bars_ago` is now never 0, and entry is up to ~60s later than
+      r377's intra-bar fire. That is the price of a close-based event.
+      ⚠️ NO CHANNEL, NO EVENT — AND IT SAYS SO. `inside_channel_at` returns None
+      when the opposite rail is unknown, the caller emits nothing, and
+      `publish_tines` WARNS. An unpaired rail silently emitting zero touches is
+      the plausible-silence class this project keeps paying for (§0.5).
+      📊 THE PAIR IS NOT ASSUMED. `condor_trigger_map.build` appends the call and
+      put rail of a frame from ONE `rails_for` result or neither, so the channel
+      is available whenever the fork is — and the OPPOSITE RAIL IS READ rather
+      than mirrored about the median, which would assume a symmetry
+      `build_fork_contained` never promised.
+      🔑 AND THE NAMED POOL'S 0.002 RETREAT FLOOR IS GONE — for named pools
+      only. It was a bare literal judging a RETREAT DISTANCE, while the level's
+      own interaction record already answers the question by CLOSE: a close back
+      on the origin side is a hold, a close beyond is a breach. A magnitude has
+      no definitional standing next to that, and the floor suppressed the exact
+      shallow-but-held case the ruling admits. `reclaimed` — the foundational
+      condition — is untouched. UNNAMED pools keep the floor under
+      `_MIN_RETREAT_PCT`, which is that literal given a name (C.44).
 v4.4  2026-09-12  r377 — LVL.9: THE PIERCE IS MEASURED WHERE THE TOUCH WAS
       JUDGED. `_detect_touch` tested CONTACT with `pool.price_at(ts)` per bar —
       time-aware, always was — and then measured the DEPTH as
@@ -300,12 +344,45 @@ class LiquidityPool:
     moving:         bool   = False
     slope_per_min:  float  = 0.0        # signed price drift per WALL minute
     as_of:          float  = 0.0        # epoch of `price`
+    # r378 — THE OPPOSITE RAIL OF THE SAME FORK, so a tine can be asked whether
+    # a close came back INSIDE the channel. Paired by timeframe in
+    # `publish_tines`; 0.0 means the pair was not published and the channel
+    # question is UNANSWERABLE, which is not the same as answered "no".
+    opp_price:      float  = 0.0
+    opp_slope_per_min: float = 0.0
 
     def price_at(self, ts_epoch: float) -> float:
         """The level where it WAS at `ts_epoch`. A fixed pool returns itself."""
         if not self.moving or not self.as_of:
             return self.price
         return self.price - self.slope_per_min * ((self.as_of - float(ts_epoch)) / 60.0)
+
+    def opp_price_at(self, ts_epoch: float) -> float:
+        """The OPPOSITE rail where it stood at `ts_epoch`, or 0.0 if unknown."""
+        if not self.opp_price:
+            return 0.0
+        if not self.as_of:
+            return self.opp_price
+        return self.opp_price - self.opp_slope_per_min * (
+            (self.as_of - float(ts_epoch)) / 60.0)
+
+    def inside_channel_at(self, price: float, ts_epoch: float):
+        """Was `price` between BOTH rails where they stood at `ts_epoch`?
+
+        🔴 RETURNS None WHEN THE CHANNEL IS UNKNOWN, and the caller must not
+        read that as False. A missing opposite rail means the operator's test
+        cannot be evaluated; reporting it as "closed outside" would turn an
+        absent input into a refusal and the refusal would be invisible.
+        ⚠️ BOTH BOUNDS ARE TESTED, not just the contacted one. A bar that pokes
+        the upper rail and closes below the LOWER rail did not come back inside
+        the channel, and reading only the near side would call that containment.
+        """
+        if not self.moving or not self.opp_price:
+            return None
+        a = self.price_at(ts_epoch)
+        b = self.opp_price_at(ts_epoch)
+        lo, hi = (b, a) if b < a else (a, b)
+        return bool(lo <= float(price) <= hi)
 
 
 @dataclass
@@ -319,6 +396,11 @@ class LiquiditySweep:
     confirmed:      bool    = False
     bar_index:      int     = 0
     reclaim_bar_index: int  = 0      # SWP.10: bar the close returned INSIDE
+    # 🔑 r378 — THE EVENT'S IDENTITY. Epoch of the bar that COMPLETED the
+    # interaction: the reclaim bar for a pool sweep, the single contact-and-
+    # close bar for a tine. It is what the entry latch keys on, so one
+    # interaction produces one entry however many ticks it stays aligned.
+    event_ts:       float   = 0.0
     bars_ago:       int     = 0      # SWP.10: bars since the RECLAIM (was: since
                                      #   the sweep). The setup is not tradeable
                                      #   until price closes back inside, so aging
@@ -382,6 +464,12 @@ class LiquidityMap:
 
 
 _ACCEPT_CLOSES = 2      # LIQ.3 — mirrors SWEEP_ACCEPT_CLOSES
+# 🔑 r378 — THE RETREAT FLOOR, WHICH WAS A BARE LITERAL IN TWO PLACES. It gates
+# UNNAMED pools only from r378: a NAMED level's interaction is decided by the
+# CLOSE (hold vs breach), which `reclaimed` already tests, and a retreat
+# MAGNITUDE has no definitional standing beside it. Named rather than inlined
+# per C.44 — a number nobody can find is a number nobody chose.
+_MIN_RETREAT_PCT = 0.002
 # A2.6 (2026-08-15): NAMED_POOLS_INCLUDE_SESSIONS removed. The LIQ.6 ladder
 # never consulted it — the knob was dead while a green test asserted sessions
 # were off. Session rungs are ON by LIQ.6 doctrine (rule 1); the protection
@@ -886,6 +974,14 @@ class LiquidityMapper:
         lows   = df["low"].tolist()
         closes = df["close"].tolist()
         n      = len(highs)
+        # r378 — the RECLAIM bar's own stamp, so the event carries an identity
+        # the entry latch can key on. Absent or unreadable index -> 0.0, and a
+        # 0.0 `event_ts` is treated by the strategy as "no identity" rather than
+        # as a shared one, which would make every such sweep the same event.
+        try:
+            stamps = [float(t.timestamp()) for t in df.index]
+        except Exception:                                      # noqa: BLE001
+            stamps = [0.0] * n
 
         for pool in lmap.pools:
             for i in range(1, n):
@@ -937,7 +1033,21 @@ class LiquidityMapper:
                     reject_close = min((closes[k] for k in window
                                         if closes[k] <= pool.price), default=closes[i])
                     rejection_pct = (highs[i] - reject_close) / highs[i]
-                    if reclaimed and rejection_pct >= 0.002:
+                    # 🔑 r378 — THE FLOOR IS FOR UNNAMED POOLS ONLY. A named
+                    # level's interaction is decided by the CLOSE, which
+                    # `reclaimed` tests and which the ledger counts as a hold or
+                    # a breach; a retreat MAGNITUDE adds nothing definitional
+                    # and suppressed the shallow-but-held case the operator's
+                    # ruling admits. `reclaimed` is unchanged — §36 calls it
+                    # foundational and it stays foundational.
+                    # ⚠️ `is_named` IS TRUE FOR TINES TOO, and that is harmless
+                    # HERE only because tines never reach this function: they
+                    # are published by `publish_tines` and judged by
+                    # `_detect_touch`. Said out loud because the next reader of
+                    # this line will wonder.
+                    _floor_ok = (rejection_pct >= _MIN_RETREAT_PCT
+                                 or bool(getattr(pool, "is_named", False)))
+                    if reclaimed and _floor_ok:
                         sweep = LiquiditySweep(
                             pool_price=pool.price,
                             sweep_price=highs[i],
@@ -947,6 +1057,7 @@ class LiquidityMapper:
                             confirmed=True,
                             bar_index=i,
                             reclaim_bar_index=_rc_bar,
+                            event_ts=(stamps[_rc_bar] if 0 <= _rc_bar < n else 0.0),
                             bars_ago=(n - 1 - _rc_bar),
                             timeframe=tf,
                             swept_named_level=pool.name if pool.is_named else "",
@@ -976,7 +1087,21 @@ class LiquidityMapper:
                     reject_close = max((closes[k] for k in window
                                         if closes[k] >= pool.price), default=closes[i])
                     rejection_pct = (reject_close - lows[i]) / lows[i]
-                    if reclaimed and rejection_pct >= 0.002:
+                    # 🔑 r378 — THE FLOOR IS FOR UNNAMED POOLS ONLY. A named
+                    # level's interaction is decided by the CLOSE, which
+                    # `reclaimed` tests and which the ledger counts as a hold or
+                    # a breach; a retreat MAGNITUDE adds nothing definitional
+                    # and suppressed the shallow-but-held case the operator's
+                    # ruling admits. `reclaimed` is unchanged — §36 calls it
+                    # foundational and it stays foundational.
+                    # ⚠️ `is_named` IS TRUE FOR TINES TOO, and that is harmless
+                    # HERE only because tines never reach this function: they
+                    # are published by `publish_tines` and judged by
+                    # `_detect_touch`. Said out loud because the next reader of
+                    # this line will wonder.
+                    _floor_ok = (rejection_pct >= _MIN_RETREAT_PCT
+                                 or bool(getattr(pool, "is_named", False)))
+                    if reclaimed and _floor_ok:
                         sweep = LiquiditySweep(
                             pool_price=pool.price,
                             sweep_price=lows[i],
@@ -986,6 +1111,7 @@ class LiquidityMapper:
                             confirmed=True,
                             bar_index=i,
                             reclaim_bar_index=_rc_bar,
+                            event_ts=(stamps[_rc_bar] if 0 <= _rc_bar < n else 0.0),
                             bars_ago=(n - 1 - _rc_bar),
                             timeframe=tf,
                             swept_named_level=pool.name if pool.is_named else "",
@@ -1076,13 +1202,25 @@ def _rail_slope_per_min(slope_per_bar: float, tf: str) -> float:
 
 def publish_tines(lmap: LiquidityMap, ctm, df_1m) -> int:
     """Put every active fork tine on the liquidity map as a MOVING named pool
-    and detect TOUCHES of it on the 1m tape. Returns the number of touch
-    events emitted. Never raises.
+    and detect CONTACT EVENTS on the 1m tape. Returns events emitted. Never
+    raises.
 
     ⚠️ THE RAIL IS EVALUATED WHERE IT WAS ON EACH BAR. `price_at(bar_ts)`
     walks the slope back in wall minutes; a bar that would reach today's
     value of the rail but did not reach the rail as it stood then is NOT a
     touch. That is the "slope and time" the operator named.
+
+    🔑 r378 — EACH TINE IS STAMPED WITH ITS OPPOSITE RAIL, because the event
+    now asks whether the contact bar CLOSED BACK INSIDE THE CHANNEL and that
+    is a question about BOTH rails. The pair is read, not mirrored about the
+    median: `build_fork_contained` never promised symmetry, and
+    `condor_trigger_map.build` appends a frame's call and put rail from ONE
+    `rails_for` result or neither — so reading the pair costs nothing and
+    assumes nothing.
+    ⚠️ AN UNPAIRED RAIL EMITS NO EVENT AND SAYS SO. The pool is still published
+    (other consumers read tine POSITIONS), but the operator's test cannot be
+    evaluated without the far side, and a tine that quietly stops producing
+    events is exactly the silence §0.5 forbids.
     """
     try:
         if lmap is None or ctm is None:
@@ -1096,6 +1234,20 @@ def publish_tines(lmap: LiquidityMap, ctm, df_1m) -> int:
         now_ts = float(df_1m.index[-1].timestamp()) if df_1m is not None and len(df_1m) else time.time()
     except Exception:                                          # noqa: BLE001
         now_ts = time.time()
+
+    # ── the CHANNEL, paired by timeframe, BEFORE anything is published ───────
+    by_tf = {}
+    for r in rails:
+        try:
+            _tf = str(getattr(r, "tf", "") or "")
+            _sd = str(getattr(r, "side", "") or "")
+            _rl = float(getattr(r, "rail", 0.0) or 0.0)
+        except Exception:                                      # noqa: BLE001
+            continue
+        if _tf and _sd in ("call", "put") and _rl > 0:
+            by_tf.setdefault(_tf, {})[_sd] = (
+                _rl, _rail_slope_per_min(getattr(r, "slope", 0.0), _tf))
+
     emitted = 0
     # drop yesterday's tine pools/touches before re-publishing this tick's
     lmap.pools = [p for p in lmap.pools if not getattr(p, "moving", False)]
@@ -1112,9 +1264,17 @@ def publish_tines(lmap: LiquidityMap, ctm, df_1m) -> int:
             continue
         kind = "high" if side == "call" else "low"
         name = f"{tf} {'upper' if side == 'call' else 'lower'} tine"
+        _opp = by_tf.get(tf, {}).get("put" if side == "call" else "call")
+        if _opp is None:
+            logger.warning("[tines] %s %s rail has NO PAIRED opposite rail — the "
+                           "close-inside-the-channel test cannot be evaluated, so "
+                           "this tine publishes its POSITION but emits NO event",
+                           tf, side)
         pool = LiquidityPool(price=round(rail, 4), kind=kind, timeframe=tf,
                              name=name, is_named=True, moving=True,
-                             slope_per_min=slope, as_of=now_ts)
+                             slope_per_min=slope, as_of=now_ts,
+                             opp_price=round(_opp[0], 4) if _opp else 0.0,
+                             opp_slope_per_min=_opp[1] if _opp else 0.0)
         lmap.pools.append(pool)
         ev = _detect_touch(pool, df_1m, now_ts)
         if ev is not None:
@@ -1126,12 +1286,38 @@ def publish_tines(lmap: LiquidityMap, ctm, df_1m) -> int:
 
 
 def _detect_touch(pool: LiquidityPool, df_1m, now_ts: float) -> Optional[LiquiditySweep]:
-    """A TOUCH of a moving level on the last TOUCH_LOOKBACK_BARS 1m bars.
+    """ONE 1m bar that touched a moving rail and CLOSED BACK INSIDE the channel.
 
-    upper tine: a bar's HIGH >= rail(t)  ·  lower tine: a bar's LOW <= rail(t)
-    sweep_price = the EXTREME of the touching move (the strike goes beyond it)
-    invalidated = ACCEPT_CLOSES closes beyond rail(t) since the FIRST touch
-    bars_ago    = bars since the LAST touch
+    OPERATOR'S RULING, 2026-09-12: *"for the 1-hr fork, allow ANY contact with a
+    tine to trigger if it results in a 1-min candle close back inside the
+    channel on the 1-min candle where the contact occurred."*
+
+    So the event is a SINGLE BAR and the bar is the whole test:
+      · CONTACT — upper: `high >= rail(t)`  ·  lower: `low <= rail(t)`
+      · RECLAIM — THAT SAME bar's CLOSE lies between BOTH rails at that bar
+      · CLOSED  — the forming bar is excluded; it has no close to judge
+    The freshest qualifying bar is the event and `event_ts` is its stamp.
+
+    🔴 WHAT THIS REPLACES, AND WHY IT IS A TIGHTENING. r163 made a touch its own
+    trigger and stamped `reclaimed=True` unconditionally, so the condition §36
+    calls FOUNDATIONAL for this setup — *"a bar has CLOSED back inside"* — was
+    VACUOUS on the tine path for fourteen revisions. "ANY contact" sounds looser
+    and is not: every event now has to survive a close it never had to survive
+    before. The DEPTH band is what goes, and it goes because it was a SELECTION
+    preference standing in for a reclaim that was missing.
+    ⚠️ AND IT IS WHY THE EVENT IS COUNTABLE. The old scan answered "is price near
+    the rail somewhere in the last 30 bars", which is a STATE — true on every
+    tick until the window slides, with no instant to name. Identity was not
+    missing from the record by oversight (r377 looked); it did not exist to
+    record. ORB hit this at r235 and answered it with
+    `confirmation_seq`/`order_placed_seq`; the bar stamp is that answer here.
+    ⚠️ THE WINDOW IS NOW AN AGE LIMIT, NOT THE EVENT. `TOUCH_LOOKBACK_BARS`
+    bounds how far back a qualifying bar may sit — a SELECTION preference — and
+    no longer participates in deciding WHAT the interaction was.
+    ⚠️ `invalidated` IS COUNTED FROM THE EVENT BAR, not from the first contact in
+    the window. The CONDITIONS text already says *"price has NOT accepted
+    through it AFTER the reclaim"*, and before r378 there was no single reclaim
+    to count from.
     """
     try:
         if df_1m is None or len(df_1m) < 2:
@@ -1144,53 +1330,54 @@ def _detect_touch(pool: LiquidityPool, df_1m, now_ts: float) -> Optional[Liquidi
     except Exception:                                          # noqa: BLE001
         return None
     upper = pool.kind == "high"
-    first = last = -1
-    extreme = None
-    extreme_lvl = None
-    beyond = 0
-    for i, ts in enumerate(stamps):
-        lvl = pool.price_at(ts)
-        hit = highs[i] >= lvl if upper else lows[i] <= lvl
-        if hit:
-            if first < 0:
-                first = i
-            last = i
-            ex = highs[i] if upper else lows[i]
-            # 🔴 LVL.9 / r377 — REMEMBER WHERE THE RAIL STOOD WHEN THE EXTREME
-            # PRINTED. The contact test above is already time-aware; the DEPTH
-            # was not, and the two have to be measured at the same instant or
-            # the gate is comparing a price from one bar against a rail from
-            # another.
-            if extreme is None or (ex > extreme if upper else ex < extreme):
-                extreme = ex
-                extreme_lvl = lvl
-        if first >= 0:
-            if (closes[i] > lvl) if upper else (closes[i] < lvl):
-                beyond += 1
-    if first < 0:
-        return None
     n = len(stamps)
+    # ⚠️ THE LAST ROW IS THE FORMING BAR and a forming bar has no close. That is
+    # not an assumption made here: `liquidity_ledger.feed_frame` owns bar
+    # consumption for this project and states it — *"the LAST row is the forming
+    # bar and is never fed"* — so the newest judgeable bar is n-2.
+    last_closed = n - 2
+    if last_closed < 0:
+        return None
+    ev_i = -1
+    ev_lvl = 0.0
+    contacts = 0
+    for i in range(0, last_closed + 1):
+        lvl = pool.price_at(stamps[i])
+        hit = highs[i] >= lvl if upper else lows[i] <= lvl
+        if not hit:
+            continue
+        contacts += 1
+        # None (channel unknown) is NOT False and must not fire. `if inside is
+        # True` rather than `if inside`, so an unanswerable channel can never be
+        # read as a satisfied test by a later refactor that makes None falsy in
+        # some other way.
+        inside = pool.inside_channel_at(closes[i], stamps[i])
+        if inside is True:
+            ev_i = i                      # freshest qualifying bar wins
+            ev_lvl = lvl
+    if ev_i < 0:
+        # Contacts with no same-bar reclaim are NOT events. Logged at debug
+        # because on a trending tape this is the common case and a warning would
+        # train the reader to ignore warnings (CV.1).
+        if contacts:
+            logger.debug("[tines] %s: %d contact(s) in the window, none closed "
+                         "back inside the channel on its own bar — no event",
+                         pool.name, contacts)
+        return None
     level_now = pool.price
     px = closes[-1] or level_now
-    # ── 🔴 LVL.9 / r377 — THE PIERCE IS MEASURED WHERE THE TOUCH WAS JUDGED ──
-    # The contact test uses `pool.price_at(ts)` per bar and always has; the
-    # DEPTH used `pool.price`, the rail NOW. For a STATIC pool those are the
-    # same number and the code was right. For a MOVING tine they differ by
-    # slope x elapsed bars, and the defect arrived with r163 when tines became
-    # pools and nothing revisited the arithmetic — half time-aware.
-    # 📊 MEASURED BEFORE CHANGING IT, on 19,997 distinct 1h fork samples across
-    # 15 symbols and 5 sessions (2026-09-08..12): at the full 30-bar lookback
-    # the error is a median of 10.3% of the admissible band and p90 27.1% — and
-    # ON 57.9% OF SAMPLES IT ALONE EXCEEDS `MIN_REJECTION_PCT`, so drift by
-    # itself could carry a touch with no real pierce past the floor. It is
-    # concentrated, not diffuse: AMD's median is 78.1% of the band, QQQ's 1.7%.
-    # AMD is the name LVL.9's row estimated at 0.20%; measured, 0.18%.
-    # ⚠️ THE LEGACY VALUE RIDES ALONG, RECORD-ONLY, so the per-event crossing
-    # count the bound could only estimate is answerable from the next session's
-    # tape instead of from a second delivery.
-    ref = extreme_lvl if extreme_lvl is not None else level_now
-    pierce = abs(float(extreme) - ref) / px if px else 0.0
+    # ── the pierce, measured where the touch was JUDGED (r377, unchanged) ────
+    # For a tine this is now NARRATION and a record, not a gate: the ruling
+    # admits ANY depth that the bar took back. `rejection_pct_legacy` still
+    # rides along so r377's correction stays measurable on live tape.
+    extreme = highs[ev_i] if upper else lows[ev_i]
+    pierce = abs(float(extreme) - ev_lvl) / px if px else 0.0
     pierce_legacy = abs(float(extreme) - level_now) / px if px else 0.0
+    beyond = 0
+    for j in range(ev_i + 1, last_closed + 1):
+        lvl_j = pool.price_at(stamps[j])
+        if (closes[j] > lvl_j) if upper else (closes[j] < lvl_j):
+            beyond += 1
     return LiquiditySweep(
         pool_price=round(level_now, 4),
         sweep_price=round(float(extreme), 4),
@@ -1199,12 +1386,13 @@ def _detect_touch(pool: LiquidityPool, df_1m, now_ts: float) -> Optional[Liquidi
         rejection_pct=round(pierce, 6),
         rejection_pct_legacy=round(pierce_legacy, 6),
         confirmed=True,
-        bar_index=first,
-        reclaim_bar_index=last,
-        bars_ago=(n - 1) - last,
+        bar_index=ev_i,
+        reclaim_bar_index=ev_i,         # contact and reclaim are ONE bar now
+        event_ts=stamps[ev_i],
+        bars_ago=(n - 1) - ev_i,
         timeframe=pool.timeframe,
         swept_named_level=pool.name,
-        reclaimed=True,                 # the TOUCH is the trigger
+        reclaimed=True,                 # EARNED: that bar closed inside the channel
         closes_beyond=0,
         invalidated=beyond >= _ACCEPT_CLOSES,
         closes_beyond_live=beyond,

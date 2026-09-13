@@ -1,5 +1,17 @@
 """
-execution/entry_engine.py  v4.9
+execution/entry_engine.py  v5.0
+v5.0  2026-09-12  r378 — THE SWEEP'S INTERACTION IS LATCHED AT THE FILL. One
+      call, sited after the fill is confirmed and before the record is written,
+      marking THAT interaction spent so the next order needs a fresh one.
+      ⚠️ THE SITE IS THE WHOLE POINT AND §37 CHOSE IT. *"normal entries that
+      weren't filled and weren't interrupted should keep trying"* — latching
+      where the SIGNAL is produced would turn a failed fill, a thin chain or a
+      taken dispatch slot into a silent lockout, which is §37 violated by a
+      change that would read like a bug fix. `orb_engine` sites
+      `order_placed_seq` the same way (r235).
+      ⚠️ IT NEVER RAISES INTO THE ENTRY PATH, and it never swallows either: a
+      latch that cannot be recorded logs a WARNING naming the interaction,
+      because the alternative is a duplicate entry with no explanation.
 v4.9  2026-09-10  r340 — 🔴 THE CONTRACT IS ON THE ROW NOW. A single-leg entry
       recorded `symbol = INSTRUMENT` — the UNDERLYING — and nothing naming the
       option, so ORB and Runaway trades were never replayable against
@@ -312,6 +324,27 @@ class EntryEngine:
                 f"filled — recording the filled size")
 
         total_cost = fill_premium * filled_qty * CONTRACT_MULTIPLIER
+
+        # ── 🔑 r378 — THE SWEEP'S INTERACTION IS SPENT AT THE FILL ────────────
+        # Sited HERE, after the fill is confirmed and before the record is
+        # written, because §37 requires that a confirmation which simply has not
+        # filled keep being offered every tick: *"normal entries that weren't
+        # filled and weren't interrupted should keep trying."* Latching where the
+        # SIGNAL is produced would convert a failed fill, a thin chain or a taken
+        # dispatch slot into a silent lockout. This is `orb_engine`'s r235 siting
+        # — `order_placed_seq` is set where the order is placed and nowhere else.
+        # ⚠️ NEVER RAISES INTO THE ENTRY PATH. A latch that cannot be recorded
+        # must not cost a filled trade its record — but it is logged, because the
+        # only other way to notice is a duplicate entry nobody can explain.
+        _sek = str(getattr(signal, "sweep_event_key", "") or "")
+        if _sek:
+            try:
+                from strategy.sweep_credit_spread import mark_event_fired_key
+                mark_event_fired_key(_sek, f"filled {filled_qty} @ {fill_premium}")
+            except Exception as _sexc:                         # noqa: BLE001
+                logger.warning("[%s] could NOT latch the sweep interaction %s "
+                               "(%s) — this interaction can fire again", mode,
+                               _sek, _sexc)
 
         record = make_record(
             **self._record_kwargs(signal),

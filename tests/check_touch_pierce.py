@@ -1,6 +1,25 @@
 #!/usr/bin/env python3
 """
-tests/check_touch_pierce.py  v1.0
+tests/check_touch_pierce.py  v1.1
+v1.1  2026-09-12  r378 — P1 GAINS A CHANNEL AND P2/P4 ARE RE-DERIVED, because
+      r378 made a tine event require the contact bar to CLOSE back inside the
+      channel and a pool with no opposite rail can no longer produce an event at
+      all. P1's tape is unchanged; it is given the far rail it always implied.
+      🔴 P2 WAS *"a STATIC pool is unaffected"*, ASSERTED THROUGH `_detect_touch`
+      — and that door is now shut by construction: `inside_channel_at` returns
+      None for a pool that does not move, the caller emits nothing, so the old P2
+      would fail for a reason that has nothing to do with the pierce arithmetic
+      it was pinning. Keeping it would be a check red on a PROPERTY OF THE TARGET
+      rather than a defect in it, which is the CV.1 shape that teaches a reader
+      to skip reds.
+      🔑 SO THE PROPERTY MOVES TO WHERE IT ACTUALLY LIVES. The r377 guarantee is
+      that `price_at()` returns `price` for a non-moving pool, which makes the
+      at-touch and at-now measurements identical BY CONSTRUCTION — P2b asserts
+      that directly instead of through a round-trip that no longer exists. And
+      the NEW P2 pins the r378 property worth guarding: NO CHANNEL, NO EVENT.
+      ⚠️ THE r378 BEHAVIOUR ITSELF IS PINNED IN `check_sweep_event`, not here.
+      This file stays r377's control: the pierce is measured where the touch was
+      judged.
 v1.0  2026-09-12  r377 / LVL.9 — A TOUCH IS JUDGED AND MEASURED AT THE SAME
       INSTANT.
 
@@ -26,10 +45,12 @@ predicts: shallow <0.10% survived 33%, 0.10-0.25% 34%, 0.25-0.50% 21%, deep
 
   P1  a MOVING tine's pierce is measured against the rail where it STOOD when
       the extreme printed, not where it sits now
-  P2  a STATIC pool is UNAFFECTED — `price_at()` returns `price`, so the two
-      measurements are identical by construction. This is the control: a fix
-      that changed static pools too would be a different, larger change than
-      the one that was measured and approved.
+  P2  a pool with NO opposite rail emits NO event — the channel question is
+      unanswerable and an unanswerable test must never read as satisfied (r378)
+  P2b a STATIC pool is UNAFFECTED — `price_at()` returns `price`, so the
+      at-touch and at-now measurements are identical BY CONSTRUCTION. The r377
+      control, asserted where the guarantee lives rather than through
+      `_detect_touch`, which a static pool can no longer enter.
   P3  the legacy value is carried, so the correction is measurable on live tape
   P4  ...and for a static pool it EQUALS the live one, which makes a non-zero
       delta by itself evidence that the pool was a tine
@@ -101,11 +122,18 @@ def main():
     # 91.0 and the bar's high of 100.0 pierced it by 9.0. By the last bar the
     # rail is 100.0, so the old arithmetic reports a pierce of 0.0 — a real
     # 9-point piercing touch measured as no pierce at all.
+    # r378 — AND IT IS GIVEN THE FAR RAIL IT ALWAYS IMPLIED. The lower rail sits
+    # 20 points under the upper one and rises with it, so at the first bar the
+    # channel is [71.0, 91.0] and that bar's close of 90.0 is INSIDE it: the
+    # contact is taken back on its own bar, which is the r378 event. The pierce
+    # arithmetic under test is untouched by this.
     tine = LiquidityPool(price=100.0, kind="high", name="1h upper tine",
                          timeframe="1h")
     tine.moving = True
     tine.slope_per_min = 1.0
     tine.as_of = stamps[-1]
+    tine.opp_price = 80.0
+    tine.opp_slope_per_min = 1.0
 
     sw = _detect_touch(tine, df, stamps[-1])
     if sw is None:
@@ -125,21 +153,33 @@ def main():
     check("P3", abs(legacy - want_at_now) < 1e-9,
           "legacy carried: {:.6f} (expected the old at-now value)".format(legacy))
 
-    # ── P2 — THE CONTROL. A static pool must be untouched by this change.
-    # `price_at()` returns `price` when the pool does not move, so both
-    # measurements are identical by construction — and a fix that moved static
-    # pools too would be a larger change than the one that was measured.
+    # ── P2 — NO CHANNEL, NO EVENT (r378). A pool that does not move has no
+    # far rail, so "did the bar close back inside the channel" has no answer —
+    # and an unanswerable test must not fire. This is the guard against the
+    # silent-refusal half: `inside_channel_at` returns None, and the detector
+    # must treat None as "cannot fire", never as "closed outside".
     stat = LiquidityPool(price=91.0, kind="high", name="PDH", timeframe="1h")
     sw2 = _detect_touch(stat, df, stamps[-1])
-    if sw2 is None:
-        print("  FAIL  P2 no touch detected against the static pool")
-        return 1
-    want_static = abs(100.0 - 91.0) / px
-    check("P2", abs(float(sw2.rejection_pct) - want_static) < 1e-9,
-          "static pool unaffected: {:.6f}".format(float(sw2.rejection_pct)))
-    check("P4", abs(float(getattr(sw2, "rejection_pct_legacy", -1.0))
-                    - float(sw2.rejection_pct)) < 1e-9,
-          "static: legacy == live, so a non-zero delta means the pool moved")
+    check("P2", sw2 is None,
+          "a pool with no channel yields no event (got {})".format(
+              "None" if sw2 is None else "an event"))
+
+    # ── P2b — THE r377 CONTROL, at the guarantee itself. A non-moving pool's
+    # `price_at()` is its `price` at EVERY instant, so the at-touch rail and the
+    # at-now rail are the same number and the pierce correction cannot move a
+    # static pool. Asserted here rather than through `_detect_touch`, which
+    # static pools no longer enter (P2).
+    check("P2b", all(abs(stat.price_at(t) - stat.price) < 1e-12 for t in stamps),
+          "static price_at is constant across the window: {:.4f}".format(
+              stat.price_at(stamps[0])))
+
+    # ── P4 — and therefore a moving tine is the ONLY way the two can differ, so
+    # a non-zero delta is itself evidence the pool moved. Same statement as
+    # before, now derived from P2b plus P1's measured delta instead of from a
+    # static round-trip.
+    check("P4", abs(got - legacy) > 1e-9 and tine.moving,
+          "moving tine delta {:.6f} vs static-by-construction 0".format(
+              got - legacy))
 
     # ── P5 — RECORD-ONLY. The legacy value must not reach a verdict.
     # ⚠️ Scoped to a GATE call, not to the token: the strategy has to NAME the
@@ -158,7 +198,7 @@ def main():
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS ({})".format(5 - len(FAILS)))
+    print("ALL PASS ({})".format(6 - len(FAILS)))
     return 0
 
 

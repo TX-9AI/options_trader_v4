@@ -1,7 +1,48 @@
 """
-analysis/liquidity_ledger.py  v4.0
+analysis/liquidity_ledger.py  v4.1
 Per-level touch / hold / breach accounting across the session.
 
+v4.1  2026-09-12  r378 — THE READ SIDE GETS A READER, WHICH IS THE ONLY THING
+      THIS FILE WAS MISSING. Since the port it has carried the comment
+      *"read side (nothing gates on this in v1)"* while implementing the
+      operator's own interaction rule — wick reaches = touch, close beyond =
+      breach (acceptance), close back on the origin side = hold (rejection) —
+      on every closed bar, persisted per box. LVL.11's one-sentence finding was
+      that the MEMORY side records and the MEMORYLESS side trades; `liq_map` is
+      rebuilt every tick and cannot answer "is this floor holding", so the
+      answer existed and nothing asked for it.
+      🔑 `interaction_at(price, kind)` is that ask. It returns the matched
+      level's LATEST closed-bar verdict plus its running counters, so the sweep
+      can be gated on the level's own definition of an interaction instead of on
+      a retreat-magnitude band that never had definitional standing.
+      ⚠️ IT RETURNS None RATHER THAN A DEFAULT when no level matches, and the
+      caller's contract is that None means STARVED, not REFUSED. A level the
+      ledger has not seeded yet (`main.py` defers seeding until the mapper
+      produces named pools) is an ABSENT INPUT; answering "no interaction" would
+      turn the first minutes of every session into silent refusals, which is the
+      plausible-silence class in docs/PORT_STATE.md.
+      🔴 AND THE COUNTING WAS WRONG, WHICH THE READER FOUND IMMEDIATELY.
+      `reached` was a HALF-PLANE test — `low <= price + tol` for a low level — so
+      every bar on the FAR SIDE of a level counted as a fresh touch and a fresh
+      breach. AMZN 2026-09-09: PDL 254.75, session HIGH 254.62, price never
+      reached it; the book recorded 389 TOUCHES and 389 BREACHES. Across 45
+      banked books (3 sessions, 15 symbols, 386 level-rows) 67.9% of levels
+      showed zero touches and 19.4% showed over 100, median 209 in a 390-bar
+      session — bimodal, because it measured which SIDE of a line price sat on.
+      🔑 CONTACT IS NOW CONTAINMENT AND A TEST IS NOW A VISIT. Operator,
+      2026-09-12: *"Every 'touch' and retreat is a successful defense"* and
+      *"Leans on isn't the same as testing it."* So the range must reach the
+      level, a visit opens once and counts ONE touch however long it lasts, and
+      the bar that ENDS the visit decides hold or breach by which side its close
+      departed on. `contact_bars` keeps the duration separately so the two
+      questions stop sharing one number.
+      ⚠️ SCHEMA_VERSION 1 -> 2. The same field answers a different question now,
+      so a v1 book must never hydrate into a v2 run; the mismatch guard already
+      refuses it, on LIQ.7's precedent for a changed `touch_tol_pct`.
+      ⚠️ CONSEQUENCE FOR THE HISTORY: the 20 banked sessions are NOT comparable
+      to the new counters and must be REPLAYED from the 1m tape rather than
+      imported. That is the operator's seeding plan and this is why it has to be
+      a replay.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
@@ -82,7 +123,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+# 🔴 r378 — BUMPED TO 2 BECAUSE A COUNT MEANS SOMETHING ELSE NOW. `touches` was
+# a BAR count under a half-plane contact test; it is a VISIT count under a
+# containment test. The same number in the same field answers a different
+# question, so a v1 book must not be hydrated into a v2 run — `_hydrate_same_date`
+# already refuses on a schema mismatch, and LIQ.7 set the precedent by refusing a
+# book taken under a different `touch_tol_pct` for exactly this reason.
+SCHEMA_VERSION = 2
 
 # Self-locate: <repo>/analysis/liquidity_ledger.py -> <repo>/data/liquidity_ledger/
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -126,7 +173,31 @@ class Level:
     """
 
     __slots__ = ("price", "kind", "name", "is_named", "touches", "holds",
-                 "breaches", "first_seen", "last_touch", "last_result")
+                 "breaches", "first_seen", "last_touch", "last_result",
+                 # r378 — A VISIT IS ONE TEST, HOWEVER MANY BARS IT LASTS.
+                 # Operator, 2026-09-12: *"Leans on isn't the same as testing
+                 # it."* `contact_bars` keeps the DURATION so the distinction
+                 # stays visible instead of being chosen silently; the open
+                 # visit's state is carried because a test spans bars and the
+                 # outcome is not known until price leaves.
+                 "contact_bars", "visit_open", "visit_bars", "visit_started",
+                 "last_visit_started", "last_visit_bars",
+                 # 🔴 r378 — HISTORY SEEDS DURABILITY AND NEVER SEEDS AN EVENT.
+                 # `prior_*` is the defense record from PREVIOUS sessions, built
+                 # from banked tape by a control-side tool and delivered. The
+                 # session counters above always start at zero and `last_result`
+                 # always starts EMPTY, because a hold from three days ago is not
+                 # an interaction that happened today — seeding it would fire a
+                 # trade on a stale event, which is this project's oldest defect
+                 # shape. One writer per field: the bot never touches `prior_*`
+                 # and the seed never touches the session's own.
+                 "prior_touches", "prior_holds", "prior_breaches",
+                 "prior_sessions",
+                 # r378 — TODAY'S OBSERVATION STARTED LATE. `touches == 0` must
+                 # not conflate "never tested" with "we were not watching": a
+                 # level admitted mid-session (every bake re-seeds) can never
+                 # backfill its morning from the box's own 60-bar frame.
+                 "partial")
 
     def __init__(self, price: float, kind: str, name: str = "",
                  is_named: bool = False, first_seen: str = ""):
@@ -138,8 +209,19 @@ class Level:
         self.holds = 0
         self.breaches = 0
         self.first_seen = first_seen
-        self.last_touch = ""
+        self.last_touch = ""                  # stamp of the bar that RESOLVED
         self.last_result = ""                 # "hold" | "breach" | ""
+        self.contact_bars = 0                 # bars in contact, ALL visits
+        self.visit_open = False               # a test is in progress
+        self.visit_bars = 0                   # bars of the OPEN visit
+        self.visit_started = ""
+        self.last_visit_started = ""
+        self.last_visit_bars = 0
+        self.prior_touches = 0
+        self.prior_holds = 0
+        self.prior_breaches = 0
+        self.prior_sessions = 0
+        self.partial = False
 
     def as_dict(self) -> dict:
         return {
@@ -148,7 +230,29 @@ class Level:
             "holds": self.holds, "breaches": self.breaches,
             "first_seen": self.first_seen, "last_touch": self.last_touch,
             "last_result": self.last_result,
+            "contact_bars": self.contact_bars,
+            "visit_open": self.visit_open, "visit_bars": self.visit_bars,
+            "visit_started": self.visit_started,
+            "last_visit_started": self.last_visit_started,
+            "last_visit_bars": self.last_visit_bars,
+            "prior_touches": self.prior_touches,
+            "prior_holds": self.prior_holds,
+            "prior_breaches": self.prior_breaches,
+            "prior_sessions": self.prior_sessions,
+            "partial": self.partial,
         }
+
+    def defense_rate(self):
+        """Prior holds / prior tests, or None when there is no history.
+
+        None IS THE ANSWER when nothing is known, and the caller must not read it
+        as 0.0 — a level with no history is not a level that has never held. That
+        distinction is the whole reason `prior_sessions` is carried.
+        """
+        t = int(self.prior_touches or 0)
+        if t <= 0:
+            return None
+        return float(self.prior_holds or 0) / float(t)
 
 
 class LiquidityLedger:
@@ -216,6 +320,21 @@ class LiquidityLedger:
                 lv.breaches = int(d.get("breaches", 0))
                 lv.last_touch = d.get("last_touch", "")
                 lv.last_result = d.get("last_result", "")
+                # r378 — an OPEN visit survives the restart too, or a bake in the
+                # middle of a test would resolve it twice: once by the bar that
+                # ends it before the restart (lost), once by the next contact
+                # after it (counted as a new test).
+                lv.contact_bars = int(d.get("contact_bars", 0))
+                lv.visit_open = bool(d.get("visit_open", False))
+                lv.visit_bars = int(d.get("visit_bars", 0))
+                lv.visit_started = d.get("visit_started", "")
+                lv.last_visit_started = d.get("last_visit_started", "")
+                lv.last_visit_bars = int(d.get("last_visit_bars", 0))
+                lv.prior_touches = int(d.get("prior_touches", 0))
+                lv.prior_holds = int(d.get("prior_holds", 0))
+                lv.prior_breaches = int(d.get("prior_breaches", 0))
+                lv.prior_sessions = int(d.get("prior_sessions", 0))
+                lv.partial = bool(d.get("partial", False))
                 self.levels.append(lv)
             self.last_bar_ts = str(payload.get("last_bar_ts", "") or "")
             logger.info("[ledger] hydrated %d level(s) for %s from disk "
@@ -228,6 +347,23 @@ class LiquidityLedger:
 
     def add_level(self, price: float, kind: str, name: str = "",
                   is_named: bool = False, first_seen: str = "") -> None:
+        """Admit a level. Idempotent within `TOUCH_TOL_PCT` for the same kind.
+
+        🔴 r378 — A LEVEL THAT JOINS LATE SAYS SO. If bars have already been
+        consumed (`last_bar_ts` is set) the new level's session counters can
+        never include them: the box holds ~60 1m bars and `feed_frame` refuses
+        anything at or before `last_bar_ts`, by design. So it is marked
+        `partial`, and a reader must treat `touches == 0` on a partial level as
+        NOT OBSERVED rather than NEVER TESTED.
+        📊 THIS IS NOT HYPOTHETICAL. `reset_for_session` hydrates then merges the
+        caller's seeds, and every BAKE restarts the process — so any level the
+        mapper had not yet named at the first seeding joined with zero counts and
+        an afternoon `last_bar_ts`. Measured on 2026-09-09, 147 level-rows: 45
+        were DEFLATED against a replay of the same tape, `AMD Asia High (R1)`
+        banked 0 against 24 real tests and 216 bars of contact.
+        ⚠️ THE REAL REPAIR IS THE SEED FILE, NOT THIS FLAG. Only control holds
+        the full tape; this flag is how the box states what it could not know.
+        """
         try:
             if not price or price <= 0 or kind not in ("high", "low"):
                 return
@@ -235,8 +371,14 @@ class LiquidityLedger:
                 if lv.kind == kind and abs(lv.price - price) <= \
                         abs(price) * TOUCH_TOL_PCT:
                     return                                     # already held
-            self.levels.append(Level(price, kind, name, is_named,
-                                     first_seen or self.date))
+            lv = Level(price, kind, name, is_named, first_seen or self.date)
+            if self.last_bar_ts:
+                lv.partial = True
+                logger.info("[ledger] %s %s %.2f joined AFTER bar %s — marked "
+                            "PARTIAL: its session counters cannot include the "
+                            "bars already consumed", self.symbol, name or kind,
+                            float(price), self.last_bar_ts)
+            self.levels.append(lv)
             self._dirty = True
         except Exception as e:                                 # noqa: BLE001
             logger.debug("ledger add_level skipped: %s", e)
@@ -281,15 +423,39 @@ class LiquidityLedger:
 
     def on_closed_bar(self, high: float, low: float, close: float,
                       ts: str = "") -> None:
-        """Apply ONE CLOSED bar to every level.
+        """Apply ONE CLOSED bar. A TEST is a VISIT, not a bar.
 
-        THE RULE, and it is the operator's, not an interpretation:
-          · WICK reaches the level            -> touches += 1
-          · CLOSE beyond it                   -> breaches += 1   (acceptance)
-          · CLOSE back on the origin side     -> holds    += 1   (rejection)
-        A bar that never reaches the level does nothing at all — it is neither
-        a hold nor a breach, and counting it as either is how a level that was
-        simply far away starts looking defended.
+        THE RULE, and it is the operator's:
+          · the bar's RANGE reaches the level      -> the visit is in CONTACT
+          · a visit OPENS on the first such bar    -> touches += 1  (ONE per test)
+          · the visit CLOSES on the first bar that does NOT reach, and the
+            DEPARTING CLOSE decides it:
+              origin side -> holds += 1    (a touch and a retreat: a defense)
+              far side    -> breaches += 1 (acceptance)
+        Operator, 2026-09-12: *"Leans on isn't the same as testing it."* So 40
+        bars of price leaning on a level is ONE test, and `contact_bars` keeps
+        the duration separately rather than letting it masquerade as 40 tests.
+
+        🔴 WHAT THIS REPLACES, AND IT WAS A LIVE DEFECT. `reached` was a
+        HALF-PLANE — `low <= price + tol` for a low level — so every bar on the
+        FAR SIDE of a level satisfied it. Once price broke through, every
+        subsequent bar re-counted as a fresh touch AND a fresh breach.
+        📊 MEASURED ON THE BANKED BOOKS before it was changed, 45 books over 3
+        sessions and 15 symbols, 386 level-rows: 67.9% of levels showed ZERO
+        touches and 19.4% showed more than 100, median 209 for any level that
+        saw one — in a 390-bar session. Bimodal, because it was recording which
+        SIDE of a line price sat on rather than contact with it.
+        🔴 THE CASE THAT PROVES IT: AMZN 2026-09-09, PDL 254.75, session high
+        254.62 — **price never reached the level.** One bar came within the 0.51
+        band; 389 were entirely below it. The book recorded **389 touches and 389
+        breaches** of a level that was never touched and never crossed.
+        ⚠️ CONTAINMENT IS SYMMETRIC AND THAT IS THE POINT. `low - tol <= price <=
+        high + tol` asks one question of both kinds of level, so neither side can
+        drift into a half-plane again the next time someone edits a branch.
+        ⚠️ AN UNRESOLVED VISIT IS NEITHER A HOLD NOR A BREACH. A test still in
+        progress at the session close stays open and `last_result` keeps naming
+        the last RESOLVED test. Defaulting it either way would invent an outcome,
+        and `touches >= holds + breaches` is the invariant that says so.
 
         ⚠️ CLOSED BARS ONLY. Feeding a forming bar would count a wick that has
         not finished printing and a close that is not a close.
@@ -305,44 +471,106 @@ class LiquidityLedger:
                 self._dirty = True
             for lv in self.levels:
                 tol = abs(lv.price) * TOUCH_TOL_PCT
-                if lv.kind == "high":
-                    reached = high >= lv.price - tol
-                    accepted = close > lv.price + tol
-                else:
-                    reached = low <= lv.price + tol
-                    accepted = close < lv.price - tol
-                if not reached:
+                # CONTACT: does the bar's RANGE reach the level at all?
+                reached = (low - tol) <= lv.price <= (high + tol)
+                if reached:
+                    lv.contact_bars += 1
+                    if not lv.visit_open:
+                        lv.visit_open = True
+                        lv.visit_started = ts
+                        lv.visit_bars = 0
+                        lv.touches += 1          # ONE touch per TEST
+                    lv.visit_bars += 1
+                    self._dirty = True
                     continue
-                lv.touches += 1
-                lv.last_touch = ts
-                if accepted:
-                    lv.breaches += 1
-                    lv.last_result = "breach"
-                else:
+                if not lv.visit_open:
+                    continue
+                # ── THE TEST ENDS HERE, and the departing close decides it. The
+                # bar's range does not contain the level, so the close is
+                # unambiguously on one side or the other.
+                lv.visit_open = False
+                origin = (close < lv.price - tol) if lv.kind == "high" \
+                    else (close > lv.price + tol)
+                if origin:
                     lv.holds += 1
                     lv.last_result = "hold"
+                else:
+                    lv.breaches += 1
+                    lv.last_result = "breach"
+                lv.last_touch = ts               # the bar the test RESOLVED on
+                lv.last_visit_started = lv.visit_started
+                lv.last_visit_bars = lv.visit_bars
+                lv.visit_bars = 0
                 self._dirty = True
         except Exception as e:                                 # noqa: BLE001
             logger.debug("ledger on_closed_bar skipped: %s", e)
 
-    # ── read side (nothing gates on this in v1) ──────────────────────────────
+    # ── read side ────────────────────────────────────────────────────────────
 
-    def floors_below(self, price: float) -> List[Level]:
-        """Levels below `price`, nearest first. The floor thesis' input."""
-        try:
-            out = [lv for lv in self.levels
-                   if lv.kind == "low" and lv.price < price]
-            return sorted(out, key=lambda lv: -lv.price)
-        except Exception:                                      # noqa: BLE001
-            return []
+    def interaction_at(self, price: float, kind: str = ""):
+        """This level's OWN latest interaction, as recorded on a CLOSED bar.
 
-    def ceilings_above(self, price: float) -> List[Level]:
+        Returns a dict — `result` ("hold"|"breach"|""), `last_touch` (the bar's
+        stamp, which is the interaction's IDENTITY), `touches`, `holds`,
+        `breaches`, `price`, `name` — or **None** when no level matches.
+
+        🔴 None MEANS THE LEDGER CANNOT ANSWER, NOT THAT THE ANSWER IS NO. The
+        book is seeded from the mapper's named pools and `main.py` retries every
+        tick until they exist, so "not found" is normal early in a session and
+        must reach the caller as STARVED. A default verdict here would refuse
+        trades invisibly.
+        ⚠️ MATCHED BY PRICE WITHIN `TOUCH_TOL_PCT`, THE SAME TOLERANCE THE
+        COUNTING USES. The mapper's pool price and this book's level price come
+        from one source, but they round independently and an exact == would fail
+        on the last decimal — silently, and only for some levels.
+        ⚠️ NEAREST WINS when several levels fall inside the tolerance, so a
+        cluster cannot make the answer depend on insertion order.
+        """
         try:
-            out = [lv for lv in self.levels
-                   if lv.kind == "high" and lv.price > price]
-            return sorted(out, key=lambda lv: lv.price)
-        except Exception:                                      # noqa: BLE001
-            return []
+            px = float(price)
+            if px <= 0:
+                return None
+            best = None
+            best_d = None
+            for lv in self.levels:
+                if kind and lv.kind != kind:
+                    continue
+                d = abs(lv.price - px)
+                if d > abs(px) * TOUCH_TOL_PCT:
+                    continue
+                if best_d is None or d < best_d:
+                    best, best_d = lv, d
+            if best is None:
+                return None
+            return {"result": best.last_result, "last_touch": best.last_touch,
+                    "touches": best.touches, "holds": best.holds,
+                    "breaches": best.breaches, "price": best.price,
+                    "name": best.name,
+                    # r378 — the DURATION and the OPEN test, both separate from
+                    # the test COUNT. A caller that wants "is price leaning on
+                    # this right now" asks `visit_open`; one that wants "how
+                    # often has it been defended" asks `holds`. Before r378 one
+                    # number was doing both jobs and doing neither.
+                    "contact_bars": best.contact_bars,
+                    "visit_open": best.visit_open,
+                    "visit_bars": best.visit_bars,
+                    "last_visit_bars": best.last_visit_bars,
+                    "unresolved": best.touches - (best.holds + best.breaches),
+                    # r378 — the DEFENSE RECORD, from previous sessions. This is
+                    # what the operator ruled the contact gates must be fitted
+                    # per level type against: *"those named levels also have
+                    # historical defense numbers that the transient fork will
+                    # never have."* `defense_rate` is None when there is no
+                    # history and must not be read as 0.0.
+                    "prior_touches": best.prior_touches,
+                    "prior_holds": best.prior_holds,
+                    "prior_breaches": best.prior_breaches,
+                    "prior_sessions": best.prior_sessions,
+                    "defense_rate": best.defense_rate(),
+                    "partial": best.partial}
+        except Exception as e:                                 # noqa: BLE001
+            logger.debug("ledger interaction_at skipped: %s", e)
+            return None
 
     def coverage(self) -> Dict[str, int]:
         highs = sum(1 for lv in self.levels if lv.kind == "high")

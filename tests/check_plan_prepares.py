@@ -1,6 +1,30 @@
 #!/usr/bin/env python3
 """
-tests/check_plan_prepares.py  v1.11
+tests/check_plan_prepares.py  v1.12
+v1.12  2026-09-12  r378 — THE FIXTURES CATCH UP WITH THE RULING, AND ONE OF THEM
+      IS MINE FROM YESTERDAY.
+      🔴 T4b RE-DERIVED. I wrote it at r377 to pin that a POOL sweep with a
+      sub-floor rejection is REFUSED, and it was right for that revision. The
+      operator's 2026-09-12 ruling removed that floor — a retreat MAGNITUDE has
+      no definitional standing beside the level's own record — so T4b now pins
+      that such a sweep FIRES when the level's last test was a HOLD.
+      ⚠️ AND A RE-DERIVATION THAT ONLY LOOSENS IS NOT A CHECK, so it ships with
+      its controls: T4c the SAME sweep REFUSED on a BREACH (acceptance — §36
+      foundational, and the one assertion that separates an ungate from a
+      deleted gate), T4d an absent book STARVED rather than refused, T4e a
+      PARTIAL level starved too because `touches == 0` there means NOT OBSERVED.
+      🔴 T3's TAPE COULD NO LONGER PRODUCE AN EVENT AT ALL. It reached the rail
+      and closed BEYOND it on the same bar, which under the ruling is not an
+      interaction. The tape now does what `invalidated` describes — a real event
+      first, acceptance after it — and the PROPERTY is unchanged.
+      🔑 EVERY TINE FIXTURE GAINED ITS FAR RAIL, via `_fork()`. A single-rail
+      `_CTM` was never a shape production can emit: `condor_trigger_map.build`
+      appends a frame's call and put rail from one `rails_for` result or neither.
+      Under r378 it emits nothing, by design — no channel, no event.
+      🔑 AND THE NAMED FIXTURES GAINED A BOOK, `_ledger_book()`, because the
+      named sweep is now gated on `liquidity_ledger`'s own definitions.
+      ⚠️ `_Sweep` CARRIES `event_ts` so the entry latch is exercised rather than
+      skipped by the unstamped fallback.
 v1.11  2026-09-12  r377 — T4 RE-DERIVED, T4b ADDED. T4's tape reaches the rail
       exactly where it stood, so the honest depth is ZERO; it read 0.0502% only
       because the depth was measured against the rail's LATER position, and the
@@ -159,10 +183,14 @@ class _Chain:
 
 class _Sweep:
     def __init__(self, kind, pool, name, reclaimed, bars=3, rej=0.0018,
-                 sweep_price=None, invalidated=False):
+                 sweep_price=None, invalidated=False, event_ts=1_700_000_000.0):
         self.kind, self.pool_price, self.swept_named_level = kind, pool, name
         self.reclaimed, self.invalidated, self.bars_ago = reclaimed, invalidated, bars
         self.rejection_pct = rej
+        # r378 — THE INTERACTION'S IDENTITY. A real sweep carries the stamp of
+        # the bar that completed it; the fixtures carry one so the entry latch is
+        # exercised rather than skipped by the unstamped fallback.
+        self.event_ts = event_ts
         self.sweep_price = sweep_price if sweep_price is not None else (
             pool - 0.18 if kind == "low_sweep" else pool + 0.18)
 
@@ -187,6 +215,35 @@ def main():
     sw.EARLIEST_ET, sw.LATEST_ET = "13:00", "14:00"
     S = sw.SweepCreditSpreadStrategy()
     S.planner.symbol = "TST"
+
+    # ── r378 — THE NAMED SWEEP IS NOW GATED ON THE LEVEL'S OWN RECORD ────────
+    # Operator, 2026-09-12: *"Ungate the sweep trade on the definitions we have
+    # for interactions on the named levels."* Those definitions live in
+    # `liquidity_ledger`: a test is a VISIT, a HOLD is a touch and a retreat (a
+    # successful defense), a BREACH is acceptance. So every named-pool fixture
+    # needs a book, and a fixture with no book is STARVED rather than refused —
+    # which is itself pinned, at S8b.
+    def _ledger_book(*specs):
+        """Install the book. Each spec is (price, kind, result[, partial])."""
+        from analysis.liquidity_ledger import get_ledger, Level
+        led = get_ledger(sw._symbol_of() or "TST")
+        led.date = "2026-09-09"
+        led.levels = []
+        for s in specs:
+            price, kind, result = s[0], s[1], s[2]
+            partial = s[3] if len(s) > 3 else False
+            lv = Level(price, kind, "seeded", True, "2026-09-09")
+            lv.touches = 1 if result else 0
+            lv.holds = 1 if result == "hold" else 0
+            lv.breaches = 1 if result == "breach" else 0
+            lv.last_result = result
+            lv.last_touch = "2026-09-09 13:29:00-04:00" if result else ""
+            lv.partial = partial
+            led.levels.append(lv)
+        return led
+
+    # the two named pools every S-case uses, both last DEFENDED
+    _ledger_book((96.0, "low", "hold"), (103.0, "high", "hold"))
 
     # a put chain where 95/92.5 clears R>=1: short 95 bid 1.40, wing 92.5 ask
     # 0.10 -> credit 1.30 on a 2.5 width, risk 1.20, R 1.08. (A first draft
@@ -510,6 +567,18 @@ def main():
         def __init__(self, *rails): self._r = list(rails)
         def all_rails(self): return self._r
 
+    def _fork(tf, rail, slope, width=10.0):
+        """A FORK — both rails — because r378 asks whether the contact bar closed
+        back inside the CHANNEL, which is a question about both.
+
+        ⚠️ THE PAIR IS NOT A TEST CONVENIENCE. `condor_trigger_map.build` appends
+        a frame's call and put rail from ONE `rails_for` result or neither, so a
+        single-rail fixture was never a shape production can produce — and under
+        r378 it emits nothing at all, by design (no channel, no event).
+        """
+        return _CTM(_Rail(tf, "call", rail, slope),
+                    _Rail(tf, "put", rail - width, slope))
+
     def _bars(rows, t0=2_000_000):
         idx = pd.to_datetime([t0 + 60 * i for i in range(len(rows))], unit="s", utc=True)
         return pd.DataFrame({"open": [r[2] for r in rows], "high": [r[0] for r in rows],
@@ -520,7 +589,7 @@ def main():
     # the rail AS IT WAS (99.90) even though it is below the rail NOW (100.00).
     rows = [(99.5, 99.0, 99.3)] * 5 + [(99.95, 99.4, 99.6)] + [(99.7, 99.2, 99.5)] * 4 + [(99.8, 99.3, 99.6)]
     lm = LiquidityMap()
-    n = publish_tines(lm, _CTM(_Rail("1h", "call", 100.0, 0.60)), _bars(rows))
+    n = publish_tines(lm, _fork("1h", 100.0, 0.60), _bars(rows))
     ev = lm.recent_sweep
     check("T1 slope+time: a bar that reached the rail WHERE IT WAS is a touch (rail now 100.00, "
           "then 99.90, high 99.95)",
@@ -535,12 +604,23 @@ def main():
     # T2: same tape, a FALLING rail (was 100.10 ten minutes ago): the 99.95
     # high never reached it -> NO touch. Today's value alone would say otherwise.
     lm2 = LiquidityMap()
-    n2 = publish_tines(lm2, _CTM(_Rail("1h", "call", 100.0, -0.60)), _bars(rows))
+    n2 = publish_tines(lm2, _fork("1h", 100.0, -0.60), _bars(rows))
     check("T2 a bar below the rail as it stood then is NOT a touch, whatever the rail reads now", n2 == 0)
     # T3: two closes above the rail(t) since the first touch -> ACCEPTED -> invalidated
-    rows3 = [(99.5, 99.0, 99.3)] * 5 + [(100.3, 99.6, 100.2), (100.5, 99.9, 100.3)] * 1 + [(100.4, 100.0, 100.3)] * 4
+    # 🔴 T3 RE-DERIVED AT r378, AND THE OLD TAPE COULD NO LONGER PRODUCE AN
+    # EVENT AT ALL. It reached the rail and CLOSED BEYOND IT on the same bar
+    # (100.2 against a flat rail at 100.0), which under the operator's ruling is
+    # not an interaction — the contact bar has to close back inside the channel.
+    # So the tape now does what `invalidated` actually describes: a real event
+    # first (contact, closing back inside), and acceptance AFTER it.
+    # ⚠️ THE PROPERTY IS UNCHANGED — 2+ closes beyond the rail since the event
+    # invalidate the tine. Only the tape had to become a shape r378 can emit.
+    rows3 = ([(99.5, 99.0, 99.3)] * 5
+             + [(100.3, 99.6, 99.8)]                    # the EVENT: back inside
+             + [(100.5, 100.1, 100.4)] * 4              # then ACCEPTED through
+             + [(100.4, 100.0, 100.3)])
     lm3 = LiquidityMap()
-    publish_tines(lm3, _CTM(_Rail("1h", "call", 100.0, 0.0)), _bars(rows3))
+    publish_tines(lm3, _fork("1h", 100.0, 0.0), _bars(rows3))
     ev3 = lm3.recent_sweep
     check(f"T3 {_AC}+ closes beyond the rail since the touch -> the tine is INVALIDATED",
           ev3 is not None and ev3.touch and ev3.invalidated and ev3.closes_beyond_live >= _AC,
@@ -576,21 +656,65 @@ def main():
           and sigt.condor_trigger_source == "1h_fork" and getattr(sigt, "touch_of_tine", False)
           and rt4 and rt4[0] == "TAKE" and "GRAZE" in rt4[1],
           f"{rt4} short={sigt and sigt.short_call_contract.strike}")
-    # ⚠️ T4b — THE CONTROL, AND IT IS THE MOST IMPORTANT CHECK IN THIS FILE
-    # AFTER r377. The floor was REPURPOSED for tines, not removed: an ordinary
-    # POOL sweep must still require a rejection. Selling into a level price is
-    # still through is what §36 calls foundational, and r163's "a touch, not a
-    # reject" was said about moving tines — not about pools. Nothing pinned
-    # this before, so a change that quietly dropped the floor for every sweep
-    # would have gone green.
+    # ── 🔴 T4b RE-DERIVED AT r378 — THE UNGATE, AND THIS IS ITS CONTROL SET.
+    # At r377 this asserted that a POOL sweep with a sub-floor rejection is
+    # REFUSED, and it was the right check for that revision. The operator's
+    # 2026-09-12 ruling removed that floor: *"Ungate the sweep trade on the
+    # definitions we have for interactions on the named levels."* A retreat
+    # MAGNITUDE has no definitional standing beside the level's own record, and
+    # measured, the ceiling refused 95.5% of sweeps strict / 73.7% relaxed.
+    # ⚠️ THE FOUNDATIONAL CONDITION DID NOT MOVE. `reclaimed` still gates, and a
+    # BREACH still refuses — by a CLOSE instead of a percentage. That is what
+    # T4c pins, and without it this re-derivation would just be a loosening.
     P.begin_tick(30.5)
+    _ledger_book((96.0, "low", "hold"))
     lm_shallow = _LM(_Sweep("low_sweep", 96.0, "NY Low", reclaimed=True, rej=0.00001))
     sig4b = S.generate_signal(liq_map=lm_shallow, chain=_Chain(good_puts), **common)
     r4b = _row(st, "SweepCreditSpread", 30.5)
-    check("T4b a POOL sweep with a sub-floor rejection is STILL REFUSED — the "
-          "floor was repurposed for tines, never removed",
-          sig4b is None and r4b and r4b[0] != "TAKE" and "rejection" in (r4b[1] or ""),
-          str(r4b))
+    check("T4b (r378) a POOL sweep with a SUB-FLOOR rejection now FIRES when the "
+          "level's last test was a HOLD — the magnitude band is gone and the "
+          "level's own record decides",
+          sig4b is not None and r4b and r4b[0] == "TAKE", str(r4b))
+
+    # ⚠️ T4c — THE REFUSAL, AND IT IS THE MOST IMPORTANT CHECK IN THIS FILE
+    # AFTER r378. Same tape, same sub-floor depth, ONLY the level's record
+    # differs: its last test was a BREACH — price accepted through it. Selling a
+    # boundary that has already given way is what §36 calls foundational, and
+    # without this check the ungate above is indistinguishable from dropping the
+    # gate entirely.
+    P.begin_tick(30.6)
+    _ledger_book((96.0, "low", "breach"))
+    sig4c = S.generate_signal(liq_map=lm_shallow, chain=_Chain(good_puts), **common)
+    r4c = _row(st, "SweepCreditSpread", 30.6)
+    check("T4c (r378) the SAME sweep is REFUSED when the level's last test was a "
+          "BREACH — acceptance, not a defense",
+          sig4c is None and r4c and r4c[0] != "TAKE"
+          and "interaction_named" in (r4c[1] or ""), str(r4c))
+
+    # ⚠️ T4d — AND AN ABSENT BOOK IS STARVED, NEVER REFUSED. `main.py` defers
+    # seeding until the mapper names pools, so an empty book is normal in the
+    # first minutes of a session. A refusal here would cost trades with no red
+    # anywhere — the plausible-silence class in docs/PORT_STATE.md. The row must
+    # name the starvation rather than report a failed condition.
+    P.begin_tick(30.7)
+    _ledger_book()                      # the book cannot answer
+    sig4d = S.generate_signal(liq_map=lm_shallow, chain=_Chain(good_puts), **common)
+    r4d = _row(st, "SweepCreditSpread", 30.7)
+    check("T4d (r378) no book -> STARVED and named, not a refusal",
+          sig4d is None and r4d and "level_ledger" in (r4d[1] or ""), str(r4d))
+
+    # ⚠️ T4e — a level admitted MID-SESSION with no resolved test is PARTIAL, and
+    # partial is starved too: `touches == 0` there means NOT OBSERVED, not NEVER
+    # TESTED. Every bake re-seeds, and the box cannot backfill its morning from
+    # its own short frame — measured, 45 of 147 level-rows on 2026-09-09 were
+    # deflated against a replay of the same tape.
+    P.begin_tick(30.8)
+    _ledger_book((96.0, "low", "", True))
+    sig4e = S.generate_signal(liq_map=lm_shallow, chain=_Chain(good_puts), **common)
+    r4e = _row(st, "SweepCreditSpread", 30.8)
+    check("T4e (r378) a PARTIAL level with no resolved test is STARVED, not refused",
+          sig4e is None and r4e and "level_partial" in (r4e[1] or ""), str(r4e))
+    _ledger_book((96.0, "low", "hold"), (103.0, "high", "hold"))   # restore
     # T5: under the condor's authorization (leg two) the same touch is NOT selected
     P.begin_tick(31.0)
     sig5 = S2.generate_signal(liq_map=lm, chain=_Chain([], calls_t), price_now=99.6,
@@ -609,7 +733,7 @@ def main():
     # T7: spent by NAME survives the rail drifting
     sw.mark_spent(sw._symbol_of(), "call", sw._name_key("1h upper tine"), "stopped out 13:40")
     lm7 = LiquidityMap()
-    publish_tines(lm7, _CTM(_Rail("1h", "call", 99.98, 0.60)), _bars(rows))    # rail has drifted
+    publish_tines(lm7, _fork("1h", 99.98, 0.60), _bars(rows))    # rail has drifted
     P.begin_tick(33.0)
     sig7 = S2.generate_signal(liq_map=lm7, chain=_Chain([], calls_t), price_now=99.6,
                               now_et="13:30", atr_pct=0.08, orb_high=99.2, orb_low=98.4)

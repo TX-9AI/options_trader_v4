@@ -1,5 +1,13 @@
 """
-strategy/base_strategy.py  v4.4
+strategy/base_strategy.py  v4.5
+v4.5  2026-09-12  r378 — OptionsSignal gains `sweep_event_key`, the sweep
+      INTERACTION's identity ("symbol|side|level|event_epoch"). The sweep had no
+      event identity at all: `_spent_key` keyed the LEVEL and armed only on a
+      loss, so one interaction could fire repeatedly. This is the bridge the
+      fill path latches on — the same bridge `swept_level_name` crosses, and the
+      one AUDIT F4 found `relaxed_entry` missing from, which is why a new field
+      here is wired end to end in the same delivery rather than declared and
+      left for a later one (CHR.2's shape).
 v4.4  2026-09-01  r207 — OptionsSignal gains `orb_stop_distance_px`: the
       impulsive wick measured from the boundary it broke, frozen by the engine
       at break time. ⚠️ RECORDED, NEVER READ IN A DECISION — sizing stays on
@@ -142,6 +150,12 @@ class OptionsSignal:
     adx_at_signal:  float = 0.0    # v-obs: ADX at entry, for tape-context analysis
     flat_angle_deg: float = 0.0    # v-obs: flat-angle at entry (0 if unavailable)
     swept_level_name: str = ""     # v-obs: name of swept level (PDH/PDL/session) — '' if equal-H/L
+    # 🔑 r378 — THE SWEEP INTERACTION'S IDENTITY: "symbol|side|level|event_epoch".
+    # The Signal is the only bridge from the strategy to `entry_engine`, and the
+    # fill path latches THIS string so one interaction produces one entry. Empty
+    # for every other strategy and for a sweep whose producer left no stamp; an
+    # empty key is never latched, deliberately (see `sweep_credit_spread`).
+    sweep_event_key: str = ""
     level_strength:   float = 0.0  # v-obs: 0..1 conviction of the swept level (named+touches)
     vix_at_signal:  float = 0.0
     is_fed_day:     bool  = False

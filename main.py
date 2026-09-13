@@ -1,5 +1,24 @@
 """
-main.py  v4.44
+main.py  v4.45
+v4.45 2026-09-12  r378 — THE LEVEL BOOK IS FIT TO DECIDE ON, WHICH IT WAS NOT
+      WHILE NOTHING READ IT. Two defects in `_feed_liquidity_ledger`, both
+      latent until r378 made `liquidity_ledger` the named sweep's gate:
+      🔴 A TINE COULD BE SEEDED AS A HORIZONTAL LEVEL. `publish_tines` publishes
+      each fork rail as a pool with `is_named=True`, and the seed comprehension
+      asked only that question — so a MOVING rail's momentary price could enter a
+      book of horizontal levels as a level that never existed, and then collect
+      touches. Now excluded by the `moving` FLAG rather than by the name, because
+      a flag is the fact and a name is a spelling (C.24).
+      🔴 A LEVEL NAMED MID-SESSION NEVER ENTERED THE BOOK. `reset_for_session`
+      runs ONCE per day, so a new session high at 11:00 was unknown to the
+      ledger for the rest of the day and `interaction_at` would answer None for
+      it forever. Harmless while the read side had no reader; from r378 it would
+      STARVE the sweep on exactly the levels the session just made. `add_level`
+      is idempotent within `TOUCH_TOL_PCT`, so admitting every named pool each
+      tick is a no-op once the book is warm.
+      ⚠️ NOTHING IS EVER REMOVED. The book is the session's RECORD; a level the
+      mapper stops naming still happened, and dropping it would erase touch
+      history mid-session.
 v4.44 2026-09-12  r365 — the ORB dispatch stops handing the strategy a liquidity
       map; it no longer takes one. The sweep's two call sites are untouched —
       its trigger IS a level event, and that is its own revision.
@@ -1372,9 +1391,19 @@ def _feed_liquidity_ledger(liq_map, df_1m) -> None:
         from analysis.liquidity_ledger import get_ledger
         today = str(df_1m.index[-1].date())
         if _LEDGER is None or _LEDGER_DATE != today:
+            # 🔴 r378 — MOVING POOLS ARE EXCLUDED, AND THIS MATTERS NOW.
+            # `publish_tines` publishes a fork tine as a pool with
+            # `is_named=True`, so this comprehension would admit a TINE — whose
+            # price is a function of time — into a book of HORIZONTAL levels, as
+            # a frozen price that was never a level. It was latent while nothing
+            # gated on the book; from r378 the ledger DECIDES the named sweep, so
+            # a polluted book is a polluted trade. Excluded by `moving` rather
+            # than by parsing the name, because the flag is the fact and a name
+            # is a spelling (C.24).
             seeds = [(p.price, p.kind, p.name, True)
                      for p in (getattr(liq_map, "pools", None) or [])
-                     if getattr(p, "is_named", False)]
+                     if getattr(p, "is_named", False)
+                     and not getattr(p, "moving", False)]
             # A2.9 — an EMPTY first-tick seed must not latch the date: a mapper
             # warm-up hiccup used to lock a zero-level ledger for the whole
             # session. Retry every tick until the mapper produces named pools.
@@ -1391,6 +1420,21 @@ def _feed_liquidity_ledger(liq_map, df_1m) -> None:
         # A2.4 — bar selection lives in the ledger now: every closed session
         # bar newer than the persisted last_bar_ts, forming row excluded. The
         # old iloc[-2] + one-stamp guard dropped bars on any tick > ~75s.
+        # 🔑 r378 — NAMED LEVELS THAT APPEAR MID-SESSION ARE ADMITTED. Seeding
+        # runs ONCE per day, so before this a level the mapper named at 11:00 —
+        # a new session high, a fresh ladder rung — never entered the book, and
+        # `interaction_at` would answer None for it forever. That was invisible
+        # while nothing read the book; from r378 it would STARVE the named sweep
+        # on exactly the levels the session just created. `add_level` is
+        # idempotent (it returns early on any level of the same kind within
+        # `TOUCH_TOL_PCT`), so this is a per-tick no-op once the book is warm.
+        # ⚠️ A LEVEL IS NEVER REMOVED HERE. The book is the session's RECORD and
+        # a level the mapper stops naming still happened; dropping it would erase
+        # touch history mid-session, which is the one thing this file exists to
+        # keep.
+        for _p in (getattr(liq_map, "pools", None) or []):
+            if getattr(_p, "is_named", False) and not getattr(_p, "moving", False):
+                _LEDGER.add_level(_p.price, _p.kind, _p.name, True)
         _LEDGER.feed_frame(df_1m)
         _LEDGER.write()
     except Exception as exc:                                   # noqa: BLE001
