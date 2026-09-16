@@ -1,5 +1,25 @@
 """
-main.py  v4.45
+main.py  v4.46
+v4.46 2026-09-16  r383 — CFG.3 — ABSENT IS NOT ZERO, AND BOTH WRITE PATHS
+      NOW SEE THE TICK CONTEXT.
+      (a) `chain_iv_rank` wrote a measured-looking 0.0 on every trade —
+          `OptionsChain.iv_rank` is a dataclass field defaulting to 0.0 that
+          NOTHING EVER ASSIGNS, and `get_iv_rank()` already guards `> 0`, so the
+          code knew. 0/56 across 2026-09-14 and 09-15, every strategy; MU
+          entered at 89.7% IV with its IV rank reading zero. Now NULL unless a
+          value was genuinely computed. The dataclass default is deliberately
+          untouched — strike selection reads that object.
+      (b) `entry_eng.enter(...)` is handed `ctx`, so ORB and the runaway record
+          the gap and the graded level the credit verticals already got.
+      (c) `_execute_condor_leg`'s inline level-strength expression is routed
+          through `_resolve_level_strength_ctx` -> `analysis.level_grade`, one
+          implementation shared with `entry_engine.enter()`, returning None for
+          "nobody measured it" instead of a 0.0 that reads as a measurement.
+      ⚠️ SIZING IS NOT TOUCHED. The `abs()` at the ORB sizing call site stands,
+      per the operator: *"I don't want the sizing affected."* With (a)-(c) and
+      r383's entry refusal in place it is unreachable from the ORB path rather
+      than wrong. `check_orb_underwater_entry` U6 is the canary.
+      GATE: tests/check_absent_not_zero.py N1/N2/N2b/N5, born red at 71c08fd.
 v4.45 2026-09-12  r378 — THE LEVEL BOOK IS FIT TO DECIDE ON, WHICH IT WAS NOT
       WHILE NOTHING READ IT. Two defects in `_feed_liquidity_ledger`, both
       latent until r378 made `liquidity_ledger` the named sweep's gate:
@@ -2197,7 +2217,21 @@ def _capture_entry_contract(ctx: dict, record: dict) -> bool:
                 "entry_iv":    getattr(con, "iv", None),
                 "entry_bid":   getattr(con, "bid", None),
                 "entry_ask":   getattr(con, "ask", None),
-                "chain_iv_rank": getattr(chain, "iv_rank", None),
+                # 🔴 r383 / CFG.3 — ABSENT IS NOT ZERO. `OptionsChain.iv_rank`
+                # is a dataclass field defaulting to 0.0 and NOTHING EVER
+                # ASSIGNS IT — `get_iv_rank()` already guards `if chain.iv_rank
+                # > 0`, so the code knows. Copying the default in wrote a
+                # measured-looking 0.0 on every trade: 0/56 across 2026-09-14
+                # and 09-15, every strategy. MU entered at 89.7% IV on a -7%
+                # gap with its IV rank reading zero.
+                # ⚠️ "IV is at the bottom of its range" and "nobody computed
+                # this" are different statements and collapsing them is the
+                # exact class §0.5 names. NULL says the second one honestly.
+                # ⚠️ THE DATACLASS DEFAULT IS LEFT ALONE deliberately — strike
+                # selection reads that object, so the fix goes where the
+                # RECORD is written and nowhere near the chain.
+                "chain_iv_rank": ((lambda _v: _v if (_v or 0) > 0 else None)(
+                    getattr(chain, "iv_rank", None))),
             }
             if get_trade_logger().set_entry_contract(trade_id, payload):
                 return True
@@ -2475,6 +2509,25 @@ def _supervise_credit_remainders(ctx: dict, state: BotState) -> None:
         logger.warning("remainder supervision skipped this tick: %s", exc)
 
 
+def _resolve_level_strength_ctx(signal_value, ctx):
+    """r383 / CFG.3 — one implementation, shared with `entry_engine.enter()`.
+
+    Wrapped so an import failure cannot take down a credit-vertical entry: an
+    observation must never be the reason a confirmed fill fails to record
+    (r120's rule). Returns None rather than 0.0 on the failure path, because a
+    fabricated zero is the defect being fixed.
+    """
+    try:
+        from analysis.level_grade import resolve_level_strength
+        return resolve_level_strength(signal_value, ctx)
+    except Exception:                                          # noqa: BLE001
+        try:
+            v = float(signal_value or 0.0)
+            return v if v > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+
 def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
                         ctx: dict = None):
     """
@@ -2720,9 +2773,12 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         # Falls back to the strategy's own value (sweep sets one directly), so
         # a strategy with a better local read is not overwritten by a generic
         # proximity grade.
-        level_strength    = (float(getattr(signal, "level_strength", 0.0) or 0.0)
-                             or ((ctx.get("level_near") or (None, 0.0, 0))[1]
-                                 if isinstance(ctx, dict) else 0.0)),
+        # r383 / CFG.3 — was the ONLY reader of ctx["level_near"], and it
+        # resolved to a measured-looking 0.0 when nothing was near. Now routed
+        # through analysis.level_grade so this path and entry_engine.enter()
+        # share one implementation and return None for "nobody measured it".
+        level_strength    = _resolve_level_strength_ctx(
+            getattr(signal, "level_strength", 0.0), ctx),
         # A2.6b: persist the gap or it is telemetry. Backfillable, so historical
         # rows can be filled retroactively — unlike everything else this week.
         gap_pct           = ((ctx.get("gap") or {}).get("gap_pct")
@@ -4305,7 +4361,10 @@ def _execute_entry_signal(signal, ctx, ms, state, _sigj=None, *, additive: bool 
 
     # ── Enter trade ───────────────────────────────────────────────────────────
     # ⚠️ r152 — no score argument; the scorer is gone.
-    record = entry_eng.enter(signal=signal, sizing=sizing)
+    # r383 / CFG.3 — hand the tick context over so ORB and the runaway
+    # record the gap and the graded level the credit verticals already
+    # got. `main` computes both every tick; only one path read them.
+    record = entry_eng.enter(signal=signal, sizing=sizing, ctx=ctx)
     if record:
         # v5.1 — capture BEFORE anything else touches the row, but AFTER the
         # fill: the picture we want is the one that produced this entry.

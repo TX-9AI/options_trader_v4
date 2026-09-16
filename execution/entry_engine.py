@@ -1,5 +1,19 @@
 """
-execution/entry_engine.py  v5.0
+execution/entry_engine.py  v5.1
+v5.1  2026-09-16  r383 — CFG.3 — `enter()` TAKES THE TICK CONTEXT, BECAUSE
+      THIS PATH WAS THE BLIND ONE. `main` computes `ctx["gap"]` and
+      `ctx["level_near"]` EVERY TICK FOR EVERY STRATEGY, and
+      `main._execute_condor_leg` was their only reader — so the four credit
+      verticals recorded the day's gap and the graded nearest level while this
+      function, the path ORB and RunawayContinuation take (433 of 493 banked
+      trades), recorded NEITHER: `gap_pct` NULL and `level_strength` 0.0 on
+      every one. MU 2026-09-14 gapped -7.09% and its row's `gap_pct` is NULL.
+      `ctx` is OPTIONAL so every existing caller keeps working, and an absent
+      one yields None rather than a fabricated zero.
+      ⚠️ RESOLVED IN ONE PLACE — `analysis.level_grade.resolve_level_strength`
+      and `resolve_gap_pct`, shared with `_execute_condor_leg`. Duplicating the
+      expression is how the two paths came to disagree (C.23).
+      GATE: tests/check_absent_not_zero.py N3/N3b/N4/N5, born red at 71c08fd.
 v5.0  2026-09-12  r378 — THE SWEEP'S INTERACTION IS LATCHED AT THE FILL. One
       call, sited after the fill is confirmed and before the record is written,
       marking THAT interaction spent so the next order needs a fresh one.
@@ -228,6 +242,46 @@ def _cfg_entry_open():
 logger = logging.getLogger(__name__)
 
 
+# ── r383 / CFG.3 — the tick context's two observations, resolved ONCE ─────────
+# ⚠️ IMPORTED, NOT REIMPLEMENTED. `analysis.level_grade` owns the grade and the
+# absent-is-not-zero rule; a second copy here is how the two write paths came to
+# disagree in the first place (C.23).
+def _resolve_level_strength(signal_value, ctx):
+    try:
+        from analysis.level_grade import resolve_level_strength
+        return resolve_level_strength(signal_value, ctx)
+    except Exception:                                          # noqa: BLE001
+        # An OBSERVATION must never be the reason a confirmed fill fails to
+        # record (r120's rule). Falls back to the signal's own value, and to
+        # None rather than 0.0 so a failure here cannot fabricate a measurement.
+        try:
+            v = float(signal_value or 0.0)
+            return v if v > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+
+def _resolve_gap_pct(ctx):
+    try:
+        from analysis.level_grade import resolve_gap_pct
+        return resolve_gap_pct(ctx)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def _ctx_level_name(ctx) -> str:
+    """The nearest graded level's NAME, mirroring `_execute_condor_leg`."""
+    if not isinstance(ctx, dict):
+        return ""
+    near = ctx.get("level_near")
+    if not near:
+        return ""
+    try:
+        return str(near[0] or "")
+    except (TypeError, IndexError):
+        return ""
+
+
 class EntryEngine:
     """Places orders for all strategy types and returns a populated TradeRecord."""
 
@@ -238,10 +292,23 @@ class EntryEngine:
     def enter(self,
               signal:  OptionsSignal,
               sizing:  SizingResult,
-              score=None) -> Optional[TradeRecord]:
+              score=None,
+              ctx: Optional[dict] = None) -> Optional[TradeRecord]:
         """
         Place entry order and record the trade.
         Returns TradeRecord on success, None on failure.
+
+        🔴 r383 / CFG.3 — `ctx` IS THE TICK CONTEXT, AND IT IS WHY THIS PATH WAS
+        BLIND. `main` computes `ctx["gap"]` and `ctx["level_near"]` EVERY TICK
+        FOR EVERY STRATEGY, and until r383 `main._execute_condor_leg` was their
+        only reader. So the four credit verticals recorded the day's gap and the
+        graded nearest level while THIS function — the path ORB and
+        RunawayContinuation take, 433 of 493 banked trades — recorded neither:
+        `gap_pct` NULL and `level_strength` 0.0 on every one. The values were
+        sitting in `ctx` the whole time.
+        ⚠️ OPTIONAL, so every existing caller keeps working; a caller that omits
+        it gets None rather than a fabricated zero, which is the honest answer
+        and the one the schema already asks for (`gap_pct REAL`, nullable).
         """
         mode = "PAPER" if self.paper_trading else "LIVE"
 
@@ -367,8 +434,13 @@ class EntryEngine:
             target_premium    = signal.target_premium(),
             adx_at_entry      = getattr(signal, 'adx_at_signal', 0.0),
             flat_angle_deg    = getattr(signal, 'flat_angle_deg', 0.0),
-            swept_level_name  = getattr(signal, 'swept_level_name', ''),
-            level_strength    = getattr(signal, 'level_strength', 0.0),
+            # r383 / CFG.3 — resolved in ONE place (analysis.level_grade) so
+            # this path and `_execute_condor_leg` cannot drift apart again.
+            swept_level_name  = (getattr(signal, 'swept_level_name', '') or
+                                 _ctx_level_name(ctx)),
+            level_strength    = _resolve_level_strength(
+                getattr(signal, 'level_strength', 0.0), ctx),
+            gap_pct           = _resolve_gap_pct(ctx),
             order_id          = order_id,
             paper_trade       = 1 if self.paper_trading else 0,
             # ⚠️ AUDIT F4 (2026-08-20): relaxed.tag() sets this on the SIGNAL

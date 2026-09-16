@@ -1,5 +1,29 @@
 """
-execution/exit_engine.py  v4.11
+execution/exit_engine.py  v4.12
+v4.12  2026-09-16  r383 — ORB.12 — A POSITION ENTERED THROUGH ITS OWN
+       INVALIDATION IS OUT ON THE TICK IT IS SEEN, NOT ON THE NEXT CLOSE.
+       Operator, 2026-09-16: *"If we entered beyond the stop, despite the
+       underwater check, then on the tick it's realized (not the close) get out
+       immediately. We misread & fucked up — get out."*
+       New check 1a, ABOVE the premium floor: when `underlying_entry` is already
+       through `underlying_stop`, exit on the first `evaluate()` on the live
+       mark without consulting `df_1m`.
+       🔑 IT DOES NOT CONTRADICT THE CLOSE-BASED STRUCTURE STOP BELOW. That arm
+       reads the last CLOSED candle ON PURPOSE so a live thesis can breathe. A
+       position whose ENTRY was already through its invalidation HAS NO THESIS,
+       so the intrabar tolerance is not a kindness to it — it is a delay. Every
+       position that entered correctly keeps the completed-close rule untouched;
+       this arm can only ever see the broken ones, and it is scoped to the two
+       IMMUTABLE fields stamped at entry so it can never widen into "price is
+       through the level".
+       ⚠️ SITED ABOVE THE FLOOR DELIBERATELY: on MU the floor was the only thing
+       that could act and it acted late — marks 4.17 -> 3.80 -> 2.805 against a
+       3.13125 floor, realizing -32.7% on a 25% stop.
+       ⚠️ BELT AND BRACES with `orb_strategy`'s own refusal, because this arm is
+       the only one that can see a fill that slipped through the level between
+       submit and fill — zero in paper, not zero live.
+       GATE: tests/check_orb_underwater_entry.py U7/U7b, born red at 71c08fd;
+       U8 is the control and goes red when the arm is made unscoped.
 v4.11  2026-09-10  r345 — THE EXIT PATH STOPS TRUSTING `is_short_position` ALONE.
       That column had NO WRITER anywhere until r343, so every credit spread
       reached this file as 0. Two consequences, and only one was cosmetic:
@@ -987,6 +1011,55 @@ class ExitEngine:
             decision.should_exit = True
             decision.exit_reason = "hard_close_15:45_ET"
             return decision
+
+        # 1a. 🔴 r383 / ORB.12 — ENTERED THROUGH ITS OWN INVALIDATION. OUT NOW.
+        #     Operator, 2026-09-16: *"If we entered beyond the stop, despite the
+        #     underwater check, then on the tick it's realized (not the close)
+        #     get out immediately. We misread & fucked up — get out."*
+        #
+        #     🔑 WHY THIS DOES NOT CONTRADICT THE CLOSE-BASED RULE BELOW. The
+        #     structure stop reads the last CLOSED candle ON PURPOSE, so an
+        #     intrabar wick into the range survives and a live thesis is allowed
+        #     to breathe. A position whose ENTRY was already through its own
+        #     invalidation HAS NO THESIS — it was invalid before its first tick —
+        #     so the intrabar tolerance is not a kindness to it, it is a delay.
+        #     Every position that entered correctly keeps the completed-close
+        #     rule untouched; this arm can only ever see the broken ones.
+        #
+        #     ⚠️ SCOPED TO THE FILL, NOT TO PRICE NOW. It compares
+        #     `underlying_entry` against `underlying_stop` — two immutable
+        #     fields stamped at entry — so it is decided by what the fill WAS
+        #     and can never widen into "price is through the level", which is
+        #     the close-based question one block down.
+        #
+        #     ⚠️ IT SITS ABOVE THE PREMIUM FLOOR DELIBERATELY. On MU the floor
+        #     was the only thing that could act and it acted late: the marks
+        #     went 4.17 -> 3.80 -> 2.805 on a 3.13125 floor, so the realized
+        #     exit was -32.7% rather than -25%. Firing here gets the position
+        #     out while the premium is still near the fill, and names the real
+        #     reason instead of reporting a floor breach.
+        #
+        #     ⚠️ ENTRY ENGINE GUARDS THIS TOO (orb_strategy, r383). Belt and
+        #     braces on purpose: the strategy guard cannot see a fill that
+        #     slipped through the level between submit and fill, which is zero
+        #     in paper and is not zero live.
+        _u_entry = float(record.get("underlying_entry", 0.0) or 0.0)
+        _u_stop = float(record.get("underlying_stop", 0.0) or 0.0)
+        if _u_entry > 0.0 and _u_stop > 0.0:
+            _born_bad = (_u_entry < _u_stop if direction == "long"
+                         else _u_entry > _u_stop)
+            if _born_bad:
+                decision.should_exit = True
+                decision.exit_reason = (
+                    f"entry_underwater: filled {_u_entry:.2f} already "
+                    f"{'below' if direction == 'long' else 'above'} the "
+                    f"impulsive-candle "
+                    f"{'low' if direction == 'long' else 'high'} {_u_stop:.2f}")
+                logger.warning(
+                    "ORB ENTERED UNDERWATER: %s fill=%.2f stop=%.2f — no "
+                    "thesis to manage, exiting on this tick",
+                    trade_id[:8], _u_entry, _u_stop)
+                return decision
 
         # 1b. HARD STOP — unconditional -25% dollar floor (v1.6). Mirrors the
         #     sweep/butterfly/adopted paths, which check the floor DIRECTLY. ORB

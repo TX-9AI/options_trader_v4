@@ -1,7 +1,26 @@
 """
-analysis/level_grade.py  v4.0
+analysis/level_grade.py  v4.1
 Grades a level by TYPE with a rung discount; nearest graded pool.
 
+v4.1  2026-09-16  r383 — CFG.3 — THE RESOLVERS LAND HERE, SO THERE IS ONE
+      IMPLEMENTATION AND NOT TWO. `resolve_level_strength()` and
+      `resolve_gap_pct()` are the single place a trade row's level grade and gap
+      are decided, called by BOTH `entry_engine.enter()` and
+      `main._execute_condor_leg`. Until r383 the signal-then-ctx fallback lived
+      inline in the condor path alone, so ORB and RunawayContinuation — 433 of
+      493 banked trades — recorded `level_strength` 0.0 and `gap_pct` NULL while
+      the values sat in `ctx`.
+      🔑 None, NEVER 0.0. `nearest_graded` already refuses to collapse "no level
+      within range" into "a level of zero strength"; these keep that honest all
+      the way to the column. A measured-looking zero on every row is how
+      `level_strength` came back from the separation probe as "levels do not
+      separate outcomes" when levels had never been measured at all.
+      ⚠️ NOTE FOR THE NEXT READER: the `touch_count IS A CONSTANT` warning above
+      is about the OLD `sweep_reversal` formula this module REPLACES, not about
+      `grade_level`, which is a pure function of the level's NAME and returns
+      real differentiated values (PDH 1.0, PDH (R2) 0.9, London High (R1) 0.7,
+      1h upper tine 0.15). That distinction was misread once during r383 and is
+      written down here so it is not misread again.
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
 INHERITED DOCTRINE
@@ -143,3 +162,69 @@ def nearest_graded(pools, price: float, within_pct: float = 0.004):
         except Exception:                                      # noqa: BLE001
             continue
     return best
+
+
+# ── r383 / CFG.3 — THE ONE PLACE A TRADE ROW'S `level_strength` IS RESOLVED ──
+def resolve_level_strength(signal_value, ctx) -> Optional[float]:
+    """The level grade for a trade row, or **None** when nothing measured one.
+
+    🔴 WHY THIS FUNCTION EXISTS RATHER THAN THE EXPRESSION BEING WRITTEN TWICE.
+    Until r383 the signal-value-then-ctx-fallback lived inline in
+    `main._execute_condor_leg` and NOWHERE ELSE, so the four credit verticals
+    resolved a grade and `entry_engine.enter()` — the path ORB and
+    RunawayContinuation take, 433 of 493 banked trades — read only the signal,
+    which no strategy sets. Two write paths, one of them enriched, and the
+    difference was invisible in the data because both ended up at 0.0.
+    Duplicating the expression to fix it would make them disagree the next time
+    one is edited (C.23); one implementation cannot.
+
+    ⚠️ **None, NEVER 0.0.** `nearest_graded` already refuses to collapse "no
+    level within range" into "a level of zero strength", and this keeps that
+    honest all the way to the column. A measured-looking zero on every row is
+    how `level_strength` came back from the separation probe as *"levels do not
+    separate outcomes"* when levels had never been measured at all.
+
+    ⚠️ A GENUINE 0.0 IS CURRENTLY UNPRODUCIBLE — `grade_level` floors at 0.15
+    for anything it recognises and `nearest_graded` returns None rather than a
+    zero. If a producer ever emits a true 0.0 this coercion has to be revisited,
+    which is why the condition is `> 0` and not a truthiness test on a float.
+    """
+    try:
+        v = float(signal_value or 0.0)
+    except (TypeError, ValueError):
+        v = 0.0
+    if v > 0:
+        return v
+    if isinstance(ctx, dict):
+        near = ctx.get("level_near")
+        if near:
+            try:
+                g = float(near[1] or 0.0)
+                if g > 0:
+                    return g
+            except (TypeError, ValueError, IndexError):
+                pass
+    return None
+
+
+def resolve_gap_pct(ctx) -> Optional[float]:
+    """`ctx["gap"]["gap_pct"]`, or None. The other half of the same defect.
+
+    🔴 `gap_pct` was populated on the four credit verticals and NULL on every
+    ORB and RunawayContinuation trade — 0/15 and 0/11 on ORB across
+    2026-09-14/15 — for exactly one reason: `_execute_condor_leg` read
+    `ctx["gap"]` and `entry_engine.enter()` did not. `main` computes it EVERY
+    TICK FOR EVERY STRATEGY and its own comment says *"persist the gap or it is
+    telemetry"*; it persisted it on one of two paths.
+
+    ⚠️ MU 2026-09-14 gapped **-7.09%** and its trade row's `gap_pct` is NULL.
+    That session was a gap-down-and-reverse across the board and ORB traded it
+    15 times for -$3,093 with no gap recorded on a single row.
+    """
+    if not isinstance(ctx, dict):
+        return None
+    gap = ctx.get("gap")
+    if not isinstance(gap, dict):
+        return None
+    v = gap.get("gap_pct")
+    return None if v is None else float(v)

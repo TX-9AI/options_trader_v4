@@ -1,5 +1,27 @@
 """
-strategy/orb_strategy.py  v4.6
+strategy/orb_strategy.py  v4.7
+v4.7  2026-09-16  r383 — A FIRE ALREADY THROUGH ITS OWN INVALIDATION IS
+      REFUSED, AND THE TAPE WINDOW MEASURES THE FIGHT AGAIN.
+      (a) ORB.12 — `entry_underwater`: a long firing BELOW `stop_level`, or a
+          short ABOVE it, is refused strictly and named in the plan row. MU
+          2026-09-14 filled at 913.495 with its stop at 914.14 and lost
+          $2,047.50 in 45 seconds having never traded up; 8 of 154 banked ORB
+          trades (5.2%) entered this way, for -$2,792. The confirm was CORRECT
+          and is untouched — `_check_for_retest` reads the last CLOSED candle
+          and the fire is the NEXT TICK at the live price, so nothing re-read
+          price against the level in between. A REFUSAL, not a park (§37): the
+          arm survives and the next qualifying retest fires normally.
+      (b) ORB.13 — `_break_epoch()` replaces `_confirmed_epoch()` as the source
+          of `orb_break_ts`. The field is NAMED for the break and was being
+          handed the CONFIRM, so `tape_at_level`'s window — contracted to span
+          "from the break to the fire... THE FIGHT" — was about 16 seconds wide
+          and measured nothing: `tape_vol_at_level` was live on 6/7 and 7/9
+          RunawayContinuation trades and 0/15 and 1/11 on ORB. Derived as
+          `confirm - bars_since_break * 60` rather than stored, so no new
+          ORBData field has to be kept and cleared with the impulsive candle.
+      GATES: tests/check_orb_underwater_entry.py (U1-U8, born red at 71c08fd on
+      U1/U2/U5/U7/U7b with U3/U4/U6/U8 green as controls; U8 and U6 both
+      mutation-proven red) and tests/check_absent_not_zero.py (W1/W3).
 v4.6  2026-09-12  r365 — THE ORB NO LONGER KNOWS ABOUT LEVELS, AT ALL.
       Operator, 2026-09-12: *"the orb trade does not need to know about any
       levels… I used to give it awareness of the levels to avoid fake outs, but
@@ -176,6 +198,53 @@ def _confirmed_epoch(orb) -> float:
         return 0.0
 
 
+def _break_epoch(orb) -> float:
+    """The epoch of THE BREAK, which is what `orb_break_ts` has always claimed.
+
+    🔴 r383 / ORB.13 — IT WAS PASSING THE CONFIRM AND CALLING IT THE BREAK.
+    `tape_at_level`'s own contract is *"WINDOW = from the break to the fire.
+    That measures THE FIGHT — everything that traded while the level was being
+    contested — rather than only the retest instant."* This function fed it
+    `_confirmed_epoch()`, and the fire happens on the NEXT TICK after the
+    confirming candle closes — so the window was about 16 SECONDS wide and the
+    measurement it exists to take could not be taken.
+
+    📊 MEASURED: `tape_vol_at_level` was live on 6/7 and 7/9 RunawayContinuation
+    trades and 0/15 and 1/11 on ORB across 2026-09-14/15 — dead on the one
+    strategy that trades levels. MU 2026-09-14 recorded prints=0, vol=0.0,
+    buy_frac=None; the fight over 914.55 ran 09:45-09:51 and we measured
+    09:51:00-09:51:16.
+
+    ⚠️ THE INVERSION IS THE TELL, AND IT IS WHY THIS WENT UNNOTICED. Nothing
+    except this strategy sets `orb_break_ts`, so RunawayContinuation leaves it
+    0.0 and `entry_engine` falls back to a flat 900-second window — the path
+    with the "real" value failed and the path with the dumb fallback worked.
+
+    ⚠️ DERIVED, NOT STORED. `bars_since_break` is a real 1-minute bar count
+    (r228 fixed it from counting 15s ticks), so the break is one multiplication
+    away and needs no new ORBData field — which would then have to be kept and
+    cleared alongside the impulsive candle on every `_rearm` path (r228/r232).
+    Erring WIDE is the correct direction for a window: a window slightly too
+    long includes tape that is genuinely part of the fight, while one too short
+    silently measures nothing, which is the defect being fixed.
+
+    ⚠️ NOT A TIMEZONE BUG — CHECKED. `now_et()` is tz-aware, so
+    `_confirmed_epoch`'s `.timestamp()` was always correct. The error was
+    purely which EVENT was being named.
+
+    Returns 0.0 when it cannot be derived, which `entry_engine` reads as
+    "use the fallback window" — never a silently wrong instant.
+    """
+    confirmed = _confirmed_epoch(orb)
+    if confirmed <= 0.0:
+        return 0.0
+    try:
+        bars = int(getattr(orb, "bars_since_break", 0) or 0)
+    except Exception:                                          # noqa: BLE001
+        bars = 0
+    return confirmed - (max(bars, 1) * 60.0)
+
+
 class ORBStrategy(BaseOptionsStrategy):
     """
     Opening Range Breakout strategy.
@@ -304,6 +373,46 @@ class ORBStrategy(BaseOptionsStrategy):
         t.direction = direction
         t.anchor(trigger=break_level, invalidation=orb.stop_level)
 
+        # ── 🔴 r383 / ORB.12 — A FIRE ALREADY THROUGH ITS OWN INVALIDATION ──
+        # Operator, 2026-09-16, on MU: *"if it enters underwater, it should
+        # exit immediately"* — and the conclusion of that is that it should
+        # never enter. MU 2026-09-14 lost $2,047.50 in 45 seconds on an ORB
+        # Long filled at 913.495 while `stop_level` was 914.14: the recorded
+        # invalidation was ALREADY BREACHED at the moment of the fill, and the
+        # trade never traded up for a single tick (MFE 3.80 vs a 4.17 entry).
+        #
+        # 🔑 THE CONFIRM WAS CORRECT AND IS NOT TOUCHED. The 09:50 candle is a
+        # textbook retest — wick into the range, body outside — so the engine
+        # was right to arm. What was missing is that `_check_for_retest` reads
+        # the last COMPLETED candle and the fire happens on the NEXT TICK at
+        # the LIVE price: 16 seconds in which the 09:51 bar ran 914.73 -> 908.50.
+        # Nothing between the confirm and here re-read price against the level.
+        #
+        # ⚠️ STRICT, NO TOLERANCE, which is this setup's own doctrine (v3.4
+        # removed every band: *"A break is a close beyond the level. Full
+        # stop."*). A band here would re-admit exactly the fills this refuses.
+        #
+        # ⚠️ IT IS A REFUSAL, NOT A PARK (§37). No signal exists, so the
+        # dispatch never runs; the engine keeps its arm and the next qualifying
+        # retest fires normally. Consuming the setup here would turn a stale
+        # fill into a silent lockout, which is the failure §37 names.
+        #
+        # ⚠️ AND IT IS COUNTED. `t.refuse` writes the verdict to the plan row,
+        # so a refusal is a number in the ledger rather than a line in a log
+        # nobody reads at the box's level (§0.5).
+        _stop_lvl = float(getattr(orb, "stop_level", 0.0) or 0.0)
+        if _stop_lvl > 0.0:
+            _underwater = (current_price < _stop_lvl if direction == "long"
+                           else current_price > _stop_lvl)
+            t.check("entry_underwater", current_price, not _underwater)
+            if _underwater:
+                return t.refuse(
+                    "entry_underwater",
+                    f"price {current_price:.2f} is already "
+                    f"{'below' if direction == 'long' else 'above'} the "
+                    f"impulsive-candle {'low' if direction == 'long' else 'high'} "
+                    f"{_stop_lvl:.2f} — the setup is invalid before the fill")
+
         # 🔴 r193 — POOL IS RECORD-ONLY. Operator, 2026-08-29: pool presence is
         # "recorded but not influence the entry or target location. We can
         # evaluate its effects later on." The target is the pure measured
@@ -337,7 +446,11 @@ class ORBStrategy(BaseOptionsStrategy):
             # instant. `confirmed_at` is an ET string; parsed to epoch here
             # because the consumer needs a number and this is where the
             # timezone context lives.
-            orb_break_ts      = _confirmed_epoch(orb),
+            # r383 / ORB.13 — THE BREAK, not the confirm. See `_break_epoch`:
+            # this fed `_confirmed_epoch` and the fire is the next tick after
+            # the confirming candle, so the tape window was ~16s and the
+            # measurement was silently empty on every ORB trade.
+            orb_break_ts      = _break_epoch(orb),
             atr_at_signal     = float(getattr(vol_state, "atr", 0.0) or 0.0),
             # - which is exactly why it kept working while every gated strategy
             # degraded, and why it is the one v3 strategy with a positive
