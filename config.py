@@ -1,5 +1,17 @@
 """
-config.py  v4.18
+config.py  v4.19
+v4.19 2026-09-16  r386 — ORB.17: `ORB_STOP_RESPECT_TOL`, THE GRACE THE
+      STRUCTURE STOP IS ALLOWED BEFORE THE STOP IS SIMPLY IGNORED.
+      🔴 `_size_geometry` sizes on `width / stop_distance` and promises *"every
+      ORB trade risks roughly the same dollars AT THE STRUCTURE STOP"* — then
+      the structure stop waits for a 1m CLOSE and fires wherever that lands.
+      📊 54 banked structure-stop exits: median intended 0.38 -> ACTUAL 0.54,
+      a 46% overshoot, worst on the LARGEST positions (PLTR 0.02 -> 0.25 on 86
+      contracts; QQQ 0.06 -> 0.64 on 24; GOOGL 0.02 -> 0.11 on 60).
+      A FRACTION of the stop, not a fixed band, so it is scale-free: a wide stop
+      is untouched and a tight one is protected. 0.50 estimated +$3,183 across
+      155 trades, monotone from 0.25 to 1.50 with no cliff — a tolerance, not a
+      fitted threshold. Operator: *"I want the tight stop respected."*
 v4.18 2026-09-12  r376 — LVL.10: WHAT COUNTS AS A REJECTION NOW HAS AN
       AUTHOR. `SWEEP_CS_MIN_REJECTION_PCT` and `SWEEP_CS_MAX_REJECTION_PCT`
       were DEFINED NOWHERE, so the `getattr` fallback in
@@ -741,6 +753,37 @@ ORB_BUDGET_USD     = float(os.environ.get("OT_ORB_BUDGET_USD",
 # is explicit and the default is the exception that needs announcing. main.py
 # logs it at startup and status.py prints it; this flag is how they tell.
 ORB_BUDGET_IS_DEFAULT = "OT_ORB_BUDGET_USD" not in os.environ
+
+# ── r386 / ORB.17 — THE STOP THE SIZE WAS PREDICATED ON, HONOURED ───────────
+# 🔴 `_size_geometry` sizes on `width / stop_distance` and promises *"every ORB
+# trade risks roughly the same dollars AT THE STRUCTURE STOP by construction."*
+# The structure stop then waits for a 1-MINUTE CLOSE beyond the level, so it
+# fires wherever that close lands — not at the stop.
+# 📊 MEASURED on 54 banked structure-stop exits: median intended stop 0.38,
+# median ACTUAL exit 0.54 — a 46% overshoot — and the worst cases are the
+# BIGGEST positions, because a tight stop is both the easiest to overshoot in a
+# full bar AND the thing that buys the most contracts:
+#     PLTR 0.02 -> 0.25 (12.5x) on 86 contracts · QQQ 0.06 -> 0.64 (10.7x) on 24
+#     NVDA 0.03 -> 0.20 (6.7x) on 49 · GOOGL 0.02 -> 0.11 (5.5x) on 60
+# So the risk the size was justified by was multiplied 5-12x on exactly the
+# trades carrying the most size.
+# 🔑 THE GRACE IS A FRACTION OF THE STOP, NOT A FIXED BAND, AND THAT IS THE
+# WHOLE IDEA. The close-based rule exists so *"an intrabar wick into the range
+# survives"* and that is correct — but its COST scales with the stop. A whole
+# bar of grace on a 0.02 stop is 12x the intended risk; on a 3.00 stop it is
+# noise. Expressed as a fraction it is scale-free: a wide-stop trade is
+# untouched, a tight-stop trade gets the protection it was sized for.
+# ⚠️ 0.50 = half the stop distance. Estimated +$3,183 across 155 banked ORB
+# trades, helping 21 of them; the sweep is MONOTONE from 0.25 to 1.50 with no
+# cliff, which is why this is a tolerance and not a fitted threshold. The
+# estimate treats premium loss as ~linear in the underlying move and is a
+# DIRECTION, not a forecast.
+# ⚠️ OPERATOR, 2026-09-16: *"I want the tight stop respected. Right now, it
+# isn't"* — and capping SIZE instead was measured as the worse answer (+$2,564
+# at best, negative at a $1,000 risk budget) because shrinking cuts the large
+# winners too. On these trades *"we only have to be directionally correct for a
+# very brief time to harvest it."*
+ORB_STOP_RESPECT_TOL = float(os.environ.get("OT_ORB_STOP_RESPECT_TOL", "0.50"))
 # Daily loss limit: halt NEW entries when the day's NET realized P&L is down by
 # this much. Defaults to one trade's risk; override via OT_DAILY_LOSS_LIMIT.
 DAILY_LOSS_LIMIT_USD = float(os.environ.get("OT_DAILY_LOSS_LIMIT", str(RISK_PER_TRADE_USD)))

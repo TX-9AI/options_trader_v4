@@ -1,5 +1,26 @@
 """
-execution/exit_engine.py  v4.12
+execution/exit_engine.py  v4.13
+v4.13  2026-09-16  r386 — ORB.17 — THE STOP THE SIZE WAS PREDICATED ON IS
+       HONOURED, WITHIN A GRACE PROPORTIONAL TO ITSELF. New check 1a2, above the
+       premium floor and below r383's entry-underwater arm: if the FORMING bar
+       reaches beyond `underlying_stop` by more than `ORB_STOP_RESPECT_TOL` of
+       the entry-to-stop distance, exit now rather than waiting for a close.
+       🔴 WHY: the sizer buys `width / stop_distance` contracts on the promise
+       that the structure stop bounds the loss, and the structure stop waits a
+       whole bar. Measured on 54 banked exits, the median overshoot is 46% of
+       the stop and the worst are the biggest positions — 12.5x on 86 contracts,
+       10.7x on 24. The multiplier lands on exactly the trades carrying size.
+       ⚠️ NOTHING IS REPLACED OR REORDERED. The close-based arm still fires on
+       its own terms (R4 pins it) and the premium floor stays put as the
+       catastrophic backstop (v1.6 / CRM 2026-07-09, -83%). This arm can only
+       fire EARLIER. It reads `iloc[-1]`, the FORMING bar, deliberately — the
+       arm below reads `iloc[-2]`, so reading the same bar would be the same
+       check twice and could never fire first.
+       GATE: check_orb_stop_respected R1-R6, born red at 0ea6b41 on R1/R1b/R6;
+       R2/R3/R4/R5 green as controls, and R2/R3 mutation-proven red at grace 0.
+       ⚠️ R4's FIRST CUT WAS A BAD CONTROL and is recorded in the file: it put
+       the forming bar beyond the grace too, so both arms were true and it
+       proved nothing about the old one. A control must ISOLATE its property.
 v4.12  2026-09-16  r383 — ORB.12 — A POSITION ENTERED THROUGH ITS OWN
        INVALIDATION IS OUT ON THE TICK IT IS SEEN, NOT ON THE NEXT CLOSE.
        Operator, 2026-09-16: *"If we entered beyond the stop, despite the
@@ -603,6 +624,7 @@ from config import (
     CONTINUATION_EXHAUST_EXT_ATR, CONTINUATION_EXHAUST_MIN_GAIN,
     CONTINUATION_EXHAUST_TRAIL_LOCK, CONTINUATION_STOP_LOSS_PCT
 )
+from config import ORB_STOP_RESPECT_TOL
 from utils.time_utils import (is_hard_close_time, minutes_since, now_utc,
                               fmt_et_short, now_et, ts_for_db)
 from execution.limit_ladder import limit_at_mark, hard_close_order_mode
@@ -1060,6 +1082,74 @@ class ExitEngine:
                     "thesis to manage, exiting on this tick",
                     trade_id[:8], _u_entry, _u_stop)
                 return decision
+
+        # 1a2. 🔴 r386 / ORB.17 — THE STOP IS HONOURED, NOT MERELY DECLARED.
+        #      Operator, 2026-09-16: *"I want the tight stop respected. Right
+        #      now, it isn't."*
+        #
+        #      🔴 THE BROKEN PROMISE. `_size_geometry` sizes on
+        #      `width / stop_distance` and states outright that *"every ORB
+        #      trade risks roughly the same dollars AT THE STRUCTURE STOP by
+        #      construction."* So of a stop 0.02 away it says: take 86
+        #      contracts, you only risk 86 x 0.02. The structure stop below
+        #      then waits for a 1-MINUTE CLOSE beyond the level and fires
+        #      wherever that close lands.
+        #      📊 54 banked structure-stop exits: median intended 0.38 ->
+        #      median ACTUAL 0.54, a 46% overshoot, and the worst are the
+        #      biggest positions — PLTR 0.02 -> 0.25 (12.5x) on 86 contracts,
+        #      QQQ 0.06 -> 0.64 (10.7x) on 24, GOOGL 0.02 -> 0.11 on 60.
+        #      A tight stop is the easiest to overshoot in a whole bar AND the
+        #      thing that buys the most contracts, so the multiplier lands on
+        #      exactly the trades carrying the most size.
+        #
+        #      🔑 THE GRACE IS PROPORTIONAL TO THE STOP, which is what makes
+        #      this scale-free rather than a fitted band. The close-based arm
+        #      below exists so *"an intrabar wick into the range survives"* and
+        #      that is right — but a whole bar of grace costs 12x the intended
+        #      risk on a 0.02 stop and nothing on a 3.00 stop. A fraction of
+        #      the stop costs a wide trade nothing and protects a tight one.
+        #
+        #      ⚠️ THIS REPLACES AND REORDERS NOTHING. The close-based arm below
+        #      is untouched and still fires on its own terms; this arm can only
+        #      fire EARLIER, and only once price is beyond the stop by more
+        #      than the grace. `check_orb_stop_respected` R4 is the control.
+        #      ⚠️ AND THE PREMIUM FLOOR STAYS WHERE IT IS as the catastrophic
+        #      backstop (v1.6 added it after CRM 2026-07-09 bled to -83% while
+        #      the structure stop held). This sits above it and will usually
+        #      pre-empt it on a tight stop by firing sooner in TIME — which is
+        #      the repair, not a reordering.
+        #      ⚠️ READS THE FORMING BAR (`iloc[-1]`) DELIBERATELY. The arm below
+        #      reads the last CLOSED bar (`iloc[-2]`); if this one did too it
+        #      would be the same check twice and could never fire first.
+        if (df_1m is not None and len(df_1m) >= 1
+                and _u_entry > 0.0 and _u_stop > 0.0):
+            _stop_dist = abs(_u_entry - _u_stop)
+            if _stop_dist > 0:
+                _grace = _stop_dist * ORB_STOP_RESPECT_TOL
+                try:
+                    _bar = df_1m.iloc[-1]
+                    _reach = (float(_bar["low"]) if direction == "long"
+                              else float(_bar["high"]))
+                except Exception:                              # noqa: BLE001
+                    _reach = None
+                if _reach is not None:
+                    _limit = (_u_stop - _grace if direction == "long"
+                              else _u_stop + _grace)
+                    _blown = (_reach < _limit if direction == "long"
+                              else _reach > _limit)
+                    if _blown:
+                        decision.should_exit = True
+                        decision.exit_reason = (
+                            f"orb_stop_respected: {_reach:.2f} is beyond the "
+                            f"{'low' if direction == 'long' else 'high'} stop "
+                            f"{_u_stop:.2f} by more than "
+                            f"{ORB_STOP_RESPECT_TOL:.0%} of the {_stop_dist:.2f} "
+                            f"stop it was sized on")
+                        logger.info(
+                            "ORB STOP RESPECTED: %s reach=%.2f limit=%.2f "
+                            "stop=%.2f dist=%.2f — out before the close",
+                            trade_id[:8], _reach, _limit, _u_stop, _stop_dist)
+                        return decision
 
         # 1b. HARD STOP — unconditional -25% dollar floor (v1.6). Mirrors the
         #     sweep/butterfly/adopted paths, which check the floor DIRECTLY. ORB
