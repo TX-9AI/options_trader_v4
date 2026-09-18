@@ -592,7 +592,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_configure_relaxed.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `configure.sh`
+- **called by:** (not imported) — referenced in `configure.sh`, `docs/BACKLOG.md`
 
 ### `tests/check_conviction_removed.py`
 - **calls:** (none)
