@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.5 · 2026-09-12 — §0 plus 40 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.6 · 2026-09-18 — §0 plus 40 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -794,7 +794,8 @@ one rule whose whole job is to stop docs going unread has been pointing at a
 missing file since the split. Nobody noticed, which is the section's own thesis
 proving itself.
 
-**READ IN THIS ORDER instead, and all four of these exist:**
+**READ IN THIS ORDER instead. The four documents exist — that was the whole
+point of replacing the old line — and the fifth is on the box, not in the repo:**
 
 1. **`README.md`** (repo root) — what this repo is, what it refuses to be, and
    why. It carries the reading order too.
@@ -803,6 +804,36 @@ proving itself.
    which revision. **This is the only place open work survives a thread.**
 4. **`docs/GENESIS.md`** — one line per revision, and *why*, which the diff
    cannot tell you.
+5. **OUR LAST CONVERSATION.** Operator, 2026-09-18: *"Read our last conversation
+   in full as this thread is likely a continuation of that work."* The
+   transcripts are on this box at
+   `~/.claude/projects/-home-ubuntu-options-trader-v4/*.jsonl`.
+   🔑 **IT IS FIFTH, AFTER THE DURABLE RECORD, AND THAT ORDER IS LOAD-BEARING.**
+   This section's own warning is that anything not written in these files did
+   not survive the last thread — and the converse is that a transcript contains
+   things that were **said and then reversed**. r386's backlog row is a
+   retraction of a finding reported confidently an hour earlier in the same
+   conversation, on which the operator had already said yes. Read the record
+   first and it wins where the two disagree; read the chat first and a thread
+   can pick up the version that was withdrawn.
+   ⚠️ **READ THE TEXT, NOT THE FILE.** Measured 2026-09-18: the raw JSONL runs
+   1.6–12.7 MB and is mostly tool output, while the human/assistant text inside
+   is 1–121k tokens. Extract the message text.
+   ⚠️ **AND "LAST" MEANS LAST SUBSTANTIVE.** On the same date the newest session
+   by mtime held **one turn and 2 KB**. A thread taking the instruction
+   literally reads a stub, finds nothing, and concludes there is no history
+   while the real context sits in the session before it.
+   🔑 **THE OLDER THREADS ARE SEARCHABLE, AND THAT IS A DIFFERENT MODE.** Only
+   the last conversation is READ; the rest are there to be **searched** when a
+   question needs an origin — when a constant was chosen, when a ruling was
+   given, what the operator actually said. Operator, 2026-09-18: *"looking into
+   other past threads if available is always an option for a word search or
+   other reference."*
+       grep -l "<term>" ~/.claude/projects/-home-ubuntu-options-trader-v4/*.jsonl
+   ⚠️ **A TRANSCRIPT IS EVIDENCE OF WHAT WAS SAID, NEVER OF WHAT IS TRUE NOW.**
+   §0.1 applies unchanged: a quote found this way is a lead to verify against
+   the repo, not a fact to assert. It is the same standard §38.3 sets for a
+   panel that explains itself.
 
 Then, by question: `PLAN_SPEC.md` and `TRADES.md` for what the strategies do,
 `FILE_MAP.md` and `WRITE_MAP.md` (both **generated**, both gated) for what calls
@@ -1423,6 +1454,25 @@ remove.
 exact-command rules, not a general licence: anything else still stops and asks.
 
 ## CHANGELOG
+
+**v5.6 — 2026-09-18 — r388 — §25 GAINS A FIFTH ENTRY: THE LAST CONVERSATION.**
+Operator, 2026-09-18: *"Read our last conversation in full as this thread is
+likely a continuation of that work."* The transcripts are on the box and a fresh
+thread can read them; until now nothing told it they were there.
+🔑 **IT IS FIFTH ON PURPOSE.** A transcript is not the record — it contains
+things that were said and then reversed, and r386's own row is a retraction of a
+finding reported confidently an hour earlier in the same conversation, after the
+operator had already approved it. The durable files are read first and win where
+the two disagree.
+⚠️ **AND THE ENTRY CARRIES ITS MECHANICS, BECAUSE THIS SECTION HAS BEEN BITTEN
+BY EXACTLY THAT.** §25 pointed at a `docs/README.md` that was never ported to
+v4 — for months the one rule whose job is to stop documents going unread was
+itself routing to a missing document. So entry 5 names the PATH, and both traps
+measured on 2026-09-18 before it was written: the raw JSONL is megabytes of
+mostly tool output against 1–121k tokens of actual text, and the newest session
+by mtime held ONE TURN and 2 KB, so "last" must mean last SUBSTANTIVE.
+`tools/gen_handoff.py` carries the same entry as a POINTER and is gated by
+`check_handoff_item` H9–H9c; §25 here is the authority (§35).
 
 **v5.5 — 2026-09-12 — r371 — §38.9 ADDED: THE STANDING PERMISSION LIST, AND
 §38.1's BOX-LIFECYCLE HALF INVERTS.**
