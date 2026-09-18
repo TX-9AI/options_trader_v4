@@ -1,5 +1,24 @@
 """
-notifications/alert_manager.py  v4.2
+notifications/alert_manager.py  v4.3
+v4.3  2026-09-18  r387 — THE BOOT ALERT CARRIES THE BOX'S PUBLIC IP.
+      PORTED FROM OTV4TEST r22, where the operator built it; the implementation
+      and its checker are his and land here unchanged in behaviour. Operator:
+      the public IP CHANGES ON EVERY STOP/START, so reaching a misbehaving box
+      meant fighting the AWS console and two-factor at exactly the moment he
+      needed to be ON the box. It now rides the boot alert for Termius.
+      📊 WHAT otv4 ADDED IS THE VERIFICATION: OTV4TEST confirmed checkip against
+      the console for ONE instance, so before shipping, all 15 production boxes
+      were asked for BOTH their IMDSv2 `public-ipv4` and `checkip` — MATCHED
+      15/15, no NAT anywhere, so checkip is the address that accepts SSH on
+      every box. A NAT on any of them would have printed a plausible WRONG
+      address, which is worse than printing none.
+      ⚠️ The reply is PARSED as an IP, never trusted as text, and the lookup is
+      bounded at 3s so it cannot hold the boot. A failure is NAMED in the alert
+      rather than omitted — "no IP field" and "lookup failed" must not look
+      alike (§0.5).
+      GATE: tests/check_startup_alert.py A0-A5, born red at 85b1337 on A1, A2,
+      A3 and A5 with A0 and A4 green as controls — the same born-red shape the
+      operator recorded at OTV4TEST r21.
 v4.2  2026-09-06  r292 / DEV.10 — `send_blind_alert`'s DRILL CALLER IS GONE.
       `tests/blind_alert_selftest.py` never existed in otv4: the devtools item
       shelling it answered "can't open file" on all fifteen boxes and STILL
@@ -133,12 +152,63 @@ repo-wide v3.0 bump: Yahoo-Finance purge & data stream
 """
 
 import html
+import ipaddress
 import logging
+import urllib.request
 from typing import Optional
 from utils.time_utils import fmt_et_short
 from config import INSTRUMENT
 
 logger = logging.getLogger(__name__)
+
+
+# ── r387 — THE BOX'S PUBLIC IP, ON THE BOOT ALERT ──────────────────────────
+# 🔑 PORTED FROM OTV4TEST r22. The operator built this there; otv4 adopts it
+# unchanged in behaviour and adds the fleet-wide verification recorded below.
+# Operator, 2026-09-13: the boot alert is how he learns a box is up, and the
+# public IP CHANGES ON EVERY STOP/START — so reaching the box meant fighting the
+# AWS console and its two-factor login first, at exactly the moment he needs to
+# be on the box NOW. The IP rides the alert so Termius can connect straight away.
+# 🔑 WHY checkip.amazonaws.com AND NOT THE INSTANCE METADATA SERVICE: checkip is
+# AWS-operated, plain text, needs no IMDSv2 token dance, and — the part that
+# matters — reports what the INTERNET sees, which is what SSH must reach.
+# 📊 VERIFIED ON ALL 15 PRODUCTION BOXES, 2026-09-18 19:04 ET, BEFORE THIS
+# SHIPPED. Each box was asked for BOTH its IMDSv2 `public-ipv4` (authoritative:
+# what AWS assigned) and `checkip.amazonaws.com` (what the internet sees). They
+# MATCHED 15 OF 15 — no box egresses through a NAT, so checkip IS the address
+# that accepts SSH on every one of them. OTV4TEST's note had confirmed this for
+# a single instance; a NAT on any production box would have made this print a
+# plausible WRONG address, which is worse than printing none.
+# ⚠️ AND IMDS IS NOT UNAVAILABLE, ONLY UNAVAILABLE FROM CONTROL. OTV4TEST's
+# header reads as though IMDS could not be used; from the boxes themselves
+# IMDSv2 answered all 15. checkip still wins on simplicity and is verified
+# equal, but the alternative is real if this ever needs re-deciding.
+# ⚠️ IT DEPENDS ON THE SAME EGRESS THE ALERT ITSELF NEEDS. If this lookup cannot
+# reach AWS, Telegram almost certainly cannot be reached either — so the lookup
+# adds no new way for the boot alert to go missing.
+PUBLIC_IP_URL = "https://checkip.amazonaws.com"
+PUBLIC_IP_TIMEOUT_S = 3.0
+
+
+def public_ip(timeout: Optional[float] = None, url: Optional[str] = None):
+    """(ip, None) on success, (None, reason) on failure. NEVER raises.
+
+    ⚠️ THE ANSWER IS PARSED AS AN IP ADDRESS, NOT TRUSTED AS TEXT. A captive
+    portal, a proxy error page or a truncated read would otherwise be pasted
+    straight into the alert — and a wrong address that LOOKS like an answer is
+    worse than one that says it is missing.
+    ⚠️ BOUNDED. It runs inline on the startup path, so it gives up after
+    PUBLIC_IP_TIMEOUT_S rather than holding the bot's boot.
+    """
+    try:
+        with urllib.request.urlopen(url or PUBLIC_IP_URL,
+                                    timeout=timeout or PUBLIC_IP_TIMEOUT_S) as r:
+            raw = r.read(64).decode("ascii", "replace").strip()
+        return str(ipaddress.ip_address(raw)), None
+    except ValueError:
+        return None, "reply was not an IP address"
+    except Exception as e:                                      # noqa: BLE001
+        return None, type(e).__name__
 
 
 class AlertManager:
@@ -182,9 +252,15 @@ class AlertManager:
                             restart_type: str = ""):
         mode = "PAPER" if paper else "LIVE"
         rt   = f" | {restart_type}" if restart_type else ""
+        # r387 — the address to SSH to, or a NAMED absence. Never silently
+        # omitted: "no IP field" and "lookup failed" must not look alike (§0.5).
+        ip, why = public_ip()
+        if ip is None:
+            logger.warning("startup alert: public IP unavailable (%s)", why)
+        ipf  = f" | IP {ip}" if ip else f" | IP unavailable ({why})"
         self._send(
             f"\U0001F680 OptionsBot [{mode}] STARTED | "
-            f"{instrument}{rt} | "
+            f"{instrument}{rt}{ipf} | "
             f"{fmt_et_short()}"
         )
 
