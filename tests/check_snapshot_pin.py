@@ -1,6 +1,38 @@
 #!/usr/bin/env python3
 """
-tests/check_snapshot_pin.py  v1.1
+tests/check_snapshot_pin.py  v1.2
+v1.2  2026-09-19  CHK.4 CORRECTED — S2 WAS RED AS A FUNCTION OF THE WALL CLOCK.
+      S2 compares `pin_em_fraction` from `build_payload()` against its own
+      recomputation at a 1e-9 tolerance. Both sides call
+      `gex_pin_butterfly.expected_move`, which reads `datetime.now(ET)` ITSELF
+      and scales by sqrt(hours-to-close) -- so the two reads land at different
+      instants and the values differ continuously through the session.
+      MEASURED 2026-09-19: six consecutive runs drifted 2.208372 -> 2.208879,
+      ~1e-4 per run at ~1s intervals, against a predicted want*0.5/hours =
+      9.4e-5/s at 3.25h remaining. The arithmetic matches the tape.
+      🔑 AND THE CLAMP IS WHY IT WAS EVER GREEN. `hours = max(..., 0.25)` binds
+      from 15:45 ET, after which EM is FROZEN and both reads agree. So this gate
+      was GREEN ONLY WHEN THE SUITE RAN AFTER 15:45 ET and red at every other
+      hour -- its colour encoded the hour of the run, not the state of the code.
+      Every green it ever reported was a late-day sweep.
+      ⚠️ CONSEQUENCE BEYOND THIS FILE: a full-sweep baseline is only comparable
+      to a build sweep taken on the SAME SIDE of 15:45 ET, and nothing has ever
+      recorded a sweep's start time. Until that changes, a sweep must record it.
+      🔴 BACKLOG CHK.4 NAMES THE WRONG FUNCTION. It says `expected_move_iv`
+      resolves `frac_remaining` via `session_fraction_remaining()` and proposes
+      feeding both sides one fraction. S2 CALLS NEITHER. A fix written to that
+      row would patch a function this check cannot reach. The SHAPE is right --
+      pin the time -- and the parameter is `now=`, which `expected_move` has
+      always accepted.
+      FIX: freeze the clock around S2 at a MID-SESSION instant, so the check
+      exercises the REAL unclamped arithmetic rather than passing vacuously on
+      the 0.25 floor. S2c pins that the freeze holds; S2d pins that the
+      underlying hazard is real, using two EXPLICIT `now` values so the proof
+      does not itself depend on when the suite runs.
+      ⚠️ THE 1e-9 TOLERANCE IS NOT LOOSENED. Widening it would hide exactly the
+      second-definition drift S2 exists to catch (this file's own v1.0 note).
+      Reproduced independently on OTV4TEST at their r60: same function, same
+      0.25 floor, same 15:45 boundary to the minute.
 v1.1  2026-09-04  r244 — S6 extends to `pin_concentration` and
       `gex_environment` — recorded RAW, kept as distinct keys, and None rather
       than 0.0 or "" when the gex object carries neither.
@@ -43,6 +75,45 @@ class _Gex:
             self.gex_environment = env
 
 
+class _FrozenClock:
+    """Pin `datetime.now()` inside a module's namespace.
+
+    🔴 WHY A FREEZE AND NOT A TOLERANCE. `expected_move` reads the clock itself
+    and scales by sqrt(hours-to-close), so two calls a millisecond apart return
+    different numbers. S2's whole purpose is that the recomputation uses the
+    GATE'S OWN function rather than a second definition -- so the fix cannot be
+    to reimplement it with a fixed `now`, and must not be to widen 1e-9, which
+    would hide the drift S2 exists to detect.
+
+    ⚠️ MID-SESSION ON PURPOSE. `hours` is floored at 0.25, which binds from
+    15:45 ET and freezes EM all by itself. A freeze set after 15:45 would make
+    S2 pass for the WRONG REASON -- the clamp, not the fix -- which is the
+    failure this whole revision is correcting.
+    """
+
+    def __init__(self, mod, hh, mm):
+        self.mod, self.hh, self.mm = mod, hh, mm
+        self.real = None
+
+    def __enter__(self):
+        from utils.time_utils import ET
+        real = self.mod.datetime
+        fixed = real(2026, 9, 17, self.hh, self.mm, 0, 0, tzinfo=ET)
+
+        class _DT(real):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed
+
+        self.real = real
+        self.mod.datetime = _DT
+        return fixed
+
+    def __exit__(self, *exc):
+        self.mod.datetime = self.real
+        return False
+
+
 def main():
     from derived.snapshot import SnapshotEngine
     from strategy.gex_pin_butterfly import expected_move, EM_MIN_FRAC, EM_MAX_FRAC
@@ -65,11 +136,74 @@ def main():
     # a second definition, the study would compare a number the gate never saw
     # against an outcome the gate decided — worse than no field at all.
     price, iv, pin = 100.0, 0.30, 103.0
-    got = e.build_payload({"price": price, "atm_iv": iv, "gex": _Gex(pin)})
-    want = abs(pin - price) / expected_move(price, iv)
-    check("S2 the fraction equals |pin - spot| / expected_move()",
-          abs(got["pin_em_fraction"] - want) < 1e-9,
-          f"{got['pin_em_fraction']:.6f} vs {want:.6f}")
+    import strategy.gex_pin_butterfly as _gpb
+    # 12:00 ET — mid-session, so `hours` is ~4.0 and the 0.25 floor does NOT
+    # bind. A freeze after 15:45 would pass on the clamp and prove nothing.
+    with _FrozenClock(_gpb, 12, 0) as _frozen_at:
+        got = e.build_payload({"price": price, "atm_iv": iv, "gex": _Gex(pin)})
+        want = abs(pin - price) / expected_move(price, iv)
+        check("S2 the fraction equals |pin - spot| / expected_move()",
+              abs(got["pin_em_fraction"] - want) < 1e-9,
+              f"{got['pin_em_fraction']:.6f} vs {want:.6f}")
+        # S2c — THE FREEZE ITSELF IS PINNED. If it ever stops holding, this
+        # goes red BY NAME instead of S2 going red mysteriously once a day.
+        _a = expected_move(price, iv)
+        _b = expected_move(price, iv)
+        check("S2c the clock is frozen — two reads are identical",
+              _a == _b, f"{_a!r} vs {_b!r}")
+        # 🔴 S2d IS LOAD-BEARING. IT IS NOT REDUNDANT WITH S2c. DO NOT DELETE IT.
+        # THERE ARE **TWO** WAYS EM CAN GO CONSTANT FOR A REASON THAT IS NOT
+        # THE FIX WORKING, AND S2c CANNOT SEE EITHER:
+        #   (1) THE CLAMP. `hours = max(..., 0.25)` binds from 15:45 ET, so a
+        #       freeze set inside that window makes EM constant by the FLOOR.
+        #       Proven: moving the freeze to 16:30 turned all eleven checks
+        #       green on a fix that was no longer doing anything.
+        #   (2) THE BARE `except Exception: hours = 3.0` IN `expected_move`
+        #       (gex_pin_butterfly.py:403). If this harness's `datetime`
+        #       subclass mishandles the tz-aware `now(ET)` call in ANY way, the
+        #       exception is SWALLOWED, `hours` becomes the constant 3.0, and
+        #       EM freezes **for a reason the test harness itself introduced**.
+        #       S2 then passes with the arithmetic entirely bypassed.
+        #       ⚠️ Raised by the OTV4TEST session's review, and it is the case
+        #       my own mutation testing MISSED — I mutated the freeze TIME and
+        #       never the function's FAILURE PATH.
+        # S2d catches both, because a constant EM cannot move between two
+        # instants however it became constant.
+        #
+        # S2d — THE FREEZE SITS WHERE THE ARITHMETIC IS LIVE.
+        # 🔴 S2c ALONE IS NOT ENOUGH. `hours` is floored at 0.25, so a freeze
+        # set after 15:45 ET makes EM constant BY THE CLAMP and S2/S2c both pass
+        # for the wrong reason — proven by moving the freeze to 16:30, where all
+        # eleven checks went green on a fix that was no longer doing anything.
+        # ⚠️ SO THE INSTANT IS TAKEN FROM THE FREEZE ITSELF (`_frozen_at`) and
+        # never written twice. Move the freeze into the clamped window and EM
+        # stops moving, these two values become equal, and THIS check goes red
+        # BY NAME rather than the suite going quietly vacuous.
+        from datetime import timedelta as _td
+        _e0 = expected_move(price, iv, now=_frozen_at)
+        _e1 = expected_move(price, iv, now=_frozen_at + _td(milliseconds=1))
+        check("S2d the frozen instant is MID-SESSION — EM still moves there",
+              _e0 != _e1, f"{_e0!r} vs {_e1!r}")
+        # 🔴 S2e — THE FROZEN CLOCK ACTUALLY REACHES THE PRODUCTION PATH.
+        # S2d passes `now=` EXPLICITLY, so it never calls `datetime.now()` and
+        # therefore CANNOT see the bare-except case: if the harness's clock
+        # raises, `expected_move` swallows it, `hours` becomes the constant
+        # 3.0, and BOTH sides of S2 get 3.0 and agree. Verified by mutation —
+        # making `now()` raise left S2, S2c AND S2d all green on a fix that had
+        # stopped working entirely.
+        # ⚠️ THIS IS THE CHECK THAT CLOSES IT: `build_payload` computes its
+        # fraction through the FROZEN clock, and here it is compared against
+        # the fraction computed from the frozen instant passed EXPLICITLY. They
+        # agree only if the freeze genuinely reached the production path. If
+        # the clock raises, build_payload gets hours=3.0 while the explicit
+        # call gets the real remaining hours, and this goes RED by name.
+        # 🔑 S2d and S2e catch DIFFERENT failures — the clamp and the swallowed
+        # exception — and neither is redundant. Raised by the OTV4TEST review.
+        _want_explicit = abs(pin - price) / expected_move(price, iv,
+                                                          now=_frozen_at)
+        check("S2e the frozen clock REACHES build_payload's own computation",
+              abs(got["pin_em_fraction"] - _want_explicit) < 1e-9,
+              f"{got['pin_em_fraction']:.6f} vs explicit {_want_explicit:.6f}")
     check("S2b and the pin itself round-trips", got["pin_strike"] == pin)
 
     # ══ S3 — A PIN AT THE MONEY IS 0.0, NOT None ══════════════════════════
