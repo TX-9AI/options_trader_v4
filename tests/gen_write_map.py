@@ -1,6 +1,27 @@
 #!/usr/bin/env python3
 """
-tests/gen_write_map.py  v4.2
+tests/gen_write_map.py  v4.3
+v4.3  2026-09-20  r400 / DOC.25 - THE MAP'S DEAD-WEIGHT LIST WAS NAMING EIGHT
+LIVE STREAMS. This generator was PURE REGEX over source text and could not see
+a table name that was not spelled out, so `warehouse/s3_push.py` - which reads
+its tables as `"SELECT * FROM %s" % table` inside `for table in
+SERIES_TABLES:` - was credited with the TWO it names literally against the
+TWENTY it reads.
+  🔴 THE CONSEQUENCE IS A DELETION LIST, NOT AN ATTRIBUTION ERROR. "No external
+reader" went 9 -> 1 on this fix; the eight that left it are pushed to S3 every
+session, and S3.13 records 492,945 `raw/shadow` objects already deleted once on
+exactly that reasoning.
+  🔑 THE THREE SHAPES ARE THE OTV4TEST FORK'S r67, PORTED WITH CREDIT: the
+`%`-substitution with a single-`%s` refusal so an ambiguous path template
+resolves to NOTHING; `_iter_members` as an explicit RECURSION so a CONDITIONAL
+iterable contributes the branches that resolve; and `_param_consts`, which
+resolves a loop over a PARAMETER from the module's own call sites.
+  ⚠️ THE READ PASS TAKES THE RESOLVED TEXT TOO. Wiring it into the write pass
+alone lands the writes and silently drops the reads, which would leave the
+deletion list exactly as wrong as it was.
+  ⚠️ AND EVERY ENTRY POINT IS DEFENSIVE BECAUSE THIS RUNS INSIDE THE LAND GATE
+(section 33): any parse failure returns nothing and the regex pass stands
+alone, so the worst case is the behaviour this file already had.
 Generates docs/WRITE_MAP.md — what every box writes, and who writes it.
 
 v4.2  2026-09-11  r358 — `handoffs` joins SKIP_DIRS. The operator's inbox on
@@ -45,6 +66,7 @@ Run:  python3 tests/gen_write_map.py           # regenerate
 from __future__ import annotations
 
 import os
+import ast
 import re
 import sys
 
@@ -63,6 +85,206 @@ RE_UPDATE = re.compile(r"UPDATE\s+([a-z_]+)\s+SET", re.I)
 RE_DELETE = re.compile(r"DELETE\s+FROM\s+([a-z_]+)", re.I)
 RE_SELECT = re.compile(r"FROM\s+([a-z_]+)", re.I)
 RE_DBFILE = re.compile(r"([a-z_]+)\.db")
+
+
+# ── DYNAMIC SQL: A LOOP OVER THIS MODULE'S OWN CONSTANTS (r400) ─────────────
+# 🔴 THIS FILE WAS PURE REGEX OVER SOURCE TEXT AND COULD NOT SEE A TABLE NAME
+# THAT WAS NOT SPELLED OUT. `warehouse/s3_push.py` reads its tables as
+# `"SELECT * FROM %s" % table` inside `for table in SERIES_TABLES:`, so the map
+# credited it with the TWO it names literally (`candles`, `trades`) against the
+# TWENTY it actually reads.
+#
+# 🔴 AND THE CONSEQUENCE IS NOT AN ATTRIBUTION ERROR, IT IS A DELETION LIST.
+# This document publishes "No external reader", and says of it in its own
+# words: *"A table nobody reads is dead weight … this list is where that
+# question gets asked."* Measured before the fix: **8 of its 9 entries were
+# read by `s3_push` every session** — `character_axis_sample`,
+# `character_ledger`, `exit_counterfactual`, `indicator_series`, `last_trade`,
+# `session_summary`, `theo_series`, `underlying_series`. Only `resting_orders`
+# was a true positive.
+# ⚠️ **THIS PROJECT HAS ALREADY PAID THAT BILL ONCE.** [[S3.13]]: *"THE
+# 2026-08-25 PURGE DELETED 492,945 `raw/shadow` OBJECTS AS A DEAD STREAM. IT
+# WAS NOT DEAD."* Same reasoning, same kind of list. And `--check` was green
+# throughout, because the generator and the map agreed with each other —
+# self-consistent and wrong.
+#
+# 🔑 THE THREE SHAPES ARE THE OTV4TEST FORK'S (their r67), PORTED WITH CREDIT
+# RATHER THAN RE-DERIVED. They paid for three attempts to get here.
+# ⚠️ AND EVERY ENTRY POINT IS DEFENSIVE. This generator RUNS INSIDE THE LAND
+# GATE (§33): if it raises, every future delivery fails on it. Any parse or
+# resolution failure returns NOTHING and the regex pass stands alone, so the
+# worst case is the behaviour this file had before.
+_ITER_WRAPPERS = {"list", "tuple", "set", "sorted", "reversed", "frozenset"}
+_ITER_METHODS = {"keys", "values", "items"}
+
+
+def _string_members(node):
+    """The strings of a collection literal written in place, else None."""
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        out = [e.value for e in node.elts
+               if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+        return out if len(out) == len(node.elts) else None
+    return None
+
+
+def _module_consts(tree):
+    """{NAME: [strings]} for module-level string collections."""
+    out = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        members = _string_members(node.value)
+        if not members:
+            continue
+        for tgt in node.targets:
+            if isinstance(tgt, ast.Name):
+                out[tgt.id] = members
+    return out
+
+
+def _param_consts(tree, consts):
+    """{function: {parameter: [tables]}} resolved from THIS module's calls.
+
+    ⚠️ SCOPE IS DELIBERATELY TINY AND IS NOT GENERAL DATAFLOW: same module, a
+    bare Name that is a module string-constant, nothing else. It exists for one
+    real shape — `push_series(..., tables=DERIVED_SERIES_TABLES, ...)` called a
+    few lines from its own loop. An imported name, a computed value or a call
+    result resolves to NOTHING, which leaves the loop as invisible as it was
+    rather than guessed at.
+    """
+    funcs = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            a = node.args
+            funcs[node.name] = [pa.arg for pa in (a.posonlyargs + a.args)]
+    out = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        if node.func.id not in funcs:
+            continue
+        names = funcs[node.func.id]
+        slot = out.setdefault(node.func.id, {})
+        for i, arg in enumerate(node.args):
+            if i < len(names) and isinstance(arg, ast.Name) and arg.id in consts:
+                slot.setdefault(names[i], []).extend(consts[arg.id])
+        for kw in node.keywords:
+            if kw.arg and isinstance(kw.value, ast.Name) and kw.value.id in consts:
+                slot.setdefault(kw.arg, []).extend(consts[kw.value.id])
+    return out
+
+
+def _iter_members(node, consts, params=None):
+    """Members of a `for` iterable built from this module's own literals.
+
+    -> list of strings, or None when ANYTHING in it is not resolvable.
+    """
+    m = _string_members(node)
+    if m is not None:
+        # ⚠️ `or None` keeps the contract single-valued: an EMPTY literal must
+        # not read as "resolved, nothing to iterate".
+        return m or None
+    if isinstance(node, ast.Name):
+        if node.id in consts:
+            return list(consts[node.id])
+        if params and node.id in params:
+            return list(params[node.id]) or None
+        return None
+    if isinstance(node, ast.Call):
+        if (isinstance(node.func, ast.Name)
+                and node.func.id in _ITER_WRAPPERS and node.args):
+            return _iter_members(node.args[0], consts, params)
+        if (isinstance(node.func, ast.Attribute)
+                and node.func.attr in _ITER_METHODS):
+            return _iter_members(node.func.value, consts, params)
+        return None
+    # 🔑 A CONDITIONAL ITERABLE CONTRIBUTES THE BRANCHES THAT RESOLVE. This is
+    # the one that unlocks `for table in (SERIES_TABLES if tables is None else
+    # tables)` — the old shape would have bounced off `IfExp` entirely.
+    if isinstance(node, ast.IfExp):
+        out = []
+        for side in (node.body, node.orelse):
+            got = _iter_members(side, consts, params)
+            if got:
+                out.extend(got)
+        return sorted(set(out)) or None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        lhs = _iter_members(node.left, consts, params)
+        rhs = _iter_members(node.right, consts, params)
+        if lhs is None or rhs is None:
+            return None
+        return lhs + rhs
+    return None
+
+
+def _sql_template(sub, var):
+    """SQL text with the loop variable replaced by \0, else None."""
+    if isinstance(sub, ast.JoinedStr):
+        parts, uses = [], False
+        for v in sub.values:
+            if isinstance(v, ast.Constant):
+                parts.append(str(v.value))
+            elif (isinstance(v, ast.FormattedValue)
+                  and isinstance(v.value, ast.Name) and v.value.id == var):
+                parts.append("\0")
+                uses = True
+            else:
+                parts.append("?")
+        return "".join(parts) if uses else None
+    # ⚠️ ONLY A BARE Name ON THE RIGHT, AND EXACTLY ONE `%s`. `s3_push` also
+    # has `"%s/derived_%s/dt=%s/..." % (PREFIX, table, day, ...)`; a TUPLE means
+    # the table's POSITION is not knowable, so it must resolve to nothing
+    # rather than to the first slot.
+    if (isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.Mod)
+            and isinstance(sub.left, ast.Constant)
+            and isinstance(sub.left.value, str)
+            and isinstance(sub.right, ast.Name) and sub.right.id == var):
+        text = sub.left.value
+        if text.count("%s") != 1:
+            return None
+        return text.replace("%s", "\0")
+    return None
+
+
+def _loop_sql(src):
+    """Every SQL string a `for` loop over this module's constants resolves to.
+
+    ⚠️ NEVER RAISES. A syntax error, an unparseable file or any internal
+    failure returns [] and the regex pass stands alone (§33 — this runs inside
+    the land gate).
+    """
+    try:
+        tree = ast.parse(src)
+        consts = _module_consts(tree)
+        params_of = _param_consts(tree, consts)
+        # ⚠️ WITHOUT THIS MAP `_iter_members` NEVER RECEIVES `params` AND THE
+        # PARAMETER SHAPE IS DEAD CODE THAT LOOKS INSTALLED. The fork named
+        # this as the failure they would most expect on a port.
+        fn_of = {}
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for sub in ast.walk(fn):
+                    fn_of[id(sub)] = fn.name
+        out = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.For):
+                continue
+            tgt = node.target
+            if isinstance(tgt, ast.Tuple) and tgt.elts:
+                tgt = tgt.elts[0]
+            if not isinstance(tgt, ast.Name):
+                continue
+            members = _iter_members(node.iter, consts,
+                                    params_of.get(fn_of.get(id(node), ""), {}))
+            if not members:
+                continue
+            for sub in (n for st in node.body for n in ast.walk(st)):
+                tmpl = _sql_template(sub, tgt.id)
+                if tmpl is not None:
+                    out.extend(tmpl.replace("\0", m) for m in members)
+        return out
+    except Exception:                                           # noqa: BLE001
+        return []
 
 # Which database each table lives in. Derived from the module that CREATEs it,
 # so a table moving file moves here automatically.
@@ -102,7 +324,13 @@ def scan():
             sources[rel] = open(os.path.join(ROOT, rel), encoding="utf-8").read()
         except Exception:                                       # noqa: BLE001
             continue
+    # r400 — RESOLVED ONCE PER FILE AND USED BY *BOTH* PASSES. The fork's
+    # warning was explicit: if the loop-resolved texts feed the write pass and
+    # not the read pass, the writes land and the reads silently do not — which
+    # would leave the "No external reader" list exactly as wrong as it was.
+    looped = {rel: "\n".join(_loop_sql(src)) for rel, src in sources.items()}
     for rel, src in sources.items():
+        src = src + "\n" + looped.get(rel, "")
         for t in RE_CREATE.findall(src):
             creates.setdefault(t, set()).add(rel)
             if rel in DB_OF_DIR:
@@ -120,6 +348,7 @@ def scan():
     # of a table this tree writes; deciding that mid-walk made the answer
     # depend on directory order.
     for rel, src in sources.items():
+        src = src + "\n" + looped.get(rel, "")       # r400 — the read pass too
         for t in RE_SELECT.findall(src):
             # a module that only writes also names the table in its INSERT;
             # reads are recorded separately so "who consumes this" is answerable
