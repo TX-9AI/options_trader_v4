@@ -1,6 +1,41 @@
 #!/usr/bin/env python3
 """
-tools/manifold_health.py  v4.1
+tools/manifold_health.py  v4.2
+v4.2  2026-09-20  r405 / OPS.32 — THE BOARD COST 38 SECONDS TO ANSWER AND
+      NOTHING COULD WAIT FOR IT. 88% OF THAT WAS ONE `COUNT(*)` THAT DECIDED
+      NOTHING.
+      🔴 MEASURED ON TSLA, NOT REASONED: the whole tool ran `rc=0 elapsed=38s`
+      while the menu's fan-out is bounded at 22s (`SSH_CONNECT_TIMEOUT` 12 + 10)
+      and `status.py:491` allows it **10**. Per query:
+          0.86s COUNT greeks_series ·  28.75s COUNT quote_series (13,241,241
+          rows) · 0.00s chain_marks · 2.75s prints · 0.42s last_trade ·
+          0.04s candles GROUP BY · 0.00s EXISTS quote_series · 0.00s MAX(ts)
+      🔴 AND THE COUNT DECIDES NOTHING. `_bulb` reads `rows` as a TRUTHINESS
+      TEST and nothing else — `if not rows: return RED`. The number is printed
+      and is otherwise decoration, bought for 28.75 seconds a box. `MAX(ts)`,
+      which is what actually separates GREEN from AMBER, is already free
+      because that column is indexed.
+      🔑 SO THE DEFAULT ASKS EXISTENCE AND THE EXACT COUNTS MOVE BEHIND
+      `--counts`. That is not a new idea here: `warehouse_coverage` (dtp r277,
+      [[S3.10]]) already makes object counts opt-in for exactly this reason —
+      *"object counts page and are opt-in behind --counts"*.
+      ⚠️ AND AN ABSENT COUNT IS NEVER RENDERED AS ZERO (§0.5). The row reads
+      `rows=present` or `rows=none`; `0` would claim a measurement that was
+      not taken, which is the failure this whole board exists to prevent.
+      🔴 WHAT IT COST WHILE UNFIXED, AND IT IS WORSE THAN A SLOW MENU:
+      `status.py` gives this tool `timeout=10`, so on any box where the store
+      is large the rollup bulb — *the line whose own comment says it is what
+      would have caught 2026-08-21* — rendered `⚪ Manifold: unavailable`.
+      Measured 2026-09-20: QQQ and TSLA `unavailable`, CVX and UNH `GREEN`.
+      ⚠️ THE MENU FAILURE WAS INTERMITTENT, WHICH IS WORSE THAN CONSISTENT.
+      Two identical fleet runs minutes apart returned **7/15 and 9/15**, with
+      different boxes in each set — so a box appeared to recover on its own.
+      ⚠️ THE CANDLES `GROUP BY` KEEPS ITS COUNTS, AND THE RULE IS STRUCTURAL
+      RATHER THAN A LIST THAT ROTS: that query must scan to group at all, so
+      its counts are free; a stream table needs only an indexed `MAX(ts)` and
+      an existence probe, so there `COUNT(*)` is the SOLE reason to scan.
+      ⚠️ AND THE DUPLICATE IS GONE — v4.1 ran the candles GROUP BY twice
+      (`:223` through `_q1`, discarded, then `:226` again for real).
 
 One bulb per stream. All green = manifold green.
 
@@ -64,6 +99,7 @@ when the market is shut.
 Run:  python3 tools/manifold_health.py            # the board
       python3 tools/manifold_health.py --json     # machine-readable
       python3 tools/manifold_health.py --bulb     # one line, for status.py
+      python3 tools/manifold_health.py --counts   # EXACT rows; a full scan
 """
 
 from __future__ import annotations
@@ -169,6 +205,41 @@ def _q1(conn, sql, args=()):
         return None
 
 
+def _probe(conn, tbl: str, tscol: str, counts: bool):
+    """(rows, newest_ts) for one table — WITHOUT a full scan unless asked.
+
+    🔴 THE DEFAULT PATH RUNS NO `COUNT(*)`, AND THAT IS THE WHOLE REVISION.
+    `COUNT(*)` in SQLite has no stored answer: it walks every row (or every
+    entry of the smallest index), which on TSLA's 13.2M-row `quote_series`
+    measured **28.75 seconds** — 88% of the tool's entire runtime, on a query
+    whose result `_bulb` only ever tests for truthiness.
+    🔑 THE TWO QUESTIONS THE BOARD ACTUALLY ASKS ARE BOTH FREE:
+      · *is there anything here at all* -> `SELECT 1 ... LIMIT 1`, 0.00s
+      · *how old is the newest row*     -> `MAX(tscol)`, 0.00s, indexed
+    ⚠️ `rows` IS `None` WHEN NOT COUNTED, NEVER `0`. Zero is a measurement and
+    means MISSING — the RED state. Returning it for "not measured" would make
+    the board assert an outage it never looked for, which is precisely the
+    class this file was written to prevent.
+    ⚠️ AND THE BULB IS DRIVEN BY `present`, NOT BY `rows`, so the decision is
+    byte-identical in both modes: an empty table is RED either way.
+    """
+    if counts:
+        r = _q1(conn, f"SELECT COUNT(*), MAX({tscol}) FROM {tbl}")
+        n = (r[0] if r else 0) or 0
+        return n, (n > 0), (r[1] if r else None)
+    present = _q1(conn, f"SELECT 1 FROM {tbl} LIMIT 1") is not None
+    newest = _q1(conn, f"SELECT MAX({tscol}) FROM {tbl}")
+    return None, present, (newest[0] if newest else None)
+
+
+def _rows_txt(d: dict) -> str:
+    """What the row prints. An UNCOUNTED table never renders as a number."""
+    n = d.get("rows")
+    if n is not None:
+        return str(n)
+    return "present" if d.get("present") else "none"
+
+
 def _bulb(rows, age, budget, in_window) -> str:
     """GREEN/AMBER/RED, where AMBER only fires INSIDE the stream's own window.
 
@@ -191,7 +262,7 @@ def _is_after_hours_candle(label: str) -> bool:
 
 
 def collect(feed_db: str, derived_db: str, in_rth: bool,
-            is_index: bool = False) -> dict:
+            is_index: bool = False, counts: bool = False) -> dict:
     now = time.time()
     out = {"streams": [], "candles": [], "derived": [], "in_rth": in_rth,
            "is_index": is_index}
@@ -205,23 +276,27 @@ def collect(feed_db: str, derived_db: str, in_rth: bool,
         return out
 
     for tbl, tscol, budget, label, critical, after_hours in STREAMS:
-        r = _q1(fc, f"SELECT COUNT(*), MAX({tscol}) FROM {tbl}")
-        rows = (r[0] if r else 0) or 0
-        age = (now - r[1]) if (r and r[1]) else None
+        rows, present, newest = _probe(fc, tbl, tscol, counts)
+        age = (now - newest) if newest else None
         # A stream that cannot exist for this instrument is n/a, and n/a is
         # NOT a degraded green — it is the absence of a question.
         if is_index and tbl in INDEX_NA_TABLES:
             bulb = NA
         else:
-            bulb = _bulb(rows, age, budget,
+            bulb = _bulb(present, age, budget,
                          (not in_rth) if after_hours else in_rth)
         out["streams"].append({
-            "label": label, "table": tbl, "rows": rows,
+            "label": label, "table": tbl, "rows": rows, "present": present,
             "age_s": round(age) if age is not None else None,
             "bulb": bulb, "critical": critical, "after_hours": after_hours})
 
-    r = _q1(fc, "SELECT symbol, interval, COUNT(*), MAX(ts_epoch_ms)"
-                " FROM candles GROUP BY symbol, interval")
+    # 🔴 v4.2 — THE DISCARDED TWIN IS GONE. v4.1 ran this exact GROUP BY
+    # through `_q1` here, fetched ONE row and threw it away, then ran it again
+    # below for real. Cheap (0.04s measured) and entirely wasted.
+    # ⚠️ THE COUNTS STAY HERE AND THE REASON IS STRUCTURAL, NOT A TABLE LIST:
+    # this query has to scan in order to GROUP at all, so `COUNT(*)` rides
+    # along free. On a stream table the count is the ONLY reason to scan, which
+    # is why those are probed for existence instead.
     try:
         rows = fc.execute("SELECT symbol, interval, COUNT(*), MAX(ts_epoch_ms)"
                           " FROM candles GROUP BY symbol, interval").fetchall()
@@ -255,16 +330,17 @@ def collect(feed_db: str, derived_db: str, in_rth: bool,
             out["engines"] = None
 
         for tbl, tscol, budget, label in DERIVED:
-            r = _q1(dc, f"SELECT COUNT(*), MAX({tscol}) FROM {tbl}")
-            rows = (r[0] if r else 0) or 0
-            age = (now - r[1]) if (r and r[1]) else None
+            # Same rule as the streams, so there is ONE answer to "what does a
+            # bulb cost" rather than two that drift.
+            rows, present, newest = _probe(dc, tbl, tscol, counts)
+            age = (now - newest) if newest else None
             out["derived"].append({
-                "label": label, "rows": rows,
+                "label": label, "rows": rows, "present": present,
                 "age_s": round(age) if age is not None else None,
                 # ⚠️ DERIVED PORTS NEVER PAINT THE ROLLUP RED. Operator's
                 # standing rule: derivers are contributors, never gates. A
                 # missing derived value is not an outage.
-                "bulb": _bulb(rows, age, budget, in_rth)})
+                "bulb": _bulb(present, age, budget, in_rth)})
     return out
 
 
@@ -321,6 +397,15 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--bulb", action="store_true",
                     help="one line for status.py")
+    # 🔴 OPT-IN, AND OFF BY DEFAULT — `warehouse_coverage --counts` (dtp r277,
+    # [[S3.10]]) is the precedent and the reason is identical: an exact count
+    # over a stream table is a full scan, measured at 28.75s on 13.2M rows,
+    # and NOTHING decides on it. The board is read before the open, when the
+    # answer is wanted in seconds.
+    ap.add_argument("--counts", action="store_true",
+                    help="EXACT row counts — a full scan per stream table "
+                         "(~29s on a 13M-row store); off, rows read "
+                         "present/none and the bulbs are identical")
     ap.add_argument("--symbol", default=os.environ.get("OT_INSTRUMENT", ""),
                     help="instrument, for per-instrument applicability "
                          "(a cash index has no time-and-sale)")
@@ -338,7 +423,8 @@ def main() -> int:
         _is_index = is_cash_index(a.symbol)
     except Exception:                                           # noqa: BLE001
         _is_index = False
-    rep = collect(a.feed_db, a.derived_db, in_rth, _is_index)
+    rep = collect(a.feed_db, a.derived_db, in_rth, _is_index,
+                  counts=a.counts)
     r = rollup(rep)
 
     if a.bulb:
@@ -373,7 +459,7 @@ def main() -> int:
         age = "—" if s["age_s"] is None else f"{s['age_s']}s"
         star = "*" if s["critical"] else " "
         note = "  n/a — cash index has no tape" if s["bulb"] == NA else ""
-        print(f"   {s['bulb']}{star} {s['label']:<22} rows={s['rows']:<8} age={age}{note}")
+        print(f"   {s['bulb']}{star} {s['label']:<22} rows={_rows_txt(s):<8} age={age}{note}")
 
     print("\n  CANDLES")
     for c in sorted(rep["candles"], key=lambda x: x["label"]):
@@ -394,7 +480,7 @@ def main() -> int:
                else "(LIVE now — these drive the rollup outside RTH)"))
         for s in ah_s:
             age = "—" if s["age_s"] is None else f"{s['age_s']}s"
-            print(f"   {s['bulb']}  {s['label']:<22} rows={s['rows']:<8} age={age}")
+            print(f"   {s['bulb']}  {s['label']:<22} rows={_rows_txt(s):<8} age={age}")
         for c in sorted(ah_c, key=lambda x: x["label"]):
             print(f"   {c['bulb']}  {c['label']:<22} rows={c['rows']:<8} age={c['age_s']}s")
 
@@ -402,7 +488,7 @@ def main() -> int:
         print("\n  DERIVED  (contributors — never gate trading)")
         for d in rep["derived"]:
             age = "—" if d["age_s"] is None else f"{d['age_s']}s"
-            print(f"   {d['bulb']}  {d['label']:<22} rows={d['rows']:<8} age={age}")
+            print(f"   {d['bulb']}  {d['label']:<22} rows={_rows_txt(d):<8} age={age}")
     # 🔴 THE ENGINE'S OWN ACCOUNT, NEXT TO THE ROW COUNT. On 2026-08-24 two
     # engines showed rows=0 with no error anywhere, and the row count alone
     # could not distinguish "never ran", "ran and wrote nothing", and "ran and

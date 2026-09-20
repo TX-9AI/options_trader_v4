@@ -1,5 +1,23 @@
 """
-status.py  v4.5
+status.py  v4.6
+v4.6  2026-09-20  r405 / OPS.32 — `Manifold: unavailable` WAS HIDING A
+      TIMEOUT, AND IT WAS FIRING ON MOST OF THE FLEET.
+      🔴 MEASURED 2026-09-20: this line gives `manifold_health.py --bulb`
+      `timeout=10` and that tool took **38 seconds**, so on any box with a
+      large `feed_store.db` the rollup rendered `⚪ Manifold: unavailable` —
+      QQQ and TSLA dark, CVX and UNH green, on the same fleet at the same
+      minute. **The bulb whose own comment says it is the line that would have
+      caught 2026-08-21 was the one going dark.**
+      🔑 THE DISPLAY IS NOT THE FIX — r405 makes the tool answer in seconds —
+      **but the reporting was its own defect and is fixed here.** A ten-second
+      timeout, an ImportError and a crashed tool all printed the same four
+      words, so *"we did not wait long enough"* was indistinguishable from
+      *"the instrument is broken"*. §0.5: no output is never tidier than an
+      error, and an absence must name itself.
+      ⚠️ AND A SILENT THIRD CASE IS NAMED TOO: when the tool exited without
+      writing a line, `if _line:` printed NOTHING AT ALL and the row simply
+      vanished from the board — a missing row reads as a board that has no
+      such bulb rather than as a bulb that failed.
 v4.5  2026-09-01  r212 (chunk D) — THE PLAN COLLAPSE GOES WITH ITS PREMISE.
       r199 saw two rows for one strategy at one trigger, called them
       duplicates and merged them for display; r211 kept the merge while the
@@ -484,17 +502,33 @@ def main():
     # glance before the open.
     # ⚠️ NEVER FATAL TO THE DISPLAY. status.py must render even if the health
     # tool cannot — a broken instrument must not hide the instrument panel.
+    # ⚠️ THREE FAILURES, THREE DIFFERENT SENTENCES (§0.5). v4.5 collapsed
+    # them into one `unavailable`, and the one that was actually firing was
+    # the TIMEOUT — which is a statement about this line's own patience, not
+    # about the health of the box it is describing.
+    _MANIFOLD_TIMEOUT_S = 10
     try:
         import subprocess as _sp
         _r = _sp.run([sys.executable,
                       os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    "tools", "manifold_health.py"), "--bulb"],
-                     capture_output=True, text=True, timeout=10)
+                     capture_output=True, text=True,
+                     timeout=_MANIFOLD_TIMEOUT_S)
         _line = (_r.stdout or "").strip()
         if _line:
             print(f"  {_line}")
-    except Exception:                                          # noqa: BLE001
-        print("  \u26aa Manifold:    unavailable")
+        else:
+            # Exited without a line. Name the exit code — a vanished row is
+            # not the same fact as a bulb that could not be computed.
+            print(f"  \u26aa Manifold:    no answer (rc={_r.returncode}) — "
+                  f"the board ran and printed nothing")
+    except _sp.TimeoutExpired:
+        # 🔴 THE ONE THAT WAS ACTUALLY HAPPENING, AND IT SAYS SO.
+        print(f"  \u26aa Manifold:    TIMED OUT after {_MANIFOLD_TIMEOUT_S}s — "
+              f"this is THIS line giving up, not a dead feed; run the board "
+              f"by hand")
+    except Exception as _exc:                                  # noqa: BLE001
+        print(f"  \u26aa Manifold:    unavailable ({type(_exc).__name__})")
     print()
     sep()
 
