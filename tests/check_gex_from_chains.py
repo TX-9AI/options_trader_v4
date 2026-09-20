@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-tests/check_gex_from_chains.py  v1.0
+tests/check_gex_from_chains.py  v2.0
+v2.0  2026-09-20  r395 / GEX.2 — REWRITTEN FOR THE ADAPTER. v1.0 gated a LOCAL
+      `gex_profile()` that v3.0 DELETED, because that function was a SECOND
+      DEFINITION of `data/gex_data.py`: the scalar differed by spot/100 and
+      the OI differed IN KIND. A gate left pointing at removed machinery fails
+      on an AttributeError and reads as breakage rather than as a design
+      change — the same reason check_wargame was rewritten at r393 rather
+      than left to rot.
 v1.0  2026-09-19  r391 / GEX.1 — THE INSTRUMENT THE GAMMA HYPOTHESIS WOULD
       HAVE LEANED ON WAS RETURNING CONFIDENT NOTHING.
 
@@ -85,44 +92,83 @@ ck("G2b", isinstance(_res, tuple) and _res[0] is None and _res[1],
    f"{str(_res)[:70]}")
 
 # ------------------------------------------------------------------------- G3
-# Synthetic chain: gamma x OI, calls +, puts -. A flip must exist between them.
+# 🔑 G3 PINS THE ADAPTER. What must be guarded is that a warehouse record
+# reaches production's own compute_gex with its four load-bearing fields
+# intact — gamma, open_interest, strike, mark are the only ones it reads.
 snap = {"event": "chain_snapshot", "ts_et": "2026-09-18T10:00:00-04:00",
         "expiry": "2026-09-18", "symbol": "T", "underlying": "100.0",
         "contracts": [
-            {"type": "C", "strike": 95.0, "gamma": 0.05, "oi": 1000},
-            {"type": "C", "strike": 100.0, "gamma": 0.08, "oi": 2000},
-            {"type": "P", "strike": 105.0, "gamma": 0.09, "oi": 9000},
-            {"type": "P", "strike": 110.0, "gamma": 0.07, "oi": 5000}]}
-spot, per = g.gex_profile(snap)
-ck("G3", spot == 100.0 and len(per) == 4 and per[95.0] > 0 and per[105.0] < 0,
-   f"profile signs by type: call {per.get(95.0, 0):+,.0f} / "
-   f"put {per.get(105.0, 0):+,.0f}")
+            {"occ": "T 260918C00095000", "type": "C", "strike": 95.0,
+             "gamma": 0.05, "oi": 1000, "mark": 6.0, "bid": 5.9, "ask": 6.1,
+             "delta": 0.8, "theta": -0.1, "vega": 0.2, "iv": 0.4, "vol": 0},
+            {"occ": "T 260918P00105000", "type": "P", "strike": 105.0,
+             "gamma": 0.09, "oi": 9000, "mark": 6.5, "bid": 6.4, "ask": 6.6,
+             "delta": -0.8, "theta": -0.1, "vega": 0.2, "iv": 0.4, "vol": 0}]}
+chain, spot = g.chain_from_snapshot(snap)
+ck("G3", spot == 100.0 and len(chain.calls) == 1 and len(chain.puts) == 1,
+   f"the adapter splits calls/puts and carries spot: {len(chain.calls)}C/"
+   f"{len(chain.puts)}P spot={spot}")
 
-pin, _ = g.pin_from(per, spot)
-ck("G3b", pin is not None,
-   f"a chain whose cumulative gamma changes sign HAS a flip: pin={pin}")
+c0 = chain.calls[0]
+ck("G3b", (c0.gamma, c0.open_interest, c0.strike, c0.mark) == (0.05, 1000, 95.0, 6.0),
+   f"the FOUR fields compute_gex reads survive intact: gamma={c0.gamma} "
+   f"oi={c0.open_interest} strike={c0.strike} mark={c0.mark}")
 
-# a chain with no sign change must return None, never the nearest strike
-allcalls = {k: abs(v) for k, v in per.items()}
-ck("G3c", g.pin_from(allcalls, spot)[0] is None,
-   "a chain that never flips returns None, NOT the nearest strike — "
-   "'no pin' and 'a pin somewhere' must not be the same answer")
+gx_, _sp = g.gex_of(snap)
+ck("G3c", gx_ is not None and hasattr(gx_, "orb_bias"),
+   f"production's compute_gex ran and returned its own labels: "
+   f"env={getattr(gx_, 'gex_environment', None)} "
+   f"orb_bias={getattr(gx_, 'orb_bias', None)}")
+
+# 🔴 THE PROXY IS A SHAPE CHANGE, NOT A CALIBRATION ONE. Where OI is real GEX
+# is LINEAR in gamma; where absent it is 100000*gamma^2*spot/mark — QUADRATIC.
+# Gamma peaks ATM, so a scalar disagreement rate buries a systematic ATM bias
+# as noise. Measured 2026-09-18 AMD: 0.0% proxy within 5% of spot, 10.8%
+# beyond — the amplification does NOT bite on current data, and only the
+# stratification shows that.
+_ps = {"event": "chain_snapshot", "ts_et": "x", "symbol": "T",
+       "underlying": "100.0", "contracts": [
+           {"type": "C", "strike": 100.0, "gamma": 0.10, "oi": 500, "mark": 5.0},
+           {"type": "C", "strike": 100.5, "gamma": 0.10, "oi": 0,   "mark": 5.0},
+           {"type": "C", "strike": 140.0, "gamma": 0.01, "oi": 0,   "mark": 0.2}]}
+ex = g.proxy_exposure(_ps)
+ck("G3d", any(not k.startswith(">") for k in ex) and any(k.startswith(">") for k in ex),
+   f"proxy exposure is reported BY MONEYNESS BAND, never as one number: {ex}")
 
 # ---------------------------------------------------------------- G5 / G6
 _saved = g.snapshots
 try:
+    # ⚠️ TWO FIXTURES, DELIBERATELY. An empty-contract snapshot returns before
+    # the summary is reached, so G5 and G6 cannot be asserted against one run
+    # — a single fixture would have made one of them vacuous.
     nofl = dict(snap)
-    nofl["contracts"] = [{"type": "C", "strike": 95.0, "gamma": 0.05, "oi": 1000}]
+    nofl["contracts"] = []
     g.snapshots = lambda d, s: ([nofl], "")
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        rc = g.run("2026-09-18", "T")
+        g.run("2026-09-18", "T")
     out = buf.getvalue()
-    ck("G5", "NO GAMMA FLIP IN ANY OF 1 LOADED SNAPSHOT" in out,
-       "'no pin' is printed WITH the n it rests on, so it can never again be "
-       "read as a verdict on a tape that was never loaded")
-    ck("G6", "ASSUMPTION" in out and "not verified" in out.lower(),
-       "the unverified dealer-sign convention is declared to the reader")
+    ck("G5", "LOADED SNAPSHOT" in out,
+       "a negative conclusion is printed WITH the n it rests on, so it can "
+       "never be read as a verdict on a tape that was never loaded")
+
+    # 🔴 G6 IS REVERSED ON PURPOSE. v1.0 asserted the dealer-sign convention
+    # was declared an UNVERIFIED ASSUMPTION. It is not one — `data/gex_data.py`
+    # documents it and v3.0 defers to production entirely, so keeping the old
+    # assertion would require the report to call a settled thing unsettled: a
+    # gate demanding a falsehood. What deserves declaring now is the live
+    # finding — production computes `orb_bias` and NO STRATEGY READS IT.
+    g.snapshots = lambda d, s: ([snap], "")
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        g.run("2026-09-18", "T")
+    out2 = buf2.getvalue()
+    ck("G6", "orb_bias" in out2 and "READ BY NO" in out2.upper(),
+       "the report declares production's orb_bias is computed and read by "
+       "nothing — an instrument on disk and unread")
+    ck("G6b", "compute_gex" in out2,
+       "the report NAMES production's function as the source, so a reader "
+       "cannot mistake these numbers for the tool's own arithmetic")
 finally:
     g.snapshots = _saved
 

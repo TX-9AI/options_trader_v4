@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-290 Python modules across 13 local packages.
+291 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 120 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 120 referenced from a script, unit or doc but never imported · **61 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -212,7 +212,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/gex_data.py`
 - **calls:** `data/options_chain.py`
-- **called by:** `main.py`, `tests/check_pin_bounded.py`, `tests/check_pin_clamp_em.py`
+- **called by:** `main.py`, `tests/check_pin_bounded.py`, `tests/check_pin_clamp_em.py`, `tests/gex_from_chains.py`
 
 ### `data/macro_data.py`
 - **calls:** `config.py`, `data/market_data.py`, `utils/time_utils.py`
@@ -228,7 +228,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/options_chain.py`
 - **calls:** `analysis/tenor_publish.py`, `config.py`, `data/open_interest.py`, `data/tasty_client.py`, `execution/tick_size.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `analysis/trade_readiness.py`, `data/gex_data.py`, `main.py`, `strategy/base_strategy.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `tests/check_entry_gate.py`, `tests/check_sweep_spread.py`, `tests/check_tick_join.py`
+- **called by:** `analysis/trade_readiness.py`, `data/gex_data.py`, `main.py`, `strategy/base_strategy.py`, `strategy/iron_condor_strategy.py`, `strategy/orb_strategy.py`, `tests/check_entry_gate.py`, `tests/check_sweep_spread.py`, `tests/check_tick_join.py`, `tests/gex_from_chains.py`
 
 ### `data/tasty_client.py`
 - **calls:** `config.py`
@@ -624,6 +624,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_derived_layer.py`
 - **calls:** `analysis/__init__.py`, `analysis/second_order.py`, `analysis/volatility_measures.py`, `data/derived_store.py`, `derived/base.py`, `derived/registry.py`
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_discriminator_inputs.py`
+- **calls:** (none)
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_disk_watch.py`
@@ -1083,7 +1087,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/gex_from_chains.py`
-- **calls:** (none)
+- **calls:** `data/gex_data.py`, `data/options_chain.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/magnitude_estimator.py`

@@ -1,6 +1,40 @@
 #!/usr/bin/env python3
 """
-tests/gex_from_chains.py  v2.0
+tests/gex_from_chains.py  v3.0
+v3.0  2026-09-20  r395 / GEX.2 — IT STOPS COMPUTING GEX. IT WAS A SECOND
+      DEFINITION OF A PRODUCTION QUANTITY AND I GATED IT ONE REVISION AGO
+      WITHOUT NOTICING.
+      🔴 `data/gex_data.py` is production and has always been authoritative:
+        gex_data.py       gamma x oi_proxy x 100 x spot
+        this file (v2.0)  gamma x oi       x 100 x spot x spot x 0.01
+      The scalar differs by spot/100 (~5.45x on AMD) so SIGN and FLIP LOCATION
+      survived, but NET MAGNITUDE was never comparable to production's — and
+      the OI differed IN KIND, because production substitutes a SYNTHETIC
+      `oi_proxy = max(1, 1000*gamma/mark)` wherever open_interest is 0.
+      So a null measured with this file was a claim about MY surface, not
+      about the instrument the bot actually trades on. That is the §7 / C.23
+      drift this repo keeps finding, in a file whose own v2.0 header said
+      "no stub, no proxy".
+      🔑 THE FIX IS A DELETION, NOT A REWRITE. `chain_from_snapshot` rebuilds
+      an OptionsChain from the warehouse record and hands it to production's
+      OWN `compute_gex`. One definition. Verified lossless: `compute_gex`
+      reads only gamma, mark, open_interest and strike from a contract, and
+      the warehouse carries all four.
+      ⚠️ AND THE REPLAY IS EXACT, NOT APPROXIMATE. main.py:4885-4925 feeds the
+      SAME `_gex_chain` object to `compute_gex` AND to the snapshot archiver —
+      its own comment reads "NO SECOND FETCH ... Same object, one fetch". So
+      the warehouse snapshot IS the chain production computed GEX from, and
+      feeding it back reproduces production's computation rather than
+      resembling it.
+      ⚠️ `--proxy-exposure` EXISTS BECAUSE THE PROXY IS A SHAPE CHANGE, NOT A
+      CALIBRATION ONE. Where OI is real, GEX is LINEAR in gamma; where it is
+      absent, `100000 x gamma^2 x spot / mark` is QUADRATIC. Gamma peaks at
+      the money, so the quadratic branch disproportionately amplifies exactly
+      the strikes that decide `pin_strike` and `pin_concentration` — and the
+      two forms are mixed WITHIN one snapshot, per strike. A single averaged
+      disagreement number would bury that as noise, so the exposure is
+      reported STRATIFIED BY MONEYNESS. (OTV4TEST's analysis, QQQ-26.)
+v2.0  2026-09-19
 v2.0  2026-09-19  r391 / GEX.1 — 🔴 IT READ A DIRECTORY FROM ANOTHER MACHINE,
       FOUND NOTHING, AND CALLED THE NOTHING A RESULT.
       `ROOT` defaulted to `/home/claude/cc`, which does not exist on control.
@@ -91,20 +125,80 @@ def snapshots(date, symbol):
     return out
 
 
-def gex_profile(snap):
-    """Signed dealer gamma per strike. ⟨ASSUMPTION⟩ long calls / short puts."""
-    spot = float(snap["underlying"])
-    per = defaultdict(float)
-    for c in snap["contracts"]:
-        g, oi = float(c.get("gamma") or 0), float(c.get("oi") or 0)
-        if g <= 0 or oi <= 0:
-            continue
-        sign = 1.0 if c["type"] == "C" else -1.0
-        per[float(c["strike"])] += sign * g * oi * 100 * spot * spot * 0.01
-    return spot, dict(per)
+def chain_from_snapshot(snap):
+    """Warehouse chain_snapshot record -> a production OptionsChain.
+
+    🔑 LOSSLESS FOR THIS PURPOSE, AND THAT WAS CHECKED RATHER THAN HOPED:
+    `compute_gex` reads only `gamma`, `mark`, `open_interest` and `strike`
+    off a contract, and every warehouse row carries all four. Nothing here
+    interprets or rescales — it moves fields.
+    """
+    from data.options_chain import OptionContract, OptionsChain
+    spot = float(snap.get("underlying") or 0.0)
+    calls, puts = [], []
+    for c in snap.get("contracts", []) or []:
+        oc = OptionContract(
+            symbol=str(c.get("occ") or ""),
+            underlying=str(snap.get("symbol") or ""),
+            expiry=str(snap.get("expiry") or ""),
+            option_type=str(c.get("type") or ""),
+            strike=float(c.get("strike") or 0.0),
+            bid=float(c.get("bid") or 0.0),
+            ask=float(c.get("ask") or 0.0),
+            mark=float(c.get("mark") or 0.0),
+            delta=float(c.get("delta") or 0.0),
+            gamma=float(c.get("gamma") or 0.0),
+            theta=float(c.get("theta") or 0.0),
+            vega=float(c.get("vega") or 0.0),
+            iv=float(c.get("iv") or 0.0),
+            open_interest=int(float(c.get("oi") or 0)),
+            volume=int(float(c.get("vol") or 0)),
+        )
+        (calls if oc.option_type == "C" else puts).append(oc)
+    return OptionsChain(underlying=str(snap.get("symbol") or ""),
+                        expiry=str(snap.get("expiry") or ""),
+                        spot_price=spot, calls=calls, puts=puts), spot
+
+
+def gex_of(snap):
+    """Production's OWN GEXSnapshot for a warehouse record. One definition."""
+    from data.gex_data import compute_gex
+    chain, spot = chain_from_snapshot(snap)
+    if spot <= 0 or (not chain.calls and not chain.puts):
+        return None, spot
+    return compute_gex(chain, spot), spot
+
+
+def proxy_exposure(snap, buckets=(0.005, 0.01, 0.02, 0.05)):
+    """Share of strikes on the QUADRATIC branch, stratified by moneyness.
+
+    🔴 THE STRATIFICATION IS THE POINT. `oi_proxy` fires per contract wherever
+    open_interest is 0, and that flips the functional form from linear in
+    gamma to quadratic. Gamma peaks ATM, so the quadratic branch amplifies
+    the very strikes `pin_strike` and `pin_concentration` are decided on. A
+    scalar disagreement rate averages that systematic ATM bias into something
+    that looks like noise.
+    """
+    spot = float(snap.get("underlying") or 0.0)
+    if spot <= 0:
+        return {}
+    out = {}
+    for c in snap.get("contracts", []) or []:
+        g = float(c.get("gamma") or 0.0)
+        if g <= 0:
+            continue                      # contributes to neither branch
+        m = abs(float(c.get("strike") or 0.0) - spot) / spot
+        band = next((f"<={b:.1%}" for b in buckets if m <= b), f">{buckets[-1]:.1%}")
+        tot, prox = out.get(band, (0, 0))
+        out[band] = (tot + 1, prox + (1 if float(c.get("oi") or 0) <= 0 else 0))
+    return out
 
 
 def pin_from(per, spot):
+    # ⚠️ RETAINED ONLY AS A PURE HELPER FOR THE GATE'S SYNTHETIC CASES. It is
+    # NOT used to produce any reported number — production's `flip_strike`
+    # is. Kept because its "a chain that never flips returns None, not the
+    # nearest strike" property is worth pinning somewhere.
     """The strike where cumulative signed gamma crosses zero — the flip.
 
     ⚠️ If gamma never changes sign the flip does not exist and this returns
@@ -123,50 +217,77 @@ def pin_from(per, spot):
     return None, cum
 
 
-def run(date: str, symbol: str) -> int:
+def run(date: str, symbol: str, mode: str = "gex") -> int:
     snaps, why = snapshots(date, symbol)
     # 🔴 THE REFUSAL COMES FIRST AND EXITS. v1.0 fell straight through an empty
     # list into the conclusion block and declared "no pin on this tape ... a
-    # REAL answer, not a missing one" having loaded NOTHING. A report that can
-    # reach its own conclusion on an empty input is not a report.
+    # REAL answer, not a missing one" having loaded NOTHING.
     if snaps is None:
         print(f"\n  ⚠️ REFUSED: {why}")
         print("  Nothing is concluded from an empty load — r39: a tool-caused "
               "absence must not wear the costume of a null.")
         return 1
+
+    if mode == "proxy":
+        print("=" * 74)
+        print(f"  PROXY EXPOSURE — {symbol} {date} · {len(snaps)} snapshot(s)")
+        print("=" * 74)
+        print("  Share of gamma-bearing strikes on the QUADRATIC branch")
+        print("  (open_interest == 0 -> oi_proxy -> 100000*gamma^2*spot/mark)\n")
+        agg = {}
+        for sn in snaps:
+            for band, (tot, prox) in proxy_exposure(sn).items():
+                t, p = agg.get(band, (0, 0))
+                agg[band] = (t + tot, p + prox)
+        order = sorted(agg, key=lambda b: (b.startswith(">"), b))
+        for band in order:
+            tot, prox = agg[band]
+            print(f"    |K-S|/S {band:>8}   {prox:6d} / {tot:6d}   {prox/max(1,tot):6.1%} on the proxy")
+        gt, gp = sum(t for t, _ in agg.values()), sum(p for _, p in agg.values())
+        print(f"\n    {'ALL':>16}   {gp:6d} / {gt:6d}   {gp/max(1,gt):6.1%}")
+        print("\n  ⚠️ A RISING SHARE TOWARD THE MONEY IS THE FINDING, NOT THE TOTAL.")
+        print("  Gamma peaks ATM, so proxy strikes there are squared and amplified")
+        print("  exactly where pin_strike and pin_concentration are decided.")
+        return 0
+
     print("=" * 74)
     print(f"  {symbol} {date} · {len(snaps)} chain snapshot(s) · expiry "
           f"{snaps[0].get('expiry', '?')}")
+    print("  GEX computed by PRODUCTION'S data.gex_data.compute_gex — one definition")
     print("=" * 74)
-    print(f"\n  {'TIME':>8}  {'SPOT':>8}  {'PIN':>8}  {'NET GEX ($M)':>13}  "
-          f"{'|GEX| TOP STRIKE':>16}")
+    print(f"\n  {'TIME':>8}  {'SPOT':>8}  {'PIN':>8}  {'FLIP':>8}  "
+          f"{'NET GEX ($M)':>13}  {'ENV':>9}  {'ORB BIAS':>10}")
     rows = []
     for sn in snaps:
-        spot, per = gex_profile(sn)
-        pin, _cum = pin_from(per, spot)
-        net = sum(per.values()) / 1e6
-        top = max(per, key=lambda k: abs(per[k])) if per else None
-        rows.append((str(sn.get("ts_et"))[11:16], spot, pin, net, top))
-    for t, spot, pin, net, top in rows[::6]:
-        print(f"  {t:>8}  {spot:8.2f}  {(f'{pin:.0f}' if pin else '   none'):>8}  "
-              f"{net:13.1f}  {(f'{top:.0f}' if top else '-'):>16}")
+        g, spot = gex_of(sn)
+        if g is None:
+            continue
+        rows.append((str(sn.get("ts_et"))[11:16], spot,
+                     getattr(g, "pin_strike", 0.0), getattr(g, "flip_strike", 0.0),
+                     getattr(g, "net_gex", 0.0) / 1e6,
+                     str(getattr(g, "gex_environment", "?")),
+                     str(getattr(g, "orb_bias", "?"))))
+    for t, spot, pin, flip, net, env, ob in rows[::6]:
+        print(f"  {t:>8}  {spot:8.2f}  {pin:8.0f}  {flip:8.0f}  {net:13.1f}  "
+              f"{env:>9}  {ob:>10}")
     print(f"\n{'='*74}\n  WHAT THIS SAYS\n{'='*74}")
-    print("  ⚠️ ⟨ASSUMPTION⟩ dealer sign convention (long calls / short puts) is "
-          "NOT verified\n     against this fleet's own definition. The pin "
-          "location depends on it.")
-    pins = [p for _, _, p, _, _ in rows if p]
-    if pins:
-        from collections import Counter
-        c = Counter(pins)
-        print(f"  Pin located in {len(pins)}/{len(rows)} snapshot(s).")
-        print(f"  Most common pin strikes: "
-              f"{', '.join(f'{k:.0f} ({v}x)' for k, v in c.most_common(4))}")
-    else:
-        # ⚠️ REACHABLE ONLY WITH SNAPSHOTS IN HAND. The count is printed beside
-        # the claim so "no pin" can never again be read without the n it rests on.
-        print(f"  NO GAMMA FLIP IN ANY OF {len(rows)} LOADED SNAPSHOT(S) — no pin "
-              f"on this tape\n  by this definition. A butterfly plan declared "
-              f"here would have no anchor.")
+    if not rows:
+        print(f"  NO GEX COMPUTED FROM {len(snaps)} LOADED SNAPSHOT(S) — every one "
+              f"had no spot or no contracts.")
+        return 0
+    import collections as _c
+    envs = _c.Counter(r[5] for r in rows)
+    bias = _c.Counter(r[6] for r in rows)
+    print(f"  environments over {len(rows)} snapshot(s): " +
+          ", ".join(f"{k} {v}" for k, v in envs.most_common()))
+    print(f"  orb_bias:                       " +
+          ", ".join(f"{k} {v}" for k, v in bias.most_common()))
+    # 🔑 orb_bias IS WRITTEN BY PRODUCTION AND READ BY NOTHING — grep finds one
+    # comment in status.py and no consumer. It is printed here so the label the
+    # repo already computes is at least visible to a human.
+    print("\n  ⚠️ `orb_bias` is computed by production on every snapshot and is "
+          "READ BY NO STRATEGY.\n     It is shown here because an instrument "
+          "already on disk and unread is the\n     cheapest thing in the repo.")
     return 0
 
 
@@ -175,6 +296,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default="2026-09-18")
     ap.add_argument("--symbol", default="AMD")
+    ap.add_argument("--proxy-exposure", action="store_true",
+                    help="share of strikes on the quadratic branch, by moneyness")
     a = ap.parse_args()
     print(__doc__)
-    sys.exit(run(a.date, a.symbol))
+    sys.exit(run(a.date, a.symbol, "proxy" if a.proxy_exposure else "gex"))
