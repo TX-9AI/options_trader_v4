@@ -52,10 +52,10 @@ Change these with the most care; a break here reaches everything downstream.
 | module | imported by | some of the importers |
 |---|---|---|
 | `config.py` | 68 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
-| `utils/time_utils.py` | 41 | alert_manager.py, broker_reconcile.py, check_butterfly_foundational.py, check_butterfly_legs.py |
+| `utils/time_utils.py` | 40 | alert_manager.py, broker_reconcile.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/__init__.py` | 35 | check_age_gate_gone.py, check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/plan.py` | 30 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
-| `analysis/orb_engine.py` | 18 | base_strategy.py, check_absent_not_zero.py, check_atr_units.py, check_orb_one_order.py |
+| `analysis/orb_engine.py` | 16 | base_strategy.py, check_absent_not_zero.py, check_atr_units.py, check_orb_one_order.py |
 | `database/trade_logger.py` | 16 | check_condor_pairing.py, check_condor_stop_suppression.py, check_credit_remainder.py, check_one_per_session.py |
 | `strategy/sweep_credit_spread.py` | 16 | check_age_gate_gone.py, check_atr_units.py, check_chain_ordering.py, check_dispatch.py |
 | `utils/math_utils.py` | 15 | credit_vertical.py, entry_ladder.py, exit_engine.py, gex_pin_butterfly.py |
@@ -116,7 +116,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `analysis/orb_engine.py`
 - **calls:** `analysis/signal_journal.py`, `config.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `execution/entry_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `strategy/base_strategy.py`, `strategy/orb_strategy.py`, `tests/check_absent_not_zero.py`, `tests/check_atr_units.py`, `tests/check_orb_one_order.py`, `tests/check_orb_rearm_zone.py`, `tests/check_orb_restart.py`, `tests/check_orb_resume.py`, `tests/check_orb_sequence.py`, `tests/check_orb_underwater_entry.py`, `tests/check_plan_signal.py`, `tests/check_standing_offer.py`, `tests/check_wargame.py`, `tests/wargame.py`
+- **called by:** `execution/entry_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `strategy/base_strategy.py`, `strategy/orb_strategy.py`, `tests/check_absent_not_zero.py`, `tests/check_atr_units.py`, `tests/check_orb_one_order.py`, `tests/check_orb_rearm_zone.py`, `tests/check_orb_restart.py`, `tests/check_orb_resume.py`, `tests/check_orb_sequence.py`, `tests/check_orb_underwater_entry.py`, `tests/check_plan_signal.py`, `tests/check_standing_offer.py`
 
 ### `analysis/order_flow.py`
 - **calls:** (none)
@@ -1035,7 +1035,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_wargame.py`
-- **calls:** `analysis/orb_engine.py`
+- **calls:** (none)
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_wing_search.py`
@@ -1159,7 +1159,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/wargame.py`
-- **calls:** `analysis/orb_engine.py`, `utils/time_utils.py`
+- **calls:** (none)
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tools/manifold_health.py`
@@ -1204,7 +1204,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/time_utils.py`
 - **calls:** `config.py`, `utils/__init__.py`, `utils/market_calendar.py`
-- **called by:** `analysis/entry_snapshot.py`, `analysis/orb_engine.py`, `analysis/tenor_publish.py`, `analysis/tenor_select.py`, `analysis/trade_readiness.py`, `analysis/trend_engine.py`, `analysis/volatility_measures.py`, `data/macro_data.py`, `data/market_data.py`, `data/options_chain.py`, `database/trade_logger.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_butterfly_wing_grid.py`, `tests/check_condor_spec.py`, `tests/check_entry_gate.py`, `tests/check_exit_executes.py`, `tests/check_holiday_aware.py`, `tests/check_manage_call.py`, `tests/check_manifold_windows.py`, `tests/check_orb_resume.py`, `tests/check_orb_underwater_entry.py`, `tests/check_plan_prepares.py`, `tests/check_rehearsal_toggle.py`, `tests/check_snapshot_pin.py`, `tests/check_standing_offer.py`, `tests/check_tcs_fifty.py`, `tests/check_tcs_parked.py`, `tests/wargame.py`, `tools/manifold_health.py`
+- **called by:** `analysis/entry_snapshot.py`, `analysis/orb_engine.py`, `analysis/tenor_publish.py`, `analysis/tenor_select.py`, `analysis/trade_readiness.py`, `analysis/trend_engine.py`, `analysis/volatility_measures.py`, `data/macro_data.py`, `data/market_data.py`, `data/options_chain.py`, `database/trade_logger.py`, `execution/broker_reconcile.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `risk/session_guard.py`, `strategy/condor_roll.py`, `strategy/gex_pin_butterfly.py`, `tests/check_butterfly_foundational.py`, `tests/check_butterfly_legs.py`, `tests/check_butterfly_wing_grid.py`, `tests/check_condor_spec.py`, `tests/check_entry_gate.py`, `tests/check_exit_executes.py`, `tests/check_holiday_aware.py`, `tests/check_manage_call.py`, `tests/check_manifold_windows.py`, `tests/check_orb_resume.py`, `tests/check_orb_underwater_entry.py`, `tests/check_plan_prepares.py`, `tests/check_rehearsal_toggle.py`, `tests/check_snapshot_pin.py`, `tests/check_standing_offer.py`, `tests/check_tcs_fifty.py`, `tests/check_tcs_parked.py`, `tools/manifold_health.py`
 
 ### `warehouse/__init__.py`
 - **calls:** (none)

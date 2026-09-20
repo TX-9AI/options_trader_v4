@@ -1,407 +1,226 @@
 #!/usr/bin/env python3
 """
-tests/wargame.py  v0.1
-v0.1  2026-09-19  r391 / FU.5 — REPLAY THE REAL DECISION PATH AGAINST THE REAL
-      TAPE, SO A PROPOSED CHANGE IS MEASURED INSTEAD OF ARGUED.
+tests/wargame.py  v0.2
+v0.2  2026-09-20  r393 / FU.5 — REBUILT TO RUN EXCLUSIVELY ON THE TICK-LEVEL
+      FEED. The bar-reconstruction path is GONE, and this is the operator's
+      ruling rather than a refactor.
 
-🔴 WHAT THIS IS AND WHAT IT REFUSES TO BE. The operator's instruction was to
-wargame real chains and tapes "through our actual bot architecture". So this
-harness does NOT model the strategies. It rebuilds the INPUTS from the
-warehouse and calls the SAME engines and the SAME `generate_signal()` the live
-bot calls. A second implementation of a decision rule is the drift WA §7 and
-C.23 exist to prevent, and it would be invisible: both copies look right in
-isolation and only disagree on the trades that matter.
+🔴 WHY v0.1'S FOUNDATION WAS WRONG. v0.1 rebuilt 1m bars from `raw/ohlc` and
+drove the real engines from them. Its own positive control killed it: of the
+26 recorded ORB decision ticks on 2026-09-18, **25 were MID-BAR**. The bot
+decides on a ~15s tick; the warehouse stores 1m bars; so at 09:37:15 the live
+engine held fifteen seconds of a bar this harness could only supply whole.
+Reconstructing the input was never going to work, and the fix is the
+operator's own framing — **read what the tick RECORDED instead of rebuilding
+what the tick SAW.**
 
-⚠️ AND THE PRECEDENT IS ONE DAY OLD. `exit_replay` spent its whole life
-scoring hypotheticals it could not reproduce — it refused 42 of 42 trades and
-blamed the tape — and its positive control still printed ZERO because the
-control's band was a third of entry cost (RPL.2). A harness that cannot
-REPRODUCE WHAT ACTUALLY HAPPENED is not entitled to an opinion about what
-would have happened. Hence:
+📊 THE STREAMS SHARE ONE CLOCK, MEASURED BEFORE ANY OF THIS WAS BUILT
+(AMD 2026-09-18): `plan_tick` 1,754 ticks and `indicator_series` 1,758 ticks,
+both at a **median 15.0s cadence**, and the nearest indicator row to a given
+plan tick is **median 0.00s away, p90 0.10s, max 4.2s**. They are co-emitted
+per tick, so joining them on `ts_epoch` is reading one record rather than
+correlating two.
 
-  🔑 THE POSITIVE CONTROL IS THE PRODUCT, NOT A FORMALITY. With NO change
-  applied, every gate value this harness emits must match the value the live
-  bot recorded in `derived_plan_check` for the same tick, symbol, strategy and
-  check name. Until that reconciles, no counterfactual from this tool means
-  anything, and the report says so in those words.
+🔑 WHAT THE CONTROL IS NOW, AND WHY IT CHANGED. v0.1 had to prove it could
+REPRODUCE a decision, because it was rebuilding the inputs. This harness does
+not rebuild anything — the inputs ARE the record — so the thing that can go
+wrong is the JOIN: an invented tick, a dropped tick, a silent mismatch. The
+control is therefore INTEGRITY: every tick accounted for, every unjoined tick
+NAMED, and nothing counted as agreement that was never compared. RPL.2's
+ruling carried over unchanged.
 
-THE TWO HAZARDS THIS FILE IS BUILT AROUND
-  1. LOOKAHEAD. The classic way a backtest lies. It is not merely avoided
-     here, it is made STRUCTURALLY IMPOSSIBLE: `Tape.at()` is the only way to
-     reach a bar and it slices on the frozen instant. Asking it for anything
-     at or beyond that instant RAISES rather than returning a row.
-  2. THE WALL CLOCK. `orb_engine.update()` calls `now_et()` ITSELF for the
-     11:00 ET cutoff and the range date, and 47 modules import that name. A
-     replay run at 23:00 would find every session EXPIRED and would report a
-     clean, wrong, empty answer. This is CHK.7 exactly — a result that encodes
-     the hour of the run — and CHK.7 was found only eight minutes before a
-     clamp would have hidden it. So the clock is frozen per tick, across every
-     BOUND name, and the freeze is asserted rather than assumed.
+⚠️ WHAT THIS HARNESS CANNOT DO, STATED SO IT IS NOT DISCOVERED LATER. It
+cannot re-run the ORB STATE MACHINE, because the engine's state is not a field
+in any stream — it survives only inside `plan_tick.reason` as PROSE, parseable
+on ~24% of ticks. So threshold and discriminator questions are fully
+answerable here; "would the engine have ARMED" is not, until the per-tick
+logging carries state as a FIELD. That is a production change and is not
+assumed by this file.
 """
 from __future__ import annotations
 
-import io
+import bisect
 import os
 import sys
-import types
-from datetime import datetime
-
-import pandas as pd
+from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))          # repo root — RPL.1's lesson
 
-import pytz
-
-ET = pytz.timezone("US/Eastern")
+JOIN_TOL_S = 1.0          # measured p90 is 0.10s; 1.0s is ten times the slack
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# THE CLOCK
-# ═══════════════════════════════════════════════════════════════════════════
-class FrozenClock:
-    """Freeze `now_et`/`now_utc` everywhere they are BOUND, not just defined.
+class Tick:
+    """One tick, as the bot recorded it. Nothing here is reconstructed."""
 
-    🔴 PATCHING `utils.time_utils.now_et` ALONE DOES NOTHING for the 47 modules
-    that did `from utils.time_utils import now_et` — that binding was resolved
-    at import and points at the original function object. So this walks every
-    loaded module and rebinds any attribute that IS the original, which is an
-    identity test and therefore cannot catch an unrelated same-named helper.
-    """
+    __slots__ = ("ts", "symbol", "strategy", "verdict", "reason",
+                 "underlying", "ind", "checks")
 
-    def __init__(self, when_et: datetime):
-        if when_et.tzinfo is None:
-            when_et = ET.localize(when_et)
-        self.when_et = when_et
-        self._saved: list[tuple[object, str, object]] = []
-
-    def __enter__(self):
-        import utils.time_utils as tu
-        originals = {"now_et": tu.now_et, "now_utc": tu.now_utc}
-        frozen_et = self.when_et
-        frozen_utc = self.when_et.astimezone(pytz.UTC)
-
-        def _now_et():
-            return frozen_et
-
-        def _now_utc():
-            return frozen_utc
-
-        repl = {"now_et": _now_et, "now_utc": _now_utc}
-
-        for mod in list(sys.modules.values()):
-            if not isinstance(mod, types.ModuleType):
-                continue
-            for name, orig in originals.items():
-                try:
-                    cur = getattr(mod, name, None)
-                except Exception:                              # noqa: BLE001
-                    continue
-                if cur is orig:
-                    self._saved.append((mod, name, orig))
-                    try:
-                        setattr(mod, name, repl[name])
-                    except Exception:                          # noqa: BLE001
-                        self._saved.pop()
-        return self
-
-    def __exit__(self, *exc):
-        for mod, name, orig in self._saved:
-            try:
-                setattr(mod, name, orig)
-            except Exception:                                  # noqa: BLE001
-                pass
-        self._saved.clear()
-        return False
-
-    @property
-    def patched(self) -> int:
-        return len(self._saved)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# THE TAPE
-# ═══════════════════════════════════════════════════════════════════════════
-class LookaheadError(RuntimeError):
-    """Raised when a caller reaches for a bar it could not have had."""
-
-
-class Tape:
-    """Point-in-time 1m bars for one symbol-session, plus a 5m resample.
-
-    🔑 `at(ts)` IS THE ONLY WAY IN, and it returns bars whose OPEN is at or
-    before `ts`. The final row is therefore the FORMING bar, exactly as the
-    live loop sees it — `orb_engine._advance_state` reads `iloc[-2]` as the
-    newest CLOSED bar and `iloc[-1]` as the one still printing, so handing it
-    only closed bars would silently shift every decision one minute early.
-    """
-
-    def __init__(self, df_1m: pd.DataFrame, symbol: str, date: str):
-        self.df = df_1m.sort_index()
+    def __init__(self, ts, symbol, strategy, verdict, reason, underlying):
+        self.ts = ts
         self.symbol = symbol
-        self.date = date
+        self.strategy = strategy
+        self.verdict = verdict
+        self.reason = reason
+        self.underlying = underlying
+        self.ind = {}
+        self.checks = {}
 
-    @classmethod
-    def from_csv(cls, csv_text: str, symbol: str, date: str) -> "Tape":
-        df = pd.read_csv(io.StringIO(csv_text))
-        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-        df = df.set_index("timestamp").tz_convert(ET)
-        df = df[["open", "high", "low", "close", "volume"]].astype(float)
-        return cls(df, symbol, date)
+    def get(self, name, default=None):
+        """A recorded value by name — indicator first, then gate value."""
+        if name in self.ind:
+            return self.ind[name]
+        if name in self.checks:
+            return self.checks[name][0]
+        return default
 
-    def at(self, ts: datetime) -> pd.DataFrame:
-        """Bars whose OPEN is at or before `ts`.
-
-        🔴 THE LAST ROW MAY BE A BAR THAT WAS STILL FORMING AT `ts`, AND ITS
-        CLOSE IS THEREFORE FROM THE FUTURE. A 1m bar stamped 09:37:00 does not
-        finish until 09:38:00, so at a tick of 09:37:15 the live bot had 15
-        seconds of it and this frame has all sixty. Callers that replay a
-        DECISION must use `closed_at()` and `bar_aligned()`; this accessor
-        exists for outcome scoring, where the future is the point.
-        ⚠️ THIS IS THE LOOKAHEAD THE `future_of` GUARD DOES NOT CATCH, because
-        it arrives inside a legitimate-looking slice rather than through an
-        obviously forward-reaching call. It was found by the positive control
-        disagreeing with the tape, not by reading the code.
-        """
-        if ts.tzinfo is None:
-            ts = ET.localize(ts)
-        return self.df[self.df.index <= ts]
-
-    def closed_at(self, ts: datetime, bar_s: int = 60) -> pd.DataFrame:
-        """Only bars that had FULLY CLOSED by `ts` — no forming bar, no future.
-
-        This is the honest frame for a decision replay. A bar stamped T is
-        closed at T + bar_s, so it is admissible only once ts >= T + bar_s.
-        """
-        if ts.tzinfo is None:
-            ts = ET.localize(ts)
-        cutoff = ts - pd.Timedelta(seconds=bar_s)
-        return self.df[self.df.index <= cutoff]
-
-    @staticmethod
-    def bar_aligned(ts: datetime, bar_s: int = 60) -> bool:
-        """True when `ts` sits exactly on a bar boundary.
-
-        🔑 WHY THIS GATES RECONCILIATION. Off a boundary, the live bot held a
-        PARTIAL bar this harness cannot reconstruct from 1m data, so a replay
-        there is an approximation wearing a measurement's clothes. RPL.2's
-        ruling applies unchanged: a row that cannot be checked is reported
-        NOT RECONCILABLE **by name**, never quietly counted as agreement.
-        """
-        return int(ts.timestamp()) % bar_s == 0
-
-    def after(self, ts: datetime) -> pd.DataFrame:
-        """Deliberately named and deliberately loud — see `future_of`."""
-        if ts.tzinfo is None:
-            ts = ET.localize(ts)
-        return self.df[self.df.index > ts]
-
-    def future_of(self, ts: datetime):
-        """🔴 THE GUARD. Nothing in a decision path may call this.
-
-        A harness that can silently see forward produces a beautiful, wrong
-        answer, and the failure is invisible in the output — which is the
-        property every defect found on 2026-09-19 shared.
-        """
-        raise LookaheadError(
-            f"{self.symbol} {self.date}: a decision path asked for bars after "
-            f"{ts} — that is lookahead. Outcome scoring uses `after()` by name."
-        )
-
-    @staticmethod
-    def to_5m(df_1m: pd.DataFrame) -> pd.DataFrame:
-        if df_1m is None or df_1m.empty:
-            return df_1m
-        return df_1m.resample("5min", label="left", closed="left").agg(
-            {"open": "first", "high": "max", "low": "min",
-             "close": "last", "volume": "sum"}).dropna(how="any")
+    def __repr__(self):
+        return (f"<Tick {self.symbol} {self.strategy} {self.ts:.1f} "
+                f"{self.verdict} ind={len(self.ind)} checks={len(self.checks)}>")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-def load_tape(date: str, symbol: str):
-    """One symbol-session of 1m bars from raw/ohlc, or (None, reason)."""
-    # ⚠️ THE ROW LOADERS CORRECTLY DECLINE THIS TABLE, WHICH IS WHY THE
-    # ENVELOPE READER IS USED DIRECTLY. `load_series`/`iter_series` only
-    # accumulate when `record` is a LIST of dicts; an `ohlc` record is the
-    # session's CSV as TEXT ("timestamp,open,high,low,close,volume" + 390
-    # rows). Calling them for ohlc returns zero rows and NO ERROR — a silent
-    # empty, which is the exact shape r39 refuses. So this reaches for
-    # `_envelopes`, the same S3 lineage every other reader uses, rather than
-    # opening a second one (WA §7).
-    import warehouse_source as ws
-    meta = ws.Meta(f"ohlc {date} {symbol}")
+def _f(v):
     try:
-        for env in ws._envelopes(ws.client(), "ohlc", [date], meta, [symbol]):
-            if str(env.get("symbol") or "") != symbol:
-                continue
-            rec = env.get("record")
-            if isinstance(rec, str) and "timestamp" in rec:
-                return Tape.from_csv(rec, symbol, date), ""
-    except Exception as exc:                                    # noqa: BLE001
-        return None, f"{type(exc).__name__}: {exc}"
-    if getattr(meta, "error", None):
-        return None, meta.error
-    return None, f"no ohlc record for {symbol} on {date}"
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# THE ORACLE — what the live bot actually recorded, tick by tick
-# ═══════════════════════════════════════════════════════════════════════════
-def recorded_ticks(date: str, strategy: str = "ORBStrategy"):
-    """{(symbol, tick_id, ts_epoch): {check_name: value}} from derived_plan_check.
+class TickFeed:
+    """Every recorded tick for one symbol-session, joined on the tick clock.
 
-    🔑 THIS IS A SPARSE ORACLE AND THAT IS A PROPERTY, NOT A GAP. The planner
-    only emits checks on ticks where the strategy actually evaluated, so ORB
-    contributes ~26 DECISION TICKS on a session where the loop ran thousands
-    of times. Those 26 are exactly the population where a counterfactual has
-    something to be wrong about.
+    🔑 THE JOIN IS NEAREST-WITHIN-TOLERANCE, NOT EXACT-MATCH, AND THAT IS
+    MEASURED RATHER THAN HOPEFUL. The two streams are written by the same loop
+    but stamped at slightly different instants; median separation is 0.00s and
+    p90 is 0.10s, so a 1.0s window is ten times the observed slack. A tick
+    with no partner inside it is NOT quietly dropped — it is counted and
+    reported, because an unjoined tick is exactly the kind of silent thinning
+    that makes a study of 1,700 ticks secretly a study of 900.
     """
-    import warehouse_source as ws
-    rows, meta = ws.load_derived("plan_check", [date])
-    if getattr(meta, "error", None):
-        return None, meta.error
-    out = {}
-    for r in rows:
-        if r.get("strategy") != strategy:
-            continue
-        key = (r.get("symbol"), r.get("tick_id"), r.get("ts_epoch"))
-        out.setdefault(key, {})[r.get("check_name")] = r.get("value")
-    return out, ""
 
+    def __init__(self, date: str, symbol: str, strategy: str = "ORBStrategy",
+                 with_checks: bool = True):
+        self.date, self.symbol, self.strategy = date, symbol, strategy
+        self.ticks: list = []
+        self.unjoined = 0
+        self.no_indicator: list = []
+        self.error = ""
+        self._load(with_checks)
 
-def seed_orb_range(engine, date: str, high: float, low: float, width: float):
-    """Establish the range through the REAL `_load_range_from_file`.
+    def _load(self, with_checks):
+        import warehouse_source as ws
+        pt, m1 = ws.load_derived("plan_tick", [self.date])
+        if getattr(m1, "error", None):
+            self.error = str(m1.error)
+            return
+        rows = [r for r in pt if r.get("symbol") == self.symbol
+                and r.get("strategy") == self.strategy]
+        if not rows:
+            self.error = (f"no plan_tick rows for {self.symbol}/"
+                          f"{self.strategy} on {self.date} — the TOOL's gap "
+                          f"or a session the strategy never ran (r39)")
+            return
 
-    🔑 A TEMP FILE RATHER THAN FIVE ASSIGNMENTS. Setting `orb_high`, `orb_low`,
-    `_range_date` and the WAITING_FOR_BREAK transition by hand would be a
-    second definition of "an established range" living in a test tool — and it
-    would drift the first time the real loader gained a condition. Pointing the
-    real function at a temp file costs three lines and cannot drift.
-    ⚠️ The range is an INPUT here, not a prediction: it is published by a
-    separate job the live engine reads from disk, so supplying the recorded
-    one is giving the harness what the bot had, not giving it the answer.
-    """
-    import json
-    import tempfile
-    import analysis.orb_engine as oe
-    fd, path = tempfile.mkstemp(suffix=".json")
-    os.close(fd)
-    try:
-        with open(path, "w") as fh:
-            json.dump({"status": "ESTABLISHED", "date": date,
-                       "high": high, "low": low, "width": width}, fh)
-        old = oe.ORB_RANGE_FILE
-        try:
-            oe.ORB_RANGE_FILE = path
-            engine._load_range_from_file()
-        finally:
-            oe.ORB_RANGE_FILE = old
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+        ind, m2 = ws.load_series("indicator_series", [self.date],
+                                 symbols=[self.symbol])
+        if getattr(m2, "error", None):
+            self.error = str(m2.error)
+            return
+        by_ts = {}
+        for r in ind:
+            t = _f(r.get("ts_epoch"))
+            if t is not None:
+                by_ts[round(t, 3)] = r
+        ind_ts = sorted(by_ts)
 
-
-ORB_FIELDS = [("break_direction", "break_direction"),
-              ("bars_since_break", "bars_since_break"),
-              ("attempt_number", "attempt_number"),
-              ("stop_level", "stop_level"),
-              ("stop_distance_px", "stop_distance_px"),
-              ("break_close", "break_candle_close")]
-
-
-def reconcile_orb(date: str, tol: float = 0.011):
-    """Replay the REAL ORB engine at each recorded tick and compare.
-
-    Returns a dict with agree/disagree/unreconcilable counts and examples.
-    🔴 THE VERDICT IS NOT A PERCENTAGE, IT IS A GATE. Until the reconcilable
-    population agrees, this harness may not be used to score a change, and
-    `report()` says so in those words rather than printing a hopeful number.
-    """
-    from analysis.orb_engine import ORBEngine
-    ticks, err = recorded_ticks(date)
-    if ticks is None:
-        return {"error": err}
-    tapes: dict = {}
-    agree: dict = {}
-    disagree: dict = {}
-    unrec = 0
-    unrec_syms: dict = {}
-    examples: list = []
-    for (sym, _tid, ts), rec in sorted(ticks.items(), key=lambda kv: kv[0][2]):
-        when = datetime.fromtimestamp(ts, ET)
-        # ⚠️ NAMED, NOT SILENTLY SKIPPED (RPL.2). A mid-bar tick cannot be
-        # reproduced from 1m bars — the bot held a partial bar we do not have.
-        if not Tape.bar_aligned(when):
-            unrec += 1
-            unrec_syms[sym] = unrec_syms.get(sym, 0) + 1
-            continue
-        if sym not in tapes:
-            tapes[sym] = load_tape(date, sym)[0]
-        tape = tapes[sym]
-        if tape is None:
-            unrec += 1
-            continue
-        eng = ORBEngine()
-        with FrozenClock(when):
-            seed_orb_range(eng, when.strftime("%Y-%m-%d"),
-                           float(rec.get("orb_high") or 0),
-                           float(rec.get("orb_low") or 0),
-                           float(rec.get("orb_width") or 0))
-            eng.rebuild_from_tape(tape.closed_at(when))
-            d = eng._data
-            for cname, attr in ORB_FIELDS:
-                want = rec.get(cname)
-                if want is None:
+        checks = defaultdict(dict)
+        if with_checks:
+            pc, m3 = ws.load_derived("plan_check", [self.date])
+            if getattr(m3, "error", None):
+                self.error = str(m3.error)
+                return
+            for r in pc:
+                if r.get("symbol") != self.symbol:
                     continue
-                got = getattr(d, attr, None)
-                if cname == "break_direction":
-                    got = 1.0 if got == "long" else -1.0 if got == "short" else None
-                try:
-                    same = got is not None and abs(float(got) - float(want)) < tol
-                except (TypeError, ValueError):
-                    same = False
-                tgt = agree if same else disagree
-                tgt[cname] = tgt.get(cname, 0) + 1
-                if not same and len(examples) < 12:
-                    examples.append(f"{sym} {when:%H:%M:%S} {cname}: "
-                                    f"recorded={want} engine={got} state={d.state}")
-    return {"agree": agree, "disagree": disagree, "unreconcilable": unrec,
-            "unreconcilable_by_symbol": unrec_syms, "examples": examples,
-            "ticks": len(ticks)}
+                t = _f(r.get("ts_epoch"))
+                if t is None:
+                    continue
+                checks[round(t, 3)][r.get("check_name")] = (r.get("value"),
+                                                            r.get("verdict"))
+
+        for r in sorted(rows, key=lambda x: _f(x.get("ts_epoch")) or 0.0):
+            t = _f(r.get("ts_epoch"))
+            if t is None:
+                continue
+            tk = Tick(t, self.symbol, self.strategy, str(r.get("verdict") or ""),
+                      str(r.get("reason") or ""), _f(r.get("underlying")))
+            i = bisect.bisect_left(ind_ts, t)
+            best, bestd = None, None
+            for j in (i - 1, i):
+                if 0 <= j < len(ind_ts):
+                    d = abs(ind_ts[j] - t)
+                    if bestd is None or d < bestd:
+                        best, bestd = ind_ts[j], d
+            if best is not None and bestd <= JOIN_TOL_S:
+                src = by_ts[best]
+                tk.ind = {k: _f(v) for k, v in src.items()
+                          if k not in ("symbol", "interval") and _f(v) is not None}
+            else:
+                self.unjoined += 1
+                self.no_indicator.append(t)
+            tk.checks = dict(checks.get(round(t, 3), {}))
+            self.ticks.append(tk)
+
+    def __iter__(self):
+        return iter(self.ticks)
+
+    def __len__(self):
+        return len(self.ticks)
+
+    def decided(self):
+        """Ticks where the strategy actually reached a verdict."""
+        return [t for t in self.ticks if t.verdict and t.verdict != "NOT ASKED"]
+
+    def integrity(self) -> dict:
+        n = len(self.ticks)
+        with_ind = sum(1 for t in self.ticks if t.ind)
+        with_chk = sum(1 for t in self.ticks if t.checks)
+        ts = [t.ts for t in self.ticks]
+        return {"ticks": n, "with_indicator": with_ind,
+                "unjoined": self.unjoined, "with_checks": with_chk,
+                "monotonic": all(ts[i] <= ts[i + 1] for i in range(len(ts) - 1)),
+                "duplicates": n - len(set(ts)), "decided": len(self.decided())}
 
 
-def report(date: str) -> int:
-    r = reconcile_orb(date)
-    if r.get("error"):
-        print(f"  ⚠️ {r['error']}")
+def report(date: str, symbol: str, strategy: str = "ORBStrategy") -> int:
+    f = TickFeed(date, symbol, strategy)
+    print("=" * 72)
+    print(f"  WARGAME v0.2 — TICK FEED · {symbol} {strategy} {date}")
+    print("=" * 72)
+    if f.error:
+        print(f"  ⚠️ REFUSED: {f.error}")
         return 1
-    a, d = sum(r["agree"].values()), sum(r["disagree"].values())
-    print("=" * 70)
-    print(f"  WARGAME — ORB decision replay vs the tape, {date}")
-    print("=" * 70)
-    print(f"  recorded decision ticks : {r['ticks']}")
-    print(f"  field comparisons       : agree {a} · disagree {d}")
-    print(f"  NOT RECONCILABLE        : {r['unreconcilable']} tick(s) — mid-bar, "
-          f"the bot held a partial bar this harness cannot rebuild from 1m data")
-    if r["unreconcilable_by_symbol"]:
-        print("    " + ", ".join(f"{k}:{v}" for k, v in
-                                 sorted(r["unreconcilable_by_symbol"].items())))
-    for name, tally in (("AGREE", r["agree"]), ("DISAGREE", r["disagree"])):
-        if tally:
-            print(f"  {name}:")
-            for k, v in sorted(tally.items(), key=lambda kv: -kv[1]):
-                print(f"    {k:<20} {v}")
-    for e in r["examples"]:
-        print(f"    · {e}")
-    if d or a == 0:
-        print("\n  🔴 THE CONTROL HAS NOT RECONCILED. This harness may NOT be "
-              "used to score a change: a replay that cannot reproduce what "
-              "happened is not entitled to an opinion about what would have.")
+    g = f.integrity()
+    print(f"  ticks                 : {g['ticks']}")
+    print(f"  joined to an indicator: {g['with_indicator']}")
+    print(f"  UNJOINED (named)      : {g['unjoined']}")
+    print(f"  carrying gate values  : {g['with_checks']}")
+    print(f"  reached a verdict     : {g['decided']}")
+    print(f"  monotonic / dupes     : {g['monotonic']} / {g['duplicates']}")
+    # 🔴 INTEGRITY IS THE CONTROL. A feed that silently thinned would make a
+    # study of 1,700 ticks secretly a study of 900, and nothing downstream
+    # could tell.
+    bad = (not g["monotonic"]) or g["duplicates"] or g["ticks"] == 0
+    if bad:
+        print("\n  🔴 FEED INTEGRITY FAILED — no hypothesis may be scored on it.")
         return 1
-    print("\n  ✅ control reconciled on the bar-aligned population.")
+    if g["unjoined"]:
+        pct = g["unjoined"] / max(1, g["ticks"])
+        print(f"\n  ⚠️ {g['unjoined']} tick(s) ({pct:.1%}) carry NO indicator row "
+              f"within {JOIN_TOL_S:.1f}s. They are counted, not dropped; any "
+              f"indicator study must treat them as MISSING and never as zero.")
+    print("\n  ✅ feed integrity holds.")
     return 0
 
 
@@ -409,6 +228,7 @@ if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default="2026-09-18")
-    ap.add_argument("--reconcile", action="store_true")
+    ap.add_argument("--symbol", default="AMD")
+    ap.add_argument("--strategy", default="ORBStrategy")
     a = ap.parse_args()
-    sys.exit(report(a.date) if a.reconcile else report(a.date))
+    sys.exit(report(a.date, a.symbol, a.strategy))
