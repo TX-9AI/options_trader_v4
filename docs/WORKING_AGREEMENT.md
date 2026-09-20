@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.7 · 2026-09-20 — §0 plus 41 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.8 · 2026-09-20 — §0 plus 41 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1548,6 +1548,50 @@ final wording, so it was re-cut rather than pushed.**
 ⚠️ [[ORB.16]] is what skipping that costs — a finding he had already said yes
 to, retracted an hour later on the full record: *"a subset is not the record."*
 
+🔑 **WHAT "SEND IT" MEANS, AND IT DEPENDS ON WHETHER THE CHANGE REACHES A
+BOX.** Operator, 2026-09-20, unprompted, closing the ambiguity that cost an
+exchange on r397/r398:
+
+> *"When an update doesn't need to fan out to the fleet, the 'send it' just
+> means commit it. And if it is something that must go out to the fleet, send
+> it means commit it and synch the fleet (bake) or defer the bake to outside
+> of RTH (typical to our work). And occasionally I may push a hotfix out to
+> the fleet during RTH to implement an on the fly solution to defective
+> code."*
+
+    change reaches NO box   "send it" = COMMIT ONLY. There is no bake to do
+                            and reporting one would be false (§18).
+    change reaches a box    "send it" = COMMIT + BAKE — or DEFER the bake to
+                            outside RTH, which is the NORMAL case here.
+    RTH hotfix              HIS call, for DEFECTIVE CODE. Not the route for
+                            an improvement, and not Claude's to initiate.
+
+⚠️ **SO "IS THERE ANYTHING IN THIS FOR A BOX?" IS ANSWERED BEFORE THE WORD
+"BAKE" IS USED AT ALL**, and it is answered from the PAYLOAD (§34: `tests/`
+and `docs/` are control-only, dtp ships to no box), never from the revision
+number. r397 and r398 were both commit-only by that test.
+
+🔴 **AND THE RTH HOTFIX HAS A TRAP THAT IS NOT OBVIOUS FROM THE MENU.**
+`wake_and_bake --bake-only` is the RTH-safe mode and is exempt from the RTH
+guard — **precisely because it does NOT restart.** Its own help says so: it
+syncs files to disk and *"bots NOT restarted"*, so **the running process keeps
+executing the OLD IN-MEMORY CODE until a later restart.** A hotfix synced this
+way during RTH has landed on disk and changed nothing about what is trading.
+⚠️ **MAKING IT TAKE EFFECT NEEDS A RESTART, WHICH THE RTH GUARD REFUSES
+WITHOUT `--force`** — and the guard is there because a mid-session restart is
+not free. Verified at source rather than assumed:
+- `exit_engine.py:874–883` holds **six per-trade in-memory dicts** —
+  `_trail_stops`, `_trail_active`, `_exhaust_state`, `_bos_trackers`,
+  `_post_target_trail`, `_vel_breaches`. A restart wipes all six, so **every
+  earned trail tier reverts to the base stop** (§22 records this happening).
+- Any firing sequence whose trigger fired while the process was down is
+  `MISSED` and is never re-entered (§37); one that was still WAITING is
+  `WIPED_BY_RESTART`. Those cost different things and are recorded apart.
+🔑 **SO THE HONEST FORM OF "HOTFIX DURING RTH" IS: sync with `--bake-only`
+now, and take the restart knowingly** — accepting reset trails and consumed
+sequences on the open book — **or wait for the close.** Both are legitimate;
+what is not legitimate is syncing during RTH and believing the fix is live.
+
 ⚠️ **THE LANDER CANNOT SPLIT COMMIT FROM PUSH, AND THAT IS WHY THE YES COMES
 BEFORE `deploy.sh` RUNS AT ALL.** `tools/deploy.sh` → `land.sh` extracts,
 gates, appends GENESIS, commits **and pushes** in ONE atomic run — the property
@@ -1655,6 +1699,27 @@ assistant granted itself, which §38.9 refuses in its own words.
 
 ## CHANGELOG
 
+**v5.8 — 2026-09-20 — r399 — §38.10: WHAT "SEND IT" MEANS, AND THE RTH
+HOTFIX THAT DOES NOTHING.** Operator, unprompted: *"When an update doesn't
+need to fan out to the fleet, the 'send it' just means commit it. And if it is
+something that must go out to the fleet, send it means commit it and synch the
+fleet (bake) or defer the bake to outside of RTH (typical to our work). And
+occasionally I may push a hotfix out to the fleet during RTH."*
+🔑 **THE TEST IS THE PAYLOAD (§34), NEVER THE REVISION NUMBER** — r397 and
+r398 were commit-only by construction, and reporting a bake for either would
+have written a green into the record the tape does not support (§18).
+🔴 **AND THE RTH HOTFIX IS A NO-OP AS USUALLY PERFORMED.** `wake_and_bake
+--bake-only` is the RTH-safe mode and is exempt from the RTH guard **precisely
+because it does not restart** — its own help says *"bots NOT restarted"* — so
+the process keeps executing the OLD IN-MEMORY CODE. **A hotfix synced during
+RTH has landed on disk and changed nothing about what is trading, while
+reading exactly like a successful deploy.** Making it take effect needs a
+restart, which `exit_engine.py:874–883` shows wipes **six per-trade dicts**
+(`_trail_stops`, `_trail_active`, `_exhaust_state`, `_bos_trackers`,
+`_post_target_trail`, `_vel_breaches`) so **earned trails revert to base**, and
+consumes any in-flight sequence as `MISSED` (§37). Sync and take the restart
+knowingly, or wait for the close — but do not believe a synced hotfix is live.
+
 **v5.7 — 2026-09-20 — r398 — §38.10 ADDED: THE VETO. CLAUDE STAGES, LANDS,
 EDITS AND PRESENTS UNPROMPTED; THE COMMIT NEEDS HIS EXPRESS YES.**
 Operator, 2026-09-20, final wording after several narrower ones: *"This is my
@@ -1708,6 +1773,18 @@ was trying to protect. ⚠️ It does NOT license substituting judgement for
 instruction (§0); when intent and instruction appear to conflict, **that is a
 question for him, not a decision for Claude.** ⚠️ And the tie-breaker when
 there is no time to ask: **take the reading that gives Claude less.**
+🔑 **AND "SEND IT" IS NOW DEFINED BY WHETHER THE CHANGE REACHES A BOX** — his
+words, unprompted: *"When an update doesn't need to fan out to the fleet, the
+'send it' just means commit it… if it is something that must go out to the
+fleet, send it means commit it and synch the fleet (bake) or defer the bake to
+outside of RTH (typical to our work)."* **The question is answered from the
+PAYLOAD (§34), never from the revision number.**
+🔴 **AND THE RTH-HOTFIX CASE CARRIES A TRAP, VERIFIED AT SOURCE:**
+`--bake-only` is RTH-safe *because it does not restart*, so the bot keeps
+running the OLD in-memory code — a hotfix synced during RTH has changed
+nothing about what is trading. Taking effect needs a restart, which wipes
+**six per-trade dicts in `exit_engine` (:874–883)** so earned trails revert to
+base, and consumes any in-flight firing sequence as `MISSED` (§37).
 ⚠️ **`bake` IS HIS WORD FOR "FAN IT OUT TO THE FLEET", WHICH IS §18's MEANING
 EXACTLY.** `✅ BAKED` keeps it: live on the boxes. On origin and running
 nowhere is `◐ PUSHED`, never `✅`.

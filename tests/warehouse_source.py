@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """
-tests/warehouse_source.py  v1.7
+tests/warehouse_source.py  v1.8
+v1.8  2026-09-20  r399 / S3.31 - THE BANNER CERTIFIED ITS OWN IGNORANCE. On
+zero objects it printed "(a real, empty result - not a missing path)", which
+ASSERTS the absence belongs to the tape. Measured: load_series of
+`derived_indicator_series` returns 0 rows under that exact sentence and the
+stream DOES NOT EXIST - the real prefix is `indicator_series`, no `derived_`.
+  🔑 THE PREFIXES ARE INCONSISTENT SO THE GUESS IS A COIN FLIP:
+derived_plan_tick / derived_strategy_note / derived_gate_disposition carry the
+prefix; indicator_series / fork_series / greeks_series / surface_series /
+theo_series do not. The wrong side of that coin was SILENT.
+  ⚠️ THIS IS r39's FAILURE INSIDE THE SANCTIONED READER - the class [[GEX.1]]
+was raised for - and 14 modules import this file.
+  Now: a zero-object read checks whether the stream exists at all, says NO
+SUCH STREAM ... THIS IS A TOOL FAULT NOT AN EMPTY DAY, and names near
+matches. One list call, only on the zero path, and it stays QUIET if the probe
+itself fails rather than manufacturing a second wrong story.
 v1.7  2026-09-20  r397 / D2 - THE SANCTIONED LOADER RETURNED A SILENT ZERO
 FOR THE DEEPEST CORPUS THIS PROJECT OWNS. `load_series` collected only when
 `record` was a LIST, with no `else`. `raw/ohlc` stores a whole session as ONE
@@ -108,6 +123,9 @@ class Meta:
         # 🔴 r397 — OBJECTS READ BUT NOT UNDERSTOOD. See load_series().
         self.unhandled = 0
         self.unhandled_kind = ""
+        # 🔴 r399 — THE STREAM NAME ITSELF WAS WRONG. See _stream_exists().
+        self.unknown_stream = ""
+        self.near = []
 
     def banner(self) -> str:
         if self.error:
@@ -123,8 +141,14 @@ class Meta:
                    if self.unhandled else "")
                 + ("\n     🔴 FIRST ERROR: " + self.first_error
                    if self.first_error else "")
+                + ("\n     🔴 NO SUCH STREAM: '%s' does not exist under %s/. "
+                   "THIS IS A TOOL FAULT, NOT AN EMPTY DAY.%s"
+                   % (self.unknown_stream, PREFIX,
+                      ("  Did you mean: " + ", ".join(self.near) + "?")
+                      if self.near else "")
+                   if self.unknown_stream else "")
                 + ("  (a real, empty result — not a missing path)"
-                   if self.listed == 0 else ""))
+                   if self.listed == 0 and not self.unknown_stream else ""))
 
 
 def _num_or_none(v):
@@ -144,6 +168,59 @@ def _num_or_none(v):
 def client():
     import boto3
     return boto3.client("s3", region_name=REGION)
+
+
+_STREAMS_CACHE = None
+
+
+def _streams(s3):
+    """Every stream prefix that actually exists under raw/. Listed ONCE."""
+    global _STREAMS_CACHE
+    if _STREAMS_CACHE is None:
+        out = set()
+        try:
+            pg = s3.get_paginator("list_objects_v2")
+            for page in pg.paginate(Bucket=BUCKET, Prefix=PREFIX + "/",
+                                    Delimiter="/"):
+                for c in page.get("CommonPrefixes", []) or []:
+                    out.add(c["Prefix"].rstrip("/").split("/")[-1])
+        except Exception:                                       # noqa: BLE001
+            return None          # cannot tell — say nothing rather than lie
+        _STREAMS_CACHE = out
+    return _STREAMS_CACHE
+
+
+def _note_unknown_stream(s3, datatype, meta):
+    """If a read found NOTHING, was the stream name even real? (r399)
+
+    🔴 THE BANNER USED TO CERTIFY ITS OWN IGNORANCE. On zero objects it
+    printed *"(a real, empty result — not a missing path)"* — an ASSERTION
+    that the absence belongs to the tape. Measured 2026-09-20:
+    `load_series("derived_indicator_series", ...)` returns 0 rows under
+    exactly that sentence, and the stream does not exist at all — the real
+    prefix is `indicator_series`, with no `derived_` on it.
+    🔑 **THE PREFIXES ARE GENUINELY INCONSISTENT, WHICH IS WHY A CALLER GETS
+    IT WRONG:** `derived_plan_tick`, `derived_strategy_note` and
+    `derived_gate_disposition` carry it; `indicator_series`, `fork_series`,
+    `greeks_series`, `surface_series` and `theo_series` do not. There is no
+    rule to remember, so the guess is a coin flip and the wrong side is
+    SILENT.
+    ⚠️ THIS IS r39's FAILURE IN THE SANCTIONED READER — the class [[GEX.1]]
+    was raised for, where a tool asserted its own absence was the tape's
+    answer, and 14 modules import this one.
+    ⚠️ IT COSTS ONE LIST CALL AND ONLY ON THE ZERO PATH, so a healthy read
+    pays nothing. And if the probe itself fails it stays QUIET rather than
+    manufacturing a second wrong story.
+    """
+    if meta.listed or meta.error:
+        return
+    have = _streams(s3)
+    if have is None or datatype in have:
+        return
+    meta.unknown_stream = datatype
+    base = datatype.replace("derived_", "")
+    meta.near = sorted(n for n in have
+                       if n == base or n == "derived_" + base)[:3]
 
 
 def _iter(s3, prefix, meta):
@@ -308,6 +385,9 @@ def _envelopes(s3, datatype, dates, meta, symbols=None):
                 meta.bad += 1
         if _multi:
             print(f"  in {_time.monotonic() - _t0:.0f}s", flush=True)
+    # ⚠️ AFTER every date, so a stream that is merely empty TODAY is not
+    # accused of not existing (r399).
+    _note_unknown_stream(s3, datatype, meta)
 
 
 def load_trades(dates, s3=None):

@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/check_versioned_reader.py  v1.2
+tests/check_versioned_reader.py  v1.3
+v1.3  2026-09-20  r399 / S3.31 — V11, V11b and V11c. The banner certified its
+own ignorance: on ANY zero it printed "(a real, empty result — not a missing
+path)", including for a stream name that does not exist. V11 pins that a
+nonexistent stream is named as a TOOL FAULT; V11b that the near match is
+offered — asserted on the suggestion BLOCK, because the first cut matched a
+substring of the whole banner and passed at HEAD on a reader with no
+suggestion at all — because the prefixes are inconsistent and the caller has no rule to
+remember; and V11c is the CONTROL — a REAL stream that is merely empty on a
+date must STILL read as a real empty result, because without it the fix would
+turn every legitimate empty day into a manufactured fault.
 v1.2  2026-09-20  r397 / D2 - V9, V9b, V10 and V10b, plus SELF-COUNTING.
 V9 pins that an object read but not understood is counted and NAMED in the
 banner rather than dropped into a silent zero; V10/V10b pin that the tape has a
@@ -293,6 +303,61 @@ def main():
               and abs((r10b[0]["volume"] or 0) - 1918319.0) < 1e-9,
               "a REORDERED header is followed by name, not by position: "
               "{}".format(r10b[0] if r10b else None))
+
+    # ══ r399 — A MISSING STREAM IS A TOOL FAULT, NOT AN EMPTY DAY ════════
+    # 🔴 The banner used to print "(a real, empty result — not a missing
+    # path)" on ANY zero, including a stream name that does not exist. That is
+    # r39's failure inside the sanctioned reader — the tool certifying that its
+    # own absence is the tape's answer — and 14 modules import it.
+    class StreamS3(ShapeS3):
+        """Adds the Delimiter listing so the reader can discover real streams."""
+
+        REAL = ("indicator_series", "derived_plan_tick", "ohlc")
+
+        def get_paginator(self, _name):
+            outer = self
+
+            class P:
+                def paginate(self, Bucket=None, Prefix=None, Delimiter=None):
+                    if Delimiter == "/":
+                        yield {"CommonPrefixes":
+                               [{"Prefix": "raw/%s/" % n} for n in outer.REAL]}
+                    else:
+                        yield {"Contents": [{"Key": k} for k in outer.OBJ
+                                            if k.startswith(Prefix)]}
+            return P()
+
+    ws._STREAMS_CACHE = None
+    _r, m11 = ws.load_series("derived_indicator_series", ["2026-09-18"],
+                             s3=StreamS3())
+    _b = m11.banner()
+    check("V11", len(_r) == 0 and "NO SUCH STREAM" in _b
+          and "TOOL FAULT" in _b
+          and "a real, empty result" not in _b,
+          "a nonexistent stream is named as a TOOL FAULT and is NOT certified "
+          "as a real empty result")
+    # ⚠️ AND IT NAMES THE NEAR MATCH, because the prefixes are inconsistent
+    # (`derived_plan_tick` but plain `indicator_series`) so the caller has no
+    # rule to remember and the guess is a coin flip.
+    # ⚠️ ASSERTED ON THE SUGGESTION BLOCK EXISTING, NOT ON A SUBSTRING OF THE
+    # WHOLE BANNER. The first cut did `"indicator_series" in banner.split(
+    # "Did you mean:")[-1]` — and against the OLD banner, which has no such
+    # marker, `split` returns the WHOLE string, which contains
+    # `indicator_series` inside `derived_indicator_series`. **It passed at
+    # HEAD, on a reader with no suggestion at all.** Caught by running the
+    # born-red pass instead of trusting it (§0.4).
+    _sug = _b.split("Did you mean:")[-1].strip().rstrip("?") if "Did you mean:" in _b else ""
+    check("V11b", _sug == "indicator_series",
+          f"it names the near match EXACTLY rather than only refusing: {_sug!r}")
+    # 🔑 CONTROL — a REAL stream that is simply empty on this date must STILL
+    # read as a real empty result. Without this, the fix could have turned
+    # every legitimate empty day into a manufactured tool fault.
+    ws._STREAMS_CACHE = None
+    _r2, m11c = ws.load_series("ohlc", ["2099-01-01"], s3=StreamS3())
+    check("V11c", len(_r2) == 0 and "NO SUCH STREAM" not in m11c.banner()
+          and "a real, empty result" in m11c.banner(),
+          "CONTROL — a REAL stream with no objects on the date is still a real "
+          "empty result, not a tool fault")
 
     print("")
     if FAILS:
