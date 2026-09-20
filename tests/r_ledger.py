@@ -1,6 +1,34 @@
 #!/usr/bin/env python3
 """
-tests/r_ledger.py  v1.7
+tests/r_ledger.py  v1.8
+v1.8  2026-09-20  r397 / D1 - THE EXIT TABLE COULD NOT AGGREGATE, AND IT
+RENDERED AS A FULL, HEALTHY REPORT. `render()` grouped on the RAW
+`exit_reason`, and every reason our engines emit carries a per-trade tail, so
+over 2026-09-14..09-18 it printed 135 rows for 148 trades - 134 distinct raw
+strings, nearly all n=1 - under the heading "where the R actually gets made or
+given back". A table with one trade per row cannot answer that question.
+  🔑 `exit_reason_family()` IS ADDED HERE AND IS THE ONE DEFINITION.
+`exit_replay.stop_of_reason` had a second, private copy; [[GEX.2]] landed one
+revision earlier for exactly that shape, so this file - stdlib-only, already
+imported BY exit_replay - owns it and exit_replay calls it.
+  🔑 THE THREE PER-TRADE PARTS WERE READ OFF THE EMITTERS, not guessed from
+the strings: ` pnl=` (exit_engine 1170/1254/1272/1557/1612/1668/2090/2190/2196
+and management.py:242), `: ` (the structure/stop-respected/breach narratives),
+and a TRAILING `_n%` - `exit_engine.py:1169` computes it as
+`1 - stop_prem/entry_prem` and `management.py:242` as `abs(stop_p-entry)/entry`,
+both functions of the row's own fill, which is why the tape carries
+hard_stop_19/20/24/25/26% for ONE rule.
+  ⚠️ `tcs_stop_15%_of_credit` IS NOT FOLDED - its `15%` is a BASIS, not a
+trailing parameter, and [[RPL.2]] already ruled it must never be replayed as a
+premium stop. The rule is structural, so the basis survives with nothing named
+in a list.
+  🔴 THE SELFTEST FIXTURES WERE CLEAN TOKENS AND COULD NOT FAIL. They read
+`orb_trail_stop`, `premium_stop`, `hard_close` - strings no engine has ever
+emitted - so the format that breaks the grouping never reached the test. Every
+fixture now carries a REAL tape string, and 16 family cases plus a
+five-distinct-strings-one-rule assertion are mutation-proven red four ways.
+  ⚠️ THE COLLAPSE IS NEVER SILENT: a `raw` column per row and a totals line
+state how many distinct raw strings stand behind each rule.
 v1.7  2026-09-10  r344 - `is_credit()`: the flag first, `credit_received > 0`
 as the fallback. `is_short_position` had NO WRITER anywhere until r343, so
 every row already in the book carries the schema default 0 and every credit
@@ -127,6 +155,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sqlite3
 import sys
 from collections import defaultdict
@@ -134,6 +163,67 @@ from collections import defaultdict
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DB = os.path.join(os.path.expanduser("~"), "options-trader", "trades.db")
 MIN_N = 10
+
+# ── EXIT-REASON FAMILY — THE ONE DEFINITION, r397 ────────────────────────────
+# 🔴 THE EXIT TABLE COULD NOT AGGREGATE, AND IT RENDERED AS A FULL REPORT.
+# `render()` grouped on the RAW `exit_reason`, and every reason our engines
+# emit carries a PER-TRADE TAIL. Measured 2026-09-14..09-18: **134 distinct
+# values over 148 closed trades**, so the table printed ~70 rows of n=1 under
+# the heading *"where the R actually gets made or given back"*. A table with
+# one trade per row cannot answer that question, and nothing on the page said
+# so — the plausible-silence class this repo keeps finding in its own tools.
+#
+# 🔑 THE THREE PER-TRADE PARTS ARE READ OFF THE EMITTERS, NOT GUESSED FROM THE
+# STRINGS (WA §0.1). Every site was opened before this function was written:
+#   · ` pnl=…`  — appended by `execution/exit_engine.py` at 1170, 1254, 1272,
+#     1557, 1612, 1668, 2090, 2190, 2196 and by `strategy/management.py:242`.
+#   · `: …`     — the structure/stop-respected/breach arms append a live price
+#     narrative (`orb_structure_stop: 1m close 347.62 above …`).
+#   · a TRAILING `_<n>%` on a stop token — `exit_engine.py:1169` computes
+#     `floor_pct = 1 - (stop_prem / entry_prem)` and `management.py:242`
+#     computes `abs(stop_p - entry) / entry`. **Both are functions of the
+#     row's own fill**, which is why the tape carries hard_stop_19%, _20%,
+#     _24%, _25% and _26% for ONE rule. `management.py:241` is the proof in
+#     the code's own shape: `name` is the rule and `_{floor_pct:.0%}` is
+#     decoration appended to it.
+#
+# ⚠️ `tcs_stop_15%_of_credit` IS NOT FOLDED, and that is deliberate. Its `15%`
+# is not TRAILING — it names a different BASIS (15% of the credit received,
+# not of premium), which [[RPL.2]] already ruled must never be replayed as a
+# premium stop. The rule is structural — fold a trailing `_<n>%` — so a basis
+# suffix survives it without anything having to be named in a list.
+#
+# ⚠️ AND THE COLON IS ANCHORED ON `": "`, NOT ON A BARE `:`. `hard_close_15:45_ET`
+# is a STABLE token with no per-trade part at all; splitting on a bare colon
+# truncates it to `hard_close_15`, which then reads like a percentage-bearing
+# stop name. That truncation is live today in `exit_replay.stop_of_reason`
+# and is why the 2026-09-20 brief's table carries a `hard_close_15` row.
+#
+# 🔴 THE COLLAPSE IS NEVER SILENT. `render()` prints the number of distinct RAW
+# strings behind every family row, so a fold can be SEEN rather than trusted —
+# and a future rule whose trailing percent is genuinely part of its identity
+# shows up as a family with an implausible raw count instead of disappearing.
+_REASON_TAIL = re.compile(r"\s+pnl=|:\s")
+_REASON_PCT = re.compile(r"_\d{1,3}%$")
+
+
+def exit_reason_family(reason) -> str:
+    """The RULE an exit ran under, with the per-trade decoration removed.
+
+    'hard_stop_20% pnl=-22.8%'                     -> 'hard_stop'
+    'orb_structure_stop: 1m close 347.62 above …'  -> 'orb_structure_stop'
+    'tcs_stop_15%_of_credit: 0.51 >= 0.51 …'       -> 'tcs_stop_15%_of_credit'
+    'hard_close_15:45_ET'                          -> 'hard_close_15:45_ET'
+    ''                                             -> '?'
+    """
+    raw = str(reason or "").strip()
+    if not raw:
+        return "?"
+    tok = _REASON_TAIL.split(raw, 1)[0].strip().rstrip(":")
+    if not tok:
+        return "?"
+    return _REASON_PCT.sub("", tok) or tok
+
 
 # The cuts the retired excursion report used, carried over UNCHANGED so the
 # two tools' numbers are comparable while both still run. 0.00 = never better
@@ -367,8 +457,11 @@ def render(rows: list) -> int:
         side = (r.get("option_side") or "?").lower()
         groups[(r.get("strategy") or "?", side)].append(r)
     exits = defaultdict(list)
+    exit_raw = defaultdict(set)
     for r in rows:
-        exits[r.get("exit_reason") or "?"].append(r)
+        _fam = exit_reason_family(r.get("exit_reason"))
+        exits[_fam].append(r)
+        exit_raw[_fam].add(str(r.get("exit_reason") or "?"))
 
     print("=" * 78)
     print("  R LEDGER — dollars only. R = avg win / |avg loss|. breakeven WR = 1/(1+R)")
@@ -412,14 +505,25 @@ def render(rows: list) -> int:
               f"{_col(_fmt(s['expectancy'], True), 8)} "
               f"{_col(_fmt(s['capture']), 6)}")
     print()
-    print("  BY EXIT REASON — where the R actually gets made or given back")
-    print(f"  {'exit_reason':<30}{'n':>4} {'win%':>5} {'net':>10} {'capture':>8} {'giveback':>10}")
+    _n_raw = sum(len(v) for v in exit_raw.values())
+    print("  BY EXIT RULE — where the R actually gets made or given back")
+    print(f"  {'exit rule (family)':<26}{'n':>4} {'win%':>5} {'net':>10} "
+          f"{'capture':>8} {'giveback':>10}{'raw':>5}")
     print("  " + "-" * 70)
     for reason, rs in sorted(exits.items(), key=lambda kv: -bucket_stats(kv[1])["net"]):
-        s = bucket_stats(rs)
-        wr = 100.0 * s["wins"] / s["n"] if s["n"] else 0
-        print(f"  {reason[:30]:<30}{s['n']:>4} {wr:>4.0f}% {_fmt(s['net'], True):>10} "
-              f"{_fmt(s['capture']):>8} {_fmt(s['giveback'], True):>10}")
+        st = bucket_stats(rs)
+        wr = 100.0 * st["wins"] / st["n"] if st["n"] else 0
+        print(f"  {reason[:26]:<26}{st['n']:>4} {wr:>4.0f}% {_fmt(st['net'], True):>10} "
+              f"{_fmt(st['capture']):>8} {_fmt(st['giveback'], True):>10}"
+              f"{len(exit_raw[reason]):>5}")
+    # 🔴 THE COLLAPSE IS STATED, ALWAYS, INCLUDING WHEN IT DID NOTHING.
+    # "these reasons carried no per-trade tail" and "I did not normalise" must
+    # not render the same (WA §0.5). The `raw` column above carries the same
+    # fact per row, so a fold can be audited line by line rather than trusted.
+    print(f"  {len(exits)} rule(s) from {_n_raw} distinct raw exit_reason "
+          f"string(s) over {len(rows)} trade(s).")
+    print("     Per-trade tails (` pnl=…`, `: …`) and a trailing stop `_n%` are")
+    print("     stripped; see exit_reason_family() for the emitters it reads.")
     render_two_population(rows)
     print()
     print("  ⚠️ Every number above is descriptive. Nothing here sizes or gates")
@@ -433,15 +537,15 @@ def selftest() -> int:
         # long winner: entry 1.00 -> exit +$150, MFE prem 3.00 => MFE$=200, capture .75
         dict(pnl_usd=150.0, entry_premium=1.0, mfe_premium=3.0, mae_premium=0.8,
              contracts=1, is_short_position=0, strategy="ORB", option_side="call",
-             exit_reason="orb_trail_stop", status="closed"),
+             exit_reason="orb_trail_stop pnl=8.0%", status="closed"),
         # long loser
         dict(pnl_usd=-50.0, entry_premium=1.0, mfe_premium=1.1, mae_premium=0.5,
              contracts=1, is_short_position=0, strategy="ORB", option_side="call",
-             exit_reason="premium_stop", status="closed"),
+             exit_reason="premium_stop_15% pnl=-16.1%", status="closed"),
         # SHORT credit winner: entry 2.00, premium fell to 0.50 -> MFE$ = 150
         dict(pnl_usd=120.0, entry_premium=2.0, mfe_premium=2.4, mae_premium=0.5,
              contracts=1, is_short_position=1, strategy="SweepCreditSpread",
-             option_side="put", exit_reason="hard_close", status="closed"),
+             option_side="put", exit_reason="hard_close_15:45_ET", status="closed"),
     ]
     ok = True
     mfe, mae = position_dollars(rows[0])
@@ -462,14 +566,15 @@ def selftest() -> int:
     never = dict(pnl_usd=-300.0, entry_premium=1.0, mfe_premium=1.0,
                  mae_premium=0.2, contracts=1, is_short_position=0,
                  strategy="ORB", option_side="call",
-                 exit_reason="orb_structure_stop", status="closed")
+                 exit_reason=("orb_structure_stop: 1m close 347.62 above "
+                              "impulsive-candle high 347.46"), status="closed")
     gave  = dict(pnl_usd=-40.0, entry_premium=1.0, mfe_premium=1.60,
                  mae_premium=0.6, contracts=1, is_short_position=0,
                  strategy="ORB", option_side="call",
-                 exit_reason="orb_trail_stop", status="closed")
+                 exit_reason="orb_trail_stop pnl=-4.7%", status="closed")
     blind = dict(pnl_usd=-500.0, entry_premium=1.0, contracts=1,
                  is_short_position=0, strategy="ORB", option_side="call",
-                 exit_reason="hard_close", status="closed")   # NO excursion cols
+                 exit_reason="hard_close_15:45_ET", status="closed")  # NO excursion cols
 
     f_never, f_gave, f_blind = fav_frac(never), fav_frac(gave), fav_frac(blind)
     # never traded better than entry -> exactly 0.0, not None
@@ -497,6 +602,54 @@ def selftest() -> int:
     short_ok = fav_frac(rows[2])
     short_bad = fav_frac(dict(rows[2], is_short_position=0))
     ok &= short_ok is not None and short_bad is not None and short_ok != short_bad
+
+    # ── r397: THE EXIT-RULE FAMILY ────────────────────────────────────────
+    # 🔴 THE FIXTURES ABOVE NOW CARRY REAL TAPE STRINGS, AND THAT IS THE FIX.
+    # Until r397 they were clean tokens — `orb_trail_stop`, `premium_stop`,
+    # `hard_close` — none of which any engine has ever emitted. The format
+    # that breaks the grouping could not reach the test, so the selftest
+    # passed on a table that could not aggregate. That is WA §0.4 exactly: a
+    # fixture built from the author's own assumption cannot fail. Every string
+    # below was READ OFF THE TAPE (raw/trades 2026-09-14..09-18).
+    _fam_cases = [
+        # (raw string as the engines emit it, the rule it ran under)
+        ("hard_stop_20% pnl=-22.8%", "hard_stop"),
+        ("hard_stop_19% pnl=-21.4%", "hard_stop"),
+        ("hard_stop_26% pnl=-31.1%", "hard_stop"),
+        ("stop_25% pnl=-25.4%", "stop"),
+        ("premium_stop_15% pnl=-16.1%", "premium_stop"),
+        ("orb_trail_stop pnl=8.0%", "orb_trail_stop"),
+        ("orb_trail_stop pnl=-0.0%", "orb_trail_stop"),
+        ("orb_fvg_trail_stop pnl=113.1%", "orb_fvg_trail_stop"),
+        ("nickel_close pnl=94.4%", "nickel_close"),
+        ("orb_structure_stop: 1m close 347.62 above impulsive-candle high "
+         "347.46", "orb_structure_stop"),
+        ("orb_stop_respected: 378.55 is beyond the low stop 378.63 by more "
+         "than 50% of the 0.12 stop it was sized on", "orb_stop_respected"),
+        ("breach: 1m close 709.16 through 709.25 pnl=-11.4%", "breach"),
+        # ⚠️ NOT FOLDED — a different BASIS, not a trailing parameter (RPL.2).
+        ("tcs_stop_15%_of_credit: 0.51 >= 0.51 (credit 0.44)",
+         "tcs_stop_15%_of_credit"),
+        # ⚠️ NOT TRUNCATED — a stable token whose colon is not a tail marker.
+        ("hard_close_15:45_ET", "hard_close_15:45_ET"),
+        ("", "?"),
+        (None, "?"),
+    ]
+    for _raw, _want in _fam_cases:
+        ok &= exit_reason_family(_raw) == _want
+
+    # 🔑 THE ONE THAT PROVES THE TABLE AGGREGATES. Five distinct raw strings
+    # for ONE rule must land in ONE bucket — this is the assertion the old
+    # clean-token fixtures could never make, and it is red against the raw
+    # grouping r397 replaced.
+    _five = ["hard_stop_19% pnl=-21.4%", "hard_stop_20% pnl=-22.8%",
+             "hard_stop_24% pnl=-25.0%", "hard_stop_25% pnl=-27.4%",
+             "hard_stop_26% pnl=-31.1%"]
+    ok &= len({exit_reason_family(r) for r in _five}) == 1
+    ok &= len(set(_five)) == 5          # the raw strings really are distinct
+    # deliberate failure: the two BASES must NOT collapse together
+    ok &= exit_reason_family("premium_stop_15% pnl=-16.1%") != \
+        exit_reason_family("tcs_stop_15%_of_credit: 0.51 >= 0.51 (credit 0.44)")
 
     print("r_ledger selftest:", "ALL PASS" if ok else "FAIL")
     if ok:

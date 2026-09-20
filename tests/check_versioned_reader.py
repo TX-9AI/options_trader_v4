@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-tests/check_versioned_reader.py  v1.1
+tests/check_versioned_reader.py  v1.2
+v1.2  2026-09-20  r397 / D2 - V9, V9b, V10 and V10b, plus SELF-COUNTING.
+V9 pins that an object read but not understood is counted and NAMED in the
+banner rather than dropped into a silent zero; V10/V10b pin that the tape has a
+sanctioned reader and that it follows the header BY NAME. All three are BORN
+RED at ff02d37 and V9b is GREEN there as a control, proving the refusal did not
+become blanket.
+  ⚠️ EVERY NEW ASSERTION IS GUARDED WITH getattr/hasattr ON PURPOSE, so against
+the pre-r397 module they FAIL rather than raise - a checker that crashes reports
+breakage rather than a finding.
+  ⚠️ AND THE TAIL NO LONGER PRINTS A HARDCODED "ALL PASS (8)", which is
+[[CHK.6]]'s shape exactly: a count that rots the moment a check is added while
+reading as authoritative. It counts itself.
 v1.1  2026-09-10  r335 - V7 and V8. The reader was passing a VersionId on
       EVERY key and `s3:GetObjectVersion` is a permission control does not
       hold, so AWS denied all 10,741 objects - including CURRENT ones it could
@@ -41,7 +53,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 FAILS = []
 
 
+RAN = []
+
+
 def check(name, ok, detail=""):
+    # ⚠️ r397 — SELF-COUNTING. The tail printed a HARDCODED "ALL PASS (8)",
+    # which is [[CHK.6]]'s shape: a number that rots the moment a check is
+    # added and reads as authoritative while it does. It counts itself now.
+    RAN.append(name)
     print("  {:<4} {}  {}".format(name, "PASS" if ok else "FAIL", detail))
     if not ok:
         FAILS.append(name)
@@ -178,11 +197,108 @@ def main():
           "read={} bad={} banner-has-error={}".format(
               mb.read, mb.bad, "AccessDenied" in mb.banner()))
 
+    # ══ r397 — THE RECORD SHAPE. load_series RETURNED A SILENT ZERO. ══════
+    # 🔴 WHAT THESE PIN. `raw/ohlc` stores a whole session as ONE CSV STRING
+    # in `record`, and `load_series` collected only when `record` was a LIST,
+    # with no `else`. So `load_series("ohlc", ...)` returned 0 rows while its
+    # banner read "15 object(s) listed, 15 read" and `meta.error` was empty —
+    # the deepest corpus this project owns, 54 sessions back to 2026-07-08,
+    # silently unreadable through the sanctioned loader.
+    # ⚠️ EVERY ASSERTION BELOW IS GUARDED WITH getattr/hasattr ON PURPOSE.
+    # Against the pre-r397 module these must FAIL, not raise: a checker that
+    # crashes reports breakage rather than a finding, and the two get
+    # triaged differently.
+    class ShapeS3:
+        """`Contents` paginator — the plain (non-versioned) read path.
+
+        One CSV-string record under `ohlc` and one list record under
+        `indicator_series`, so the refusal and the control share a fixture.
+        """
+
+        CSV = ("timestamp,open,high,low,close,volume\n"
+               "2026-09-18T09:30:00-04:00,547.6,548.82,544.0,545.56,1918319.0\n"
+               "2026-09-18T09:31:00-04:00,545.94,548.73,545.16,548.485,67262.67\n")
+
+        OBJ = {
+            "raw/ohlc/dt=2026-09-18/sym=AMD/bars.json": {
+                "record": CSV, "dt": "2026-09-18", "symbol": "AMD"},
+            "raw/indicator_series/dt=2026-09-18/sym=AMD/s.json": {
+                "record": [{"ts_epoch": 1, "adx": 22.0},
+                           {"ts_epoch": 2, "adx": 23.0}],
+                "dt": "2026-09-18", "symbol": "AMD"},
+        }
+
+        def get_paginator(self, _name):
+            outer = self
+
+            class P:
+                def paginate(self, Bucket=None, Prefix=None):
+                    yield {"Contents": [{"Key": k} for k in outer.OBJ
+                                        if k.startswith(Prefix)]}
+            return P()
+
+        def get_object(self, Bucket=None, Key=None, VersionId=None):
+            env = self.OBJ[Key]
+
+            class B:
+                @staticmethod
+                def read():
+                    return json.dumps(env).encode()
+            return {"Body": B()}
+
+    sh = ShapeS3()
+    r9, m9 = ws.load_series("ohlc", ["2026-09-18"], s3=sh)
+    _flagged = getattr(m9, "unhandled", 0)
+    check("V9", len(r9) == 0 and _flagged == 1
+          and "NOT PARSED" in m9.banner(),
+          "an object READ but not understood is counted and NAMED in the "
+          "banner, never dropped into a silent zero: rows={} unhandled={} "
+          "banner-says-so={}".format(len(r9), _flagged,
+                                     "NOT PARSED" in m9.banner()))
+
+    # CONTROL — the refusal must not have become blanket. A LIST record still
+    # loads, and must NOT be flagged.
+    r9b, m9b = ws.load_series("indicator_series", ["2026-09-18"], s3=sh)
+    check("V9b", len(r9b) == 2 and getattr(m9b, "unhandled", 0) == 0
+          and "NOT PARSED" not in m9b.banner(),
+          "CONTROL — a normal list-record series is untouched and unflagged: "
+          "rows={} unhandled={}".format(len(r9b), getattr(m9b, "unhandled", 0)))
+
+    if not hasattr(ws, "load_ohlc"):
+        check("V10", False, "warehouse_source.load_ohlc does not exist — the "
+                            "tape has no sanctioned reader")
+        check("V10b", False, "load_ohlc does not exist")
+    else:
+        r10, m10 = ws.load_ohlc(["2026-09-18"], s3=sh)
+        _ok = (len(r10) == 2
+               and r10[0]["symbol"] == "AMD" and r10[0]["dt"] == "2026-09-18"
+               and abs((r10[0]["open"] or 0) - 547.6) < 1e-9
+               and abs((r10[1]["close"] or 0) - 548.485) < 1e-9
+               and isinstance(r10[0]["open"], float))
+        check("V10", _ok,
+              "the tape parses into typed rows carrying their own symbol and "
+              "date: n={} first={}".format(len(r10), r10[0] if r10 else None))
+        # ⚠️ THE HEADER IS READ FROM THE FILE, NOT ASSUMED. A reordered header
+        # must follow the NAMES, or a hardcoded order silently puts plausible
+        # numbers in the wrong columns — [[RPL.3]]'s shape exactly.
+        class Swapped(ShapeS3):
+            OBJ = {"raw/ohlc/dt=2026-09-18/sym=AMD/bars.json": {
+                "record": ("volume,close,low,high,open,timestamp\n"
+                           "1918319.0,545.56,544.0,548.82,547.6,"
+                           "2026-09-18T09:30:00-04:00\n"),
+                "dt": "2026-09-18", "symbol": "AMD"}}
+        r10b, _m = ws.load_ohlc(["2026-09-18"], s3=Swapped())
+        check("V10b", len(r10b) == 1
+              and abs((r10b[0]["open"] or 0) - 547.6) < 1e-9
+              and abs((r10b[0]["volume"] or 0) - 1918319.0) < 1e-9,
+              "a REORDERED header is followed by name, not by position: "
+              "{}".format(r10b[0] if r10b else None))
+
     print("")
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (8)")
+    print("ALL PASS ({})".format(len(RAN)))
     return 0
 
 

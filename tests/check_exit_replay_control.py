@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_exit_replay_control.py  v1.0
+tests/check_exit_replay_control.py  v1.1
+v1.1  2026-09-20  r397 / D1 - C4c and C4d. C4c pins that a stable token whose
+colon is NOT a tail marker survives intact, asserted as an EXACT equality
+because a `startswith` passes against the truncated value - which is the whole
+failure being pinned. BORN RED at ff02d37, printing `hard_close_15`. C4d is the
+CONTROL: every recorded hard-stop percentage is still read as its own rule for
+the replay, so the report-side fold cannot leak into the stop derivation.
 v1.0  2026-09-19  r390 / RPL.2 + RPL.3 — THE POSITIVE CONTROL ASSERTED A STOP
       91% OF TRADES NEVER RAN UNDER, PRINTED ZERO ANYWAY, AND WAS HIDING AN
       ORIENTATION REGRESSION SHIPPED IN THE SAME REVISION.
@@ -107,6 +113,31 @@ ck("C4", ok4, f"every non-premium rule refuses BY NAME: {[t for _, t in named]}"
 
 ck("C4b", er.stop_of_reason("")[1] == "<no exit_reason>",
    f"a missing reason is named too, not silently skipped: {er.stop_of_reason('')}")
+
+# 🔴 C4c — r397. THE NAMED TOKEN MUST NOT BE TRUNCATED AT A BARE COLON.
+# Until r397 `stop_of_reason` did `.split(":")[0]`, which cut the real rule
+# `hard_close_15:45_ET` down to `hard_close_15` — a rule renamed into
+# something that reads like a percentage-bearing stop. It is not cosmetic:
+# that string is what the NOT-APPLICABLE tally prints and what a reader
+# carries away, and it reached the 2026-09-20 Saturday brief's exit table.
+# ⚠️ ASSERTED AS AN EXACT EQUALITY, NOT A `startswith`. A prefix test passes
+# against the truncated value, which is the whole failure being pinned.
+ck("C4c", er.stop_of_reason("hard_close_15:45_ET")[1] == "hard_close_15:45_ET",
+   f"a stable token whose colon is NOT a tail marker survives intact: "
+   f"{er.stop_of_reason('hard_close_15:45_ET')[1]!r}")
+
+# 🔴 C4d — r397. ONE RULE, MANY RECORDED PERCENTAGES, ONE NAME.
+# `exit_engine.py:1169` computes the hard-stop label from the row's own fill
+# (`1 - stop_prem/entry_prem`), so the tape carries hard_stop_19/20/24/25/26%
+# for a single rule. If these ever stop collapsing, the exit tables go back to
+# printing one row per trade, which is the [[RPL.1]]-class defect r397 fixed.
+_fams = {er.stop_of_reason(f"hard_stop_{p}% pnl=-{p + 2}.0%")[1]
+         for p in (19, 20, 24, 25, 26)}
+_prem = {er.stop_of_reason(f"hard_stop_{p}% pnl=-{p + 2}.0%")[0]
+         for p in (19, 20, 24, 25, 26)}
+ck("C4d", _prem == {"premium"},
+   f"every recorded hard-stop percentage is still READ AS ITS OWN RULE for "
+   f"the replay ({_prem}) — the fold is for the report, never the replay")
 
 
 # ------------------------------------------------------------------------- C5

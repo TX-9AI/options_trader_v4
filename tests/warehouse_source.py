@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """
-tests/warehouse_source.py  v1.6
+tests/warehouse_source.py  v1.7
+v1.7  2026-09-20  r397 / D2 - THE SANCTIONED LOADER RETURNED A SILENT ZERO
+FOR THE DEEPEST CORPUS THIS PROJECT OWNS. `load_series` collected only when
+`record` was a LIST, with no `else`. `raw/ohlc` stores a whole session as ONE
+CSV STRING, so `load_series("ohlc", ...)` returned 0 rows while its banner read
+"15 object(s) listed, 15 read" and `meta.error` was empty - measured, against
+1,758 rows from `indicator_series` on the same call. 54 sessions of tape back
+to 2026-07-08, unreadable through the one path WA 36a points readers at, with
+nothing on the page saying so.
+  🔑 TWO HALVES, BECAUSE EITHER ALONE MOVES THE DEAD END. `Meta.unhandled`
+counts objects READ BUT NOT UNDERSTOOD and the banner names the TYPE it saw;
+and `load_ohlc()` gives the tape a real reader.
+  ⚠️ THE REFUSAL IS STRUCTURAL, NOT KEYED ON A TABLE NAME, so a future table
+storing a third shape is loud on its first read instead of silent forever.
+  ⚠️ AND `load_ohlc` READS THE HEADER FROM THE FILE rather than assuming a
+column order - a hardcoded order that goes stale puts plausible numbers in the
+wrong columns, which is [[RPL.3]]'s shape. V10b pins it with a reordered
+header.
 v1.6  2026-09-10  r334 - TWO DEFECTS IN r332's READER, both found by running it.
 (1) It passed a VersionId on EVERY key, and passing one AT ALL requires
 `s3:GetObjectVersion`, which day-trader-control does not hold - so AWS denied
@@ -88,6 +105,9 @@ class Meta:
         self.severed = 0
         self.first_error = ""
         self.error = ""
+        # 🔴 r397 — OBJECTS READ BUT NOT UNDERSTOOD. See load_series().
+        self.unhandled = 0
+        self.unhandled_kind = ""
 
     def banner(self) -> str:
         if self.error:
@@ -97,10 +117,28 @@ class Meta:
                 f"{self.listed} object(s) listed, {self.read} read"
                 + (f", {self.bad} unreadable" if self.bad else "")
                 + (", %d behind a delete marker" % self.severed if self.severed else "")
+                + ("\n     🔴 %d OBJECT(S) READ BUT NOT PARSED — record was a "
+                   "%s, not a list of rows. THIS LOADER RETURNED NOTHING FOR "
+                   "THEM." % (self.unhandled, self.unhandled_kind or "?")
+                   if self.unhandled else "")
                 + ("\n     🔴 FIRST ERROR: " + self.first_error
                    if self.first_error else "")
                 + ("  (a real, empty result — not a missing path)"
                    if self.listed == 0 else ""))
+
+
+def _num_or_none(v):
+    """float(v), or None when the cell is absent/blank/unparseable/NaN.
+
+    ⚠️ r397 — NaN IS MAPPED TO None DELIBERATELY. A NaN propagates silently
+    through every downstream sum and comparison and renders as a plausible
+    result; None does not, because callers must decide what to do with it.
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if f != f else f
 
 
 def client():
@@ -289,7 +327,25 @@ def load_trades(dates, s3=None):
 
 
 def load_series(table, dates, symbols=None, s3=None):
-    """Rows of one manifold series table (batched objects). -> (rows, Meta)."""
+    """Rows of one manifold series table (batched objects). -> (rows, Meta).
+
+    🔴 r397 — AN OBJECT THIS CANNOT PARSE IS NOW COUNTED AND NAMED IN THE
+    BANNER. It used to be dropped by a bare `if isinstance(rec, list)` with no
+    `else`, and that is the plausible-silence class this repo keeps finding in
+    its own instruments (WA §0.5).
+    🔑 MEASURED, NOT HYPOTHETICAL. `raw/ohlc` stores a whole session as ONE
+    CSV STRING in `record`, so `load_series("ohlc", ...)` returned **0 rows**
+    while its banner read *"15 object(s) listed, 15 read"* and `meta.error`
+    was empty. The same call on `indicator_series` returns 1,758. The tape is
+    the deepest corpus this project has — 54 sessions back to 2026-07-08 — and
+    the sanctioned loader handed back nothing for it and said nothing.
+    ⚠️ THE REFUSAL IS STRUCTURAL, NOT KEYED ON THE TABLE NAME. A list is
+    parsed; anything else is reported by its TYPE. So a future table that
+    stores some third shape is loud on its first read rather than silent
+    forever, and nothing has to be added to a list that later rots.
+    🔑 AND THE TAPE HAS A REAL READER NOW — `load_ohlc()` below. Refusing
+    loudly without supplying the working path would just move the dead end.
+    """
     meta = Meta(f"{table} {dates[0]}..{dates[-1]}")
     s3 = s3 or client()
     rows = []
@@ -297,6 +353,58 @@ def load_series(table, dates, symbols=None, s3=None):
         rec = env.get("record")
         if isinstance(rec, list):
             rows.extend(r for r in rec if isinstance(r, dict))
+        elif rec is not None:
+            meta.unhandled += 1
+            if not meta.unhandled_kind:
+                meta.unhandled_kind = type(rec).__name__
+    return rows, meta
+
+
+def load_ohlc(dates, symbols=None, s3=None):
+    """Bars from `raw/ohlc`, which stores a session as ONE CSV STRING.
+
+    -> (rows, Meta). Each row: symbol, dt, timestamp, open, high, low, close,
+    volume — numerics as float, `None` where the cell is absent or unparseable.
+
+    🔑 WHY THIS IS A SEPARATE FUNCTION AND NOT A BRANCH INSIDE load_series.
+    `load_series` is documented as "one manifold series table (batched
+    objects)" and every such table stores a LIST of row dicts. The tape is a
+    different shape on disk, so it gets a reader that says so in its name
+    rather than a special case keyed on the string "ohlc" — which is the
+    name-list that rots (the same argument `RiskManager.size_for` makes for
+    choosing geometry by parameters rather than by naming a strategy).
+    ⚠️ THE HEADER IS READ FROM THE FILE, NEVER ASSUMED. The pusher's column
+    order is not this module's to guarantee, and a hardcoded order that goes
+    stale produces plausible numbers in the wrong columns — which is worse
+    than a parse error and is exactly [[RPL.3]]'s shape.
+    ⚠️ A ROW THAT WILL NOT PARSE IS COUNTED IN `meta.bad`, not skipped
+    silently, so a partly-unreadable session cannot read as a short one.
+    """
+    import csv as _csv
+    import io as _io
+    meta = Meta(f"ohlc {dates[0]}..{dates[-1]}")
+    s3 = s3 or client()
+    rows = []
+    _num = ("open", "high", "low", "close", "volume")
+    for env in _envelopes(s3, "ohlc", dates, meta, symbols):
+        rec = env.get("record")
+        if not isinstance(rec, str):
+            meta.unhandled += 1
+            if not meta.unhandled_kind:
+                meta.unhandled_kind = type(rec).__name__
+            continue
+        sym = env.get("symbol") or ""
+        dt = env.get("dt") or ""
+        try:
+            rdr = _csv.DictReader(_io.StringIO(rec))
+            for raw in rdr:
+                row = {"symbol": sym, "dt": dt,
+                       "timestamp": (raw.get("timestamp") or "").strip()}
+                for c in _num:
+                    row[c] = _num_or_none(raw.get(c))
+                rows.append(row)
+        except Exception:                                       # noqa: BLE001
+            meta.bad += 1
     return rows, meta
 
 

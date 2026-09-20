@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/exit_replay.py  v1.6
+tests/exit_replay.py  v1.7
+v1.7  2026-09-20  r397 / D1 - `stop_of_reason` TRUNCATED A REAL RULE AND
+CARRIED A SECOND PARSER. Its token line did `.split(":")[0]`, which cuts
+`hard_close_15:45_ET` - a stable token with NO per-trade part - down to
+`hard_close_15`, rendering it as though it carried a percentage. That
+truncation reached the 2026-09-20 Saturday brief, whose exit table carries a
+`hard_close_15` row for it. It now calls `r_ledger.exit_reason_family`, the one
+definition, which anchors on `": "` rather than a bare colon.
+  ⚠️ THE FOLD IS FOR THE REPORT AND NEVER FOR THE REPLAY. `_STOP_RE` still
+matches FIRST, so every recorded hard-stop percentage is replayed under its own
+stop. `check_exit_replay_control` C4d is the control that pins it.
 v1.6  2026-09-19  🔴 IT REPLAYED NOTHING, AND HAD NEVER REPLAYED ANYTHING FROM
 S3. Measured 2026-09-19 over 2026-09-14..09-18: every symbol-day reported
 "N object(s), 0 quote(s) kept" -- 14 of 14 -- and a bounded single-date run
@@ -160,7 +170,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # COMPILED, PASSED REVIEW AND DID NOTHING. Caught by the selftest's own
 # credit-recovery assertion going red, not by reading.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from r_ledger import _f, DEFAULT_DB  # noqa: E402
+from r_ledger import _f, DEFAULT_DB, exit_reason_family  # noqa: E402
 
 DEFAULT_FEED = os.path.join(os.path.expanduser("~"), "options-trader", "data",
                             "feed_store.db")
@@ -225,8 +235,19 @@ def stop_of_reason(reason):
         pct = int(m.group(1)) / 100.0
         if 0.0 < pct < 1.0:
             return "premium", pct
-    tok = re.split(r"\s+pnl=", raw)[0].split(":")[0].strip()
-    return None, (tok or "<unparsed>")
+    # 🔴 r397 — THE TOKEN COMES FROM THE ONE DEFINITION NOW, AND THE OLD ONE
+    # TRUNCATED A REAL RULE. This line read
+    #     re.split(r"\s+pnl=", raw)[0].split(":")[0].strip()
+    # and `.split(":")[0]` cuts `hard_close_15:45_ET` down to `hard_close_15`
+    # — a stable token with no per-trade part at all, rendered as though it
+    # carried a percentage. That truncation reached the 2026-09-20 Saturday
+    # brief, whose exit table carries a `hard_close_15` row for it.
+    # 🔑 AND A SECOND PARSER WAS THE REAL DEFECT. [[GEX.2]] landed one revision
+    # earlier for exactly this shape — `gex_from_chains` had reimplemented a
+    # production quantity — so this does not get a private copy. `r_ledger`
+    # owns `exit_reason_family`, this file already imports from it, and the
+    # dependency runs the right way (r_ledger is stdlib-only).
+    return None, (exit_reason_family(raw) or "<unparsed>")
 
 
 TRAILS = [(0.25, 0.10), (0.25, 0.15), (0.50, 0.15), (0.50, 0.25), (0.75, 0.25)]
