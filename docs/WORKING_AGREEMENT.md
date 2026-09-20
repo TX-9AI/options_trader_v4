@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.6 · 2026-09-18 — §0 plus 40 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.7 · 2026-09-20 — §0 plus 41 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1294,12 +1294,21 @@ any report, study, checker or menu item that only reads; query S3, the
 ledgers, the derived stores and the journals; write to `/tmp`, to a scratch
 path, or to `reports/`; build a tarball and run its gates; **bring the fleet
 or an individual box up and down, run fleet commands, bake, and start, stop
-or restart services**; and LAND a delivery the operator has read and approved
-(§38.7), **including the commit, the bake and the push that land performs**.
+or restart services**; and **BUILD a delivery and LAND it — move it out of the
+scratchpad onto the file system** (§38.7, §38.10).
+🔴 **AMENDED 2026-09-20 — STAGING AND LANDING MOVED TO CLAUDE; THE COMMIT
+NEEDS HIS EXPRESS YES.** This clause read *"LAND a delivery the operator has read and
+approved"*. His ruling: *"Yes, you can land and edit fixes on the file system,
+I retain the right to push it onto GitHub and/or out to the fleet (bake)"* and
+*"You're allowed to bake if I'm properly appraised of the imminent changes."*
+So **staging, landing, editing and PRESENTING are Claude's unprompted**, and
+**the commit to the codebase needs his express approval — which then releases
+both GitHub and the fleet** (§38.9, §38.10). ⚠️ Today's lander commits and
+pushes in one atomic run, so the yes precedes `deploy.sh` — see §38.10.
 Brought to the operator as a proposal, every time: anything that changes
 **what gets traded** (a threshold, a gate, entry or exit behaviour, size);
-**WHAT GOES INTO A COMMIT** (§38.9 — he approves the described contents, and
-that approval is what releases the land); any box **RESIZE** or other change
+**WHAT REACHES GITHUB** (§38.9 — he gets the described contents as a SUMMARY
+before the push, and his go-ahead is what releases it); any box **RESIZE** or other change
 to a box's disk; any S3 delete, restore or lifecycle change; any systemd unit
 or timer; and any push that is not part of an approved land.
 🔴 **THE BOX-LIFECYCLE HALF INVERTED ON 2026-09-12 AND THE OLD WORDING IS THE
@@ -1378,22 +1387,65 @@ want of a rule nobody had written down: *"Your permissions MUST be modified and
 accurately scoped to accomplish this work."*
 
 **GRANTED — Claude's, without asking:**
-- **The fleet.** *"When needed, you should bring up the fleet or individual
-  boxes, using the fleet script and available tags (--only, etc) to run
-  commands, bake, start, stop and restart services, and bring them back down."*
+- **The fleet's LIFECYCLE.** *"When needed, you should bring up the fleet or
+  individual boxes, using the fleet script and available tags (--only, etc) to
+  run commands, bake, start, stop and restart services, and bring them back down."*
+  ⚠️ **THE `bake` IN THAT SENTENCE NEEDS HIS EXPRESS YES (2026-09-20)** —
+  fanning a package out to the boxes is a RELEASE. Up, down, commands, start,
+  stop and restart do not. **Operating the fleet and releasing code to it are
+  two things, and only the second moved** (§38.10).
 - **S3 from control.** *"You may and should access s3 from the control to run
   studies, reports, comparisons and other things."*
-- **The commit and the bake.** *"Once you have my approval to land, the commit
-  and bake should be handled by you whenever it makes the most sense to synch
-  everything."* The timing is Claude's judgement; the contents are not.
+- **Staging, landing, editing and PRESENTING — unprompted.** *"You are
+  allowed to stage, land, edit and present proposed changes unprompted"*
+  (2026-09-20). Building a package, staging it in `/home/ubuntu`, fixing files
+  in the working trees, and bringing him a proposal he did not ask for all
+  need no yes.
+- **The push and the fan-out, ONCE EXPRESSLY APPROVED.** *"Once expressly
+  approved, you may upload it GitHub and fan it out to the fleet."* One
+  approval covers both; the timing after it is Claude's judgement (§38.10).
+  🔴 **SUPERSEDED, AND KEPT BECAUSE THE SHIFT IS THE POINT.** This read: *"The
+  commit and the bake. Once you have my approval to land, the commit and bake
+  should be handled by you whenever it makes the most sense to synch
+  everything."* The bake used to ride on an approval of the LAND; **the yes now
+  attaches to the COMMIT, and releases both destinations at once.**
 - **More checkers.** *"You may add more checkers to the land sequence, if we
   encounter a need that isn't currently met."*
 
 **RESERVED — the operator's, always:**
-- **What gets committed.** *"As far as what gets committed, that's where you
+- **What reaches GitHub.** *"As far as what gets committed, that's where you
   describe the changes to the files & THAT is the part I approve PRIOR to
-  landing them."* And: *"I always retain approval over the land — you're
-  responsible for the rest."*
+  landing them."*
+  🔴 **NARROWED 2026-09-20, THE OPERATOR'S RULING, AND THE GATE MOVED ONE STEP
+  LATER.** *"You can land packages on the disk without approval, I just retain
+  the right to a summary of changes before committing to the official tree in
+  GitHub."* So **building a package and landing it out of the scratchpad onto
+  the file system is Claude's**, and what he keeps is **BEING TOLD WHAT IS IN
+  IT BEFORE IT IS RELEASED** — to origin or to the boxes (§38.10). The
+  superseded wording — *"I always retain approval over the land — you're
+  responsible for the rest"* — is kept here rather than deleted, per r240's
+  precedent, because it is why the checkpoint exists at all.
+  ⚠️ **WHAT DID NOT MOVE IS THE ONLY PART THAT MATTERS: HE STILL READS IT
+  FIRST.** The checkpoint §38.1 keeps is a HUMAN READING THE DESCRIBED
+  CONTENTS BEFORE THEY BECOME PERMANENT, and that has caught a stale base, a
+  version with no changelog entry, a duplicate GENESIS row and a payload that
+  would have reverted a landed fix — all inside one session. The ruling moves
+  WHEN it happens, not WHETHER.
+  ⚠️ **AND A LAND IS NOW REVERSIBLE WHILE A PUSH IS NOT**, which is the
+  reasoning that makes the move safe. A landed commit that he then dislikes is
+  a local `reset`; an object on origin is in every future clone. **So the
+  summary is owed BEFORE the push and is not optional because the land already
+  happened.**
+  🔑 **HE MUST BE GIVEN THE OPPORTUNITY TO VETO.** Operator, 2026-09-20:
+  *"I must be given the opportunity to veto anything before the change is
+  committed to the codebase."* ⚠️ **THAT IS A WAIT, NOT A NOTICE** — a summary
+  sent and immediately acted on has not given him the chance (§38.10).
+  ⚠️ **AND NOTHING ELSE COUNTS AS THE YES** — not silence, not a green gate,
+  not his approval of a previous delivery (§38.1).
+  🔴 **IT EXPIRES:** *"If something changes that would void my previous
+  understanding of the change, then I need an update first to have a chance to
+  weigh in again."* An approval attaches to the contents he was SHOWN; if they
+  move, it is void and a fresh one is owed (§38.10).
 
 **REFUSED — never, by anyone:**
 - *"You are not permitted to bypass the landing script or checkers — those
@@ -1424,6 +1476,95 @@ value of the list is that a human wrote it. Propose the exact rule, in full,
 and let him land it. r362 recorded this refusal once already; r371 hit it
 again and the answer was the same both times.
 
+**38.10 — THE VETO. WHAT CLAUDE MAY DO UNPROMPTED, AND WHAT NEEDS HIS YES.**
+
+> 🔑 **THE WHOLE RULE, IN HIS OWN WORDS AND HIS OWN PREFERRED FORM:**
+> ***"ALL CHANGES MUST BE APPROVED BEFORE COMMITMENT TO THE REPO AND/OR THE
+> FLEET."***
+
+⚠️ **THAT SENTENCE IS THE RULE. EVERYTHING BELOW IT IS ELABORATION, AND IF THE
+TWO EVER DISAGREE THE SENTENCE WINS.** He offered it after watching this
+section get rewritten four times over wording: *"This could be as simple as
+'all changes must be approved before commitment to the repo and/or the fleet'.
+I didn't want to have an hourlong discussion on semantics or word choice."*
+**The detail below exists to answer questions the sentence does not, never to
+qualify it.**
+
+The longer statement it came from, 2026-09-20:
+
+> *"This is my project. I approve the changes. The approval must occur before
+> they are committed to the repo. You are allowed to stage, land, edit and
+> present proposed changes unprompted, but I must be given the opportunity to
+> veto anything before the change is committed to the codebase. Once expressly
+> approved, you may upload it GitHub and fan it out to the fleet. I may tell
+> you yes, or no, or yes but, or no and, or just hold off for a minute."*
+
+    STAGE · LAND · EDIT · PRESENT          Claude's, UNPROMPTED.
+    COMMIT TO THE CODEBASE                 needs his EXPRESS APPROVAL.
+    PUSH to GitHub + FAN OUT to the fleet  follow from that one approval.
+
+🔑 **IT IS A VETO, AND A VETO NEEDS AN OPPORTUNITY.** The obligation is not
+merely to tell him — it is to **give him the chance to say no, and to wait for
+the answer.** A summary sent and immediately acted on has not given him that
+chance and does not satisfy this section.
+⚠️ **AN EARLIER DRAFT OF THIS SECTION SAID THE GATE WAS "THE INFORMING, NOT A
+CLICK". THAT WAS WRONG AND IT WAS WRONG IN CLAUDE'S FAVOUR** — as were three
+other drafts the same evening, every one of them reading the line more
+generously than he had drawn it. **That is the pattern worth carrying, not the
+individual mistakes:** when the boundary is ambiguous, the assistant's reading
+drifts toward its own autonomy, so an ambiguous permission is resolved by
+ASKING him, never by picking the reading that lets the work continue.
+
+🔑 **ONE APPROVAL COVERS BOTH DESTINATIONS.** *"Once expressly approved, you
+may upload it GitHub and fan it out to the fleet."* He does not gate origin and
+the boxes separately; the yes that releases a delivery releases both. ⚠️ The
+fleet LIFECYCLE is untouched and needs nothing — up, down, commands, start,
+stop and restart stay Claude's (§38.9). What the yes releases is the RELEASE of
+a package, not the right to operate the fleet.
+
+🔑 **HIS ANSWER IS NOT BINARY, AND A THREAD THAT TREATS IT AS BINARY WILL GET
+IT WRONG.** *"I may tell you yes, or no, or yes but, or no and, or just hold
+off for a minute."*
+
+    yes           proceed
+    no            do not, and it is not a negotiation
+    yes but       proceed WITH his amendment — the amendment is the answer
+    no and        refused, PLUS something further he wants done
+    hold off      not a no. Wait. Do not re-ask, do not proceed, do not
+                  reinterpret the silence that follows as consent.
+
+⚠️ **"YES BUT" AND "NO AND" ARE THE TWO THAT GET FLATTENED.** Reading *"yes
+but"* as a plain yes drops his amendment; reading *"no and"* as a plain no
+drops the work he added. **Both halves of those answers are instructions.**
+
+🔴 **AND THE APPROVAL EXPIRES WHEN THE DELIVERY MOVES.** He gave this rule in
+the same conversation: *"If something changes that would void my previous
+understanding of the change, then I need an update first to have a chance to
+weigh in again."* An approval attaches to the CONTENTS HE WAS SHOWN. If they
+change, **it is void and a fresh one is owed** — judged by whether it would
+change his answer, not by diff size. **This section is itself the worked
+example: he approved a staged r398 whose §38.10 no longer matched his own
+final wording, so it was re-cut rather than pushed.**
+⚠️ [[ORB.16]] is what skipping that costs — a finding he had already said yes
+to, retracted an hour later on the full record: *"a subset is not the record."*
+
+⚠️ **THE LANDER CANNOT SPLIT COMMIT FROM PUSH, AND THAT IS WHY THE YES COMES
+BEFORE `deploy.sh` RUNS AT ALL.** `tools/deploy.sh` → `land.sh` extracts,
+gates, appends GENESIS, commits **and pushes** in ONE atomic run — the property
+§15's all-halves-or-none rollback depends on. So the thing Claude may do
+unprompted is **build the archive and stage it in `/home/ubuntu`**; running the
+lander is already the commit and the push.
+🔑 **A `--no-push` LANDER WOULD LET THE LAND HAPPEN BEFORE THE YES. PROPOSED,
+NOT TAKEN** — it touches the one script §38.9 says is added to and never worked
+around, and §15's rollback reasoning needs re-thinking for a half left
+committed and unpushed for an unbounded time.
+
+⚠️ **VOCABULARY, SO THE LEDGER DOES NOT DRIFT.** He uses *bake* for "fan it out
+to the fleet", which is **§18's meaning exactly**. `✅ BAKED` in `BACKLOG` PART
+0 keeps it: **live on the boxes.** A revision on origin that no box runs is
+`◐ PUSHED`, never `✅` — hundreds of rows already carry that sense and
+re-grading the mark would falsify every one of them.
+
 **38.7 — THE DELIVERY LOOP: THE TRANSPORT GOES, THE GATES STAY.** Operator,
 2026-09-11: *"I want to cut out the extra steps... but I wanna keep the parts
 of the landing script that were doing real work — checking for headers getting
@@ -1453,7 +1594,123 @@ remove.
 (`tools/deploy.sh`, `install_eod_v2.sh`, starting the analysis unit). They are
 exact-command rules, not a general licence: anything else still stops and asks.
 
+## 39. WORK FROM THE OPERATOR'S INTENT, NOT FROM THE WORDING.
+
+Added 2026-09-20, in his words, after this assistant spent an evening parsing
+one permission four different ways instead of asking him what he meant:
+
+> *"I didn't want to have an hourlong discussion on semantics or word choice.
+> I prefer to work from intent. Operator's intent. And you are encouraged to
+> ask any time about my intent and you may also ask yourself when proposing
+> changes 'is this change in the spirit of the operator's intent?' I try to
+> provide context of that intent in nearly every interaction we have."*
+
+**THREE THINGS FOLLOW, AND THEY ARE OBLIGATIONS RATHER THAN OFFERS.**
+
+**1. ASKING ABOUT INTENT IS CHEAP AND IS ENCOURAGED.** *"You are encouraged to
+ask any time."* A question about what he is trying to achieve costs one
+message. **Guessing costs a delivery** — and §0.2 records that the cost lands
+on him, never on the assistant.
+
+**2. THE SELF-TEST, BEFORE PROPOSING ANYTHING: *"IS THIS CHANGE IN THE SPIRIT
+OF THE OPERATOR'S INTENT?"*** It is his question, in his words, and it is
+meant to be asked of the assistant's own proposals — including the ones that
+are technically permitted. A change can satisfy every rule in this file and
+still not be the thing he wanted.
+
+**3. THE CONTEXT IS ALREADY IN THE MESSAGE — READ FOR IT.** *"I try to provide
+context of that intent in nearly every interaction."* So intent is not usually
+missing and does not usually need to be inferred; **it is usually stated and
+gets skimmed past** while the assistant optimises the literal instruction.
+
+🔴 **WHY THIS IS A SECTION AND NOT A NOTE: THE FAILURE IT NAMES HAPPENED THE
+DAY IT WAS WRITTEN.** §38.10 was drafted four times in one evening — each
+version a closer parse of his phrasing, **each one landing more generously to
+Claude than he had drawn the line** — and the whole loop was avoidable by
+asking *"what are you actually trying to protect here?"* once. He ended it
+himself with a single sentence anyone could have obtained by asking for it.
+
+⚠️ **AND IT IS THE GENERAL CASE OF A FAILURE THIS FILE ALREADY RECORDS FOUR
+TIMES.** §20's canary matched a mention instead of a definition; §21's tests
+asserted source text instead of runtime; §24's canaries pinned version strings
+instead of behaviour; §36's first gate check asserted that the right WORDS
+appeared in a header. **Every one is the same mistake — operating on the form
+of a thing instead of on what it is for** — and intent is that mistake applied
+to the operator's own instructions.
+
+⚠️ **THIS DOES NOT LICENSE SUBSTITUTING JUDGEMENT FOR INSTRUCTION, AND THE
+DISTINCTION IS THE WHOLE VALUE OF THE SECTION.** Working from intent means
+asking what he is trying to achieve **when the wording is ambiguous or when a
+literal reading would defeat the purpose.** It does NOT mean overriding a
+clear instruction because the assistant believes it knows better — that is
+§0's territory and nothing here softens it. **When intent and instruction
+appear to conflict, that is a question for him, not a decision for Claude.**
+
+🔑 **AND THE TIE-BREAKER WHEN THERE IS NO TIME TO ASK: TAKE THE READING THAT
+GIVES CLAUDE LESS.** §38.10's four drafts all erred the other way. An
+ambiguous permission resolved in the assistant's favour is a permission the
+assistant granted itself, which §38.9 refuses in its own words.
+
+---
+
 ## CHANGELOG
+
+**v5.7 — 2026-09-20 — r398 — §38.10 ADDED: THE VETO. CLAUDE STAGES, LANDS,
+EDITS AND PRESENTS UNPROMPTED; THE COMMIT NEEDS HIS EXPRESS YES.**
+Operator, 2026-09-20, final wording after several narrower ones: *"This is my
+project. I approve the changes. The approval must occur before they are
+committed to the repo. You are allowed to stage, land, edit and present
+proposed changes unprompted, but I must be given the opportunity to veto
+anything before the change is committed to the codebase. Once expressly
+approved, you may upload it GitHub and fan it out to the fleet."*
+
+    STAGE · LAND · EDIT · PRESENT          Claude's, UNPROMPTED
+    COMMIT TO THE CODEBASE                 his EXPRESS APPROVAL
+    PUSH to GitHub + FAN OUT to the fleet  follow from that one yes
+
+🔑 **A VETO NEEDS AN OPPORTUNITY, WHICH MEANS A WAIT.** The obligation is not
+to tell him — it is to give him the chance to say no and to wait for it. A
+summary sent and immediately acted on does not satisfy the section.
+🔑 **AND HIS ANSWER IS NOT BINARY:** *"yes, or no, or yes but, or no and, or
+just hold off for a minute."* §38.10 spells out all five, because **"yes but"
+and "no and" are the ones that get flattened** — reading them as plain yes/no
+drops the half of his answer that is an instruction. *"Hold off"* is not a no
+and the silence after it is not consent.
+🔴 **FOUR EARLIER DRAFTS OF §38.10 WERE WRITTEN AND DISCARDED IN ONE EVENING,
+AND EVERY ONE READ THE LINE MORE GENEROUSLY THAN HE HAD DRAWN IT** — the worst
+saying outright that the gate was *"the informing, not a click"*. The drafts
+are not preserved individually; **the pattern is, because it is the thing that
+generalises: when a permission boundary is ambiguous, the assistant's reading
+drifts toward its own autonomy, so an ambiguous permission is resolved by
+ASKING, never by taking the reading that lets the work continue.**
+🔴 **THE SECTION IS ITS OWN WORKED EXAMPLE.** He approved a staged r398 whose
+§38.10 no longer matched his final wording; it was **re-cut rather than
+pushed**, under the expiry rule he gave in the same conversation — *"if
+something changes that would void my previous understanding … I need an update
+first."*
+⚠️ **THE LANDER CANNOT SPLIT COMMIT FROM PUSH:** `land.sh` extracts, gates,
+commits **and pushes** as ONE atomic run — §15's all-halves-or-none rollback
+depends on it — so what Claude may do unprompted is build and stage the
+archive; running the lander is already the commit. A `--no-push` lander is
+**proposed, not taken**.
+🔑 **AND §38.10 NOW LEADS WITH HIS OWN ONE-LINE FORM OF THE RULE** — *"all
+changes must be approved before commitment to the repo and/or the fleet"* —
+offered after watching the section get rewritten four times over wording. **The
+sentence is the rule; the table beneath it is elaboration, and the sentence
+wins if they ever disagree.**
+🔴 **§39 ADDED: WORK FROM THE OPERATOR'S INTENT, NOT FROM THE WORDING.** His
+instruction, same conversation: *"I prefer to work from intent. Operator's
+intent… you may also ask yourself when proposing changes 'is this change in the
+spirit of the operator's intent?' I try to provide context of that intent in
+nearly every interaction."* **The failure it names happened the day it was
+written** — four drafts of one permission, all avoidable by asking once what he
+was trying to protect. ⚠️ It does NOT license substituting judgement for
+instruction (§0); when intent and instruction appear to conflict, **that is a
+question for him, not a decision for Claude.** ⚠️ And the tie-breaker when
+there is no time to ask: **take the reading that gives Claude less.**
+⚠️ **`bake` IS HIS WORD FOR "FAN IT OUT TO THE FLEET", WHICH IS §18's MEANING
+EXACTLY.** `✅ BAKED` keeps it: live on the boxes. On origin and running
+nowhere is `◐ PUSHED`, never `✅`.
 
 **v5.6 — 2026-09-18 — r388 — §25 GAINS A FIFTH ENTRY: THE LAST CONVERSATION.**
 Operator, 2026-09-18: *"Read our last conversation in full as this thread is
