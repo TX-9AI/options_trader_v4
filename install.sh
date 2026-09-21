@@ -1,6 +1,21 @@
 #!/bin/bash
 # ==========================================================================
-# install.sh  v4.1
+# install.sh  v4.2
+# v4.2 (2026-09-21) - r407 / OPS.33. THE CLONE URL, THE DOCUMENTED ONE-LINER
+#   AND THE BANNER ALL STILL SAID v3, SO THIS INSTALLER INSTALLED THE PREVIOUS
+#   GENERATION - INCLUDING WHEN RUN FROM AN otv4 BOX.
+#   🔴 `REPO` cloned options_trader_v3 and then ran THAT clone's setup_ec2.sh,
+#   so otv4 could not install itself. The unattended bootstrap never even
+#   reached this file: it curled v3's installer, which has NO SPARSE LOGIC,
+#   which is the whole mechanism behind [[OPS.18]] - sparse is applied once at
+#   install and neither REPOINT nor the bake re-runs an installer.
+#   ⚠️ THE BANNER IS PART OF THE FIX, NOT DECORATION. The v2→v3 instance of
+#   this exact defect (recorded below) was caught ONLY because a rebuild's
+#   banner printed the wrong version. Leaving it reading v3.1 would remove the
+#   one signal that has ever detected this.
+#   ⚠️ AND otv4 GAINED ITS OWN `requirements.txt` IN THE SAME REVISION, because
+#   without it `setup_ec2.sh:225` ABORTS - the reason the v3 pointer was
+#   load-bearing rather than vestigial.
 # v4.1 (2026-09-07) - r303 / DEP.8. WHAT SHIPS IS DECLARED, WHAT LANDED IS
 #   VERIFIED. `docs/` joins `tests/` as control-only. New TRADER_DIRS and
 #   _verify_trader: a SHORT checkout is fatal at install time rather than at
@@ -33,16 +48,16 @@
 #         rebuild, whose banner printed v2.5 — v2's setup_ec2.sh). Now clones
 #         options_trader_v3. Display banner v2.0 -> v3.1 (was never bumped).
 # Run on a fresh EC2:
-#   curl -fsSL https://raw.githubusercontent.com/TX-9AI/options_trader_v3/main/install.sh -o install.sh && bash install.sh
+#   curl -fsSL https://raw.githubusercontent.com/TX-9AI/options_trader_v4/main/install.sh -o install.sh && bash install.sh
 # ==========================================================================
 set -e
 
-REPO="https://github.com/TX-9AI/options_trader_v3.git"
+REPO="https://github.com/TX-9AI/options_trader_v4.git"
 DEPLOY_DIR="$HOME/options-trader-deploy"
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║     options_trader v3.1  |  Web Installer           ║"
+echo "║     options_trader v4.2  |  Web Installer           ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 

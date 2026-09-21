@@ -1,0 +1,75 @@
+# ==========================================================================
+# requirements.txt  v4.0
+# v4.0  2026-09-21  r407 / OPS.33 — otv4's OWN DEPENDENCY MANIFEST. THE OTV4
+#       SPLIT PORTED THE CODE AND LEFT THIS FILE BEHIND.
+#
+# 🔴 WHY IT DID NOT EXIST AND WHY THAT WAS INVISIBLE. `setup_ec2.sh:225`
+# ABORTS an install when this file is missing — `ERROR: requirements.txt
+# missing. Aborting.` — and `:235` builds the venv from it. otv4 had no such
+# file (`raw.githubusercontent.com/TX-9AI/options_trader_v4/main/
+# requirements.txt` → HTTP 404, against 200 for v3), so **a fresh install
+# pointed at otv4 could not complete.** Nobody hit it because the unattended
+# bootstrap fetched v3's installer, cloned v3, and built the venv from V3's
+# manifest; REPOINT then pulled otv4's CODE over that already-built venv.
+# **That is the mechanism that made the v3 pointer load-bearing rather than
+# vestigial**, and it is why r407 could not be a two-line URL change.
+#
+# 🔑 EVERY LINE BELOW IS MEASURED, NOT INHERITED. The direct third-party
+# imports of the SHIPPED surface were taken by AST across 119 `.py` files with
+# `tests/` and `docs/` excluded exactly as sparse checkout excludes them:
+#     boto3 · numpy · pandas · pytz · requests · tastytrade
+# and each entry here says which of those it is, or why it is here without
+# being one.
+# ==========================================================================
+
+# ── The broker SDK. 12 shipped files import it (data/candle_feed.py,
+#    data/market_data.py, data/open_interest.py, execution/…).
+tastytrade>=12.4.0
+
+# ── HTTP and async. ⚠️ NEITHER IS IMPORTED DIRECTLY BY otv4 — measured, and
+#    said out loud rather than carried silently. They are declared because the
+#    tastytrade SDK needs them and because this file's job is to reproduce a
+#    venv that WORKS; v3 declared them for the same reason and fifteen boxes
+#    were built from that list. Dropping a declared dependency that nothing in
+#    our tree imports is a change with no upside and a real downside if the
+#    SDK's own metadata ever thins out.
+httpx>=0.27.0
+anyio>=4.0.0
+
+# ── Data / analysis. pandas: 13 shipped files. numpy: 2.
+pandas>=2.0.0
+numpy>=1.24.0
+
+# ── Timezones. 2 shipped files (utils/time_utils.py,
+#    strategy/trend_credit_spread.py).
+#    ⚠️ SEE [[OPS.22]]: those sites still name the LEGACY `US/Eastern` link,
+#    which tzdata 2026c moved into a package this fleet does not install. The
+#    pip `pytz` wheel is what keeps them resolving; that row is the real fix
+#    and this line is not a substitute for it.
+pytz>=2024.1
+
+# ── HTTP. 2 shipped files (data/macro_data.py,
+#    notifications/telegram_sender.py).
+#    ⚠️ v3's manifest records that this was UNDECLARED until 2026-07-31 and
+#    survived only because it arrived transitively — "in a clean venv the whole
+#    repo fails to import". Kept explicit here for that reason.
+requests>=2.31.0
+
+# ── DELIBERATELY ABSENT, EACH WITH ITS MEASUREMENT ────────────────────────
+#
+# boto3 — `warehouse/s3_push.py` imports it, and it is NOT in the box venv.
+#   Measured on TSLA: `venv/bin/python -c "import boto3"` →
+#   ModuleNotFoundError, while `/usr/bin/python3` has boto3 1.40.72. The unit
+#   settles it: `ExecStart=/usr/bin/python3 …/warehouse/s3_push.py`. **The
+#   pusher runs under SYSTEM python by design, so the venv does not need it.**
+#   ⚠️ AND THE IMPORT IS LATE ON PURPOSE — `s3_push.py:1218`, "imported late so
+#   a missing SDK cannot break --report" — which is why the repo's own import
+#   gate passes 105/105 under a venv built from this file without boto3 in it.
+#   Written down because the next reader will see the import, not see the
+#   package, and "fix" it.
+#
+# pytest, pyflakes — v3 declared both. They are CONTROL tooling: `tests/` is
+#   control-only under WA §34 and does not ship, and the live boxes do not
+#   have them (a `pip freeze` on TSLA lists neither). Installing pytest on
+#   every t2.micro is the opposite of §34's reasoning. **This is a deliberate
+#   divergence from v3's list, declared rather than silent.**
