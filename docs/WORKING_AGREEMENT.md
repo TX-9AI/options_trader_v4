@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.9 · 2026-09-20 — §0 plus 41 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v6.0 · 2026-09-21 — §0 plus 41 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -201,6 +201,57 @@ over its size cap.** Rules the assistant believes it "saved" may never have
 persisted. **This file, in the repo, is the only durable place for operating
 discipline.** If a rule matters, it lands here in a revision — it does not live
 in memory.
+
+---
+
+### 0.7 SEARCH THE LEDGERS BEFORE YOU CALL ANYTHING A FINDING
+
+**Before proposing a finding or a defect — RUN THIS, and put what it returned
+in the proposal:**
+
+    python3 ~/day_trader_pro/tools/genesis_find.py <subject>
+
+🔴 **THIS IS §0.1 MADE RUNNABLE, AND IT EXISTS BECAUSE §0.1 ALONE DID NOT
+HOLD.** On 2026-09-21 the assistant reported `docs/` and `tests/` reaching the
+boxes as a live finding, from a `git diff` listing printed by a bake. It had
+**read [[OPS.18]]'s row the previous evening** — a row whose title says *"THE
+COSMETIC ARTEFACT HYPOTHESIS IS REFUTED, MEASURED."*
+
+**The record was not merely present, it was better than the claim:**
+
+| revision | what it already held |
+|---|---|
+| **r384** | saw the IDENTICAL bake output and **refused to call it a finding** — *"the bake prints git diff against the TREE which is indifferent to what sparse checkout then materialises on disk… confirming it needs one `ls` on a box"* |
+| **r402** | did that `ls`: AMD, **168 test files**, `core.sparseCheckout` unset |
+| **r407** | the cause — v3's installer has no sparse logic and nothing re-runs an installer |
+| **r303** | sparse GRANULARITY already examined |
+
+**Four revisions, one of them a previous thread making the exact judgement
+call correctly and writing down why.** The assistant then spent a turn
+re-deriving r384's sentence in a throwaway repo and presented it to the
+operator as news.
+
+🔑 **THE DEFECT WAS NOT IGNORANCE. IT WAS THE PRICE OF CHECKING.** Confirming
+"has this been found already?" cost a re-read of a 188k-token ledger *at the
+moment of speaking* — and **a cost that high converts a rule into a wish.**
+That is §0.6 in one line: a rule changes the odds, a cheap action changes the
+outcome. The search is three seconds.
+
+⚠️ **SCOPED TO FINDINGS AND DEFECTS, DELIBERATELY.** Not to every proposal — a
+rule that fires on a version bump and a menu label becomes ritual, gets
+performed rather than followed, and stops being read. The class that actually
+gets re-derived is *"I have discovered a problem."*
+
+⚠️ **THE RESULT GOES IN THE PROPOSAL, INCLUDING WHEN IT IS NOTHING.** That is
+what gives this teeth: a proposal is handed to the operator, so the line is
+visible on the page he is already reading and **its absence is conspicuous.**
+It is the nearest thing to a gate that exists for conversational output, which
+is where this failure lives — nothing that went wrong that morning ever
+reached a land, so no land gate could have fired.
+
+⚠️ **AND THE TOOL SEARCHES BOTH LEDGERS.** GENESIS says WHY a thing was done,
+which is what establishes a question is SETTLED; BACKLOG says what is OPEN. A
+search of one is an answer to half the question.
 
 ---
 
@@ -1709,6 +1760,32 @@ assistant granted itself, which §38.9 refuses in its own words.
 ---
 
 ## CHANGELOG
+
+**v6.0 — 2026-09-21 — r411 — §0.7 ADDED: SEARCH THE LEDGERS BEFORE YOU CALL
+ANYTHING A FINDING.** Operator, after watching a thread re-derive a settled
+row: *"What if we make it doctrine to check the Genesis file for the same
+subject before proposing anything?"* — and his placement is the correction
+that matters: **before PROPOSING, not before landing.** By land time the
+tokens are spent and, worse, he has already been told something wrong.
+🔴 **THE FAILURE IT IS WRITTEN FROM.** `docs/` and `tests/` reaching the boxes
+was reported as a live finding off a `git diff` listing. [[OPS.18]] had
+settled it three weeks of revisions earlier, and the row had been READ the
+night before — its title says *"THE COSMETIC ARTEFACT HYPOTHESIS IS REFUTED,
+MEASURED."* **r384 had seen the IDENTICAL bake output and refused to call it a
+finding**, naming the mechanism exactly: *"the bake prints git diff against
+the TREE which is indifferent to what sparse checkout then materialises on
+disk."* r402 then did the `ls` (AMD, 168 test files, `core.sparseCheckout`
+unset); r407 gave the cause; r303 had examined granularity.
+🔑 **SO THE DEFECT WAS NOT IGNORANCE — IT WAS THE PRICE OF CHECKING.** The
+question cost a 188k-token re-read at the moment of speaking, and **a cost
+that high converts a rule into a wish.** §0.6 in one line. `genesis_find`
+makes it three seconds and searches BOTH ledgers, because GENESIS says why a
+thing was SETTLED and BACKLOG says what is OPEN.
+⚠️ **SCOPED TO FINDINGS AND DEFECTS** — a rule that fires on version bumps
+becomes ritual. ⚠️ **AND THE RESULT GOES IN THE PROPOSAL, INCLUDING WHEN IT IS
+NOTHING**, which is what gives it teeth: the operator reads the proposal, so
+an absent line is conspicuous. **No land gate could have caught this** —
+nothing that went wrong that morning was ever landed.
 
 **v5.9 — 2026-09-20 — r409 — §13 STOPPED ROUTING BY NUMBER, BECAUSE EVERY
 NUMBER IN IT WAS WRONG.** Measured against the live render: **53 of 53

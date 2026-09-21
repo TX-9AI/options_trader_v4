@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-# options-trader-v4/tests/check_doc_menu_refs.py — v1.0
+# options-trader-v4/tests/check_doc_menu_refs.py — v1.1
+# v1.1 (2026-09-21) — r411 / OPS.36. D5: §0.7 MUST NAME A COMMAND THAT
+#   RESOLVES. The section added at r411 sends every thread to
+#   `genesis_find` BEFORE it calls anything a finding, which makes the
+#   doctrine a PROMISE — and §25 spent months routing readers to a
+#   `docs/README.md` that was never ported, the one rule whose whole job is
+#   stopping documents going unread. D5 asserts the section names the tool
+#   and states both its scope and that the result rides in the proposal;
+#   the dtp gate `check_genesis_find` G1-G4 drives the tool itself. The two
+#   ends rot independently, so they are checked independently.
+#   ⚠️ SCOPED TO §0.7's BODY, never the file — the CHANGELOG must describe
+#   this addition and §5 requires it to, so a file-wide search would be
+#   satisfied by the entry rather than by the rule (§20, and the same
+#   collision D1 already carries for §13).
 # v1.0 (2026-09-20) — r409 / DOC.27. THE ROUTING SECTION NAMED 53 MENU NUMBERS
 #   AND EVERY ONE OF THEM WAS WRONG.
 #   WORKING_AGREEMENT §13 is the section whose entire job is to route a reader
@@ -101,6 +114,31 @@ def main():
            "§13 names the live source (menu_extract/menu_render)"
            if has_src else
            "§13 names no runnable source for the current item list")
+
+    # ── D5 — §0.7 MUST NAME A COMMAND THAT RESOLVES ────────────────────────
+    # 🔑 SAME PROMISE, SAME FAILURE MODE AS §13. §25 routed readers to a
+    # `docs/README.md` that was never ported, for months — the one rule whose
+    # job is stopping documents going unread was itself pointing at a missing
+    # file. §0.7 now sends every thread to `genesis_find` BEFORE it calls
+    # anything a finding, so the section must name the tool and the tool must
+    # exist. The dtp gate `check_genesis_find` drives it; this end asserts the
+    # DOCTRINE still names it, because the two rot independently.
+    # ⚠️ ANCHORED ON THE SECTION, NOT THE WHOLE FILE — the CHANGELOG at the
+    # foot will describe this addition and §5 requires it to, so a file-wide
+    # search would be satisfied by the entry rather than by the rule (§20).
+    m07 = re.search(r"\n### 0\.7\b.*?(?=\n###? |\n---\n\n\n## )", wa, re.S)
+    if m07 is None:
+        report("D5", False,
+               "§0.7 is absent — the doctrine that makes §0.1 runnable")
+    else:
+        body07 = m07.group(0)
+        names = "genesis_find" in body07
+        scoped = ("finding" in body07.lower()
+                  and "proposal" in body07.lower())
+        report("D5", names and scoped,
+               "§0.7 names genesis_find and puts its result in the proposal"
+               if (names and scoped) else
+               f"names-tool={names} states-scope-and-proposal={scoped}")
 
     # ── D3 — install.sh must not disagree with itself ──────────────────────
     if not os.path.exists(INSTALL):
