@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v5.8 · 2026-09-20 — §0 plus 41 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v5.9 · 2026-09-20 — §0 plus 41 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -330,45 +330,56 @@ yet," that is the correct discipline — capture it in OBSERVATIONS.md and let i
 ---
 
 ## 13. The control box already has a devtools SERVICE MENU. Use it before building.
-On the control box (`~/day_trader_pro`, run `./dev*`), the **devtools service menu**
-(v1.22 as of 2026-07-24) already exposes most of what we reach for. Before writing a
-query or script, check whether a menu option does it. Reference (numbers may drift —
-re-read the menu if unsure):
 
-- **Orchestration:** 1 full spool-up (mock) · 2 EOD aggregate (mock) · 3 reset mock ·
-  4 dry-run spool-up (real reads) · 5 dry-run EOD aggregate (real reads)
-- **Registry & master switch:** 6 instance map · 7 reconcile map · 8 swap/pin instance
-  ID · 9 control status · 10 ENABLE control · 11 DISABLE control
-- **Fleet (inspect & fan-out):** 12 fleet list · 13 fleet ping ·
-  **14 Run command (all running)** ← the fan-out we use for fleet commands ·
-  15 status.py+query.py (one/all/some) · **16 Pull trades.db (one/all/some)** ·
-  17 Pull OHLC for a day (one/all/some)
-- **Debug/logs (remote):** 18 service status (bot+candle-feed) · 19 journal tail ·
-  20 feed health (store freshness) · 21 bot log tail
-- **Maintenance (wake_and_bake):** 22 dry-run · 23 FULL (wake→bake→restart→STOP) ·
-  24 wake · 25 bake only (sync, no restart — RTH-safe) · 26 leave on · 27 EMERGENCY STOP
-- **Repoint (migrate fleet→new repo):** 28 check · 29 full · 30 full+wake · 31 no
-  restart · 32 scoped · 33 mock preview
-- **Snapshot & tests:** 34 snapshot dir→repo-ready tarball · 35 test selection (mock) ·
-  36 test Telegram
-- **Control repo ↔ GitHub (force sync):** **37 PUSH→GitHub (this server = source of
-  truth)** · **38 PULL←GitHub (GitHub = source of truth)**
-- **Trades data:** **39 re-run consolidation→`fleet_trades_<date>.json`(+.csv)** ·
-  **40 excursion report (MFE/MAE)→`reports/excursions_<date>.txt`** ·
-  **41 trade breakdown (cross-day: regime/strategy/grade + regime×strategy)**
-- **Regime validation (L1 confluence, tape-only):** 42 run replay today · 43 replay a
-  date · 44 view a day's report · **45 view the diary (all days)** · 46 backfill missing
-  days · 47 A2 co-occurrence + HTF drift (auto-finds replay logs)
-- **EOD/backfill/live P&L:** **48 live P&L standings (read-only)** · 49 backfill missing
-  OHLC · 50 EOD conductor (dry-run→confirm→run)
-- **Utilities:** 51 OHLC 21-day fetch (yfinance) · 52 rotate fleet tokens/secrets ·
-  53 audit fleet credentials (read-only) · 54 verify fleet credentials WORK (TT SDK,
-  Telegram, GitHub)
+On the control box (`~/day_trader_pro`, run `./dev*`) the **devtools service
+menu** already exposes most of what we reach for. **Before writing a query or a
+script, check whether a menu item does it.**
 
-**Rule:** if the user needs trades pulled, a report, a replay, live P&L, or a deploy —
-a menu option almost certainly exists. Point them at the number instead of writing a
-one-off. The excursion/breakdown/diary reports (40/41/45) are already the analysis
-surface we keep re-deriving by hand.
+🔴 **THIS SECTION USED TO PRINT A NUMBERED INVENTORY. EVERY NUMBER IN IT WAS
+WRONG.** Measured at r409 against the live render: **53 of 53 numbered
+citations incorrect, ZERO correct**, and NINE of the items it named **no longer
+exist at all** — `Pull trades.db`, `Pull OHLC for a day`, `view the diary`, the
+four regime-replay items, `full spool-up`, `reset mock`. The list was taken
+2026-07-24 and the menu is now **78 items over 15 sections** (devtools v1.63, measured).
+
+🔑 **AND IT COULD NEVER HAVE STAYED RIGHT, WHICH THE REPO ALREADY KNEW.**
+`menu_render()` assigns the numbers from a **render-time loop counter** over the
+`MENU` array and stores them nowhere — read at source in `menu_registry.sh`.
+That property is deliberate and good: it means a reorder cannot desynchronise
+code. **What it cannot protect is prose.** [[C.15]] says exactly this —
+*nothing may be tied to the number* — and §15 and §17 each adopted CITE BY
+LABEL after being bitten. **§13 was the one routing document nobody applied the
+rule to, in the section whose entire job is routing.**
+
+⚠️ **SO THE FIX IS NOT A RENUMBERED LIST.** A renumbered list is wrong again on
+the next land, and a reader who has been wrong once stops trusting the section
+— which is the §0.5 failure applied to documentation.
+
+**CITE BY LABEL, ALWAYS. NEVER BY NUMBER.** *"Run the `Bake only (sync, no
+restart - RTH-safe)` item"*, never *"run 32"*.
+
+**TO GET THE CURRENT LIST, RUN IT — do not trust any prose, including this:**
+
+    python3 tools/menu_extract.py --inventory      # section, label, command
+    bash -c 'SCRIPT_DIR=. source ./menu_registry.sh; menu_render'   # as drawn
+
+**THE SECTIONS, which are far more stable than the items inside them:**
+REGISTRY & MASTER SWITCH · FLEET (inspect & fan-out) · SENSORS (derived stores,
+read-only) · DEBUG / LOGS (remote) · MAINTENANCE (wake_and_bake) · CLAUDE CODE ·
+REPOINT · CONTROL REPO (GitHub force sync) · TRADE REPORTS · R SUITE (fitting) ·
+EOD & DATA REPAIR · CREDENTIALS · EXTERNAL RESOURCES · SESSION TOGGLES ·
+S3 WAREHOUSE.
+
+**Rule:** if the task is trades pulled, a report, a replay, live P&L, fleet
+state or a deploy — **an item almost certainly exists.** Name it by its label
+instead of writing a one-off. The R SUITE and TRADE REPORTS sections are the
+analysis surface we keep re-deriving by hand.
+
+⚠️ **AND THE MENU IS NOT A GUARANTEE THE TOOL IS SOUND.** An item can exist and
+still answer nothing — [[RPT.29]]'s edge scan raises `KeyError`, [[RPT.30]]'s
+`auto_label` has no tape. A menu item is where the tool lives, not evidence it
+works.
+
 
 ## 14. Data lives in SEPARATE folders — candles, trades, reports.
 On the control box the data is split by kind, not co-mingled:
@@ -1698,6 +1709,25 @@ assistant granted itself, which §38.9 refuses in its own words.
 ---
 
 ## CHANGELOG
+
+**v5.9 — 2026-09-20 — r409 — §13 STOPPED ROUTING BY NUMBER, BECAUSE EVERY
+NUMBER IN IT WAS WRONG.** Measured against the live render: **53 of 53
+numbered citations incorrect, ZERO correct**, and **nine of the items it named
+do not exist** (`Pull trades.db`, `Pull OHLC for a day`, `view the diary`, the
+four regime-replay items, `full spool-up`, `reset mock`). The inventory dated
+from 2026-07-24; the menu is 78 items over 15 sections.
+🔑 **THE SECTION WHOSE JOB IS ROUTING WAS THE ONE DOCUMENT NOBODY APPLIED
+[[C.15]] TO** — and it instructed the reader to *"point them at the number"*,
+so it did not merely go stale, it actively dispatched to items that are gone.
+`menu_render()` takes the numbers from a **render-time loop counter** and
+stores them nowhere, read at source; §15 and §17 had each already adopted CITE
+BY LABEL after being bitten.
+⚠️ **NOT RENUMBERED — RENUMBERING IS THE SAME DEFECT WITH A LATER DATE.** The
+numbers are gone, the labels and the 15 section names stay, and the section
+names the two commands that print the live list so a reader never has to trust
+prose again, including this paragraph.
+⚠️ **AND IT NOW SAYS THE MENU IS NOT A WARRANTY:** an item can exist and answer
+nothing — [[RPT.29]] raises `KeyError`, [[RPT.30]] has no tape.
 
 **v5.8 — 2026-09-20 — r399 — §38.10: WHAT "SEND IT" MEANS, AND THE RTH
 HOTFIX THAT DOES NOTHING.** Operator, unprompted: *"When an update doesn't

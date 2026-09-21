@@ -1,6 +1,16 @@
 #!/bin/bash
 # ==========================================================================
-# install.sh  v4.2
+# install.sh  v4.3
+# v4.3 (2026-09-20) - r409 / DOC.27. THE PRESERVED v3 HEADER IS MARKED AS
+#   PROVENANCE. Line 39 read `install.sh — options_trader v3.0 Web
+#   Installer` with nothing saying it was INHERITED, so a grep for the
+#   installer's version found v3.0 two screens below a v4.2 title. The
+#   text is unchanged — it really was v3.0 when it was written, and
+#   rewriting it would falsify the provenance §32 keeps. Only the label
+#   is new. Gated by check_doc_menu_refs D3, which flags an UNMARKED
+#   self-description disagreeing with the operative banner and permits a
+#   marked one - r407's I1-I4 shape, anchored on operative form so the
+#   81 `Ported from options_trader_v3` lines survive (§20, §32).
 # v4.2 (2026-09-21) - r407 / OPS.33. THE CLONE URL, THE DOCUMENTED ONE-LINER
 #   AND THE BANNER ALL STILL SAID v3, SO THIS INSTALLER INSTALLED THE PREVIOUS
 #   GENERATION - INCLUDING WHEN RUN FROM AN otv4 BOX.
@@ -36,7 +46,13 @@
 # this block be read before the file is edited.
 #
 #!/bin/bash
-# install.sh — options_trader v3.0 Web Installer
+# ⬛ INHERITED v3 HEADER — PRESERVED AS PROVENANCE, NOT THIS FILE'S
+#    VERSION. This file's version is the title at the top of this file,
+#    which is the only place it is declared. Kept rather
+#    than renumbered (r240's precedent) because the v2→v3 repo-pointer
+#    defect recorded below is the SAME defect r407 fixed for v3→v4, and
+#    the record of it recurring is the reason the banner is load-bearing.
+# [INHERITED v3 HEADER - NOT THIS FILE'S VERSION] install.sh — options_trader v3.0 Web Installer
 # v1.0 — original release
 # updated repo URL to options_trader_v2
 # repo-wide v3.0 bump: Yahoo-Finance purge & data stream

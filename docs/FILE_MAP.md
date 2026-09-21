@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-294 Python modules across 13 local packages.
+295 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 124 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 125 referenced from a script, unit or doc but never imported · **60 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -637,6 +637,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_dispatch.py`
 - **calls:** `strategy/gex_pin_butterfly.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/HANDOFF.md`, `docs/PORT_STATE.md`
+
+### `tests/check_doc_menu_refs.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `install.sh`
 
 ### `tests/check_drift_verdict.py`
 - **calls:** (none)
