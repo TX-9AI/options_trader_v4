@@ -720,7 +720,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_install_target.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (not imported) — referenced in `bootstrap.example.sh`, `docs/BACKLOG.md`
 
 ### `tests/check_ladder_wired.py`
 - **calls:** `config.py`, `execution/__init__.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`, `execution/order_confirm.py`

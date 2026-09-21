@@ -1,5 +1,4 @@
 
-!bootstrap.example.sh
 #       from a bad `>>` append; it matched a filename nobody will ever create.
 #       ignored and `trades.db-shm` was only covered by the earlier `*.db-shm`.
 #       on a box would have committed a multi-MB binary SQLite DB.
@@ -49,6 +48,21 @@ Thumbs.db
 __pycache__/
 blind_tapes/
 bootstrap*.sh
+# 🔴 ORDER IS SEMANTIC AND THIS NEGATION MUST STAY BELOW THE RULE ABOVE IT.
+# git applies the LAST matching pattern, so an exception placed ABOVE the rule
+# it negates does nothing whatsoever. This line sat at line 2 — above
+# `bootstrap*.sh` — for the life of the repo, so `bootstrap.example.sh` was
+# IGNORED throughout despite its own header calling it "safe to commit", and
+# it was NEVER TRACKED: `git log --all -- bootstrap.example.sh` is empty.
+# ⚠️ FOUND BY r407 FAILING TO STAGE IT — that revision repointed the template
+# to otv4 and the land printed "The following paths are ignored by one of your
+# .gitignore files", staging 4 payload files instead of 5.
+# ⚠️ THE TEMPLATE CARRIES NO SECRETS AND THAT WAS VERIFIED BEFORE COMMITTING,
+# not assumed: every credential-bearing export reads REPLACE_ME, and the file
+# holds zero JWT-shaped, ghp_/github_pat_ or 32+ character token-shaped
+# strings. The operator's REAL `bootstrap.sh` stays ignored by the rule above,
+# which is the entire point of the pair.
+!bootstrap.example.sh
 bot.log
 cred.txt
 credentials.py

@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """
-tests/check_install_target.py  v1.0
+tests/check_install_target.py  v1.1
+v1.1  2026-09-21  r408 / OPS.34 — I7/I8. THE TEMPLATE THIS FILE CHECKS WAS
+      GITIGNORED, SO I2 AND I3 WERE READING A FILE THAT IS NOT IN THE REPO.
+      🔴 v1.0 PASSED AT LAND TIME FOR THE WRONG REASON. `bootstrap.example.sh`
+      exists in the working tree on control, so I2/I3 read it happily — but
+      `.gitignore` carried `!bootstrap.example.sh` ABOVE `bootstrap*.sh`, git
+      applies the LAST matching pattern, and the file **has never been tracked
+      in otv4**. In a pristine clone it is absent and I2 would have gone RED
+      for the environment, which is [[CHK.9]] item 2's shape — the very class
+      this suite is supposed to respect.
+      🔑 I7 DRIVES `git check-ignore` AGAINST THE PATH, and I8 asserts that
+      EVERY negation in `.gitignore` is actually in force — so the next
+      exception written above its rule is caught the day it is added rather
+      than the day a land quietly stages one file fewer.
 v1.0  2026-09-21  r407 / OPS.33 — THE UNATTENDED INSTALL MUST FACE otv4, AND
       otv4 MUST BE ABLE TO INSTALL ITSELF.
 
@@ -20,6 +33,8 @@ v2 code, and it was caught **only because a rebuild's banner printed v2.5**.
   I4  🔑 PROVENANCE IS PERMITTED — the §32 "Ported from v3" lines survive
   I5  requirements.txt exists AND covers what the shipped surface imports
   I6  the banner names v4 — the one signal that has ever caught this
+  I7  🔴 bootstrap.example.sh is COMMITTABLE — git does not ignore it
+  I8  every negation in .gitignore is actually IN FORCE (the shape)
 
 🔑 I1–I3 ARE ANCHORED ON THE SHAPE OF AN OPERATIVE TARGET — an assignment, an
 export, a fetch URL — never on the token `options_trader_v3`. otv4 carries
@@ -187,6 +202,63 @@ else:
        f"the installer banner must name v4 — the v2→v3 instance of this exact "
        f"defect was caught ONLY because a rebuild's banner printed v2.5. "
        f"got {b.group(1) if b else None!r}")
+
+# ── I7 · THE TEMPLATE CAN ACTUALLY BE COMMITTED ───────────────────────────
+# 🔴 IT COULD NOT, FOR THE LIFE OF THE REPO. `git check-ignore -v` named
+# `.gitignore:51:bootstrap*.sh` as the winning rule over the `!` exception at
+# line 2, and `git log --all -- bootstrap.example.sh` is EMPTY. r407 repointed
+# that template to otv4 and the land could not stage it — 4 payload files
+# instead of 5 — which is how it surfaced.
+# ⚠️ DRIVEN THROUGH git ITSELF, not by parsing `.gitignore`. Reimplementing
+# git's last-match-wins precedence here would be a second definition of the
+# rule that produced the defect (§7, C.23).
+import subprocess as _sp
+
+
+def _ignored(path):
+    """True / False / None when git cannot answer."""
+    try:
+        r = _sp.run(["git", "-C", ROOT, "check-ignore", "-q", "--", path],
+                    capture_output=True, timeout=30)
+    except Exception:                                           # noqa: BLE001
+        return None
+    if r.returncode == 0:
+        return True
+    if r.returncode == 1:
+        return False
+    return None                      # 128 = not a repo, or git unavailable
+
+
+_ig = _ignored("bootstrap.example.sh")
+if _ig is None:
+    ck("I7", True, "")
+    print("  [I7] GREEN (VACUOUS) — git could not answer here (not a work "
+          "tree?), so committability was NOT checked.")
+else:
+    ck("I7", _ig is False,
+       "bootstrap.example.sh is IGNORED by .gitignore, so it cannot be "
+       "committed — its own header calls it safe to commit, and r407's "
+       "repoint of it silently failed to stage for exactly this reason. The "
+       "negation must sit BELOW `bootstrap*.sh`: git takes the LAST match.")
+
+# ── I8 · AND THE GENERAL SHAPE, SO THE NEXT ONE IS CAUGHT ─────────────────
+# A negation placed above the rule it negates is inert, silently. This asserts
+# every `!` line in .gitignore actually takes effect, rather than pinning the
+# one that bit — a list of one rots the moment a second is added.
+gi = os.path.join(ROOT, ".gitignore")
+negs, inert = [], []
+if os.path.exists(gi):
+    for line in open(gi, encoding="utf-8"):
+        line = line.strip()
+        if line.startswith("!") and len(line) > 1 and "*" not in line:
+            negs.append(line[1:])
+for n in negs:
+    if _ignored(n) is True:
+        inert.append(n)
+ck("I8", not inert,
+   f"negation(s) in .gitignore that do NOTHING because a later rule overrides "
+   f"them: {inert} — git applies the LAST matching pattern, so an exception "
+   f"must come AFTER the rule it negates (checked {len(negs)} negation(s))")
 
 bad_ = [n for n, ok, _ in _res if not ok]
 print(f"\n  {len(_res) - len(bad_)}/{len(_res)} passed")
