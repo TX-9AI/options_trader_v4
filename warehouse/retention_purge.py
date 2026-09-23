@@ -1,6 +1,35 @@
 #!/usr/bin/env python3
 """
-warehouse/retention_purge.py  v1.4
+warehouse/retention_purge.py  v1.5
+v1.5  2026-09-22  r416 / OPS.39 — THE DELETES COMMIT AS THEY GO, OR A BOX
+      NEVER CATCHES UP. Every DELETE across every table ran in ONE
+      transaction committed after the LAST table. Measured at ~93s per
+      million rows, PLTR's 18M backlog needed ~28 minutes and QQQ's 53M
+      ~82, against the conductor's 900s per-box budget — so the run was
+      KILLED and the whole transaction ROLLED BACK, including the small
+      tables that had already finished. The next night faced more rows.
+      🔴 A RATCHET: the further a box fell behind the more certain it was
+      to stay behind. PLTR reached 19.8 days against a 3-day policy and
+      97% disk; QQQ 19.9 days and 59.5M rows; the other thirteen sat at
+      3.8 days, which is why nothing looked wrong.
+      🔴 AND IT REPORTED SUCCESS THE WHOLE TIME — `removed[table]` came
+      from the COUNT, never from the commit, so the conductor logged
+      `PLTR: plan_check 478,995` on a night PLTR still held 479,001.
+      🔑 `_delete_batched` commits every OT_PURGE_BATCH_ROWS (200k) and
+      checkpoints TRUNCATE between chunks, so a cut run KEEPS its
+      progress and the WAL stays bounded — which is what let this drain a
+      volume with 266MB free, where the unbatched form would have filled
+      it. A box that cannot drain in one night now drains over two.
+      ⚠️ THE COUNT IS DRY-RUN ONLY. It decided nothing on the apply path
+      and cost 153s on QQQ's quote_series (r405's lesson, one tool over).
+      ⚠️ ABSENT IS NOT FAILED. The old `except: continue` read EVERY error
+      as 'table absent', which is what hid this; the first cut of the fix
+      over-corrected and called an absent table a FAILURE, which would
+      have raised PARTIAL PURGE nightly on every box missing an optional
+      table (§17). Both are now distinguished from sqlite_master.
+      ⚠️ `_try_delete` REMOVED — dead once every caller moved; its r256
+      guarantee is preserved inside `_delete_batched` and check_purge_lock
+      K0 repointed. Gated by tests/check_purge_batched.py B1-B5.
 v1.4  2026-09-05  r270 / ASK.1 — `character_axis_sample` added at 20 days,
       IN THE SAME REVISION THAT PUSHES IT. It was in no list at all — neither
       purged nor protected — which is the by-absence exposure that let
@@ -491,25 +520,96 @@ def _open(path: str):
         return None
 
 
-def _try_delete(conn, table, sql, args, failed) -> bool:
-    """Run one DELETE. -> True on success; on failure record it and return False.
+# ── r416 — THE DELETE COMMITS AS IT GOES, OR IT NEVER COMMITS AT ALL ───────
+# 🔴 THE DEFECT THIS REPLACES, MEASURED ON PLTR AND QQQ 2026-09-22. Every
+# DELETE across every table ran inside ONE transaction that committed only
+# after the last table. On the two highest-volume boxes that transaction
+# CANNOT FINISH inside the conductor's 900s per-box budget — measured at ~93
+# seconds per million rows, so PLTR's 18M backlog needed ~28 minutes and QQQ's
+# 53M needed ~82. The run was killed every night, EVERYTHING rolled back
+# including the small tables that had finished, and the next night faced more
+# rows. **A ratchet: the further a box falls behind, the more certain it is to
+# stay behind.** PLTR reached 19.8 days against a 3-day policy and filled its
+# disk to 97%; QQQ reached 19.9 days and 59.5M rows.
+# 🔴 AND IT REPORTED SUCCESS THROUGHOUT. `removed[table]` was set from the
+# COUNT, never from the commit, so the conductor logged
+# `PLTR: plan_check 478,995` on a night when PLTR still held 479,001 of them.
+# Thirteen boxes were fine, which is why nothing looked wrong: the two that
+# were not are exactly the two the log could not distinguish.
+# 🔑 BATCHING IS NOT AN OPTIMISATION HERE, IT IS THE CORRECTNESS FIX. With a
+# commit per chunk a killed run KEEPS what it has already done, so a box that
+# cannot drain in one night drains over two instead of resetting to zero. The
+# checkpoint after each chunk also bounds the WAL, which is what let this run
+# on a volume with 266MB free — the unbatched form would have filled it.
+# ⚠️ AND THE COUNT IS GONE FROM THE APPLY PATH. It decided nothing: the DELETE
+# carries its own WHERE, and `rowcount` is free. It cost 153 SECONDS on QQQ's
+# quote_series ([[r405]] found the identical waste in `manifold_health`, where
+# a COUNT(*) bought a truthiness test for 28.75s). The dry run still counts,
+# because there it is the entire product.
+BATCH_ROWS = int(os.environ.get("OT_PURGE_BATCH_ROWS", "200000"))
+BUDGET_S   = int(os.environ.get("OT_PURGE_BUDGET_S", "0"))     # 0 = drain fully
 
-    🔴 r256 — WHY THIS EXISTS. The COUNT above every DELETE was wrapped and the
-    DELETE was not, so `database is locked` on ONE table escaped `purge()`,
-    killed `main()`, and the reclaim never ran. The cost was measured: four
-    boxes kept their WALs (AMD 963 MB, NVDA, AVGO, GOOGL) while the eleven that
-    got through returned 8.7 GB.
-    ⚠️ IT RETURNS FALSE RATHER THAN RAISING, and the caller zeroes that table's
-    count — because reporting rows as removed when the DELETE failed is worse
-    than the failure. The names are collected so the summary can say WHICH.
+
+def _delete_batched(conn, table, where, args, failed, deadline=0.0):
+    """DELETE in committed chunks. Returns (rows_committed, outcome).
+
+    outcome: "drained" | "budget" | "failed"
+    ⚠️ RETURNS WHAT COMMITTED. The caller reports this number and nothing else,
+    because a count of what we INTENDED to delete is what hid this defect for
+    weeks.
     """
+    # 🔴 ABSENT IS NOT FAILED, AND CONFLATING THEM CRIES WOLF NIGHTLY.
+    # The code this replaces swallowed EVERY sqlite error as "table absent on
+    # this box" — which is what hid the real defect. The first cut of this
+    # function over-corrected and called an absent table a FAILURE, which
+    # appends to `failed`, raises PARTIAL PURGE and returns non-zero: a red
+    # every night on every box missing an optional table (§17 — an alarm that
+    # fires on an expected condition stops being read). Both facts are real
+    # and they are now DISTINGUISHED at source, cheaply, before either can be
+    # mistaken for the other.
     try:
-        conn.execute(sql, args)
-        return True
-    except sqlite3.Error as exc:                               # noqa: BLE001
-        _log(f"⚠️ {table}: DELETE FAILED ({exc}) — table skipped, run continues")
+        present = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,)).fetchone()
+    except sqlite3.Error as exc:                                # noqa: BLE001
+        _log(f"⚠️ {table}: schema unreadable ({exc}) — table skipped")
         failed.append(table)
-        return False
+        return 0, "failed"
+    if not present:
+        return 0, "absent"          # expected on this box; silent by design
+
+    total = 0
+    while True:
+        if deadline and time.time() >= deadline:
+            _log(f"⏱️ {table}: budget reached — {total:,} row(s) COMMITTED and "
+                 f"kept; the remainder goes next run")
+            return total, "budget"
+        try:
+            cur = conn.execute(
+                f"DELETE FROM {table} WHERE rowid IN "
+                f"(SELECT rowid FROM {table} WHERE {where} LIMIT ?)",
+                tuple(args) + (BATCH_ROWS,))
+            n = cur.rowcount or 0
+            conn.commit()
+            # ⚠️ TRUNCATE, not PASSIVE — a PASSIVE checkpoint leaves the file
+            # at its high-water mark, which is what filled PLTR's disk.
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error as exc:                            # noqa: BLE001
+            _log(f"⚠️ {table}: DELETE FAILED after {total:,} committed "
+                 f"({exc}) — table skipped, run continues")
+            failed.append(table)
+            return total, "failed"
+        total += n
+        if n == 0:
+            return total, "drained"
+
+
+# ⬛ r416 — `_try_delete` REMOVED. It ran ONE unbatched DELETE per table and
+# every caller now uses `_delete_batched`, which keeps r256's guarantee (a
+# locked table costs that table, not the run) AND adds the one r256 could not
+# give: a run that is cut keeps what it committed. Deleted rather than left
+# dead, because a gate asserting a function nothing calls is the shape §21
+# names — `check_purge_lock` K0 now pins `_delete_batched`.
 
 
 def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
@@ -518,6 +618,10 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
     derived_db = derived_db or os.environ.get(
         "OT_DERIVED_DB", os.path.join(HERE, "data", "derived_store.db"))
     now = time.time()
+    # ⚠️ 0 MEANS DRAIN FULLY, which is the right default for a hand run.
+    # The conductor passes a budget so the close is not held; either way
+    # progress is committed per chunk and survives being cut.
+    deadline = (now + BUDGET_S) if BUDGET_S else 0.0
     removed: dict = {}
     failed: list = []
 
@@ -535,31 +639,35 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
                 continue
             removed[f"candles/{interval}"] = n
             if apply and n:
-                # 🔴 r256 — GUARDED. This exact statement raised
-                # `database is locked` on four boxes on 2026-09-05, escaped
-                # purge(), killed main(), and took the RECLAIM with it — which
-                # is why those boxes kept their WALs while the rest returned
-                # 8.7 GB. One table failing must cost that table, not the run.
-                if not _try_delete(fc, "candles",
-                                   "DELETE FROM candles WHERE interval=? AND"
-                                   " ts_epoch_ms < ?", (interval, cutoff_ms),
-                                   failed):
-                    removed[f"candles/{interval}"] = 0
+                # 🔴 r256 GUARDED THE FAILURE; r416 GUARDS THE DURATION. One
+                # table failing must cost that table and not the run — and a
+                # run that cannot finish must keep what it finished.
+                got, _out = _delete_batched(
+                    fc, "candles", "interval=? AND ts_epoch_ms < ?",
+                    (interval, cutoff_ms), failed, deadline)
+                removed[f"candles/{interval}"] = got
 
         for table, days in ARTIFACT_DAYS.items():
             if table in NEVER_PURGE:
                 continue                      # belt and braces
             cutoff = now - days * DAY
-            try:
-                n = fc.execute(f"SELECT COUNT(*) FROM {table}"
-                               " WHERE ts_epoch < ?", (cutoff,)).fetchone()[0]
-            except sqlite3.Error:
-                continue                      # table absent on this box
-            removed[table] = n
-            if apply and n and not _try_delete(
-                    fc, table, f"DELETE FROM {table} WHERE ts_epoch < ?",
-                    (cutoff,), failed):
-                removed[table] = 0
+            # ⚠️ THE COUNT IS DRY-RUN ONLY (r416). On the apply path it bought
+            # nothing and cost 153s on QQQ's quote_series; `rowcount` is free.
+            # ⚠️ AND THE `except: continue` BELOW IS WHY IT HAD TO GO: it reads
+            # EVERY sqlite error as "table absent on this box" and skips in
+            # SILENCE — no log, no PARTIAL, nothing. A slow table that timed
+            # out here vanished from the run without a trace.
+            if not apply:
+                try:
+                    removed[table] = fc.execute(
+                        f"SELECT COUNT(*) FROM {table}"
+                        " WHERE ts_epoch < ?", (cutoff,)).fetchone()[0]
+                except sqlite3.Error as exc:                    # noqa: BLE001
+                    _log(f"⚠️ {table}: dry COUNT unavailable ({exc})")
+                continue
+            got, _out = _delete_batched(
+                fc, table, "ts_epoch < ?", (cutoff,), failed, deadline)
+            removed[table] = got
         if apply:
             fc.commit()
         fc.close()
@@ -590,16 +698,17 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
             if table in NEVER_PURGE:
                 continue
             cutoff = now - days * DAY
-            try:
-                n = dc.execute(f"SELECT COUNT(*) FROM {table}"
-                               " WHERE ts_epoch < ?", (cutoff,)).fetchone()[0]
-            except sqlite3.Error:
+            if not apply:
+                try:
+                    removed[f"derived/{table}"] = dc.execute(
+                        f"SELECT COUNT(*) FROM {table}"
+                        " WHERE ts_epoch < ?", (cutoff,)).fetchone()[0]
+                except sqlite3.Error as exc:                    # noqa: BLE001
+                    _log(f"⚠️ derived/{table}: dry COUNT unavailable ({exc})")
                 continue
-            removed[f"derived/{table}"] = n
-            if apply and n and not _try_delete(
-                    dc, table, f"DELETE FROM {table} WHERE ts_epoch < ?",
-                    (cutoff,), failed):
-                removed[f"derived/{table}"] = 0
+            got, _out = _delete_batched(
+                dc, table, "ts_epoch < ?", (cutoff,), failed, deadline)
+            removed[f"derived/{table}"] = got
         if apply:
             dc.commit()
         dc.close()

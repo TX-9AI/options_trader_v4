@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""tests/check_purge_lock.py — v1.0
+"""tests/check_purge_lock.py — v1.1
+v1.1  2026-09-22  r416 / OPS.39 — K0 PINS `_delete_batched` RATHER THAN
+      `_try_delete`. The property K0 guards — a locked table costs that
+      table and not the run — did not disappear, it MOVED: every caller
+      now batches, and the old helper was deleted rather than left dead,
+      because a gate asserting a function nothing calls is §21 exactly.
+      D1/D1b are unchanged and still pass: a locked table does not raise
+      and the run still reports PARTIAL with a non-zero code.
 v1.0  2026-09-05 — r256. MUTUAL EXCLUSION AND PARTIAL-FAILURE BEHAVIOUR,
 DRIVEN AGAINST REAL PROCESSES AND A REAL LOCKED DATABASE.
 
@@ -64,7 +71,7 @@ def main():
               f"{type(exc).__name__}: {exc}")
         print("\nRED — 1 failed: K0 (the checker could not run)")
         return 1
-    for n in ("acquire_lock", "_try_delete", "LOCK_PATH", "BUSY_MS"):
+    for n in ("acquire_lock", "_delete_batched", "LOCK_PATH", "BUSY_MS"):
         if not hasattr(rp, n):
             check(f"K0 retention_purge exposes {n}", False,
                   "absent — r256 has not landed in this checkout")

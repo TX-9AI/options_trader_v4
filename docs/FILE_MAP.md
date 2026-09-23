@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-295 Python modules across 13 local packages.
+296 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 125 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 126 referenced from a script, unit or doc but never imported · **60 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -890,6 +890,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `analysis/__init__.py`, `analysis/liquidity_mapper.py`, `analysis/session_map.py`, `strategy/__init__.py`, `strategy/sweep_credit_spread.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
+### `tests/check_purge_batched.py`
+- **calls:** `warehouse/retention_purge.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
 ### `tests/check_purge_lock.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
@@ -1236,7 +1240,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/retention_purge.py`
 - **calls:** (none)
-- **called by:** `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
+- **called by:** `tests/check_purge_batched.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
 
 ### `warehouse/s3_push.py`
 - **calls:** (none)
