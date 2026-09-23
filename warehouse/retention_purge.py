@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """
-warehouse/retention_purge.py  v1.7
+warehouse/retention_purge.py  v1.8
+v1.8  2026-09-23  r420 / OPS.43 — 🔴 THE RECLAIM LIST POINTED AT AN EMPTY
+      DECOY. `os.path.join(HERE, "data", "trades.db")` is a real file on every
+      box and holds ZERO TABLES; the fleet's actual trade record is
+      `HERE/trades.db`, one directory up. The nightly reclaim has therefore
+      never checkpointed or vacuumed the database it names, and the log line
+      `reclaim trades.db  checkpoint ok, wal 0MB -> 0MB` was TRUE OF THE WRONG
+      FILE — which is exactly why nobody caught it.
+      📊 COST TODAY IS NIL, MEASURED BEFORE FIXING: 0.1-0.3MB per box, 0MB WAL,
+      0MB free pages, 78-187 trades. A correctness fix, not a disk fix.
+      ⚠️ THE CAUSE WAS A THIRD HARDCODED LITERAL for a path `config.DB_PATH`
+      and `s3_push.TRADES_DB` already own. Now reads the SAME `OT_TRADES_DB`
+      env var with the same default shape, pinned against `s3_push` by
+      tests/check_reclaim_paths.py P1 and P4.
 v1.7  2026-09-23  r419 / OPS.42 — 🔴 THE VACUUM HEADROOM WAS 1.15 AND `VACUUM`
       NEEDS ABOUT 2x. It builds a complete second copy before replacing the
       original; in WAL mode it writes that copy through the WAL. Measured on
@@ -223,6 +236,27 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ── 🔴 r420 — THE RECLAIM LIST NAMED `data/trades.db` AND THE REAL FILE IS ONE
+# DIRECTORY UP. `HERE/data/trades.db` exists on every box and is EMPTY — zero
+# tables — while every trade this fleet has ever taken lives in
+# `HERE/trades.db`. So the nightly reclaim faithfully checkpointed and vacuumed
+# a decoy and has NEVER touched the real database. The nightly log said
+# `reclaim trades.db  checkpoint ok, wal 0MB -> 0MB` and the 0MB was true of
+# the wrong file, which is why it never looked wrong.
+# 📊 MEASURED FLEET-WIDE 2026-09-23 BEFORE FIXING, AND THE COST TODAY IS NIL:
+# the real trades.db is 0.1-0.3MB per box with a 0MB WAL and 0MB of free pages,
+# 78-187 trades each. It never reaches SQLite's ~4MB auto-checkpoint, so there
+# was nothing to reclaim. This is a CORRECTNESS fix, not a disk fix, and the
+# row says so rather than claiming a saving it cannot show.
+# ⚠️ THE DEFECT WAS A THIRD HARDCODED LITERAL. `config.DB_PATH` and
+# `s3_push.TRADES_DB` already own this path; this file invented its own and got
+# it wrong. It now honours the SAME env var as `s3_push` with the same default
+# shape — no new import into a stdlib-only module — and
+# `check_reclaim_paths.py` P1/P4 pin the two together so they cannot drift
+# again, including under an override (WA §7: one owner, and when there must be
+# two, a check that they agree).
+TRADES_DB = os.environ.get("OT_TRADES_DB", os.path.join(HERE, "trades.db"))
 sys.path.insert(0, HERE)
 
 # ── The policy. Mirrors the (commented-out) block in config.py v4.4. ────────
@@ -832,8 +866,7 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
     # WAL that the deletes immediately refill, and a vacuum before them would
     # copy rows that are about to go.
     removed["_reclaim"] = reclaim(
-        [feed_db, derived_db,
-         os.path.join(HERE, "data", "trades.db")], apply)
+        [feed_db, derived_db, TRADES_DB], apply)
 
     # ── r255: WHAT REMAINS, so the next tuning decision is a query ──────────
     # ⚠️ THIS IS NOT DECORATION. Nothing in a deletion count explains why MU
