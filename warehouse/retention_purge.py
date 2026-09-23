@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-warehouse/retention_purge.py  v1.6
+warehouse/retention_purge.py  v1.7
+v1.7  2026-09-23  r419 / OPS.42 — 🔴 THE VACUUM HEADROOM WAS 1.15 AND `VACUUM`
+      NEEDS ABOUT 2x. It builds a complete second copy before replacing the
+      original; in WAL mode it writes that copy through the WAL. Measured on
+      PLTR 2026-09-22: `database or disk is full` at 530MB AND 656MB free
+      against a 401.9MB live size — the gate would have STARTED both.
+      ⚠️ The change only ever makes the gate MORE conservative: it defers a
+      vacuum to a night with more room, and the refusal already prints the
+      arithmetic. Gated by tests/check_vacuum_headroom.py V1-V3.
+      ⚠️ §0.1, MINE: OPS.40 and r417's DESC both named this margin
+      `_vacuum_min_free`. It is `VACUUM_HEADROOM`; `_vacuum_min_free` is a
+      separate 200MB floor on RECLAIMABLE PAGES and decides whether a vacuum is
+      worth doing at all, not whether it fits. Substance unchanged, name wrong.
 v1.6  2026-09-23  r417 / WH.20 — 🔴 THE PURGE DELETED ON AGE ALONE WHILE THE
       PUSHER DRAINS ON ITS OWN CLOCK, SO THE ONLY DURABLE COPY WAS RACING A
       DELETE NOBODY WAS TIMING. `s3_push` ships `SERIES_BATCH_ROWS` (50,000)
@@ -347,7 +359,26 @@ def acquire_lock(wait_s: int = None):
 # VACUUM needs a full second copy of the LIVE pages before it can replace the
 # original; 1.15 is that plus a margin. Below VACUUM_MIN_FREE_BYTES there is
 # nothing worth a multi-minute rewrite in the middle of a takedown.
-VACUUM_HEADROOM        = 1.15
+# 🔴 r419 — 1.15 WAS NEVER RIGHT FOR ANY JOURNAL MODE, AND IN WAL IT IS
+# DANGEROUS. `VACUUM` builds a COMPLETE SECOND COPY of the database and only
+# then replaces the original, so it needs roughly TWICE the live size — in WAL
+# mode it writes that copy THROUGH THE WAL, which is worse again. At 1.15 this
+# gate cleared a vacuum that could not possibly fit and handed the failure to
+# SQLite at the moment of least slack.
+# 📊 MEASURED ON PLTR, 2026-09-22, TWICE: `database or disk is full` at 530MB
+# AND at 656MB free, on a file whose live size was measured at 401.9MB from
+# page_count/freelist_count/page_size. That brackets the real requirement above
+# 1.63x and is consistent with ~2x. The old gate would have STARTED both.
+# ⚠️ 2.2 RATHER THAN 2.0 — the margin is over the LIVE size at the moment of
+# measurement, and a busy box writes while the vacuum runs.
+# ⚠️ THIS ONLY EVER MAKES THE GATE MORE CONSERVATIVE. The failure it prevents
+# is a half-finished rewrite on a nearly-full volume at 16:10; the cost is a
+# vacuum deferred to a night with more room, which the refusal already prints
+# in full. `VACUUM INTO` needs only ~1x and is the better long-term answer, but
+# it requires a file SWAP, and r418/OPS.41 records exactly how a swap done
+# carelessly corrupts the database it was meant to shrink — so it gets its own
+# revision and its own gate, not a line in this one.
+VACUUM_HEADROOM        = 2.2
 # ⚠️ ENV-OVERRIDABLE AND READ PER CALL, not frozen at import. Two reasons and
 # the second is the honest one: an 8.6 GB box and a 19 GB box do not want the
 # same floor, and a checker has to be able to drive the REAL resolution path
