@@ -46,7 +46,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `greeks_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_purge_lock.py` (insert), `tests/check_purge_reclaim.py` (delete/insert) | `analysis/second_order.py`, `derived/surface.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `last_trade` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `prints` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_orb_geometry.py` (delete/insert) | `analysis/order_flow.py`, `analysis/tape_at_level.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
-| `quote_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_purge_batched.py` (insert), `tests/check_purge_reclaim.py` (insert), `tests/exit_replay.py` (insert) | `analysis/order_flow.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
+| `quote_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_purge_batched.py` (insert), `tests/check_purge_reclaim.py` (insert), `tests/check_push_row_day.py` (insert), `tests/exit_replay.py` (insert) | `analysis/order_flow.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `session_summary` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_manifold_windows.py` (update) | `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `theo_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `underlying_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `tools/manifold_status.py`, `warehouse/s3_push.py` |

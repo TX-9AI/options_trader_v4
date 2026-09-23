@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# options-trader-v4/tests/check_purge_batched.py — v1.0
+# options-trader-v4/tests/check_purge_batched.py — v1.1
+# v1.1 (2026-09-23) — r417 / WH.20. §0.1 correction to this header; checks
+#   are UNCHANGED.
 # v1.0 (2026-09-22) — r416 / OPS.39. THE PURGE COMMITS AS IT GOES, OR A BOX
 #   NEVER CATCHES UP.
 #   🔴 THE DEFECT, MEASURED ON TWO LIVE BOXES. Every DELETE ran inside ONE
@@ -14,10 +16,22 @@
 #   **an interrupted run must KEEP what it committed.** That single property
 #   converts the ratchet into convergence — a box that cannot drain in one
 #   night drains over two instead of resetting to zero forever.
-#   ⚠️ B4 EXISTS BECAUSE THE REPORT LIED FOR WEEKS. `removed[table]` was set
-#   from the COUNT, never from the commit, so the conductor logged
+#   ⚠️ B4 EXISTS BECAUSE `removed[table]` IS SET FROM THE COUNT, NEVER FROM
+#   THE COMMIT, so a run killed mid-transaction leaves an intact count in the
+#   dict. That defect is real and it is QUIETER than this header first said.
+#   🔴 §0.1 CORRECTION (r417), MINE, AGAINST MY OWN r416 HEADER: this block
+#   read "THE REPORT LIED FOR WEEKS ... the conductor logged
 #   `PLTR: plan_check 478,995` on a night PLTR still held 479,001 of them. A
-#   number that reports INTENT as OUTCOME is why nobody saw this.
+#   number that reports INTENT as OUTCOME". **THAT IS WRONG AND IT IS STRUCK
+#   RATHER THAN DELETED** (r240's precedent), because the next reader would
+#   otherwise inherit it: `eod_conductor_v2` takes `tail -12` of the purge
+#   output, which lands on the `_remaining` block, so EVERY per-box number in
+#   that log is ROWS LEFT BEHIND, not rows removed. 478,995 remaining against
+#   479,001 still held is CONSISTENT, not contradictory. The BACKLOG row was
+#   corrected before r416 landed; this header was not, and a gate that carries
+#   a retracted claim teaches it to whoever reads the gate instead of the row.
+#   ⚠️ AND A KILLED PROCESS PRINTS NOTHING AT ALL, so no false success was ever
+#   logged for the two backlogged boxes — the conductor logged a TIMEOUT.
 """Gate: retention deletes are batched, committed incrementally, and reported
 from what committed.
 

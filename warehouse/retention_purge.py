@@ -1,6 +1,27 @@
 #!/usr/bin/env python3
 """
-warehouse/retention_purge.py  v1.5
+warehouse/retention_purge.py  v1.6
+v1.6  2026-09-23  r417 / WH.20 — 🔴 THE PURGE DELETED ON AGE ALONE WHILE THE
+      PUSHER DRAINS ON ITS OWN CLOCK, SO THE ONLY DURABLE COPY WAS RACING A
+      DELETE NOBODY WAS TIMING. `s3_push` ships `SERIES_BATCH_ROWS` (50,000)
+      per table per run; this file deleted anything older than N days without
+      ever asking whether S3 had it. A pusher more than the retention window
+      behind therefore SHREDS THE TAPE SILENTLY — and the box is not the
+      durable home, S3 is.
+      📊 MEASURED 2026-09-23: push lag ran ~1 day against a 3-day retention,
+      i.e. ~2 days of margin — and NOTHING measured that margin or would have
+      said a word as it closed.
+      🔑 `_safe_cutoff()` CLAMPS EVERY CUTOFF TO THE CONFIRMED PUSH MARK,
+      read from `candle_ledger.json` (`series|<table>`) and
+      `dseries_ledger.json` (`dseries|<table>`).
+      ⚠️ THE CLAMP TRADES DISK FOR DATA, DELIBERATELY. A lagging pusher now
+      GROWS the store instead of shredding it — a loud, visible failure
+      (disk) in place of an invisible one (gaps nobody finds until a fit
+      needs them). It is said out loud every time it binds.
+      ⚠️ AN ABSENT LEDGER FALLS BACK TO AGE-ONLY AND NAMES THE ABSENCE. A
+      fresh box has no marks at all, and a purge that declines everything
+      fills the disk by morning — §0.5, not a silent "nothing was pushed".
+      Gated by tests/check_push_row_day.py R5-R6.
 v1.5  2026-09-22  r416 / OPS.39 — THE DELETES COMMIT AS THEY GO, OR A BOX
       NEVER CATCHES UP. Every DELETE across every table ran in ONE
       transaction committed after the LAST table. Measured at ~93s per
@@ -183,6 +204,7 @@ Run:  python3 warehouse/retention_purge.py            # dry, prints the plan
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import sqlite3
 import sys
@@ -550,6 +572,53 @@ BATCH_ROWS = int(os.environ.get("OT_PURGE_BATCH_ROWS", "200000"))
 BUDGET_S   = int(os.environ.get("OT_PURGE_BUDGET_S", "0"))     # 0 = drain fully
 
 
+# ── 🔴 r417 — NEVER DELETE A ROW S3 HAS NOT CONFIRMED ──────────────────────
+# The purge deleted on AGE ALONE while `s3_push` drains at `SERIES_BATCH_ROWS`
+# (50,000) per table per run. Those two clocks are independent, so a pusher
+# that falls more than the retention window behind loses rows PERMANENTLY —
+# S3 is the durable home and the box is not. Measured 2026-09-23: push lag ran
+# ~1 day against a 3-day retention, i.e. ~2 days of margin, and NOTHING
+# measured that margin or would have said a word as it closed.
+# ⚠️ THE CLAMP TRADES DISK FOR DATA, DELIBERATELY. A lagging pusher now grows
+# the store instead of silently shredding the tape — a loud, visible failure
+# (disk) in place of an invisible one (gaps nobody finds until a fit needs
+# them). It is said out loud every time it binds.
+# ⚠️ AND AN ABSENT LEDGER FALLS BACK TO AGE-ONLY RATHER THAN REFUSING TO
+# DELETE. A fresh box has no marks at all, and a purge that declines
+# everything fills the disk by morning — §0.5: the absence is NAMED, not
+# silently treated as "nothing was pushed".
+_STATE_DIR = os.environ.get("OT_WAREHOUSE_STATE",
+                            os.path.join(os.path.expanduser("~"),
+                                         ".vertigo_warehouse"))
+SERIES_LEDGER  = os.path.join(_STATE_DIR, "candle_ledger.json")
+DSERIES_LEDGER = os.path.join(_STATE_DIR, "dseries_ledger.json")
+
+
+def _pushed_hwm(path, ns, table):
+    """The ts_epoch S3 has CONFIRMED for this table, or None if unknowable."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            led = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    try:
+        return float(led.get("%s|%s" % (ns, table)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_cutoff(table, age_cutoff, path, ns):
+    """(cutoff, note) — the age cutoff, clamped to what S3 has confirmed."""
+    hwm = _pushed_hwm(path, ns, table)
+    if hwm is None:
+        return age_cutoff, "no push mark — AGE ONLY, unshipped rows are at risk"
+    if hwm < age_cutoff:
+        return hwm, ("CLAMPED to the push mark (%.0f): S3 is %.1f day(s) "
+                     "behind the retention window and the rows above it are "
+                     "NOT YET SHIPPED" % (hwm, (age_cutoff - hwm) / DAY))
+    return age_cutoff, ""
+
+
 def _delete_batched(conn, table, where, args, failed, deadline=0.0):
     """DELETE in committed chunks. Returns (rows_committed, outcome).
 
@@ -651,6 +720,9 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
             if table in NEVER_PURGE:
                 continue                      # belt and braces
             cutoff = now - days * DAY
+            cutoff, _note = _safe_cutoff(table, cutoff, SERIES_LEDGER, "series")
+            if _note:
+                _log(f"🛡️ {table}: {_note}")
             # ⚠️ THE COUNT IS DRY-RUN ONLY (r416). On the apply path it bought
             # nothing and cost 153s on QQQ's quote_series; `rowcount` is free.
             # ⚠️ AND THE `except: continue` BELOW IS WHY IT HAD TO GO: it reads
@@ -698,6 +770,10 @@ def purge(apply: bool = False, feed_db: str = "", derived_db: str = "") -> dict:
             if table in NEVER_PURGE:
                 continue
             cutoff = now - days * DAY
+            cutoff, _note = _safe_cutoff(table, cutoff, DSERIES_LEDGER,
+                                         "dseries")
+            if _note:
+                _log(f"🛡️ derived/{table}: {_note}")
             if not apply:
                 try:
                     removed[f"derived/{table}"] = dc.execute(

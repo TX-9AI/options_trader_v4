@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-296 Python modules across 13 local packages.
+297 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 126 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 127 referenced from a script, unit or doc but never imported · **60 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -906,6 +906,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
+### `tests/check_push_row_day.py`
+- **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/s3_push.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
 ### `tests/check_query_sections.py`
 - **calls:** (none)
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
@@ -1232,7 +1236,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/__init__.py`
 - **calls:** (none)
-- **called by:** `tests/check_audit_20260823.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
+- **called by:** `tests/check_audit_20260823.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_push_row_day.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
 
 ### `warehouse/midnight_halt.py`
 - **calls:** (none)
@@ -1240,11 +1244,11 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/retention_purge.py`
 - **calls:** (none)
-- **called by:** `tests/check_purge_batched.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
+- **called by:** `tests/check_purge_batched.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_push_row_day.py`, `tests/check_retention_armed.py`, `warehouse/self_close.py`
 
 ### `warehouse/s3_push.py`
 - **calls:** (none)
-- **called by:** `tests/check_purge_pushed.py`
+- **called by:** `tests/check_purge_pushed.py`, `tests/check_push_row_day.py`
 
 ### `warehouse/self_close.py`
 - **calls:** `config.py`, `notifications/alert_manager.py`, `warehouse/__init__.py`, `warehouse/retention_purge.py`

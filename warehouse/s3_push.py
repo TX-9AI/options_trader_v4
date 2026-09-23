@@ -1,5 +1,35 @@
 """
-warehouse/s3_push.py  v4.8
+warehouse/s3_push.py  v4.9
+v4.9  2026-09-23  r417 / WH.20 — 🔴 `dt=` WAS THE PUSH DAY ON EVERY SERIES
+      STREAM, SO A BACKLOG THAT DRAINED ACROSS MIDNIGHT FILED A WHOLE
+      SESSION UNDER THE WRONG PARTITION. `push_series` set
+      `day = datetime.now(ET).date()` at push time; `SERIES_BATCH_ROWS`
+      (50,000) caps each run and the docstring says outright that a backlog
+      drains over successive runs, so on the biggest writers the two facts
+      met at midnight.
+      📊 MEASURED IN THE BUCKET, 224,336 raw series objects walked: 566 sat
+      in the wrong `dt=` — `quote_series` 389, `surface_series` 146,
+      `prints` 13, `fork_series` 8, `indicator_series` 8,
+      `character_axis_sample` 2 — while `greeks_series`, `last_trade`,
+      `session_summary` and `theo_series` were CLEAN AT ZERO, which is the
+      signature of a batch-cap backlog and not a labelling accident. QQQ's
+      2026-09-22 session was split 6 objects into dt=2026-09-22 and 50 into
+      dt=2026-09-23; that partition ALSO held 27 objects of 09-21 rows.
+      🔑 THE BATCH IS NOW SPLIT AT EVERY ET DAY BOUNDARY and each group is
+      filed under ITS OWN day, so an object can never hold two days nor land
+      in a partition its rows do not belong to. 441 objects in the bucket
+      straddle a boundary today and no single `dt=` is correct for any of
+      them — that shape simply cannot occur again.
+      ⚠️ THE HIGH-WATER MARK ADVANCES ONLY IF EVERY GROUP LANDED. Advancing
+      past an unwritten group skips those rows FOREVER: the box deletes on a
+      3-day clock and S3 is the only durable home. A retry is idempotent —
+      the key carries the content hash of the same rows.
+      ⚠️ AN UNREADABLE `ts_epoch` IS FILED UNDER THE PUSH DAY, NOT DROPPED.
+      Mis-filing one row beats losing it, and that was the OLD behaviour for
+      every row.
+      ⚠️ `push_derived` IS DELIBERATELY UNTOUCHED — that is C.9, and the
+      reader already compensates for it via the `derived_` forward scan.
+      Gated by tests/check_push_row_day.py R1-R6.
 v4.8  2026-09-10  r350 - SPX OWNS THE WHOLE VIX FAMILY, NOT TWO LITERALS. The
 ownership test matched `VIX` and `^VIX` exactly and MISSED `VIX_EXT`, so all
 fifteen boxes pushed the extended-hours series into one shared `sym=VIX_EXT`
@@ -1062,7 +1092,7 @@ def push_series(s3, bucket, db_path, ledger, me, counters=None,
         con.row_factory = sqlite3.Row
     except Exception:
         return 0, 0
-    day = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    push_day = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
     for table in (SERIES_TABLES if tables is None else tables):
         lk = "%s|%s" % (ns, table)
         hwm = float(ledger.get(lk, 0) or 0)
@@ -1074,18 +1104,55 @@ def push_series(s3, bucket, db_path, ledger, me, counters=None,
             continue                     # table absent on an older schema
         if not rows:
             continue
-        top = float(rows[-1]["ts_epoch"])
-        sha = _sha256(_canon(rows))
-        body = _wrap(table, rows, me or "UNKNOWN", day,
-                     {"n_rows": len(rows), "ts_from": float(rows[0]["ts_epoch"]),
-                      "ts_to": top})
-        key = "%s/%s/dt=%s/sym=%s/%d-%s.json" % (
-            PREFIX, table, day, me or "UNKNOWN", int(top * 1000), sha[:16])
-        if put_and_verify(s3, bucket, key, body, counters):
-            ledger[lk] = top
-            pushed += 1
-        else:
-            failed += 1
+        # ── 🔴 r417 — `dt=` IS THE ROW'S OWN ET DAY, NEVER THE PUSH DAY ──────
+        # The batch is SPLIT at every ET day boundary and each group is filed
+        # under ITS day, so one object can never hold two days and no object
+        # can land in a partition its rows do not belong to.
+        # ⚠️ WHY IT MATTERED: `day = datetime.now(ET)` filed by PUSH time, so a
+        # batch that drained after midnight — which is routine on the biggest
+        # writers, because SERIES_BATCH_ROWS caps each run and a backlog drains
+        # over successive runs — landed in the NEXT day's partition. Measured
+        # 2026-09-23 across the bucket: 566 of 224,336 raw series objects sat
+        # in the wrong `dt=`, 389 of them `quote_series`, and QQQ's 09-22
+        # session was split 6 objects into dt=09-22 and 50 into dt=09-23.
+        # A single-partition reader then silently under-reports, which is
+        # exactly C.9's failure mode one prefix over.
+        groups = {}
+        for r in rows:
+            try:
+                d = datetime.fromtimestamp(
+                    float(r["ts_epoch"]),
+                    ZoneInfo("America/New_York")).date().isoformat()
+            except (TypeError, ValueError, OSError, OverflowError):
+                # ⚠️ AN UNREADABLE ts_epoch IS FILED UNDER THE PUSH DAY AND NOT
+                # DROPPED. Losing the row would be worse than mis-filing it,
+                # and the old behaviour filed EVERY row this way.
+                d = push_day
+            groups.setdefault(d, []).append(r)
+        # ⚠️ THE HIGH-WATER MARK ADVANCES ONLY IF EVERY GROUP LANDED. A partial
+        # batch that advanced the mark would skip the unwritten rows FOREVER —
+        # they are deleted from the box on a 3-day clock and S3 is the only
+        # durable home. A re-push writes the same key (the name carries the
+        # content hash of the SAME rows), so the retry is idempotent.
+        all_ok = True
+        for d in sorted(groups):
+            grp = groups[d]
+            top_g = float(grp[-1]["ts_epoch"])
+            sha = _sha256(_canon(grp))
+            body = _wrap(table, grp, me or "UNKNOWN", d,
+                         {"n_rows": len(grp),
+                          "ts_from": float(grp[0]["ts_epoch"]),
+                          "ts_to": top_g})
+            key = "%s/%s/dt=%s/sym=%s/%d-%s.json" % (
+                PREFIX, table, d, me or "UNKNOWN", int(top_g * 1000), sha[:16])
+            if put_and_verify(s3, bucket, key, body, counters):
+                pushed += 1
+            else:
+                failed += 1
+                all_ok = False
+                break
+        if all_ok:
+            ledger[lk] = float(rows[-1]["ts_epoch"])
     con.close()
     return pushed, failed
 
