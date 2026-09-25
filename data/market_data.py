@@ -1,5 +1,17 @@
 """
-data/market_data.py  v4.0
+data/market_data.py  v4.1
+v4.1  2026-09-25  r430 / OPS.54 — `_feed_alive` SAYS WHY IT REFUSED. Its bare
+      except made a RAISED read and a genuinely STALE heartbeat identical to
+      every caller, and record_blindness printed HEARTBEAT_STALE for both.
+      That mislabel cost a day: on 2026-09-25 AAL logged 34 HEARTBEAT_STALE
+      lines while an independent sampler read the heartbeat at 0.4s old, ~300x
+      fresher than the 120s threshold — the feed was never stale, the process
+      could not OPEN the file because a descriptor leak had exhausted its fd
+      table. `_ALIVE_WHY` now records "heartbeat READ FAILED (<Type>: <msg>)",
+      "no heartbeat row" or "heartbeat <N>s old", and the BLIND line carries
+      it as saw=. STILL FAILS CLOSED — same shape as OPS.45/r335, where a bare
+      except returned a falsy value and the caller printed a confident wrong
+      cause. Gated by tests/check_db_handles.py H5/H5b.
 Frame accessors over the candle store, with staleness refusal.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -188,19 +200,44 @@ def _connect_ro() -> Optional[sqlite3.Connection]:
         return None
 
 
+# 🔴 r430 / OPS.54 — WHY THIS SAID False, RECORDED. The bare `except: return
+# False` below made a RAISED read and a genuinely STALE heartbeat identical to
+# every caller, and record_blindness then printed HEARTBEAT_STALE for both.
+# 📊 THAT MISLABEL COST A DAY. On 2026-09-25 AAL logged 34 HEARTBEAT_STALE
+# lines while an independent sampler read the heartbeat at 0.4s old — 300x
+# fresher than the 120s threshold. The feed was never stale; the bot could not
+# OPEN the file, because a descriptor leak had exhausted the process table.
+# The log accused the producer of a fault the producer never committed.
+# ⚠️ SAME SHAPE AS OPS.45/r335 — a bare except returning a falsy value and a
+# caller printing a confident wrong cause. The fix is not to stop swallowing
+# (the guard must still fail closed) but to SAY WHAT IT SAW.
+_ALIVE_WHY = {"why": ""}
+
+
 def _feed_alive(conn: sqlite3.Connection) -> bool:
     """True iff candle_feed's heartbeat is fresh. This is the dead-feed guard:
-    a crashed producer must surface as None, not stale numbers."""
+    a crashed producer must surface as None, not stale numbers.
+
+    ⚠️ STILL FAILS CLOSED on any error — that is deliberate and unchanged. It
+    now records WHY in `_ALIVE_WHY` so the caller can name the actual cause.
+    """
     try:
         cur = conn.execute(
             "SELECT last_write_epoch FROM feed_meta "
             "WHERE symbol='__feed__' AND interval='heartbeat'")
         row = cur.fetchone()
-    except Exception:
+    except Exception as exc:                                   # noqa: BLE001
+        _ALIVE_WHY["why"] = f"heartbeat READ FAILED ({type(exc).__name__}: {exc})"
         return False
     if not row:
+        _ALIVE_WHY["why"] = "no heartbeat row"
         return False
-    return (_time.time() - float(row[0])) <= FEED_STALE_S
+    age = _time.time() - float(row[0])
+    if age <= FEED_STALE_S:
+        _ALIVE_WHY["why"] = ""
+        return True
+    _ALIVE_WHY["why"] = f"heartbeat {int(age)}s old"
+    return False
 
 
 def fetch_candles(symbol: str, timeframe: str, count: int) -> Optional[pd.DataFrame]:
@@ -226,8 +263,12 @@ def fetch_candles(symbol: str, timeframe: str, count: int) -> Optional[pd.DataFr
         return None
     try:
         if not _feed_alive(conn):
+            # r430 — `saw=` carries what _feed_alive ACTUALLY observed. Without
+            # it this line names the feed for a fault that may be entirely on
+            # the reader's side, which is exactly what happened on 2026-09-25.
             record_blindness("HEARTBEAT_STALE", symbol, timeframe,
-                             threshold_s=f"{FEED_STALE_S:.0f}")
+                             threshold_s=f"{FEED_STALE_S:.0f}",
+                             saw=_ALIVE_WHY["why"] or "unknown")
             return None
 
         fetch_n = max(count * 3, count + 10)   # margin for NaN drops / scoping

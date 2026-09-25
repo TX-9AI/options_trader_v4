@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-execution/resting_orders.py  v1.1
+execution/resting_orders.py  v1.2
+v1.2  2026-09-25  r430 / OPS.54 — same leak, 5 sites. `with _conn() as c:`
+      committed without closing; new `_session()` contextmanager closes in a
+      finally. See trade_logger v4.13 for the measurement. Gated by
+      tests/check_db_handles.py H2/H6.
 v1.1  2026-09-01  r207 — PAPER FILLS THE WHOLE OFFER. The v1.0 paper branch
       compared the UNDERLYING price against the OPTION STRIKE
       (`price >= row["strike"]`) and called that "the underlying has come back
@@ -106,6 +110,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+from contextlib import contextmanager
 import time
 from typing import Dict, List, Optional
 
@@ -166,6 +171,17 @@ def _conn() -> sqlite3.Connection:
     return c
 
 
+@contextmanager
+def _session():
+    """Commit-or-rollback as before, THEN CLOSE. See TradeLogger._db (r430)."""
+    c = _conn()
+    try:
+        with c:
+            yield c
+    finally:
+        c.close()
+
+
 def record_placement(*, order_id: str, session_date: str, strategy: str,
                      symbol: str, underlying: str, side: str, strike: float,
                      offered_qty: int, offer_price: float,
@@ -179,7 +195,7 @@ def record_placement(*, order_id: str, session_date: str, strategy: str,
     accepts it, and a fill discovered later joins a row that is already there.
     """
     try:
-        with _conn() as c:
+        with _session() as c:
             c.execute(
                 "INSERT OR REPLACE INTO resting_orders (order_id, session_date,"
                 " strategy, symbol, underlying, side, strike, offered_qty,"
@@ -206,7 +222,7 @@ def record_placement(*, order_id: str, session_date: str, strategy: str,
 def working(session_date: str, strategy: str = "") -> List[Dict]:
     """Every offer still WORKING this session. Survives a restart by design."""
     try:
-        with _conn() as c:
+        with _session() as c:
             q = ("SELECT * FROM resting_orders WHERE state='WORKING' "
                  "AND session_date=?")
             args: list = [session_date]
@@ -225,7 +241,7 @@ def working(session_date: str, strategy: str = "") -> List[Dict]:
 def note_seen_qty(order_id: str, qty: int) -> None:
     """Record how much the broker says has filled so far. Informational."""
     try:
-        with _conn() as c:
+        with _session() as c:
             c.execute("UPDATE resting_orders SET last_seen_qty=? WHERE "
                       "order_id=?", (int(qty), str(order_id)))
     except sqlite3.Error:
@@ -237,7 +253,7 @@ def close_out(order_id: str, state: str, reason: str = "") -> None:
     are a record of what we asked for, including what never filled — which is
     the population the fill-rate question needs and the one nobody keeps."""
     try:
-        with _conn() as c:
+        with _session() as c:
             c.execute("UPDATE resting_orders SET state=?, cancel_reason=? "
                       "WHERE order_id=?", (state, reason, str(order_id)))
         logger.info("[offer] %s %s%s", order_id, state,
@@ -428,7 +444,7 @@ def _note_fill_price(order_id: str, net: float) -> None:
     booked the mark because a market order has no price.
     """
     try:
-        with _conn() as c:
+        with _session() as c:
             c.execute("UPDATE resting_orders SET fill_price=? WHERE order_id=?",
                       (float(net), str(order_id)))
     except sqlite3.Error:

@@ -42,7 +42,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `chain_marks` | `data/candle_feed.py` | `data/candle_feed.py` (delete/insert) | `data/options_chain.py`, `tools/manifold_status.py`, `tools/probe_aux_streams.py` |
 | `chain_subs` | `data/candle_feed.py`, `data/options_chain.py` | `data/options_chain.py` (insert) | — |
 | `chain_subs_aux` | `analysis/tenor_publish.py` | `analysis/tenor_publish.py` (delete/insert) | `data/candle_feed.py` |
-| `feed_meta` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `data/market_data.py`, `tools/manifold_status.py` |
+| `feed_meta` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_db_handles.py` (insert) | `data/market_data.py`, `tools/manifold_status.py` |
 | `greeks_series` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_purge_lock.py` (insert), `tests/check_purge_reclaim.py` (delete/insert) | `analysis/second_order.py`, `derived/surface.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `last_trade` | `data/candle_feed.py` | `data/candle_feed.py` (insert) | `tools/manifold_status.py`, `warehouse/s3_push.py` |
 | `prints` | `data/candle_feed.py` | `data/candle_feed.py` (insert), `tests/check_orb_geometry.py` (delete/insert) | `analysis/order_flow.py`, `analysis/tape_at_level.py`, `tools/manifold_status.py`, `warehouse/s3_push.py` |
@@ -56,7 +56,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | table | created by | written by | read by |
 |---|---|---|---|
 | `circuit_breaker_events` | `database/trade_logger.py` | `database/trade_logger.py` (insert) | `query.py` |
-| `trades` | `database/trade_logger.py`, `tests/check_condor_stop_suppression.py` | `database/trade_logger.py` (insert/update), `tests/check_condor_pairing.py` (insert), `tests/check_dashboards_multi_position.py` (insert), `tests/check_one_per_session.py` (insert), `tests/check_orb_geometry.py` (insert) | `derived/counterfactual.py`, `eod_summary.py`, `main.py`, `notifications/alert_manager.py`, `query.py`, `status.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py`, `warehouse/s3_push.py` |
+| `trades` | `database/trade_logger.py`, `tests/check_condor_stop_suppression.py` | `database/trade_logger.py` (insert/update), `tests/check_condor_pairing.py` (insert), `tests/check_dashboards_multi_position.py` (insert), `tests/check_db_handles.py` (update), `tests/check_one_per_session.py` (insert), `tests/check_orb_geometry.py` (insert) | `derived/counterfactual.py`, `eod_summary.py`, `main.py`, `notifications/alert_manager.py`, `query.py`, `status.py`, `tests/edge_scan.py`, `tests/entry_profile.py`, `tests/eod_compare.py`, `tests/exit_record.py`, `tests/exit_replay.py`, `tests/orb_bleed_study.py`, `tests/r_ledger.py`, `tests/rejection_ledger.py`, `tests/stop_sweep.py`, `warehouse/s3_push.py` |
 
 ## Flags
 
