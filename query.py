@@ -1,5 +1,21 @@
 """
-query.py  v4.8
+query.py  v4.9
+v4.9  2026-09-25  r426 / OPS.50 — THE STRATEGY CODES ARE MIRRORED FROM
+      day_trader_pro/strategy_registry.py, WHICH IS NOW THE OWNER. This copy
+      exists only because query.py runs ON A BOX and cannot import control.
+      🔴 THE TWO COPIES HAD ALREADY DRIFTED: dtp carried 8 entries and this
+      file 10, with CondorManagement/CMGT and CreditRoll/ROLL only here, and
+      nothing noticed. check_strategy_registry R5 pins them now, the same way
+      test_panel_mirror pins UNIVERSE across three repos. EDIT THE REGISTRY.
+      🔑 Codes are UNIFORM FOUR characters (operator, 2026-09-24) so the column
+      is fixed width on a phone; the old map was mixed 3-4. TEST strategies
+      HUNT/VOLT/ATPB/BRKO are registered because a second engine now writes
+      into this corpus.
+      ⚠️ AND THE FALLBACK CHANGED MEANING. r202 — an unknown name is truncated,
+      NEVER dropped — still holds, but n[:4].upper() was safe with one engine
+      and is not with two: LiquidityHunt rendered "LIQU" and Breakout "BREA",
+      wrong AND plausible. It now renders "?LIQ", which cannot be mistaken for
+      a real code.
 v4.8  2026-09-02  r216 — 🔴 THE P&L PERCENT COLUMN WAS OFF BY 100x SINCE r210.
       `pnl_pct` is a FRACTION — trade_logger:650 stores
       `(exit_price - entry_prem) / entry_prem` — so a doubling is 1.07. r210
@@ -269,12 +285,23 @@ def session_start_epoch() -> float:
 # wraps is a row that has to be reassembled by eye before it can be read.
 # ⚠️ AN UNKNOWN NAME IS TRUNCATED, NEVER DROPPED — a blank column would
 # silently hide a strategy nobody added to this table (r202's rule, same table).
+# 🔴 r426 / OPS.50 — MIRRORED FROM day_trader_pro/strategy_registry.py, WHICH
+# IS THE OWNER. This copy exists because query.py runs ON A BOX and cannot
+# import from control. The two HAD ALREADY DRIFTED before r426 — dtp carried 8
+# entries and this file 10, with CMGT and ROLL only here, and nothing noticed.
+# check_strategy_registry R5 now pins them, the same way test_panel_mirror pins
+# UNIVERSE across three repos. EDIT THE REGISTRY, NOT THIS.
+# ⚠️ CODES ARE UNIFORM FOUR CHARACTERS (operator, 2026-09-24) so the column is
+# fixed width on a phone. The old map was mixed 3-4 (ORB/RUN/SWP/TCS beside
+# BFLY/CNDR), which is why a wrapped row had to be reassembled by eye.
 _STRAT_ABBR = {
-    "ORBStrategy": "ORB", "RunawayContinuation": "RUN",
-    "GEXPinButterfly": "BFLY", "SweepCreditSpread": "SWP",
-    "TrendCreditSpread": "TCS", "IronCondorStrategy": "CNDR",
-    "CondorManagement": "CMGT", "CreditRoll": "ROLL",
+    "ORBStrategy": "ORBS", "RunawayContinuation": "RWAY",
+    "GEXPinButterfly": "GEXB", "SweepCreditSpread": "SWPT",
+    "TrendCreditSpread": "TCST", "IronCondorStrategy": "CNDR",
+    "LiquidityHunt": "HUNT", "VOLT": "VOLT",
+    "ATPButterfly": "ATPB", "Breakout": "BRKO",
     "SweepReversal": "SWPR", "ContinuationStrategy": "CONT",
+    "CondorManagement": "CMGT", "CreditRoll": "ROLL",
 }
 
 # Exit reasons carry their own P&L in the string (r16), so they are long AND
@@ -289,8 +316,15 @@ _EXIT_ABBR = (
 
 
 def abbr_strategy(name) -> str:
-    n = str(name or "?")
-    return _STRAT_ABBR.get(n, n[:4].upper())
+    """⚠️ r426 — AN UNREGISTERED NAME RENDERS VISIBLY UNREGISTERED, not as a
+    plausible code. r202's rule that it is never DROPPED still holds, but
+    `n[:4].upper()` was safe with one engine and is not with two: LiquidityHunt
+    became "LIQU" and Breakout "BREA" — not blank, not flagged, just quietly
+    not the code the operator assigned. "?LIQ" cannot be mistaken for real."""
+    n = str(name or "?").strip()
+    if n in _STRAT_ABBR:
+        return _STRAT_ABBR[n]
+    return ("?" + n[:3].upper()) if n else "?"
 
 
 def trade_row(r) -> str:
