@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v6.0 · 2026-09-21 — §0 plus 41 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v6.1 · 2026-09-26 — §0 plus 41 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1700,6 +1700,65 @@ remove.
 (`tools/deploy.sh`, `install_eod_v2.sh`, starting the analysis unit). They are
 exact-command rules, not a general licence: anything else still stops and asks.
 
+### 38.11 A SHARED FIX IS NOT DONE UNTIL IT IS DONE IN BOTH TREES, THE SAME WAY.
+
+**Operator, 2026-09-26:** *"Fixes should be durable, compatible with both
+repos, and consistently applied. In cases where timing and sequence are
+critical, I expect close coordination between you 2."*
+
+🔴 **THE FAILURE THIS CLOSES IS THAT THE STANDARD ITSELF WAS NOT DURABLE.** On
+2026-09-26 this session and the OTV4TEST session negotiated an eight-point
+definition of a properly-constructed shared fix across a dozen messages, agreed
+it, amended it three times, and applied it to four changes — and **filed it
+nowhere.** It existed only in cross-session messages. Either session ending
+would have destroyed it, and the next pair would have re-derived it badly. A
+standard that lives in a conversation is not a standard.
+
+**A SHARED FIX IS DONE WHEN ALL EIGHT HOLD:**
+
+1. **Identical logic and identical decision points** in both trees. Only
+   headers and changelogs differ. ⚠️ Any path or constant that legitimately
+   differs is READ FROM EACH TREE'S OWN MODULE, never hardcoded — `counter_pop`
+   imports `COUNTERS_PATH`, `BUCKET`, `REGION` and `LOCK_WAIT` from `s3_push`
+   for exactly this reason.
+2. **One gate file, byte-identical but for its header**, which DRIVES the real
+   function rather than grepping source, with every side effect replaced by a
+   recorder: subprocess, purge, alerts, network.
+3. **Born red on each tree's own unfixed code**, at the named checks and only
+   those, and **the born-red output is quoted in the ledger row**. A crash or
+   an environment error is NOT a FAIL (§40.1). It must run under both the
+   system interpreter and the venv.
+4. **Mutation-proven**, each mutant killed by a named check, and **any
+   surviving mutant reported rather than hidden**.
+5. **The unchanged paths are pinned too** — the cases the fix must NOT alter
+   are asserted, not assumed.
+6. **Live stores checksummed before and after every run.**
+7. **Landing order agreed in advance.** Each side announces its sha, and
+   **both operators have said yes for their own tree.** ⚠️ A peer's operator's
+   yes is never this operator's yes, and vice versa.
+8. **Stated blast radius and a named rollback.** Before landing, the ledger row
+   says: how many boxes it reaches, which runtime path it alters, what the
+   failure looks like if the fix is WRONG, and the exact command that reverts
+   it. A shared fix that cannot be described as *"if this is wrong, N boxes do
+   X, and `<command>` undoes it"* is not ready, however green its gate.
+
+🔑 **WHEN SEQUENCE IS CRITICAL, THE ORDER IS AGREED BEFORE ANY OF IT LANDS, IN
+WRITING, WITH THE DEPENDENCY NAMED.** Not "you go first" but *"your mirror
+lands, that box bakes it, I run it dry, you see the output, I apply, we both
+verify"* — the form actually used for SOFI's counter pop on 2026-09-26, which
+worked. ⚠️ **A step that cannot be done by the session that owns the code is
+named as such and handed over explicitly**: OTV4TEST had no network path to
+SOFI, so the run was this session's, under THIS operator's yes, on a box in
+THIS fleet.
+
+⚠️ **AND EACH SIDE MEASURES ON ITS OWN TREE RATHER THAN ACCEPTING THE OTHER'S
+RUN** (§40). Every time that rule was followed on 2026-09-26 it found something
+the other session had missed: otv4 carried a SECOND `sys.path` insert in
+`query.py` and a third use the peer's report omitted; re-running the peer's own
+mutants here found their N7 read the BYTECODE CACHE instead of the file it
+named — a **false green** on the one check that existed to catch renames. Two
+sessions agreeing is not evidence. Two trees measured is.
+
 ## 39. WORK FROM THE OPERATOR'S INTENT, NOT FROM THE WORDING.
 
 Added 2026-09-20, in his words, after this assistant spent an evening parsing
@@ -1760,6 +1819,29 @@ assistant granted itself, which §38.9 refuses in its own words.
 ---
 
 ## CHANGELOG
+
+**v6.1 — 2026-09-26 — r441 — §38.11 ADDED: A SHARED FIX IS NOT DONE UNTIL IT IS
+DONE IN BOTH TREES, THE SAME WAY.** Operator: *"Fixes should be durable,
+compatible with both repos, and consistently applied. In cases where timing and
+sequence are critical, I expect close coordination between you 2."*
+🔴 **THE FAILURE IT CLOSES IS THAT THE STANDARD ITSELF WAS NOT DURABLE.** This
+session and the OTV4TEST session negotiated an eight-point definition of a
+properly-constructed shared fix across a dozen messages, agreed it, amended it
+three times, and applied it to four changes on 2026-09-26 — and **filed it
+nowhere.** It existed only in cross-session messages. Either session ending
+would have destroyed it and the next pair would have re-derived it badly.
+**A standard that lives in a conversation is not a standard.**
+🔑 **THE SEQUENCING RULE IS HIS SECOND SENTENCE AND IT IS SEPARATE FROM THE
+EIGHT.** Where order matters it is agreed IN WRITING BEFORE ANY OF IT LANDS,
+with the dependency named and any step a session cannot perform handed over
+explicitly — the form used for SOFI's counter pop the same day, where OTV4TEST
+had no network path to the box and the run was this session's under THIS
+operator's yes.
+⚠️ **AND §40's "MEASURE ON YOUR OWN TREE" IS RESTATED INSIDE IT**, because every
+time it was followed that day it found something the other session had missed:
+a SECOND `sys.path` insert in `query.py`, a third use omitted from the peer's
+report, and a **false green** in their N7 which was reading the bytecode cache
+instead of the file it named. Two sessions agreeing is not evidence.
 
 **v6.0 — 2026-09-21 — r411 — §0.7 ADDED: SEARCH THE LEDGERS BEFORE YOU CALL
 ANYTHING A FINDING.** Operator, after watching a thread re-derive a settled
