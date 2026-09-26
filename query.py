@@ -1,5 +1,24 @@
 """
-query.py  v4.9
+query.py  v4.10
+v4.10 2026-09-26  r449 / QRY.1 — SHARED FIX, MIRRORED FROM OTV4TEST r152 (fb34d10)
+      under WA §38.11. THIS FILE READ THE LIVE TREE WHEREVER IT WAS IMPORTED
+      FROM: INSTALL_DIR was the expanded "~/options-trader", put FIRST on
+      sys.path at import and AGAIN on every get_live_price() call (behind an
+      except returning None), so a checker importing it from a clone tested the
+      LIVE config; and a failed `from config import` fell back SILENTLY to
+      ~/options-trader/trades.db — on control a stray directory whose only row
+      is a checker fixture (orb-T1 / NVDA). Now: this file's own directory
+      (identical on a box), an idempotent insert, no per-call insert, and the
+      fallback NAMES what it caught on stderr.
+      ⚠️ ONE LINE DIFFERS FROM OTV4TEST, NAMED PER §38.11 CRITERION 1: ET is
+      ZoneInfo("America/New_York") here where theirs keeps "US/Eastern". Same
+      zone. Control's system python 3.14 has no tzdata-legacy (OPS.22), so the
+      legacy name raised at IMPORT and the gate could never run under bare
+      python3 — which is how the lander runs CHECKs (CHK.9). Their boxes carry
+      tzdata-legacy; ours does not. Measured both ways 2026-09-26.
+      ⚠️ NOT CHANGED: the derived-store default at get_derived_* (~/options-
+      trader/data/derived_store.db) is the same class, read-only, left for a
+      later shared fix (their QRY.1).
 v4.9  2026-09-25  r426 / OPS.50 — THE STRATEGY CODES ARE MIRRORED FROM
       day_trader_pro/strategy_registry.py, WHICH IS NOW THE OWNER. This copy
       exists only because query.py runs ON A BOX and cannot import control.
@@ -175,17 +194,24 @@ import subprocess
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-INSTALL_DIR = os.path.expanduser("~/options-trader")
-sys.path.insert(0, INSTALL_DIR)
+# r152 — THIS FILE'S OWN TREE, never an assumed "~/options-trader": on a box the two are
+# the same directory; from a worktree or clone the old path loaded the LIVE config.
+INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
+if INSTALL_DIR not in sys.path:
+    sys.path.insert(0, INSTALL_DIR)
 
 try:
     from config import DB_PATH
     SERVICE_NAME = "optionsbot"
-except Exception:
+except Exception as _cfg_exc:                                   # noqa: BLE001
+    # r152 — NAMED, NOT SWALLOWED: a silent fallback bound readers to whatever trades.db sat at
+    # the assumed path (on control: a checker fixture) with no sign anything had failed.
     DB_PATH            = os.path.join(INSTALL_DIR, "trades.db")
     SERVICE_NAME       = "optionsbot"
+    print(f"query.py: config did not load ({type(_cfg_exc).__name__}: {_cfg_exc}) "
+          f"- falling back to {DB_PATH}", file=sys.stderr)
 
-ET  = ZoneInfo("US/Eastern")
+ET  = ZoneInfo("America/New_York")
 UTC = timezone.utc
 
 
@@ -403,8 +429,7 @@ def get_service_status() -> str:
 
 def get_live_price() -> float | None:
     try:
-        sys.path.insert(0, INSTALL_DIR)
-        from data.market_data import fetch_quote
+        from data.market_data import fetch_quote          # r152: no per-call sys.path insert
         return fetch_quote(INSTRUMENT)
     except Exception:
         return None
