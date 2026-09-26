@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-"""tests/check_self_close_hold.py — v1.0
+"""tests/check_self_close_hold.py — v1.1
 A FAILED DRAIN HOLDS THE BOX, WHATEVER ELSE THE VERIFIER PRINTS.
 
+v1.1  2026-09-26 — otv4 r448. v1.0's header below says MIRRORED VERBATIM; it
+      was not. Three COMMENT lines explaining the stand-in alert module were
+      dropped in transcription (the peer's body slice is 97 lines, ours was
+      94; the ASTs are identical, so no check ever behaved differently).
+      They are the one explanation a later reader needs before "simplifying"
+      the stand-in into a patched attribute, which would turn this check red
+      on the system interpreter. Restored; the body from `from __future__` to
+      EOF now hashes to the peer's c64c9561, measured, not asserted.
 v1.0  2026-09-26 — otv4 r443, MIRRORED VERBATIM from OTV4TEST r147 (babd06a),
       sha256 6e036ffc2f993a00d05159b534d2dfeef63c2ff5142187d47d3175bbbc72dce2.
       `self_close` read `drift = "COUNTER DRIFT" in out` and let it override
@@ -72,6 +80,9 @@ def drive(verifier_out: str) -> dict:
             return types.SimpleNamespace(stdout=verifier_out, stderr="")
         return types.SimpleNamespace(stdout="", stderr="")
 
+    # A stand-in MODULE, not a patched attribute: self_close imports the alert
+    # manager lazily, and the real one needs the bot venv (pytz) - importing it
+    # here would make this check red on ENVIRONMENT, not content (WA §36).
     fake_am = types.SimpleNamespace(send=lambda msg: rec["alerts"].append(msg))
     fake_mod = types.ModuleType("notifications.alert_manager")
     fake_mod.get_alert_manager = lambda: fake_am
