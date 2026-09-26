@@ -1,5 +1,26 @@
 """
-warehouse/s3_push.py  v4.9
+warehouse/s3_push.py  v4.10
+v4.10 2026-09-26  r444 — THE CLASSIFIER'S COMMENT PROMISED SOMETHING THE CODE
+      HAS NOT DONE SINCE r180, AND TWO SESSIONS READ IT AS THE SPEC. It said
+      "a gap of 3+ on ANY prefix still reads as possible loss and STILL HOLDS
+      THE BOX" — pre-r180 behaviour. The r180 heal runs 57 lines earlier and
+      repairs any short prefix where S3 holds objects, whatever the gap, so a
+      3+ gap on a non-empty prefix never reaches the classifier.
+      🔴 BOTH THIS SESSION AND OTV4TEST CALLED THAT A CONTRADICTION AND
+      PROPOSED BOUNDING THE HEAL AT GAPS <=2 — which would have reinstated the
+      exact nightly outage r180 was written in one evening to end. r180's row:
+      "the drift diagnosis only forgave gaps <=2 and TWO MONTHS OF ACCUMULATION
+      EXCEEDED IT." The `<=2` there is the PROBLEM STATEMENT, not the remedy;
+      r180's ruling carries no gap-size condition at all.
+      🔑 NO BEHAVIOUR CHANGES. Zero non-comment lines differ. What still holds
+      the box is unchanged: a got=0 prefix (the heal is gated on `_got > 0`)
+      and any drain with failed>0.
+      ⚠️ THE RESIDUAL RISK IS RECORDED RATHER THAN REMOVED: on a CLEAN drain a
+      genuine partial loss is healed and logged, and neither held nor alerted —
+      measured by OTV4TEST with a 10 -> 6 loss. r180's deliberate trade, the
+      operator's to revisit.
+      ⚠️ A COMMENT IS NOT A SPECIFICATION UNTIL YOU KNOW WHICH RULING WROTE IT.
+      §0.7 would have caught this before the proposal; it was skipped.
 v4.9  2026-09-23  r417 / WH.20 — 🔴 `dt=` WAS THE PUSH DAY ON EVERY SERIES
       STREAM, SO A BACKLOG THAT DRAINED ACROSS MIDNIGHT FILED A WHOLE
       SESSION UNDER THE WRONG PARTITION. `push_series` set
@@ -1442,10 +1463,37 @@ def main(argv=None) -> int:
             # PUTs inflate a counter by a SMALL amount wherever they land;
             # genuine loss scatters and is larger. A 1-object gap on one prefix
             # is the same fencepost as a 1-object gap on ten.
-            # ⚠️ THE OTHER HALF MUST NOT REGRESS: a gap of 3+ on ANY prefix
-            # still reads as possible loss and STILL HOLDS THE BOX. A stopped
-            # box's local store is the only copy left, and a stopped box cannot
-            # be asked anything.
+            # 🔴 r444 — THIS COMMENT USED TO PROMISE SOMETHING THE CODE HAS NOT
+            # DONE SINCE r180, AND TWO SESSIONS READ IT AS THE SPECIFICATION.
+            # It said: "a gap of 3+ on ANY prefix still reads as possible loss
+            # and STILL HOLDS THE BOX." That is PRE-r180 behaviour. The r180
+            # heal runs 57 lines ABOVE this classifier and repairs any short
+            # prefix where S3 holds objects, whatever the gap size — so a 3+
+            # gap on a NON-EMPTY prefix never reaches this line at all.
+            # ⚠️ AND THAT IS THE RULING, NOT A REGRESSION. r180, 2026-08-28:
+            # the per-prefix ledger counts PUTs while S3 counts KEYS, and the
+            # dedupe set is per-run DELIBERATELY, so any key re-pushed by the
+            # timer, a harvest or a restart inflates the ledger PERMANENTLY.
+            # Its row: "the drift diagnosis only forgave gaps <=2 and TWO
+            # MONTHS OF ACCUMULATION EXCEEDED IT." Operator: "there's never
+            # been a time that the data actually didn't go to the bucket …
+            # it's actually costing me money … we have to solve it tonight."
+            # 🔑 WHAT STILL HOLDS THE BOX, AND IT IS NOT GAP SIZE:
+            #   · a prefix S3 knows NOTHING about (got=0). The heal is gated on
+            #     `_got > 0`, so an EMPTIED prefix never heals and stays SHORT
+            #     permanently — that is the counter-orphan case (r436/S3.25).
+            #   · ANY drain with failed>0, which the heal requires to be zero.
+            # ⚠️ THE RESIDUAL RISK IS DELIBERATE AND IS r180's TRADE: on a
+            # CLEAN drain a genuine PARTIAL loss IS healed and LOGGED, and is
+            # neither held nor alerted. Measured by the OTV4TEST session with a
+            # 10 -> 6 loss: healed, box halted normally. That trade was made
+            # with the operator's reasoning attached and is HIS to revisit.
+            # ⚠️ DO NOT "FIX" THE CODE TO MATCH A COMMENT. On 2026-09-26 both
+            # this session and OTV4TEST read the old text as a live invariant,
+            # called the code self-contradictory, and proposed bounding the
+            # heal at gaps <=2 — which would have REINSTATED the exact nightly
+            # outage r180 was written in one evening to end. A comment is not a
+            # specification until you know which ruling wrote it (§0.7).
             if _gaps and max(_gaps) <= 2:
                 print("  ⚠️ SMALL, CONSISTENT SHORTFALL ON {} PREFIXES (max {}). "
                       "That is the signature of COUNTER DRIFT, not data loss — "
