@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v6.1 · 2026-09-26 — §0 plus 41 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v6.2 · 2026-09-26 — §0 plus 41 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1725,9 +1725,11 @@ standard that lives in a conversation is not a standard.
    function rather than grepping source, with every side effect replaced by a
    recorder: subprocess, purge, alerts, network.
 3. **Born red on each tree's own unfixed code**, at the named checks and only
-   those, and **the born-red output is quoted in the ledger row**. A crash or
-   an environment error is NOT a FAIL (§40.1). It must run under both the
-   system interpreter and the venv.
+   those, and **the born-red output is quoted in the ledger row**. OTV4TEST's
+   WA §40.1, verbatim: *"a FAIL must be distinguished from a non-zero exit"* —
+   so a crash, or an import error from an interpreter that lacks a module, is
+   an exit code and not a verdict. It must run under both the system
+   interpreter and the venv.
 4. **Mutation-proven**, each mutant killed by a named check, and **any
    surviving mutant reported rather than hidden**.
 5. **The unchanged paths are pinned too** — the cases the fix must NOT alter
@@ -1752,12 +1754,31 @@ SOFI, so the run was this session's, under THIS operator's yes, on a box in
 THIS fleet.
 
 ⚠️ **AND EACH SIDE MEASURES ON ITS OWN TREE RATHER THAN ACCEPTING THE OTHER'S
-RUN** (§40). Every time that rule was followed on 2026-09-26 it found something
+RUN** (OTV4TEST WA §40). Every time that rule was followed on 2026-09-26 it found something
 the other session had missed: otv4 carried a SECOND `sys.path` insert in
 `query.py` and a third use the peer's report omitted; re-running the peer's own
 mutants here found their N7 read the BYTECODE CACHE instead of the file it
 named — a **false green** on the one check that existed to catch renames. Two
 sessions agreeing is not evidence. Two trees measured is.
+
+🔴 **"§40" IS NOT A SECTION OF THIS FILE.** This agreement ends at §39. §40 and
+§40.1 belong to the OTV4TEST working agreement (v4.21), and r441 cited them
+here bare, as though they were ours — so a reader of this file was pointed at
+a rule this file does not contain, which is §0.0's founding failure in a
+smaller form. The rules this section relies on, quoted from their text as the
+peer sent it on 2026-09-26 rather than restated:
+- *"A fork and its parent carry the same defect until one of them is SHOWN not
+  to."* The cheapest correction is *"a measurement on the tree being
+  described, by the side that owns it."*
+- *"SEND THE MECHANISM, NOT THE OUTCOME."* Proven again the day this note was
+  written: r446 reported that `transcript_text.py` read an environment
+  variable the harness does not set, and the peer found the same mechanism in
+  a DIFFERENT file of theirs (`tools/last_session.py`) that no outcome-only
+  report would have led them to.
+- §40.1: *"a FAIL must be distinguished from a non-zero exit, or the harness
+  joins the table above."*
+⚠️ GENESIS rows r438, r440 and r441 say "section 40" / "40.1" bare. They are
+NOT edited in place (§0.1); read them as OTV4TEST's.
 
 ## 39. WORK FROM THE OPERATOR'S INTENT, NOT FROM THE WORDING.
 
@@ -1819,6 +1840,20 @@ assistant granted itself, which §38.9 refuses in its own words.
 ---
 
 ## CHANGELOG
+
+**v6.2 — 2026-09-26 — r447 — §38.11 STOPS CITING A SECTION THIS FILE DOES
+NOT HAVE.** r441 wrote "(§40.1)" and "(§40)" into §38.11 as though they were
+ours. This agreement ends at §39; both are OTV4TEST's (their WA v4.21). A fresh
+thread reading this file in full — which is what §25 requires — was sent to a
+rule that is not in it: §0.0's founding failure, asserting a protection the
+reader does not have, in a smaller form. Found by that thread on its first
+read. 🔑 **AND THE CITATION WAS NOT EVEN A QUOTATION.** Criterion 3 said *"a
+crash or an environment error is NOT a FAIL (§40.1)"*; §40.1's actual words
+are *"a FAIL must be distinguished from a non-zero exit"*. The peer caught it
+when asked for the text. Every citation is now labelled OTV4TEST WA and the
+rules this section relies on are quoted from their text, so this file stands
+alone. ⚠️ The v6.1 entry below and GENESIS r438/r440/r441 keep their bare
+"§40" — history is not rewritten (§0.1); this entry says how to read them.
 
 **v6.1 — 2026-09-26 — r441 — §38.11 ADDED: A SHARED FIX IS NOT DONE UNTIL IT IS
 DONE IN BOTH TREES, THE SAME WAY.** Operator: *"Fixes should be durable,
