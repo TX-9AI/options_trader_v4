@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-302 Python modules across 13 local packages.
+303 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 131 referenced from a script, unit or doc but never imported · **61 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 131 referenced from a script, unit or doc but never imported · **62 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -962,6 +962,10 @@ Change these with the most care; a break here reaches everything downstream.
 - **calls:** (none)
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
+### `tests/check_self_close_hold.py`
+- **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/self_close.py`
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
 ### `tests/check_shadow_velocity.py`
 - **calls:** `shadow/primitives.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
@@ -1252,7 +1256,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/__init__.py`
 - **calls:** (none)
-- **called by:** `tests/check_audit_20260823.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_push_row_day.py`, `tests/check_reclaim_paths.py`, `tests/check_retention_armed.py`, `tests/check_vacuum_headroom.py`, `warehouse/self_close.py`
+- **called by:** `tests/check_audit_20260823.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_push_row_day.py`, `tests/check_reclaim_paths.py`, `tests/check_retention_armed.py`, `tests/check_self_close_hold.py`, `tests/check_vacuum_headroom.py`, `warehouse/self_close.py`
 
 ### `warehouse/counter_pop.py`
 - **calls:** (none)
@@ -1264,7 +1268,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/retention_purge.py`
 - **calls:** (none)
-- **called by:** `tests/check_purge_batched.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_push_row_day.py`, `tests/check_reclaim_paths.py`, `tests/check_retention_armed.py`, `tests/check_vacuum_headroom.py`, `warehouse/self_close.py`
+- **called by:** `tests/check_purge_batched.py`, `tests/check_purge_lock.py`, `tests/check_purge_pushed.py`, `tests/check_purge_reclaim.py`, `tests/check_push_row_day.py`, `tests/check_reclaim_paths.py`, `tests/check_retention_armed.py`, `tests/check_self_close_hold.py`, `tests/check_vacuum_headroom.py`, `warehouse/self_close.py`
 
 ### `warehouse/s3_push.py`
 - **calls:** (none)
@@ -1272,7 +1276,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `warehouse/self_close.py`
 - **calls:** `config.py`, `notifications/alert_manager.py`, `warehouse/__init__.py`, `warehouse/retention_purge.py`
-- **called by:** `tests/check_audit_20260823.py`
+- **called by:** `tests/check_audit_20260823.py`, `tests/check_self_close_hold.py`
 
 <!-- REMOVED-ON-PURPOSE -->
 ## Removed on purpose

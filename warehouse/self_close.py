@@ -1,7 +1,31 @@
 #!/usr/bin/env python3
 """
-warehouse/self_close.py  v1.3
+warehouse/self_close.py  v1.4
 The box closes ITSELF: drain to S3, verify it landed, then shut down.
+
+v1.4  2026-09-26  r443 / S3.15 — A FAILED DRAIN HOLDS THE BOX, WHATEVER ELSE
+THE VERIFIER PRINTS. `drift` was `"COUNTER DRIFT" in out` alone and it
+overrode `not ok` regardless of `failed=`. A counter-drift line prints whenever
+every remaining gap is <= 2 — and an S3 delete that EMPTIES a prefix the
+counter still claims leaves a PERMANENT gap of 1, because the r180 heal is
+gated on `if _got > 0` and a got=0 prefix therefore never heals.
+🔴 MEASURED 2026-09-26: mainline carried 31 such prefixes across all 15 boxes
+and SOFI six, so on every one of them a drain with a FAILED PUT halted and ran
+the purge where this file was built to HOLD and page — and the purge deletes
+the local copy of data S3 never acknowledged. The gate captured HEAD doing it:
+`failed=1`, then *"shortfall is COUNTER DRIFT — objects present; proceeding"*,
+then shutdown and `purge(["--apply"])`.
+⚠️ `failed=` IS READ FROM `line`, THE DRAIN LINE THAT OWNS IT, never from all
+of `out`. A mutant reading the whole output passes H1-H5 and dies only on H4b,
+which exists for exactly that and which the peer session added after it
+survived their first cut.
+🔑 AUTHORED BY THE OTV4TEST SESSION (their r147, babd06a) AND MIRRORED HERE
+VERBATIM under WA §38.11. Born red on otv4 at H4 and H4b ONLY; three mutants
+each killed by a named check — presence-not-value reds H4+H4b, reading `out`
+instead of `line` reds H4b alone, ignoring drift reds H2.
+⚠️ BLAST RADIUS: 15 mainline boxes, the shutdown path only. If the predicate
+were wrong the boxes hold every night — expensive and VISIBLE, never silent.
+ROLLBACK: revert this one condition and bake.
 
 v1.3  2026-09-05  r255 — RELEASE THE STORES BEFORE THE RECLAIM. `retention_purge`
 now checkpoints and vacuums, and both are blocked by a live connection:
@@ -130,7 +154,18 @@ def main(argv=None) -> int:
 
     line = next((l for l in out.splitlines() if l.startswith("DRAIN ")), "")
     ok = " short=0 " in line and line.rstrip().endswith("OK")
-    drift = "COUNTER DRIFT" in out
+    # 🔴 r443 — DRIFT MAY ONLY OVERRIDE `not ok` ON A CLEAN DRAIN. It used to
+    # be `"COUNTER DRIFT" in out` alone, so ANY gap <= 2 anywhere turned the
+    # hold off — and an S3 delete that EMPTIES a prefix the counter still
+    # claims leaves a PERMANENT gap of 1, because a got=0 prefix never heals.
+    # Measured 2026-09-26: mainline carried 31 such prefixes across 15 boxes
+    # and SOFI six, so on every one of them a drain with a FAILED PUT halted
+    # and ran the purge where it was built to HOLD and page. The purge then
+    # deletes the local copy of data S3 never acknowledged.
+    # ⚠️ `failed=` IS READ FROM `line`, THE DRAIN LINE THAT OWNS IT, NOT FROM
+    # ALL OF `out`. A mutant reading the whole output passes H1-H5 and dies
+    # only on H4b, which exists for exactly that.
+    drift = "COUNTER DRIFT" in out and " failed=0 " in line
 
     # ⚠️ DRIFT IS NOT LOSS. Same rule as the conductor: a small consistent
     # shortfall across many prefixes is an inflated ledger with every object
