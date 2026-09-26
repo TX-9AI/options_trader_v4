@@ -1,6 +1,6 @@
 # WORKING_AGREEMENT.md — how we operate (read this first, every new thread)
 
-**`WORKING_AGREEMENT.md` v6.2 · 2026-09-26 — §0 plus 41 sections. See the CHANGELOG at the foot.**
+**`WORKING_AGREEMENT.md` v6.3 · 2026-09-26 — §0 plus 41 sections. See the CHANGELOG at the foot.**
 
 > 🔴 **§0 IS THE FLOOR — AN ATTESTATION, NOT A TIP. Read it first, every thread.**
 > The operator ordered it once before and was told it existed. It did not.
@@ -1723,7 +1723,12 @@ standard that lives in a conversation is not a standard.
    for exactly this reason.
 2. **One gate file, byte-identical but for its header**, which DRIVES the real
    function rather than grepping source, with every side effect replaced by a
-   recorder: subprocess, purge, alerts, network.
+   recorder: subprocess, purge, alerts, network. ⚠️ **A TRANSFER BETWEEN TREES
+   IS VERIFIED BY HASH, NOT BY EYE** — the body from `from __future__` to EOF,
+   hashed on both sides, and extracted byte-exact (from the transcript, never
+   retyped). r443's copy of the fix-2a gate lost three comment lines while its
+   header said "verbatim"; the ASTs matched, the record did not, and r448 was
+   the cost.
 3. **Born red on each tree's own unfixed code**, at the named checks and only
    those, and **the born-red output is quoted in the ledger row**. OTV4TEST's
    WA §40.1, verbatim: *"a FAIL must be distinguished from a non-zero exit"* —
@@ -1734,7 +1739,11 @@ standard that lives in a conversation is not a standard.
    surviving mutant reported rather than hidden**.
 5. **The unchanged paths are pinned too** — the cases the fix must NOT alter
    are asserted, not assumed.
-6. **Live stores checksummed before and after every run.**
+6. **Live stores checksummed before and after every run** — the ones NO running
+   service writes. A store a live process writes every minute changes under
+   any run and would read as a false red; check it for the thing the fix must
+   not put there (e.g. fixture symbols) instead. (Adopted from OTV4TEST WA
+   §38.9, where it was found when a derived store's md5 moved mid-sweep.)
 7. **Landing order agreed in advance.** Each side announces its sha, and
    **both operators have said yes for their own tree.** ⚠️ A peer's operator's
    yes is never this operator's yes, and vice versa.
@@ -1760,6 +1769,12 @@ the other session had missed: otv4 carried a SECOND `sys.path` insert in
 mutants here found their N7 read the BYTECODE CACHE instead of the file it
 named — a **false green** on the one check that existed to catch renames. Two
 sessions agreeing is not evidence. Two trees measured is.
+
+🔗 **THE OTHER HALF:** OTV4TEST WA §38.9 (OTV4TEST r153, 90ae63b) carries this
+section adapted to their tree, built from this text byte-verified by hash
+(sha256 3f693bd6 at v6.1) with r447's changes applied. The two texts are
+expected to differ in tree names and in which §40 citations need a label;
+they must not differ in the rule.
 
 🔴 **"§40" IS NOT A SECTION OF THIS FILE.** This agreement ends at §39. §40 and
 §40.1 belong to the OTV4TEST working agreement (v4.21), and r441 cited them
@@ -1840,6 +1855,15 @@ assistant granted itself, which §38.9 refuses in its own words.
 ---
 
 ## CHANGELOG
+
+**v6.3 — 2026-09-26 — r450 — §38.11 GAINS ITS CROSS-REFERENCE AND TWO RULES
+FROM THE PEER'S MIRROR.** OTV4TEST landed its half as WA §38.9 (r153, 90ae63b);
+§38.11 now cites it. Two of the four rules the peer added while mirroring are
+adopted, operator's yes: criterion 2 — **a transfer is verified by hash, not by
+eye**, the lesson of r448; criterion 6 — **only stores no running service writes
+are checksummed**, because our wording would checksum a live store and report a
+false red. Not adopted: naming a per-tree difference in the header (already
+practice, r449 did it) and a WHO-AUTHORS note (no rule needed).
 
 **v6.2 — 2026-09-26 — r447 — §38.11 STOPS CITING A SECTION THIS FILE DOES
 NOT HAVE.** r441 wrote "(§40.1)" and "(§40)" into §38.11 as though they were
