@@ -1,5 +1,14 @@
 """
-database/trade_logger.py  v4.13
+database/trade_logger.py  v4.14
+v4.14  2026-09-27  r452 / OPS.59 — A RECOVERED PHANTOM FILL RAISED INSTEAD OF
+      BOOKING. close_phantom's RECOVERED branch wrote `exit_price`, a column the
+      trades table has never had (it is exit_premium, :355), since the v4 port.
+      So the first LIVE phantom whose closing fill main.py recovers from order
+      history would raise OperationalError and leave the row OPEN with no P&L —
+      the DAILY_LOSS_LIMIT breaker this branch exists to feed would never see
+      it. Paper never reaches the branch. SHARED FIX (WA §38.11), found by
+      OTV4TEST (their r165); gate check_phantom_recovered carries their X12
+      byte-identical by hash.
 v4.13  2026-09-25  r430 / OPS.54 — EVERY CONNECTION THIS FILE OPENED WAS
       LEAKED. `with self._connect() as conn:` commits and does NOT close —
       sqlite3's connection context manager owns the TRANSACTION, not the
@@ -1252,7 +1261,7 @@ class TradeLogger:
             if pnl_usd is not None:
                 conn.execute(
                     "UPDATE trades SET status='closed', exit_reason=?, exit_time=?, "
-                    "exit_price=?, pnl_usd=? WHERE trade_id=?",
+                    "exit_premium=?, pnl_usd=? WHERE trade_id=?",
                     (reason, ts_for_db(), exit_price, float(pnl_usd), trade_id),
                 )
                 logger.warning(

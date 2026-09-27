@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-304 Python modules across 13 local packages.
+305 Python modules across 13 local packages.
 
-**Reached by:** 101 imported · 9 declared entry points · 133 referenced from a script, unit or doc but never imported · **61 by nothing here**.
+**Reached by:** 101 imported · 9 declared entry points · 134 referenced from a script, unit or doc but never imported · **61 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -55,7 +55,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `utils/time_utils.py` | 40 | alert_manager.py, broker_reconcile.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/__init__.py` | 35 | check_age_gate_gone.py, check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/plan.py` | 30 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
-| `database/trade_logger.py` | 17 | check_condor_pairing.py, check_condor_stop_suppression.py, check_credit_remainder.py, check_db_handles.py |
+| `database/trade_logger.py` | 18 | check_condor_pairing.py, check_condor_stop_suppression.py, check_credit_remainder.py, check_db_handles.py |
 | `analysis/orb_engine.py` | 16 | base_strategy.py, check_absent_not_zero.py, check_atr_units.py, check_orb_one_order.py |
 | `strategy/sweep_credit_spread.py` | 16 | check_age_gate_gone.py, check_atr_units.py, check_chain_ordering.py, check_dispatch.py |
 | `utils/math_utils.py` | 15 | credit_vertical.py, entry_ladder.py, exit_engine.py, gex_pin_butterfly.py |
@@ -240,7 +240,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `database/trade_logger.py`
 - **calls:** `config.py`, `derived/registry.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `utils/time_utils.py`
-- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_condor_pairing.py`, `tests/check_condor_stop_suppression.py`, `tests/check_credit_remainder.py`, `tests/check_db_handles.py`, `tests/check_one_per_session.py`, `tests/check_orb_resume.py`, `tests/check_runaway_break_key.py`, `tests/check_standing_offer.py`, `tests/exit_replay.py`
+- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_condor_pairing.py`, `tests/check_condor_stop_suppression.py`, `tests/check_credit_remainder.py`, `tests/check_db_handles.py`, `tests/check_one_per_session.py`, `tests/check_orb_resume.py`, `tests/check_phantom_recovered.py`, `tests/check_runaway_break_key.py`, `tests/check_standing_offer.py`, `tests/exit_replay.py`
 
 ### `debug_status.py`
 - **calls:** `config.py`
@@ -869,6 +869,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_pairing_table.py`
 - **calls:** (none)
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_phantom_recovered.py`
+- **calls:** `database/trade_logger.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_pin_bounded.py`
 - **calls:** `data/__init__.py`, `data/gex_data.py`
