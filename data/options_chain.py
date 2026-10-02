@@ -1,5 +1,18 @@
 """
-data/options_chain.py  v4.2
+data/options_chain.py  v4.4
+v4.4  2026-10-02  r457 (ZBID.1, shared with OTV4TEST r186) — A CONTRACT WITH NO BID IS
+      NEVER SELECTED. `two_sided(c)` (bid > 0 and ask > 0) at module level;
+      select_orb_strike and select_sweep_strike require it beside their
+      `mark > 0.05` floor, which a no-bid contract cleared because its mark IS
+      its ask (AAL 2026-10-02, three VOLTs, -3,128, on the test engine).
+      Mainline exposure to date ZERO. The mark rule, spread/fly/condor legs and
+      order pricing are untouched. Pinned by tests/check_zero_bid_refused.py.
+v4.3  2026-10-02  r456 (LADR.1, shared with OTV4TEST r185) — STRIKES ARE READ FROM THE
+      CHAIN. `chain_increment()` at module level, the r198 body moved verbatim
+      from gex_pin_butterfly._chain_increment (now an alias);
+      `select_butterfly_strikes` DELETED (0 callers; it centred on the
+      STRIKE_INCREMENT table BFLY.3 measured wrong); `select_orb_strike` takes
+      the ORB's raw float target. Pinned by tests/check_strike_ladder.py.
 v4.2  2026-08-29  r177: OptionsChain.atm_iv — the field main's butterfly
       dispatch had been reading NEVER EXISTED (getattr default masked it);
       EM starved fleet-wide and GEXPinButterfly could never fire. Median of
@@ -592,14 +605,14 @@ class OptionsChainFetcher:
     # ─── Strike Selection ─────────────────────────────────────────────────────
 
     def select_orb_strike(self, chain: OptionsChain, direction: str,
-                           target_strike: int,
+                           target_strike: float,
                            delta_bias: str = ORB_STRIKE_DELTA_BIAS
                            ) -> Optional[OptionContract]:
         """Nearest liquid strike to target_strike. When strikes bracket the target
         equally, break toward the higher- (more ITM/participation) or lower-
         (further OTM) |delta| per delta_bias."""
         contracts = chain.calls if direction == "long" else chain.puts
-        candidates = [c for c in contracts if c.mark > 0.05]
+        candidates = [c for c in contracts if c.mark > 0.05 and two_sided(c)]   # ZBID.1
         if not candidates:
             logger.warning("No liquid contracts in chain")
             return None
@@ -627,7 +640,8 @@ class OptionsChainFetcher:
         scales target_delta by reversal strength). Prefers strikes within
         +/- tolerance of the target; falls back to the nearest available."""
         pool = chain.calls if direction == "long" else chain.puts
-        liquid = [c for c in pool if c.mark > 0.05 and 0.0 < abs(c.delta) <= 0.55]
+        liquid = [c for c in pool if c.mark > 0.05 and two_sided(c)          # ZBID.1
+                  and 0.0 < abs(c.delta) <= 0.55]
         if not liquid:
             return None
         band = [c for c in liquid if abs(abs(c.delta) - target_delta) <= tolerance]
@@ -639,45 +653,6 @@ class OptionsChainFetcher:
             f"(target={target_delta:.2f}{'' if band else ', band empty->nearest'})"
         )
         return best
-
-    def select_butterfly_strikes(self, chain: OptionsChain,
-                                  direction: str,
-                                  current_price: float,
-                                  wing_width_strikes: int
-                                  ) -> Optional[Dict[str, OptionContract]]:
-        """Select center (ATM) ± wing_width butterfly strikes."""
-        center_strike = round_to_strike(current_price, STRIKE_INCREMENT)
-        lower_strike  = center_strike - wing_width_strikes * STRIKE_INCREMENT
-        upper_strike  = center_strike + wing_width_strikes * STRIKE_INCREMENT
-
-        contracts = chain.calls if direction == "call" else chain.puts
-
-        def find_strike(target: int) -> Optional[OptionContract]:
-            candidates = [c for c in contracts if c.mark > 0 and c.strike == target]
-            if candidates:
-                return candidates[0]
-            liquid = [c for c in contracts if c.mark > 0]
-            if not liquid:
-                return None
-            return min(liquid, key=lambda c: abs(c.strike - target))
-
-        lower  = find_strike(lower_strike)
-        center = find_strike(center_strike)
-        upper  = find_strike(upper_strike)
-
-        if not all([lower, center, upper]):
-            logger.warning(
-                f"Butterfly: could not find all strikes "
-                f"{lower_strike}/{center_strike}/{upper_strike}"
-            )
-            return None
-
-        logger.info(
-            f"Butterfly: {direction.upper()} "
-            f"{lower.strike}/{center.strike}/{upper.strike} "
-            f"marks={lower.mark:.2f}/{center.mark:.2f}/{upper.mark:.2f}"
-        )
-        return {"lower": lower, "center": center, "upper": upper}
 
     def get_iv_rank(self, chain: OptionsChain) -> float:
         """Estimate IV rank. Falls back to ATM call IV."""
@@ -691,6 +666,61 @@ class OptionsChainFetcher:
 
 # Singleton
 _fetcher: Optional[OptionsChainFetcher] = None
+
+
+def two_sided(c) -> bool:
+    """🔴 ZBID.1 (r186, shared with otv4) — A CONTRACT WITH NO BID IS NOT A
+    LIVE QUOTE. `mark` is the ask when the bid is 0 (the fetch above), so a
+    no-bid contract carries its whole ask as its mark and cleared every
+    `mark > 0.05` floor. AAL 2026-10-02: VOLT bought P11.5 at delta -0.0009,
+    bid 0.00 / ask 0.22, three times, -3,128. The single-contract debit
+    selectors require this as well as the floor; gamma_leverage_pick already
+    refused `bid <= 0`. Spread, butterfly and condor legs keep their own rules.
+    """
+    try:
+        return float(getattr(c, "bid", 0) or 0) > 0 and float(getattr(c, "ask", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def chain_increment(contracts, pin: float, default: float = 1.0) -> float:
+    """The symbol's ACTUAL strike ladder near `pin`, read off the chain.
+
+    🔑 LADR.1 (r185, shared with otv4) — MOVED HERE VERBATIM from
+    strategy/gex_pin_butterfly._chain_increment (r198), which is now an alias,
+    so the ladder is read in ONE place. `pin` is any price the ladder is
+    wanted near. config.STRIKE_INCREMENTS stays as the fallback `default`
+    and as the tradeable list; 18 of its entries disagree with the real
+    near-money ladder (measured 2026-09-29), which is why the chain wins.
+
+    🔴 r198 — `config.STRIKE_INCREMENT` IS ONE GLOBAL NUMBER FOR FIFTEEN
+    SYMBOLS, and `round_to_strike()` returns an **int**, so every wing was
+    quantised to whole dollars whatever the symbol actually lists. Measured
+    2026-08-31: PLTR pin 190, EM 3.25 -> wing 1 -> legs at 189/191 on a $2.50
+    ladder; AMD pin 472.5 -> legs at 470.5/474.5. Neither pair exists, so
+    `_exact()` correctly refused — for 242 and 243 MINUTES respectively, on
+    both boxes, all session.
+
+    🔑 THE APEX WAS NEVER THE PROBLEM. PLTR's 190 and AMD's 472.5 are listed
+    strikes; `_exact(pin)` would have found them. Only the WINGS were computed
+    off a grid that does not exist. So this changes nothing about the apex, and
+    the doctrine — *"the apex is the trade; a nearest-strike substitute is a
+    different one"* — is untouched: no substitution ever reaches the apex.
+
+    Median gap of the strikes nearest the pin. The MEDIAN, not the minimum:
+    one stray half-strike listing in a $2.50 ladder would otherwise set the
+    grid to 0.50 and reproduce the bug.
+    """
+    ks = sorted({float(c.strike) for c in (contracts or [])
+                 if getattr(c, "strike", None) is not None})
+    if len(ks) < 3:
+        return default
+    near = sorted(ks, key=lambda k: abs(k - pin))[:9]
+    gaps = sorted(round(b - a, 4) for a, b in zip(sorted(near), sorted(near)[1:])
+                  if b > a)
+    if not gaps:
+        return default
+    return gaps[len(gaps) // 2] or default
 
 
 def get_chain_fetcher() -> OptionsChainFetcher:

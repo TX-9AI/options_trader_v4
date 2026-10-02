@@ -1,5 +1,14 @@
 """
-analysis/orb_engine.py  v4.11
+analysis/orb_engine.py  v4.12
+v4.12  2026-10-02  r456 (LADR.1, shared with OTV4TEST r185) — THE ORB CARRIES THE RAW
+      100% TARGET AS ITS `target_strike`; THE CHAIN SNAP PICKS THE CONTRACT. It
+      was orb_strike_selection(..., STRIKE_INCREMENT), pre-rounded on one table
+      number per symbol: on a $2.50 ladder held as 5, ORB bought a 5-multiple
+      on 109 of 111 trades (a moneyness bias; the snap always found a real
+      strike). Now round(orb_breakout_target(...), 2), and select_orb_strike
+      takes the nearest LISTED strike. The ORBData field is a float and the
+      state reload reads float(): int() turned a 16.5 target into 16 after a
+      restart. Pinned by tests/check_strike_ladder.py L5-L8.
 v4.11  2026-09-04  r235 — 🔴 THE LATCH IS PER-CONFIRMATION NOW.
       `order_placed` was a bare boolean that could only say "an order happened
       at some point", so `notify_position_closed` had to CLEAR it (r227) for a
@@ -418,7 +427,7 @@ import pandas as pd
 from utils.time_utils import now_et
 from datetime import time as _dtime
 from config import ORB_NO_ENTRY_AFTER_ET as _ORB_CUT
-from utils.math_utils import orb_strike_selection
+from utils.math_utils import orb_breakout_target   # LADR.1: raw target, chain snaps
 from config import (
     ORB_MAX_RETEST_BARS, STRIKE_INCREMENT, INSTRUMENT,
     ORB_NO_ENTRY_AFTER_ET
@@ -471,7 +480,7 @@ class ORBData:
     target_100pct:      float = 0.0
     target_50pct:       float = 0.0
     stop_level:         float = 0.0
-    target_strike:      int   = 0
+    target_strike:      float = 0.0   # LADR.1: the raw 100% target, not a rounded strike
     confirmed_at:       str   = ""
     # 🔴 r235 - THE CONFIRMATION'S IDENTITY, NOT A TIMESTAMP. `confirmed_at`
     # is `str(now_et())` and is CLEARED on the armed path, so it cannot answer
@@ -829,7 +838,7 @@ class ORBEngine:
                     setattr(d, _attr, float(_v))
             d.attempt_number     = int(data.get("attempt") or 0)
             d.bars_since_break   = int(data.get("bars_since_break") or 0)
-            d.target_strike      = int(data.get("target_strike") or 0)
+            d.target_strike      = float(data.get("target_strike") or 0.0)
             d.break_direction    = str(data.get("break_direction") or "")
             d.last_retest_bar_ts = str(data.get("last_retest_bar_ts") or "")
             d.confirmed_at       = str(data.get("confirmed_at") or "")
@@ -1455,7 +1464,7 @@ class ORBEngine:
             # r207 — the sizing distance, measured from the boundary this
             # candle broke, frozen here and never recomputed downstream.
             d.stop_distance_px   = abs(d.orb_high - d.break_candle_low)
-            d.target_strike      = orb_strike_selection(d.orb_high, d.orb_low, "long", STRIKE_INCREMENT)
+            d.target_strike      = round(orb_breakout_target(d.orb_high, d.orb_low, "long"), 2)
             d.attempt_number    += 1
             d.state              = ORBState.ARMED_LONG
             # (v1.9) broke_high is now latched by _update_break_latches() every
@@ -1479,7 +1488,7 @@ class ORBEngine:
             # r207 — the sizing distance, measured from the boundary this
             # candle broke, frozen here and never recomputed downstream.
             d.stop_distance_px   = abs(d.break_candle_high - d.orb_low)
-            d.target_strike      = orb_strike_selection(d.orb_high, d.orb_low, "short", STRIKE_INCREMENT)
+            d.target_strike      = round(orb_breakout_target(d.orb_high, d.orb_low, "short"), 2)
             d.attempt_number    += 1
             d.state              = ORBState.ARMED_SHORT
             # (v1.9) broke_low is now latched by _update_break_latches() every

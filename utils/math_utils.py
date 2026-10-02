@@ -1,7 +1,15 @@
-import math
 """
-utils/math_utils.py  v4.0
+utils/math_utils.py  v4.1
 Shared numeric helpers.
+
+v4.1  2026-10-02  r456 (LADR.1, shared with OTV4TEST r185) — THE STRIKE HELPERS NO
+      LONGER TRUNCATE A FRACTIONAL INCREMENT. `_strike` and the three helpers
+      that call it are carried from OTV4TEST r137 BY HASH, not the whole file:
+      `int(round(price / increment) * increment)` made a 16.5 strike 16. The
+      result is an int when whole (every existing symbol unchanged, type
+      included) and the cent value otherwise. Also: the duplicate `import math`
+      ABOVE this docstring is removed (the real import is below), so this is the
+      module docstring again. Pinned by tests/check_strike_ladder.py L4/L4b.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
@@ -28,19 +36,26 @@ import pandas as pd
 
 # ─── STRIKE UTILITIES ─────────────────────────────────────────────────────────
 
-def round_to_strike(price: float, increment: int) -> int:
+def _strike(v: float):
+    """r137 — an int when the strike is whole (unchanged for 1 / 5 increments),
+    otherwise the value on the cent grid (0.5 increments)."""
+    v = round(v, 4)
+    return int(v) if float(v).is_integer() else round(v, 2)
+
+
+def round_to_strike(price: float, increment: float):
     """Round price to nearest valid strike increment."""
-    return int(round(price / increment) * increment)
+    return _strike(round(price / increment) * increment)
 
 
-def floor_to_strike(price: float, increment: int) -> int:
+def floor_to_strike(price: float, increment: float):
     """Round DOWN to nearest valid strike (for OTM put selection)."""
-    return int(math.floor(price / increment) * increment)
+    return _strike(math.floor(price / increment) * increment)
 
 
-def ceil_to_strike(price: float, increment: int) -> int:
+def ceil_to_strike(price: float, increment: float):
     """Round UP to nearest valid strike (for OTM call selection)."""
-    return int(math.ceil(price / increment) * increment)
+    return _strike(math.ceil(price / increment) * increment)
 
 
 # ─── ORB MATH ─────────────────────────────────────────────────────────────────
