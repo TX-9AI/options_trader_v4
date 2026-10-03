@@ -1,5 +1,15 @@
 """
-database/trade_logger.py  v4.14
+database/trade_logger.py  v4.15
+v4.15  2026-10-03  r457 / OPS.64 — EVERY NEW TRADE ROW CARRIES `lineage = 'OTV4'`.
+      Mirrors OTV4TEST r140 (their trade_logger v4.17) with one difference by
+      ruling: the value. Operator, 2026-10-03: "Instead of 'MAIN' I would
+      prefer 'OTV4'". control's rollups key on (lineage, code); until now a
+      mainline row was attributed only by a hand-kept box list, which a new
+      mainline box would miss. ⚠️ NO BACKFILL: the column has no default, so
+      existing rows stay NULL (control dates them) and only log_entry stamps.
+      One-time consequence: the new key changes each row's hash, so each box
+      re-pushes its trades table once after the bake. Pinned by
+      tests/check_lineage.py.
 v4.14  2026-09-27  r452 / OPS.59 — A RECOVERED PHANTOM FILL RAISED INSTEAD OF
       BOOKING. close_phantom's RECOVERED branch wrote `exit_price`, a column the
       trades table has never had (it is exit_premium, :355), since the v4 port.
@@ -281,6 +291,11 @@ from utils.time_utils import ts_for_db, now_utc, now_et, ET
 logger = logging.getLogger(__name__)
 _WARNED_UNKNOWN_COLS: set = set()   # TCS.4: warn once per unknown key
 _WARNED_SCHEMA_READ: set = set()    # SWALLOW T1: warn once if PRAGMA fails
+
+# r457 — the PRODUCER tag control's rollups key on. OTV4TEST writes "TEST";
+# this tree writes "OTV4" (strategy_registry.MAIN on control). ⚠️ A cross-repo
+# contract: renaming it turns every row this tree writes UNKN in the rollups.
+LINEAGE = "OTV4"
 
 
 @dataclass
@@ -591,6 +606,9 @@ class TradeLogger:
             ("tape_vol_at_level",      "REAL"),
             ("tape_buy_frac_at_level", "REAL"),
             ("tape_prints_at_level",   "INTEGER"),
+            # r457 — which ENGINE wrote the row (see LINEAGE). NO DEFAULT, on
+            # purpose: existing rows stay NULL rather than being relabelled.
+            ("lineage",                "TEXT"),
         ]
         for col, definition in _MIGRATION_ADDS:
             try:
@@ -728,6 +746,7 @@ class TradeLogger:
         """Insert a new open trade into the database."""
         record["entry_time"] = ts_for_db()
         record["status"]     = "open"
+        record["lineage"]    = LINEAGE      # r457: the producer, stamped here and only here
 
         # ── TCS.4 (2026-08-17) — FILTER TO REAL COLUMNS, AND SAY SO ─────────
         # ⚠️ THIS FUNCTION CRASH-LOOPED A LIVE BOX. It INSERTed every key in the
