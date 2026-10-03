@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-319 Python modules across 13 local packages.
+320 Python modules across 13 local packages.
 
-**Reached by:** 102 imported · 8 declared entry points · 148 referenced from a script, unit or doc but never imported · **61 by nothing here**.
+**Reached by:** 102 imported · 8 declared entry points · 149 referenced from a script, unit or doc but never imported · **61 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -57,7 +57,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `strategy/plan.py` | 31 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
 | `database/trade_logger.py` | 25 | check_cap_event.py, check_condor_pairing.py, check_condor_sibling_default.py, check_condor_stop_suppression.py |
 | `analysis/orb_engine.py` | 17 | base_strategy.py, check_absent_not_zero.py, check_atr_units.py, check_orb_one_order.py |
-| `execution/exit_engine.py` | 16 | check_condor_sibling_default.py, check_condor_spec.py, check_condor_stop_suppression.py, check_exit_executes.py |
+| `execution/exit_engine.py` | 17 | check_condor_sibling_default.py, check_condor_spec.py, check_condor_stop_suppression.py, check_exit_executes.py |
 | `strategy/sweep_credit_spread.py` | 16 | check_age_gate_gone.py, check_atr_units.py, check_chain_ordering.py, check_dispatch.py |
 | `utils/math_utils.py` | 16 | check_strike_ladder.py, credit_vertical.py, entry_ladder.py, exit_engine.py |
 | `data/options_chain.py` | 14 | base_strategy.py, check_entry_gate.py, check_exit_quote.py, check_strike_ladder.py |
@@ -324,7 +324,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/exit_engine.py`
 - **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/ladder_registry.py`, `execution/limit_ladder.py`, `notifications/alert_manager.py`, `strategy/structure.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `analysis/entry_snapshot.py`, `execution/position_manager.py`, `strategy/condor_roll.py`, `strategy/management.py`, `stress_theta_bleed.py`, `tests/check_condor_sibling_default.py`, `tests/check_condor_spec.py`, `tests/check_condor_stop_suppression.py`, `tests/check_exit_executes.py`, `tests/check_exit_quote.py`, `tests/check_ladder_wired.py`, `tests/check_management_plan.py`, `tests/check_orb_stop_respected.py`, `tests/check_orb_underwater_entry.py`, `tests/check_spx_tick.py`, `tests/stress_entry_path.py`
+- **called by:** `analysis/entry_snapshot.py`, `execution/position_manager.py`, `strategy/condor_roll.py`, `strategy/management.py`, `stress_theta_bleed.py`, `tests/check_condor_sibling_default.py`, `tests/check_condor_spec.py`, `tests/check_condor_stop_suppression.py`, `tests/check_exit_executes.py`, `tests/check_exit_quote.py`, `tests/check_exit_single_grid.py`, `tests/check_ladder_wired.py`, `tests/check_management_plan.py`, `tests/check_orb_stop_respected.py`, `tests/check_orb_underwater_entry.py`, `tests/check_spx_tick.py`, `tests/stress_entry_path.py`
 
 ### `execution/fill_model.py`
 - **calls:** (none)
@@ -712,6 +712,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_exit_replay_streams.py`
 - **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_exit_single_grid.py`
+- **calls:** `execution/exit_engine.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_ext_polarity.py`

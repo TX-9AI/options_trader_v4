@@ -1,5 +1,11 @@
 """
-execution/exit_engine.py  v4.15
+execution/exit_engine.py  v4.16
+v4.16  2026-10-03  TICK.2 — a SINGLE-LEG close posted AT THE MARK (floor policy, or
+      the walk's fallback) is snapped to the venue grid through tick_size, as the
+      walk path and the entry ladder already were; it rounded to cents on every
+      non-SPX name at any price, an invalid increment LIVE on nickel/dime grids.
+      Spreads and flies unchanged. Found by OTV4TEST (MSG-1003-23). Pinned by
+      tests/check_exit_single_grid.py.
 v4.15  2026-10-03  TICK.1 — an SPX/SPXW SINGLE-LEG close limit at or above $3.00
       rounds to $0.10, Cboe's increment there (it rounded to $0.05 at every
       premium, an invalid price LIVE). Below $3, spreads, flies and XSP are
@@ -2786,9 +2792,17 @@ class ExitEngine:
         """
         policy = self._exit_policy(record, reason)
         bid, ask = self._exit_quote(record)
+        # 🔴 TICK.2 — a SINGLE-LEG mark limit goes through the venue grid
+        # (tick_size.snap via limit_at_mark's symbol), exactly as the walk path
+        # and the entry side already do. Without the symbol, limit_at_mark only
+        # rounded to cents, so a floor stop on a nickel/dime-grid name posted an
+        # invalid increment LIVE. Spreads and flies keep the old rounding until
+        # the complex-order increment rule is measured.
+        _grid = dict(symbol=str(record.get("symbol", "") or ""), side=side,
+                     bid=bid or 0.0, ask=ask or 0.0) if structure == "single" else {}
         if policy == "floor" or ask <= 0:
             # No walk: mark, re-priced at mark every tick until it fills.
-            return limit_at_mark(mark, floor=self._tick_for(record)),                 f"{policy} — mark, no walk"
+            return limit_at_mark(mark, floor=self._tick_for(record), **_grid),                 f"{policy} — mark, no walk"
         try:
             from execution import ladder_registry as _lr
             key = _lr.intent_key(str(record.get("trade_id", ""))[:12],
@@ -2800,7 +2814,7 @@ class ExitEngine:
                 return float(got[0]), f"{policy} — {got[1]}"
         except Exception as exc:                               # noqa: BLE001
             logger.warning("[ladder] exit pricing failed (%s) — mark", exc)
-        return limit_at_mark(mark, floor=self._tick_for(record)), f"{policy} — mark"
+        return limit_at_mark(mark, floor=self._tick_for(record), **_grid), f"{policy} — mark"
 
     def _exit_walk_refused(self, record: TradeRecord, price: float) -> None:
         key = record.get("_exit_walk_key")
