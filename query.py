@@ -1,5 +1,8 @@
 """
-query.py  v4.10
+query.py  v4.11
+v4.11 2026-10-03  r460 / OPS.65 — _STRAT_ABBR gains OpeningRangeCreditSpread -> ORCS,
+      mirroring dtp strategy_registry v1.3 (check_strategy_registry R5 pins the two).
+      Display only; no box behaviour changes.
 v4.10 2026-09-26  r449 / QRY.1 — SHARED FIX, MIRRORED FROM OTV4TEST r152 (fb34d10)
       under WA §38.11. THIS FILE READ THE LIVE TREE WHEREVER IT WAS IMPORTED
       FROM: INSTALL_DIR was the expanded "~/options-trader", put FIRST on
@@ -326,6 +329,7 @@ _STRAT_ABBR = {
     "TrendCreditSpread": "TCST", "IronCondorStrategy": "CNDR",
     "LiquidityHunt": "HUNT", "VOLT": "VOLT",
     "ATPButterfly": "ATPB", "Breakout": "BRKO",
+    "OpeningRangeCreditSpread": "ORCS",      # r460 — OTV4TEST r203, TEST-only
     "SweepReversal": "SWPR", "ContinuationStrategy": "CONT",
     "CondorManagement": "CMGT", "CreditRoll": "ROLL",
 }

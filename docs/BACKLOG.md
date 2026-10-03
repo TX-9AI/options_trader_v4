@@ -1,4 +1,4 @@
-# BACKLOG.md — v3.57
+# BACKLOG.md — v3.58
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -48,6 +48,7 @@ actually read goes in as an open step, not a closed one.
 
 | ID | item | status | notes |
 |---|---|---|---|
+| **OPS.65** | 🔑 **ORCS IS REGISTERED — THE FORK'S NEW STRATEGY ENTERS THE CORPUS UNDER ITS OWN CODE.** | r460 (dtp + otv4) | ✅ **DONE (control-side, no bake).** OTV4TEST r203 (PREM.1) writes `strategy="OpeningRangeCreditSpread"` (orcs_plan.NAME) from 2026-10-05, paper, QQQ-TEST. Operator, 2026-10-03: *"It will be a part of the corpus, if it's running the repo code. I'm aware"* — and "Yes" to registering it. dtp `strategy_registry` v1.3 adds `OpeningRangeCreditSpread → ORCS, LIVE, (TEST,)`; otv4 `query.py` v4.11 adds the same abbreviation (display only). GATE `check_strategy_registry` v1.1: TEST_DECLARED gains the name, BORN RED at R2 (UNREGISTERED) and then R5 (the dtp↔query.py mirror) until both halves carried it. NOTE for any future SOFI bake to the fork's HEAD: ORCS runs there too unless the unit sets OT_ORCS=0 — the operator's call. 🔗 [[OPS.50]] [[OPS.64]] |
 | **AUD.6** | 🔑 **plan_check STORED ONLY NUMBERS — EVERY TEXT-VALUED CHECK WAS NULL, EVER.** | r459 | ✅ **FIXED (shared, OTV4TEST r197).** `strategy/plan.py` v1.11: plan_check gains `note TEXT` (CREATE + in-place ALTER; old rows NULL); write_row stores the check's note= or, for a value that will not cast, the value's own text (cap 300). `value`/`verdict` untouched. dtp readers verified safe (named keys / explicit column lists). GATE OTV4TEST's `tests/check_plan_check_note.py` UNCHANGED, BORN RED N1–N5 on d87bafb. Mirrored from OTV4TEST's audit fixes (their r191-r200), read from their origin and verified there; operator yes 2026-10-03. Full sweep base vs batch: 4=4 pre-existing reds, 163 checks. |
 | **AUD.4** | 🔑 **THE EXIT QUOTE AND IV WERE NEVER WRITTEN — set_exit_contract HAD ZERO CALLERS.** | r459 | ✅ **FIXED (shared logic, OTV4TEST r195).** `execution/position_manager.py` v4.9: `_note_quote` records each structure's bid/ask/IV per tick under record-only keys (not the ladder's `_exit_bid/_exit_ask`, so pricing is untouched); `_execute_exit` writes exit_bid/exit_ask/exit_iv after log_exit; a failure warns once. GATE OTV4TEST's `tests/check_exit_quote.py` UNCHANGED, BORN RED Q1–Q3. Mirrored from OTV4TEST's audit fixes (their r191-r200), read from their origin and verified there; operator yes 2026-10-03. Full sweep base vs batch: 4=4 pre-existing reds, 163 checks. |
 | **MEAS.1** | ⚠️ **pnl_pct WAS SIGNED BY THE PREMIUM'S DIRECTION — EVERY CREDIT LOSS READ AS A GAIN.** | r459 | ✅ **FIXED (shared, OTV4TEST r198; ruled 2026-09-17).** `database/trade_logger.py` v4.16: magnitude unchanged, sign from pnl_usd. No decision path and no dtp report reads the stored column for credit trades (excursion_report reads it only for debit floor stops). Historical rows NOT recomputed (operator's call). GATE OTV4TEST's `tests/check_pnl_pct_sign.py` UNCHANGED, BORN RED S1/S2. Mirrored from OTV4TEST's audit fixes (their r191-r200), read from their origin and verified there; operator yes 2026-10-03. Full sweep base vs batch: 4=4 pre-existing reds, 163 checks. |
@@ -592,6 +593,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v3.58 — 2026-10-03 — r460 — OPS.65 OPENED AND CLOSED.** The fork's opening range credit spread is registered as a TEST-only strategy in control's registry and in query.py's labels. [[OPS.65]]
 
 **v3.57 — 2026-10-03 — r459 — AUD.4, AUD.6, AUD.7, AUD.8, MEAS.1 AND TZ.2 OPENED AND CLOSED.** Six recording gaps from OTV4TEST's audit closed on mainline: plan-check text, the exit quote, the credit pnl_pct sign, cap-trip events, VIX at entry for every strategy, and the EOD summary's daylight saving. No trading change. [[AUD.4]] [[AUD.6]] [[AUD.7]] [[AUD.8]] [[MEAS.1]] [[TZ.2]]
 
