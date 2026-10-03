@@ -1,5 +1,10 @@
 """
-risk/risk_manager.py  v4.4
+risk/risk_manager.py  v4.5
+v4.5  2026-10-03  r459 / AUD.7 — A CAP LATCH IS RECORDED IN circuit_breaker_events
+      (one row, written where the page is decided), and a cap page that fails to
+      send now WARNS (it was `except: pass`). Mirrors OTV4TEST r199's "hit" site;
+      mainline latches, so it has no re-arm site. log_circuit_breaker had zero
+      callers. The halt decision is untouched. Pinned by tests/check_cap_event.py.
 v4.4  2026-10-03  CND.12 — _ensure_seeded marks itself seeded only after a
       successful read, and warns + retries on failure (it swallowed the error
       and never retried). Shared defect found by OTV4TEST's audit; the halt is
@@ -579,6 +584,7 @@ class RiskManager:
                 f"<= -${self._daily_loss_limit:.0f}. Halting NEW entries. "
                 f"Override via configure.sh."
             )
+            self._log_cap_event("daily_cap_hit", net)            # r459: once per latch, with the page
             try:
                 from notifications.alert_manager import get_alert_manager
                 get_alert_manager()._send(
@@ -586,9 +592,25 @@ class RiskManager:
                     f"(limit ${self._daily_loss_limit:.0f}). New entries halted. "
                     f"Override via configure.sh."
                 )
-            except Exception:
-                pass
+            except Exception as exc:                           # noqa: BLE001
+                # r459: was `pass` - a cap page that failed to send said nothing at all.
+                logger.warning(f"[{INSTRUMENT}] cap page NOT sent ({type(exc).__name__}: {exc})")
         return self._session_halted
+
+    def _log_cap_event(self, reason: str, net: float) -> None:
+        """r459 (AUD.7, OTV4TEST r199) — ONE ROW IN circuit_breaker_events WHEN THE
+        CAP LATCHES. The table has existed since v3, query.py shows it and s3_push
+        pushes it, and TradeLogger.log_circuit_breaker had ZERO callers - so the
+        only record of a cap episode was a log line and a page. Mainline LATCHES
+        (no re-arm), so only the "hit" transition exists here. Never raises: a
+        failed write warns and the halt decision is unaffected."""
+        try:
+            from database.trade_logger import get_trade_logger
+            get_trade_logger().log_circuit_breaker(
+                reason, int(self._session_losses),
+                f"day realized {net:+.2f}; limit {self._daily_loss_limit:.2f}")
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning(f"[{INSTRUMENT}] cap event NOT recorded ({type(exc).__name__}: {exc})")
 
     def consume_reassess_request(self) -> bool:
         """Edge-triggered. True once after a loss requested a reassessment."""
