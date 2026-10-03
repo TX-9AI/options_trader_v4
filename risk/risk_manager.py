@@ -1,5 +1,10 @@
 """
-risk/risk_manager.py  v4.3
+risk/risk_manager.py  v4.4
+v4.4  2026-10-03  CND.12 — _ensure_seeded marks itself seeded only after a
+      successful read, and warns + retries on failure (it swallowed the error
+      and never retried). Shared defect found by OTV4TEST's audit; the halt is
+      unaffected (is_halted reads the DB every call). Pinned by
+      tests/check_risk_seed_retry.py.
 v4.3  2026-08-31  r201 — ORB GEOMETRY IS CLAMPED BY A BUDGET. `min(geometry,
       floor(budget / cost_per_contract))`, and the operator's scaling curve
       falls out of the two clamps meeting rather than needing a ramp. A
@@ -522,15 +527,20 @@ class RiskManager:
         halt survives restarts within the same session."""
         if self._seeded:
             return
-        self._seeded = True
+        # 🔴 CND.12 — _seeded was set BEFORE the read and the error swallowed,
+        # so one unreadable DB at boot left session P&L at 0 for the whole
+        # session with no retry. It is set only once the read SUCCEEDS; a
+        # failure is logged and retried on the next call. (The daily-loss halt
+        # itself is unaffected: is_halted() re-reads the DB on every call.)
         try:
             from database.trade_logger import get_trade_logger
             summary = get_trade_logger().today_summary()
             self._session_pnl_usd = float(summary.get("total_pnl", 0.0) or 0.0)
             if self._session_pnl_usd <= -self._daily_loss_limit:
                 self._session_halted = True
-        except Exception:
-            pass
+            self._seeded = True
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning(f"risk seed: today's P&L unreadable ({exc}) — will retry")
 
     def record_loss(self, pnl_usd: float = 0.0):
         self._session_losses += 1

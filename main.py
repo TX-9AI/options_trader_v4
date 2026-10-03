@@ -1,5 +1,12 @@
 """
-main.py  v4.46
+main.py  v4.47
+v4.47 2026-10-03  CND.9 — A SWEEP CAN COMPLETE A CONDOR AGAIN. _sweep_has_rejection
+      read ctx["sweep"], which nothing writes; the live sweep is
+      ctx["liq_map"].recent_sweep. Every second credit leg had failed closed
+      ("no sweep state available") since r133, 2026-08-26, so no condor could
+      form. Found by OTV4TEST's audit, shared defect. The rule itself (reclaimed,
+      not invalidated, <= _SWEEP_REJECTION_MAX_BARS) is unchanged.
+      Pinned by tests/check_sweep_rejection_source.py.
 v4.46 2026-09-16  r383 — CFG.3 — ABSENT IS NOT ZERO, AND BOTH WRITE PATHS
       NOW SEE THE TICK CONTEXT.
       (a) `chain_iv_rank` wrote a measured-looking 0.0 on every trade —
@@ -3205,7 +3212,13 @@ def _sweep_has_rejection(ctx: dict) -> tuple:
     from the sweep bar.
     ⚠️ FAILS CLOSED. No sweep object, or an unreadable one, is NOT a rejection.
     """
+    # 🔴 CND.9 — ctx["sweep"] HAS NEVER BEEN WRITTEN. run_analysis puts the
+    # live LiquiditySweep on ctx["liq_map"].recent_sweep, so since r133 this
+    # read None every tick and refused EVERY sweep completion: no condor could
+    # form. Read the map's sweep; an explicit ctx["sweep"] still wins.
     sweep = (ctx or {}).get("sweep")
+    if sweep is None:
+        sweep = getattr((ctx or {}).get("liq_map"), "recent_sweep", None)
     if sweep is None:
         return False, "no sweep state available — that is not a rejection"
     try:

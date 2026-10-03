@@ -1,5 +1,11 @@
 """
-derived/counterfactual.py  v4.0
+derived/counterfactual.py  v4.1
+v4.1  2026-10-03  CND.10 — THIS ENGINE HAS NEVER WRITTEN A ROW. derive() read
+      `get_trade_logger().conn`, an attribute TradeLogger has never had; the
+      AttributeError was logged at DEBUG and derive returned 0 every tick since
+      r66 (2026-08-22). raw/derived_exit_counterfactual/ holds ZERO objects,
+      ever. It now reads get_open_trades() and a failure warns once. Found by
+      OTV4TEST's audit (shared). Pinned by tests/check_counterfactual_reads.py.
 Owns `exit_counterfactual`. Records what a FLOW exit WOULD have done.
 
 v4.0  2026-08-25  Operator's question: could the tape — especially aggressor
@@ -183,16 +189,20 @@ class CounterfactualExitEngine(DerivedEngine):
             return 0
         try:
             from database.trade_logger import get_trade_logger
-            tl = get_trade_logger()
-            cur = tl.conn.execute("SELECT * FROM trades WHERE status='open'")
-            cols = [d[0] for d in cur.description]
-            rows = cur.fetchall()
+            # 🔴 CND.10 — TradeLogger has NO `.conn` and never had one, so
+            # `tl.conn.execute` raised AttributeError on every tick since r66
+            # and this engine wrote nothing, ever (S3 holds zero objects). Read
+            # through the logger's own query, which opens and CLOSES its handle
+            # (r430). And it says so at WARNING once, not at debug forever.
+            rows = get_trade_logger().get_open_trades()
         except Exception as exc:                                # noqa: BLE001
-            logger.debug("counterfactual: open positions unreadable: %s", exc)
+            if not getattr(self, "_warned_unreadable", False):
+                logger.warning("counterfactual: open positions unreadable: %s", exc)
+                self._warned_unreadable = True
             return 0
         n = 0
         for r in rows:
-            if self.evaluate(dict(zip(cols, r))):
+            if self.evaluate(dict(r)):
                 n += 1
         if n:
             self._store.commit()
