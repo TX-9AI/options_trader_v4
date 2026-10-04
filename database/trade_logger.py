@@ -1,5 +1,8 @@
 """
-database/trade_logger.py  v4.16
+database/trade_logger.py  v4.17
+v4.17  2026-10-04  r467 / B3 — new column live_exit_state (TEXT, NULL unless a live
+       close is part-filled or working): the exit engine keeps the filled
+       portions and the working order id here so a restart resumes the remainder.
 v4.16  2026-10-03  r459 / MEAS.1 — pnl_pct IS SIGNED BY pnl_usd. Mirrors OTV4TEST r198.
       log_exit stored (exit - entry) / entry for every trade, so every credit
       trade's loss read as a gain (it corrupted a fleet strategy table on
@@ -615,6 +618,10 @@ class TradeLogger:
             # r457 — which ENGINE wrote the row (see LINEAGE). NO DEFAULT, on
             # purpose: existing rows stay NULL rather than being relabelled.
             ("lineage",                "TEXT"),
+            # r467 / B3 — a part-filled live close: {"fills": [[qty, net], ...],
+            # "order_id", "last_order_id"}. NULL otherwise. Written only by
+            # exit_engine._exit_state_save.
+            ("live_exit_state",        "TEXT"),
         ]
         for col, definition in _MIGRATION_ADDS:
             try:
