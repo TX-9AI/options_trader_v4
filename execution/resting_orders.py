@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-execution/resting_orders.py  v1.2
+execution/resting_orders.py  v1.3
+v1.3  2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
+      13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
+      a LIVE box could place and close nothing. Paper unaffected. Found by
+      OTV4TEST (MSG-1004-06). Pinned by tests/check_sdk_async.py.
 v1.2  2026-09-25  r430 / OPS.54 — same leak, 5 sites. `with _conn() as c:`
       committed without closing; new `_session()` contextmanager closes in a
       finally. See trade_logger v4.13 for the measurement. Gated by
@@ -415,10 +419,10 @@ def _filled_qty(order_id: str, row: dict, *, paper: bool, price: float):
     if paper:
         return int(row["offered_qty"])
     try:
-        from data.tasty_client import get_session, get_account
+        from data.tasty_client import get_session, get_account, sdk_result
         from execution.order_confirm import net_from_fills
         session, account = get_session(), get_account()
-        placed = account.get_order(session, order_id)
+        placed = sdk_result(account.get_order(session, order_id))   # B0
         # 🔑 THE REPO ALREADY HAS A FILL READER, AND ONE IS THE RIGHT NUMBER.
         # `net_from_fills` is what confirm_order_fill uses; a second hand-rolled
         # walk over legs[].fills[] would be a parallel lineage that looks
@@ -455,10 +459,10 @@ def _cancel(order_id: str, *, paper: bool) -> bool:
     if paper:
         return True
     try:
-        from data.tasty_client import get_session, get_account
+        from data.tasty_client import get_session, get_account, sdk_result
         session, account = get_session(), get_account()
         # Same call confirm_order_fill uses at its deadline.
-        account.delete_order(session, order_id)
+        sdk_result(account.delete_order(session, order_id))   # B0
         return True
     except Exception as exc:                                    # noqa: BLE001
         logger.warning("[offer] cancel of %s failed: %s", order_id, exc)

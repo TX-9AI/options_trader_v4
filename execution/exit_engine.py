@@ -1,5 +1,9 @@
 """
-execution/exit_engine.py  v4.16
+execution/exit_engine.py  v4.17
+v4.17 2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
+      13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
+      a LIVE box could place and close nothing. Paper unaffected. Found by
+      OTV4TEST (MSG-1004-06). Pinned by tests/check_sdk_async.py.
 v4.16  2026-10-03  TICK.2 — a SINGLE-LEG close posted AT THE MARK (floor policy, or
       the walk's fallback) is snapped to the venue grid through tick_size, as the
       walk path and the entry ladder already were; it rounded to cents on every
@@ -627,7 +631,7 @@ from tastytrade.order import (
 import config as _cfg   # live fill knobs read at CALL time (test/env tunable)
 
 from database.trade_logger import TradeRecord, get_trade_logger
-from data.tasty_client import get_session, get_account, TastyClientError
+from data.tasty_client import get_session, get_account, TastyClientError, sdk_result
 from config import (
     BOS_MIN_DIST_ATR,                          # v4.15
     PAPER_TRADING, CONTRACT_MULTIPLIER,
@@ -2554,7 +2558,7 @@ class ExitEngine:
         placed   = None
         if order_id is not None:
             try:
-                placed = account.get_order(session, order_id)
+                placed = sdk_result(account.get_order(session, order_id))   # B0
                 logger.info(f"LIVE exit {trade_id[:8]}: resuming order {order_id} "
                             f"(status={placed.status})")
             except Exception as e:
@@ -2598,7 +2602,7 @@ class ExitEngine:
         cancel_requested = False
         while True:
             try:
-                placed = account.get_order(session, order_id)
+                placed = sdk_result(account.get_order(session, order_id))   # B0
             except Exception as e:
                 logger.warning(f"LIVE exit {trade_id[:8]}: poll error ({e}) — retrying")
             status = placed.status
@@ -2638,7 +2642,7 @@ class ExitEngine:
             if time.monotonic() >= deadline:
                 if not cancel_requested:
                     try:
-                        account.delete_order(session, order_id)
+                        sdk_result(account.delete_order(session, order_id))   # B0
                         cancel_requested = True
                         record["_exit_escalated"] = 1        # N.5: ladder did not simply fill
                         # Short grace window to resolve the cancel/fill race:
@@ -2902,7 +2906,7 @@ class ExitEngine:
         return max(tick, round(round(price / tick) * tick, 2))
 
     def _place(self, session, account, order, what: str) -> Optional["object"]:
-        response = account.place_order(session, order, dry_run=False)
+        response = sdk_result(account.place_order(session, order, dry_run=False))   # B0
         if getattr(response, "errors", None):
             logger.error(f"{what} order errors: {response.errors}")
             return None

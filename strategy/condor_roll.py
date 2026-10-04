@@ -1,5 +1,9 @@
 """
-strategy/condor_roll.py  v4.7
+strategy/condor_roll.py  v4.8
+v4.8  2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
+      13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
+      a LIVE box could place and close nothing. Paper unaffected. Found by
+      OTV4TEST (MSG-1004-06). Pinned by tests/check_sdk_async.py.
 v4.7  2026-09-10  r343 — a roll OPENS A CREDIT POSITION, so both record sites
       write `is_short_position = 1`. The column had no writer anywhere in the
       tree; see main.py v4.40 for what that cost the excursion reports.
@@ -345,7 +349,7 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
         # plan.
         roll_qty = contracts
         if not state.paper_trading:
-            from data.tasty_client import get_session, get_account
+            from data.tasty_client import get_session, get_account, sdk_result
             from execution.order_confirm import confirm_order_fill
             from tastytrade.order import (
                 NewOrder, Leg, OrderAction, OrderType, OrderTimeInForce,
@@ -404,7 +408,7 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
                     price         = Decimal(str(round(float(_rung), 2))),  # + = credit
                     legs          = legs,
                 )
-                response = account.place_order(session, order, dry_run=False)
+                response = sdk_result(account.place_order(session, order, dry_run=False))   # B0
                 if response.errors:
                     break
                 ofill = confirm_order_fill(
@@ -747,7 +751,7 @@ def _execute_tent(pos_mgr, winner: dict, keep: dict, hedge, hedge_ask: float,
     # ── 2. buy the hedge ────────────────────────────────────────────────────
     hedge_fill, order_id = hedge_ask, "PAPER"
     if not state.paper_trading:
-        from data.tasty_client import get_session, get_account
+        from data.tasty_client import get_session, get_account, sdk_result
         from execution.order_confirm import confirm_order_fill
         from tastytrade.order import (NewOrder, Leg, OrderAction, OrderType,
                                       OrderTimeInForce, InstrumentType)
@@ -759,7 +763,7 @@ def _execute_tent(pos_mgr, winner: dict, keep: dict, hedge, hedge_ask: float,
             legs=[Leg(instrument_type=InstrumentType.EQUITY_OPTION,
                       symbol=hedge.symbol, action=OrderAction.BUY_TO_OPEN,
                       quantity=qty)])
-        resp = account.place_order(session, order, dry_run=False)
+        resp = sdk_result(account.place_order(session, order, dry_run=False))   # B0
         if getattr(resp, "errors", None):
             get_alert_manager()._send(
                 f"\U0001F6A8 [{mode}] {INSTRUMENT} TENT HALF-BUILT: the winning "

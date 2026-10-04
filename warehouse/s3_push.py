@@ -1,5 +1,11 @@
 """
-warehouse/s3_push.py  v4.10
+warehouse/s3_push.py  v4.11
+v4.11 2026-10-04  CNDL.1 — A CANDLE IS PUSHED ONLY AFTER IT CLOSES. push_candles'
+      high-water mark skipped the in-progress bar's final version forever, so
+      every stored 5m/15m/1h bar was its first ~30 s (QQQ 10-01: 78/78 5m bars
+      disagree with their own 1m bars) and ~1 in 5 1m bars. Rows are now
+      filtered to bars whose interval has ended; the mark advances only over
+      those. Shared defect (OTV4TEST mirrors). Pinned by tests/check_candle_closed.py.
 v4.10 2026-09-26  r444 — THE CLASSIFIER'S COMMENT PROMISED SOMETHING THE CODE
       HAS NOT DONE SINCE r180, AND TWO SESSIONS READ IT AS THE SPEC. It said
       "a gap of 3+ on ANY prefix still reads as possible loss and STILL HOLDS
@@ -931,6 +937,31 @@ def push_whole_files(s3, bucket, items, datatype, ledger, counters=None):
     return pushed, failed
 
 
+# 🔴 CNDL.1 — A BAR IS PUSHED ONLY ONCE IT HAS CLOSED. The high-water mark
+# below advances to the newest bar sent, and the next run selects only bars
+# AFTER it — so the bar that was still forming when it was sent never had its
+# final version pushed. Each run lands ~30 s after a bar opens, so EVERY stored
+# 5m/15m/1h bar was its first ~30 s (QQQ 2026-10-01: 78 of 78 5m bars disagree
+# with their own 1m bars; range understated $0.92 on average) and 1 in ~5 1m
+# bars too. Found by OTV4TEST's SPX-TEST agent (MSG-1004-03).
+_INTERVAL_MS = {"1m": 60_000, "2m": 120_000, "3m": 180_000, "5m": 300_000,
+                "10m": 600_000, "15m": 900_000, "30m": 1_800_000,
+                "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000,
+                "1d": 86_400_000}
+_CLOSE_GRACE_MS = 5_000      # the feed writes the final print a moment after the edge
+
+
+def _closed_bars(rows, iv, now_ms):
+    """Only the bars whose interval has ENDED (ts + length + grace <= now).
+    An interval this table does not know is passed through unchanged (and the
+    caller's old behaviour stands) rather than silently withheld forever."""
+    span = _INTERVAL_MS.get(str(iv))
+    if span is None:
+        return list(rows)
+    return [r for r in rows
+            if int(r["ts_epoch_ms"]) + span + _CLOSE_GRACE_MS <= now_ms]
+
+
 def push_candles(s3, bucket, db_path, ledger, me, counters=None):
     """feed_store candles — ALL intervals, high-water mark per symbol+interval.
 
@@ -981,6 +1012,7 @@ def push_candles(s3, bucket, db_path, ledger, me, counters=None):
                 " ORDER BY ts_epoch_ms", (sym, iv, hwm))]
         except Exception:
             continue
+        rows = _closed_bars(rows, iv, int(time.time() * 1000))   # CNDL.1
         if not rows:
             continue
         top = int(rows[-1]["ts_epoch_ms"])

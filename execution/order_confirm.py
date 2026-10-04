@@ -1,5 +1,9 @@
 """
-execution/order_confirm.py  v4.1
+execution/order_confirm.py  v4.2
+v4.2  2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
+      13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
+      a LIVE box could place and close nothing. Paper unaffected. Found by
+      OTV4TEST (MSG-1004-06). Pinned by tests/check_sdk_async.py.
 v4.1  2026-08-24  r104: confirm_order_fill takes an optional per-call
       deadline_s so the entry ladder can give ONE RUNG a slice of the entry
       budget. Default unchanged.
@@ -42,6 +46,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from tastytrade.order import OrderStatus
+from data.tasty_client import sdk_result   # B0
 
 import config as _cfg
 
@@ -142,7 +147,7 @@ def confirm_order_fill(session, account, placed, basis: Basis,
 
     while True:
         try:
-            placed = account.get_order(session, order_id)
+            placed = sdk_result(account.get_order(session, order_id))   # B0
         except Exception as e:
             logger.warning(f"{what} {order_id}: poll error ({e}) — retrying")
         status = placed.status
@@ -183,7 +188,7 @@ def confirm_order_fill(session, account, placed, basis: Basis,
         if time.monotonic() >= deadline:
             if not cancel_requested or cancel_attempts < 3:
                 try:
-                    account.delete_order(session, order_id)
+                    sdk_result(account.delete_order(session, order_id))   # B0
                     cancel_requested = True
                     cancel_attempts += 1
                     # grace to resolve the cancel/fill race

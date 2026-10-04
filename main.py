@@ -1,5 +1,9 @@
 """
-main.py  v4.48
+main.py  v4.49
+v4.49 2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
+      13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
+      a LIVE box could place and close nothing. Paper unaffected. Found by
+      OTV4TEST (MSG-1004-06). Pinned by tests/check_sdk_async.py.
 v4.48 2026-10-03  r459 / AUD.8 — vix_at_entry IS STAMPED FOR EVERY STRATEGY. _stamp_vix
       copies ctx["macro"].vix onto the signal at the top of both executors when
       the strategy did not set it (only ORB ever did). Record-only: nothing gates
@@ -2438,7 +2442,7 @@ def _post_credit_vertical(short_contract, long_contract, contracts: int,
     _deadline = EntryEngine._rung_deadline()
 
     if placer is None or confirmer is None:
-        from data.tasty_client import get_session, get_account
+        from data.tasty_client import get_session, get_account, sdk_result
         from execution.order_confirm import confirm_order_fill
         from tastytrade.order import (NewOrder, Leg, OrderAction, OrderType,
                                       OrderTimeInForce, InstrumentType)
@@ -2453,7 +2457,7 @@ def _post_credit_vertical(short_contract, long_contract, contracts: int,
                                  legs=[Leg(instrument_type=InstrumentType.EQUITY_OPTION,
                                            symbol=sym, action=act, quantity=q)
                                        for sym, act, q in legs])
-                return account.place_order(session, order, dry_run=False)
+                return sdk_result(account.place_order(session, order, dry_run=False))   # B0
         if confirmer is None:
             def confirmer(placed, basis, deadline_s):
                 return confirm_order_fill(session, account, placed, basis,
@@ -5240,7 +5244,7 @@ def _fetch_close_order_history(records: list) -> list:
     the earliest entry date among the phantom candidates. Fail-safe: any error
     returns [] and the caller books the flagged $0.00 fallback as before."""
     try:
-        from data.tasty_client import get_session, get_account
+        from data.tasty_client import get_session, get_account, sdk_result
         from datetime import date as _date
         from utils.time_utils import now_et as _net
         start = _net().date()      # r125 — ET date, not the box's UTC one
@@ -5253,8 +5257,8 @@ def _fetch_close_order_history(records: list) -> list:
                 pass
         session = get_session()
         account = get_account()
-        return account.get_order_history(session, page_offset=None,
-                                         start_date=start) or []
+        return sdk_result(account.get_order_history(session, page_offset=None,
+                                                    start_date=start)) or []   # B0
     except Exception as e:
         logger.error(f"Phantom P&L recovery: order-history read failed ({e}) — "
                      f"phantoms will book flagged $0.00 this pass.")
