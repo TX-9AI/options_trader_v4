@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-324 Python modules across 13 local packages.
+325 Python modules across 13 local packages.
 
-**Reached by:** 102 imported · 8 declared entry points · 153 referenced from a script, unit or doc but never imported · **61 by nothing here**.
+**Reached by:** 102 imported · 8 declared entry points · 154 referenced from a script, unit or doc but never imported · **61 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -61,8 +61,8 @@ Change these with the most care; a break here reaches everything downstream.
 | `strategy/sweep_credit_spread.py` | 16 | check_age_gate_gone.py, check_atr_units.py, check_chain_ordering.py, check_dispatch.py |
 | `utils/math_utils.py` | 16 | check_strike_ladder.py, credit_vertical.py, entry_ladder.py, exit_engine.py |
 | `data/options_chain.py` | 15 | base_strategy.py, check_entry_gate.py, check_exit_quote.py, check_spxw_only.py |
+| `data/tasty_client.py` | 14 | candle_feed.py, check_reconcile_strict.py, check_sdk_async.py, check_standing_offer.py |
 | `strategy/base_strategy.py` | 14 | check_absent_not_zero.py, check_credit_remainder.py, check_entry_gate.py, check_orb_geometry.py |
-| `strategy/criteria.py` | 14 | check_age_gate_gone.py, check_butterfly_foundational.py, check_criteria.py, check_plan_wiring.py |
 
 ## Every module
 
@@ -232,7 +232,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `data/tasty_client.py`
 - **calls:** `config.py`
-- **called by:** `data/candle_feed.py`, `data/market_data.py`, `data/options_chain.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/order_confirm.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `strategy/condor_roll.py`, `tests/check_sdk_async.py`, `tests/check_standing_offer.py`, `tools/probe_aux_streams.py`
+- **called by:** `data/candle_feed.py`, `data/market_data.py`, `data/options_chain.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/order_confirm.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `strategy/condor_roll.py`, `tests/check_reconcile_strict.py`, `tests/check_sdk_async.py`, `tests/check_standing_offer.py`, `tools/probe_aux_streams.py`
 
 ### `database/__init__.py`
 - **calls:** (none)
@@ -308,7 +308,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/broker_reconcile.py`
 - **calls:** `config.py`, `utils/time_utils.py`
-- **called by:** `main.py`
+- **called by:** `main.py`, `tests/check_reconcile_strict.py`
 
 ### `execution/credit_remainder.py`
 - **calls:** (none)
@@ -992,6 +992,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_reconcile_lock.py`
 - **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_reconcile_strict.py`
+- **calls:** `data/tasty_client.py`, `execution/broker_reconcile.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_rehearsal_toggle.py`

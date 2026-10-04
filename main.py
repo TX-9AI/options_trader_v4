@@ -1,5 +1,7 @@
 """
-main.py  v4.49
+main.py  v4.50
+v4.50 2026-10-04  r465 / B1 — the startup reconcile ALERTS on plan.mismatch (a kept row
+      whose legs or quantities disagree with the broker). Live-only.
 v4.49 2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
       13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
       a LIVE box could place and close nothing. Paper unaffected. Found by
@@ -5427,6 +5429,17 @@ def _reconcile_with_broker(state: BotState, live_rows: list,
             descs.append(_close_phantom_with_recovery(
                 trade_logger, rec, history, reason="phantom_closed_at_broker"))
         get_alert_manager().send_phantom_closed_alert(instrument, descs)
+
+    # B1 (r465): kept rows whose legs or quantities disagree with the broker.
+    for mm in getattr(plan, "mismatch", []) or []:
+        _desc = (f"{mm.get('trade_id','')[:8]} missing={mm.get('missing')} "
+                 f"qty={mm.get('quantity')}")
+        logger.warning(f"RECONCILE MISMATCH [{instrument}] {_desc} — kept and managed; check the broker")
+        try:
+            get_alert_manager()._send(f"⚠️ {instrument} RECONCILE MISMATCH — {_desc}. "
+                                      f"Kept and managed; the DB and the broker disagree.")
+        except Exception:                                      # noqa: BLE001
+            pass
 
     # Adopts: journal into our system of record + alert (loud for a lone short).
     anomaly_ids = set(plan.anomalies)

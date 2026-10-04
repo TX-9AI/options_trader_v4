@@ -1,5 +1,9 @@
 """
-data/tasty_client.py  v4.1
+data/tasty_client.py  v4.2
+v4.2  2026-10-04  r465 / B1 — get_open_option_positions returns THIS BOX'S underlying
+      only (SPX = SPX + SPXW roots); underlying="*" for the whole account. Boxes
+      sharing an account would otherwise adopt each other's legs. Operator:
+      "multiple boxes will trade that account but never duplicate symbols ever".
 v4.1  2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
       13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
       a LIVE box could place and close nothing. Paper unaffected. Found by
@@ -29,6 +33,7 @@ repo-wide v3.0 bump: Yahoo-Finance purge & data stream
 """
 
 import asyncio
+import os
 import logging
 import threading
 from typing import Optional
@@ -135,7 +140,14 @@ def get_account_number() -> str:
     return get_tt_account_number()
 
 
-def get_open_option_positions() -> list:
+def _underlying_family(u: str) -> set:
+    """B1 — the roots one box's instrument trades under. SPX lists SPX (AM) and
+    SPXW (PM) roots; every other symbol is its own root."""
+    u = str(u or "").upper().strip()
+    return {"SPX", "SPXW"} if u in ("SPX", "SPXW") else {u}
+
+
+def get_open_option_positions(underlying: str = None) -> list:
     """
     LIVE broker option positions, normalized for reconciliation (see
     execution/broker_reconcile.py). Returns a list of dicts:
@@ -186,6 +198,31 @@ def get_open_option_positions() -> list:
                 f"{getattr(p, 'symbol', '?')}: {e}"
             )
             continue
+
+    # 🔴 B1 (r465) — OWN INSTRUMENT ONLY. Boxes that share one account would
+    # otherwise each see — and adopt — every other box's legs. The operator:
+    # "multiple boxes will trade that account but never duplicate symbols ever".
+    # Default is this box's instrument; underlying="*" returns the whole account.
+    if underlying != "*":
+        try:
+            import config as _cfg
+            fam = _underlying_family(underlying or os.environ.get("OT_INSTRUMENT", "")
+                                     or getattr(_cfg, "INSTRUMENT", ""))
+        except Exception:                                    # noqa: BLE001
+            fam = set()
+        if fam and fam != {""}:
+            mine = []
+            for q in out:
+                root = (q.get("underlying") or "").upper()
+                if not root:
+                    sym = str(q.get("symbol") or "").lstrip(".")
+                    root = sym[:-15].strip().upper() if len(sym) > 15 else ""
+                if root in fam:
+                    mine.append(q)
+            if len(mine) != len(out):
+                logger.info(f"Broker account holds {len(out)} option position(s); "
+                            f"{len(mine)} are this box's ({sorted(fam)}) — the rest ignored")
+            out = mine
 
     logger.info(f"Broker reports {len(out)} open option position(s)")
     return out

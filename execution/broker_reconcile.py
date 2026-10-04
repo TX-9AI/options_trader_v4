@@ -1,5 +1,12 @@
 """
-execution/broker_reconcile.py  v4.0
+execution/broker_reconcile.py  v4.1
+v4.1  2026-10-04  r465 / B1 — A ROW IS HEALTHY ONLY IF EVERY LEG IS AT THE BROKER AT
+      THE RIGHT QUANTITY. build_plan kept a row if ANY leg was present and never
+      read quantity (2N vs N, or a vertical missing a leg, read healthy). Each
+      kept row is now checked leg by leg (expected contracts summed across rows;
+      a fly's body counts twice); a missing leg or wrong count is kept AND
+      reported in plan.mismatch, which main.py alerts on. Live-only. Found by
+      OTV4TEST's live-readiness audit. Pinned by tests/check_reconcile_strict.py.
 Reconciles local state against the broker.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -75,6 +82,7 @@ class ReconcilePlan:
     adopt: List[dict]           = field(default_factory=list)  # synthesized records to manage+journal
     close_phantom: List[str]    = field(default_factory=list)  # DB trade_ids absent at broker
     anomalies: List[str]        = field(default_factory=list)  # adopted trade_ids that are lone shorts
+    mismatch: List[dict]        = field(default_factory=list)  # B1: kept rows whose legs/qty disagree
 
 
 # ── OCC option symbol parsing ────────────────────────────────────────────────
@@ -153,6 +161,20 @@ def _db_leg_symbols(row: dict) -> set:
     return {row.get(k) for k in keys if row.get(k)}
 
 
+def _db_leg_quantities(row: dict) -> dict:
+    """B1 — {leg symbol: contracts the row expects at the broker}. A butterfly's
+    body is held twice; every other leg once per contract."""
+    n = abs(int(float(row.get("contracts", 0) or 0)))
+    out = {}
+    for k in ("option_symbol", "short_symbol", "long_symbol",
+              "lower_symbol", "upper_symbol"):
+        if row.get(k):
+            out[row[k]] = out.get(row[k], 0) + n
+    if row.get("center_symbol"):
+        out[row["center_symbol"]] = out.get(row["center_symbol"], 0) + 2 * n
+    return out
+
+
 def build_plan(broker_positions: List[dict], db_live_rows: List[dict]) -> ReconcilePlan:
     """Pure reconciliation. Inputs:
         broker_positions — normalized dicts (see _adopt_record) for OPEN option
@@ -167,6 +189,16 @@ def build_plan(broker_positions: List[dict], db_live_rows: List[dict]) -> Reconc
 
     # 1) KEEP vs PHANTOM: each DB live row must have at least one leg present at
     #    the broker, else it no longer exists -> phantom, close it.
+    # 🔴 B1 (r465) — PRESENT IS NOT HEALTHY. A row used to be kept if ANY one of
+    # its legs was at the broker, and quantity was never read: 2N against N, or
+    # a vertical missing its long, read as fine. Each kept row is now checked
+    # leg by leg against the broker's quantity (summed over every row that
+    # expects that symbol); a missing leg or a wrong count is KEPT (it still
+    # needs managing) and REPORTED in plan.mismatch — never silently healthy.
+    expected_total = {}
+    for row in db_live_rows:
+        for sym, q in _db_leg_quantities(row).items():
+            expected_total[sym] = expected_total.get(sym, 0) + q
     matched_broker_symbols = set()
     for row in db_live_rows:
         legs = _db_leg_symbols(row)
@@ -174,6 +206,16 @@ def build_plan(broker_positions: List[dict], db_live_rows: List[dict]) -> Reconc
         if present:
             plan.keep.append(row)
             matched_broker_symbols |= present
+            missing = sorted(legs - broker_symbols)
+            wrong = {}
+            for sym in sorted(present):
+                have = abs(int(float(broker_by_symbol[sym].get("quantity", 0) or 0)))
+                want = expected_total.get(sym, 0)
+                if want and have != want:
+                    wrong[sym] = {"expected": want, "broker": have}
+            if missing or wrong:
+                plan.mismatch.append({"trade_id": row.get("trade_id", ""),
+                                      "missing": missing, "quantity": wrong})
         else:
             plan.close_phantom.append(row.get("trade_id", ""))
 
