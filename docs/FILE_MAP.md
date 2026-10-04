@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-320 Python modules across 13 local packages.
+321 Python modules across 13 local packages.
 
-**Reached by:** 102 imported · 8 declared entry points · 149 referenced from a script, unit or doc but never imported · **61 by nothing here**.
+**Reached by:** 102 imported · 8 declared entry points · 150 referenced from a script, unit or doc but never imported · **61 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -304,7 +304,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/__init__.py`
 - **calls:** (none)
-- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `main.py`, `tests/check_credit_remainder.py`, `tests/check_db_handles.py`, `tests/check_exit_quote.py`, `tests/check_ladder_wired.py`, `tests/check_orb_geometry_size.py`, `tests/check_orb_sequence.py`, `tests/check_standing_offer.py`, `tests/check_vix_stamp.py`
+- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/position_manager.py`, `main.py`, `tests/check_credit_remainder.py`, `tests/check_db_handles.py`, `tests/check_exit_quote.py`, `tests/check_fly_mark_cap.py`, `tests/check_ladder_wired.py`, `tests/check_orb_geometry_size.py`, `tests/check_orb_sequence.py`, `tests/check_standing_offer.py`, `tests/check_vix_stamp.py`
 
 ### `execution/broker_reconcile.py`
 - **calls:** `config.py`, `utils/time_utils.py`
@@ -316,11 +316,11 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/entry_engine.py`
 - **calls:** `analysis/level_grade.py`, `analysis/orb_engine.py`, `analysis/tape_at_level.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/ladder_registry.py`, `execution/limit_ladder.py`, `execution/order_confirm.py`, `execution/resting_orders.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `strategy/base_strategy.py`, `strategy/sweep_credit_spread.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_credit_remainder.py`, `tests/check_entry_gate.py`, `tests/check_ladder_wired.py`, `tests/check_orb_geometry_size.py`, `tests/check_standing_offer.py`, `tests/check_vix_stamp.py`
+- **called by:** `main.py`, `tests/check_credit_remainder.py`, `tests/check_entry_gate.py`, `tests/check_fly_mark_cap.py`, `tests/check_ladder_wired.py`, `tests/check_orb_geometry_size.py`, `tests/check_standing_offer.py`, `tests/check_vix_stamp.py`
 
 ### `execution/entry_ladder.py`
 - **calls:** `execution/tick_size.py`, `utils/math_utils.py`
-- **called by:** `execution/ladder_registry.py`, `strategy/condor_roll.py`, `tests/check_credit_remainder.py`, `tests/stress_entry_path.py`
+- **called by:** `execution/ladder_registry.py`, `strategy/condor_roll.py`, `tests/check_credit_remainder.py`, `tests/check_fly_mark_cap.py`, `tests/stress_entry_path.py`
 
 ### `execution/exit_engine.py`
 - **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/ladder_registry.py`, `execution/limit_ladder.py`, `notifications/alert_manager.py`, `strategy/structure.py`, `utils/math_utils.py`, `utils/time_utils.py`
@@ -332,7 +332,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/ladder_registry.py`
 - **calls:** `execution/entry_ladder.py`
-- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `main.py`, `tests/check_credit_remainder.py`, `tests/check_ladder_wired.py`
+- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `main.py`, `tests/check_credit_remainder.py`, `tests/check_fly_mark_cap.py`, `tests/check_ladder_wired.py`
 
 ### `execution/limit_ladder.py`
 - **calls:** `config.py`, `execution/tick_size.py`
@@ -732,6 +732,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_fill_basis.py`
 - **calls:** `strategy/credit_vertical.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_fly_mark_cap.py`
+- **calls:** `execution/__init__.py`, `execution/entry_engine.py`, `execution/entry_ladder.py`, `execution/ladder_registry.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_fork_geometry_journal.py`

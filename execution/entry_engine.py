@@ -1,5 +1,14 @@
 """
-execution/entry_engine.py  v5.1
+execution/entry_engine.py  v5.2
+v5.2  2026-10-04  r462 / FLY.1 — A BUTTERFLY ENTRY NEVER POSTS ABOVE ITS MARK.
+      Mirrors OTV4TEST r224. Operator: "They should still not exceed mark on
+      ladder entries, even no bid quotes." Two paths posted over it: the retry
+      (mid + LIMIT_IMPROVE_TICKS, one cent over by design) and the walk, priced on
+      max(0, fly bid) so a negative structure bid (a no-bid wing) lifted the
+      ladder's midpoint above the mark. Every attempt is now min(price, the mark
+      floored to the cent); the retry re-posts AT that cap; a mark under one cent
+      posts nothing. Paper unchanged (books the mark). Pinned by
+      tests/check_fly_mark_cap.py (OTV4TEST's gate).
 v5.1  2026-09-16  r383 — CFG.3 — `enter()` TAKES THE TICK CONTEXT, BECAUSE
       THIS PATH WAS THE BLIND ONE. `main` computes `ctx["gap"]` and
       `ctx["level_near"]` EVERY TICK FOR EVERY STRATEGY, and
@@ -610,6 +619,17 @@ class EntryEngine:
         except (TypeError, ValueError):
             return (0.0, 0.0)
 
+    @staticmethod
+    def _mark_cap(mark) -> Optional[float]:
+        """r462 (FLY.1, OTV4TEST r224) — the most a BUY may post: the mark, floored
+        to the cent. None when even one cent would exceed it (no valid price at or
+        under the mark exists)."""
+        try:
+            cap = int(float(mark) * 100.0 + 1e-9) / 100.0
+        except (TypeError, ValueError):
+            return None
+        return cap if cap >= 0.01 else None
+
     def _walk_price(self, key: str, side: str, bid: float, ask: float,
                     symbol: str, mark_fallback: float) -> Tuple[float, str]:
         """The price to post THIS attempt, and why. Falls back to the mark when
@@ -934,6 +954,11 @@ class EntryEngine:
             _fly_key = _lr_bf.intent_key(
                 getattr(signal.center_contract, "symbol", "fly"),
                 "open", "butterfly")
+            _cap = self._mark_cap(mid)
+            if _cap is None:
+                logger.info("[ladder] BUTTERFLY not posted: mark %.4f is under one cent - "
+                            "any valid limit would exceed it", float(mid or 0.0))
+                return None, "", 0
             for attempt in range(2):
                 if attempt == 0 and _fly_ask > 0:
                     limit_price, _bwhy = self._walk_price(
@@ -943,7 +968,10 @@ class EntryEngine:
                                 "%.2f / %.2f, mark %.2f)", limit_price, _bwhy,
                                 _fly_bid, _fly_ask, mid)
                 else:
-                    limit_price = round(mid + attempt * LIMIT_IMPROVE_TICKS * 0.01, 2)
+                    limit_price = _cap                 # the retry RE-POSTS at the mark; it was mid + a tick
+                if limit_price > _cap:
+                    logger.info("[ladder] BUTTERFLY capped at the mark: %.2f -> %.2f", limit_price, _cap)
+                    limit_price = _cap                 # never above the mark, whatever the walk said
                 legs = [
                     Leg(instrument_type=InstrumentType.EQUITY_OPTION,
                         symbol=signal.lower_contract.symbol,
@@ -984,7 +1012,7 @@ class EntryEngine:
                     return None, "", 0
                 logger.info(f"Butterfly attempt {attempt+1} confirmed dead "
                             f"unfilled ({fill.detail})"
-                            + (" — improving 1 tick and retrying" if attempt == 0
+                            + (" — re-posting at the mark" if attempt == 0
                                else " — giving up"))
             return None, "", 0
 
