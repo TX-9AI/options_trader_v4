@@ -1,5 +1,12 @@
 """
-data/options_chain.py  v4.4
+data/options_chain.py  v4.5
+v4.5  2026-10-04  r464 / F6 (SPXW.1) — THE MORNING EXPIRATION IS NEVER TRADED. fetch_chain
+      drops every settlement_type "AM" contract BEFORE the date is chosen, so an
+      AM-only date never becomes "today"; logged once per (symbol, date);
+      chain_map stays whole. Operator, 2026-10-04: "Never trade the morning
+      expiration on SPX." MEASURED (OTV4TEST/SPX-TEST dry-run probe): 10-16 lists
+      1,060 SPX/AM beside 938 SPXW/PM. OTV4TEST r241's text, adopted verbatim.
+      Pinned by tests/check_spxw_only.py (sha 63499c5b, OTV4TEST's gate).
 v4.4  2026-10-02  r457 (ZBID.1, shared with OTV4TEST r186) — A CONTRACT WITH NO BID IS
       NEVER SELECTED. `two_sided(c)` (bid > 0 and ask > 0) at module level;
       select_orb_strike and select_sweep_strike require it beside their
@@ -271,17 +278,43 @@ class OptionsChainFetcher:
                 logger.warning(f"Empty option chain for {symbol}")
                 return None
 
+            # 🔴 SPXW.1 — NEVER TRADE THE MORNING EXPIRATION (the operator,
+            # 2026-10-04: "Never trade the morning expiration on SPX"). The SDK
+            # returns an AM-settled series and a PM one expiring the SAME day in
+            # ONE list (tastytrade instruments.get_option_chain's own docstring:
+            # "e.g. SPXW and SPX AM options") - SPX's third Fridays. The AM
+            # series stops trading the day before. It is dropped here, BEFORE a
+            # date is chosen, so an AM-only date can never become "today".
+            # Equity options are all PM, so the rule is generic. `chain_map`
+            # itself stays whole: the archival aux tenors (TERM.1) record the
+            # market, not our choices.
+            tradeable = {}
+            for _d, _opts in chain_map.items():
+                _keep = [o for o in _opts
+                         if str(getattr(o, "settlement_type", "") or "").upper() != "AM"]
+                if _keep:
+                    tradeable[_d] = _keep
+            # SAID, once per symbol and date: SPX lists AM monthlies months out,
+            # so only the REQUESTED date's drop is news (a third Friday), and a
+            # per-tick line would bury it.
+            _am_today = len(chain_map.get(target_date, [])) - len(tradeable.get(target_date, []))
+            _seen = self.__dict__.setdefault("_am_said", set())
+            if _am_today and (symbol, target_date) not in _seen:
+                _seen.add((symbol, target_date))
+                logger.info(f"[chain] {symbol} {target_date}: dropped {_am_today} AM-settled "
+                            f"contract(s) - the morning expiration is never traded")
+
             # Step 2: Find today's expiration
-            options_today: List[TTOption] = chain_map.get(target_date, [])
+            options_today: List[TTOption] = tradeable.get(target_date, [])
 
             if not options_today:
                 # Try to find the nearest available expiry
-                available = sorted(chain_map.keys())
+                available = sorted(tradeable.keys())
                 future    = [d for d in available if d >= target_date]
                 if future:
                     target_date   = future[0]
                     today_str     = target_date.isoformat()
-                    options_today = chain_map[target_date]
+                    options_today = tradeable[target_date]
                     logger.info(f"No 0DTE for {today}, using nearest: {today_str}")
                 else:
                     logger.warning(f"No options expiring on or after {today_str}")
