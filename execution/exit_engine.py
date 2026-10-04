@@ -1,5 +1,15 @@
 """
-execution/exit_engine.py  v4.18
+execution/exit_engine.py  v4.19
+v4.19 2026-10-04  r470 / BBK.1 — A SINGLE-LEG BUY-BACK IS PRICED AS A BUY. Operator
+      (via OTV4TEST, 19:39 ET): "Have reporter do the buy-back." _close_single_leg
+      chose BUY_TO_CLOSE for a short single (r345) but always asked _exit_limit
+      for the "sell" side, so the walk started near the ASK and stepped DOWN
+      (QQQ 1.00/1.20, mark 1.10: posted 1.15 then 1.14) and the floor snap
+      rounded UP (mark 1.125 on a nickel grid -> 1.15) — a live buy-back paying
+      above its mark. The side now follows the action: "buy" for BUY_TO_CLOSE,
+      starting low and walking up, never above the mark. Long singles unchanged;
+      the MARKET branch untouched. Live-only. Pinned by
+      tests/check_buyback_side.py.
 v4.18 2026-10-04  r467 / B3 — A PARTIAL EXIT SURVIVES A RESTART. The filled portions
       and the working order id lived only on the in-memory record, so a restart
       mid-close forgot them and the next pass submitted the FULL size against a
@@ -3030,7 +3040,11 @@ class ExitEngine:
         # r105 — selling a long OUT is the ladder's "sell" side: start 25% in
         # from the ask, walk down toward mark, never accept below mark. A FLOOR
         # stop skips the walk and goes to mark (see _exit_limit).
-        _lim, _why = self._exit_limit(record, reason, mark_price, "sell", "single")
+        # 🔴 r470 / BBK.1 — the side FOLLOWS THE ACTION. This was the literal
+        # "sell", so an adopted short's BUY_TO_CLOSE walked down from the ask and
+        # snapped up: a buy-back paying above its mark.
+        _side = "buy" if action == OrderAction.BUY_TO_CLOSE else "sell"
+        _lim, _why = self._exit_limit(record, reason, mark_price, _side, "single")
         limit = self._round_to_tick(_lim, record, single_leg=True)   # TICK.1
         record["_exit_last_limit"] = limit
         logger.info("[ladder] single CLOSE %s @ %.2f — %s",
