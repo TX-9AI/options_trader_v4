@@ -1,5 +1,9 @@
 """
-main.py  v4.50
+main.py  v4.51
+v4.51 2026-10-04  r466 / B2 — an error AFTER place_order no longer forgets the order: it is cancelled,
+      remembered as suspect and paged, the rung is refused, and the intent posts
+      nothing until the broker says the order is dead (execution/order_guard.py).
+      Live-only. Found by OTV4TEST's audit. Pinned by tests/check_order_guard.py.
 v4.50 2026-10-04  r465 / B1 — the startup reconcile ALERTS on plan.mismatch (a kept row
       whose legs or quantities disagree with the broker). Live-only.
 v4.49 2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
@@ -2470,13 +2474,33 @@ def _post_credit_vertical(short_contract, long_contract, contracts: int,
         _legs = [(short_contract.symbol, "SELL_TO_OPEN", contracts),
                  (long_contract.symbol,  "BUY_TO_OPEN",  contracts)]
 
+    # B2 (r466) — never post an intent whose previous order is still in doubt.
+    from execution import order_guard as _guard
+    _sess = locals().get("session"); _acct = locals().get("account")
+    if _acct is not None:
+        _ok, _gwhy = _guard.clear_to_post(lkey, _sess, _acct)
+        if not _ok:
+            logger.warning(f"[guard] credit vertical not posted: {_gwhy}")
+            return EntryFill(filled=False, detail=f"guard: {_gwhy}"), _limit, _lwhy
     response = placer(_legs, _limit)
     if getattr(response, "errors", None):
         logger.error(f"Condor leg order failed: {response.errors}")
         return EntryFill(filled=False, detail=f"rejected: {response.errors}"), _limit, _lwhy
     basis = [(short_contract.symbol, 1, +1),
              (long_contract.symbol,  1, -1)]   # net = short − long (credit)
-    fill = confirmer(getattr(response, "order", response), basis, _deadline)
+    _placed = getattr(response, "order", response)
+    try:
+        fill = confirmer(_placed, basis, _deadline)
+    except Exception:
+        # B2 — the order WAS placed; refuse the rung, cancel, remember, page.
+        try:
+            from execution import ladder_registry as _lr_g
+            _lr_g.refuse(lkey, _limit)
+        except Exception:                                       # noqa: BLE001
+            pass
+        if _acct is not None:
+            _guard.after_failure(lkey, _placed, _sess, _acct, what)
+        raise
 
     from execution import ladder_registry as _lr
     _filled = int(getattr(fill, "quantity", 0) or 0) if getattr(fill, "filled", False) else 0
