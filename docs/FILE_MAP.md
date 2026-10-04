@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-328 Python modules across 13 local packages.
+329 Python modules across 13 local packages.
 
-**Reached by:** 103 imported · 8 declared entry points · 156 referenced from a script, unit or doc but never imported · **61 by nothing here**.
+**Reached by:** 103 imported · 8 declared entry points · 157 referenced from a script, unit or doc but never imported · **61 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -348,7 +348,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/position_manager.py`
 - **calls:** `analysis/orb_engine.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/exit_engine.py`, `execution/resting_orders.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `strategy/management.py`, `strategy/structure.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_butterfly_nonblocking.py`, `tests/check_credit_remainder.py`, `tests/check_exit_quote.py`, `tests/check_manage_call.py`, `tests/check_plan_prepares.py`
+- **called by:** `main.py`, `tests/check_butterfly_nonblocking.py`, `tests/check_credit_remainder.py`, `tests/check_exit_quote.py`, `tests/check_live_mark_fallback.py`, `tests/check_manage_call.py`, `tests/check_plan_prepares.py`
 
 ### `execution/resting_orders.py`
 - **calls:** `analysis/orb_engine.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/order_confirm.py`, `utils/time_utils.py`
@@ -800,6 +800,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_lineage.py`
 - **calls:** `database/__init__.py`, `database/trade_logger.py`, `warehouse/__init__.py`, `warehouse/s3_push.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_live_mark_fallback.py`
+- **calls:** `execution/position_manager.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_lone_stop.py`
