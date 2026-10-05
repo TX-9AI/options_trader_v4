@@ -112,3 +112,8 @@ venv/
 # ⚠️ `gen_file_map.py` walks the FILESYSTEM, not git, so this path must ALSO be
 # in SKIP_DIRS and MENTION_SKIP_DIRS there or FILE_MAP drifts on the next land.
 handoffs/
+# ── r474 / WDOG.1 — THE EMERGENCY WATCHDOG'S RUNTIME FILES ─────────────────────
+# main._touch_heartbeat writes data/BOT_HEARTBEAT every loop pass; the watchdog
+# keeps its once-a-day state in data/emergency_watchdog.json. Neither is source.
+data/BOT_HEARTBEAT
+data/emergency_watchdog.json

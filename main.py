@@ -1,5 +1,9 @@
 """
-main.py  v4.53
+main.py  v4.54
+v4.54 2026-10-05  r474 / WDOG.1 — THE HEARTBEAT. _touch_heartbeat writes data/BOT_HEARTBEAT
+      first thing in every main-loop pass (never raises; a failed write warns once), the
+      liveness signal for the emergency watchdog (tools/emergency_watchdog.py). Mirrored from
+      OTV4TEST r168. Nothing that trades, sizes or exits is touched.
 v4.53 2026-10-05  r473 / F5 — a live credit vertical checks buying power before it posts:
       (width - credit) x contracts x 100, via execution/buying_power.affordable,
       right after B2's guard. Short or unreadable -> not posted. Paper unchanged.
@@ -4740,12 +4744,33 @@ def _page_dispatch_failure(state, err: Exception, where: str) -> None:
         logger.error("dispatch-failure page could not be sent: %s", _alert_err)
 
 
+_HEARTBEAT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "BOT_HEARTBEAT")
+_heartbeat_warned = False
+
+
+def _touch_heartbeat(tick: int) -> None:
+    """r474 / WDOG.1 (mirrors OTV4TEST r168) — one small write per main-loop pass.
+    The emergency watchdog reads its AGE: a loop that stops passing stops touching
+    it, however quiet or noisy bot.log is. ⚠️ NEVER RAISES: a heartbeat that could
+    stop the loop would be the hang it exists to catch. A failed write warns once
+    and the watchdog, seeing the file age, acts — the loud direction."""
+    global _heartbeat_warned
+    try:
+        with open(_HEARTBEAT, "w") as f:
+            f.write(f"{time.time():.0f} {tick}\n")
+    except Exception as exc:                                    # noqa: BLE001
+        if not _heartbeat_warned:
+            _heartbeat_warned = True
+            logger.warning("heartbeat write failed (%s) — the emergency watchdog will read this bot as stuck", exc)
+
+
 def main_loop(state: BotState):
     pos_mgr = get_position_manager(state.paper_trading)
 
     while True:
         tick_start  = time.time()
         state.tick_count += 1
+        _touch_heartbeat(state.tick_count)   # r474 — the emergency watchdog's liveness read
 
         try:
             _apply_log_level()      # r112 — one stat; DEBUG flips with no restart

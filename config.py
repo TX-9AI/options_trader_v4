@@ -1,5 +1,13 @@
 """
-config.py  v4.20
+config.py  v4.21
+v4.21 2026-10-05  r474 / F1 — LIVE_FILL_DEADLINE_SECONDS 30 -> 8. Operator: "get it down
+      to eight seconds." A live close waited up to 30 s (+6 s cancel grace) for a
+      fill, blocking the whole tick loop, so stops on other positions went
+      unchecked and the 15:45 flatten closed one position per ~36 s. An unfilled
+      close is now cancelled after 8 s and the next tick reposts it one rung
+      nearer the mark (B3 keeps a working order across ticks). Read ONLY by
+      exit_engine's live close; entries keep LIVE_ENTRY_DEADLINE_SECONDS. Paper
+      never reads it.
 v4.20 2026-10-04  r471 / PAUSE.1 — STRATEGIES_PAUSED: TCS and ORB take no new entries
       for the week of 2026-10-05. Operator: "For this week, disable sweep, TCS,
       and orb", then "Re-enable sweep then." Read by main._safe_strategy, which returns no signal
@@ -1943,7 +1951,9 @@ BOT_NAME                    = os.environ.get("OT_BOT_NAME", "OptionsTrader")
 LIVE_FILL_POLL_SECONDS      = float(os.environ.get("OT_LIVE_FILL_POLL_SECONDS", "2"))
 # Total seconds to wait for a fill before cancelling and handing the position
 # back to the caller's retry loop (15:45→16:00 hard-close retries + paging).
-LIVE_FILL_DEADLINE_SECONDS  = float(os.environ.get("OT_LIVE_FILL_DEADLINE_SECONDS", "30"))
+# r474 / F1 — 8, was 30 (operator). The loop blocks for this plus a 6 s cancel
+# grace; at 30 that was ~36 s per position with nothing else evaluated.
+LIVE_FILL_DEADLINE_SECONDS  = float(os.environ.get("OT_LIVE_FILL_DEADLINE_SECONDS", "8"))
 # Marketable-limit buffer ($/share THROUGH the mark) for multi-leg closes.
 # tastytrade rejects MARKET orders on spreads, so closes go out as aggressive
 # limits: vertical debit = min(mark + buffer, spread width); butterfly credit
