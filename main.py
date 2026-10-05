@@ -1,5 +1,8 @@
 """
-main.py  v4.52
+main.py  v4.53
+v4.53 2026-10-05  r473 / F5 — a live credit vertical checks buying power before it posts:
+      (width - credit) x contracts x 100, via execution/buying_power.affordable,
+      right after B2's guard. Short or unreadable -> not posted. Paper unchanged.
 v4.52 2026-10-04  r471 / PAUSE.1 — _safe_strategy returns no signal for a name in
       config.STRATEGIES_PAUSED, without asking the strategy, tells the plan board
       why, and logs once per name per process. Operator: "For this week, disable
@@ -2487,6 +2490,15 @@ def _post_credit_vertical(short_contract, long_contract, contracts: int,
         if not _ok:
             logger.warning(f"[guard] credit vertical not posted: {_gwhy}")
             return EntryFill(filled=False, detail=f"guard: {_gwhy}"), _limit, _lwhy
+        # F5 (r473) — the margin a short vertical ties up is its width less the credit.
+        from execution import buying_power as _bp
+        _width = abs(float(getattr(short_contract, "strike", 0) or 0)
+                     - float(getattr(long_contract, "strike", 0) or 0))
+        _need = max(0.0, _width - float(_limit or 0.0)) * int(contracts) * 100.0
+        _bok, _bwhy = _bp.affordable(_need, _sess, _acct, what)
+        if not _bok:
+            logger.warning(f"[bp] credit vertical not posted: {_bwhy}")
+            return EntryFill(filled=False, detail=f"buying power: {_bwhy}"), _limit, _lwhy
     response = placer(_legs, _limit)
     if getattr(response, "errors", None):
         logger.error(f"Condor leg order failed: {response.errors}")

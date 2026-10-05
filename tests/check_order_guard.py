@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_order_guard.py  v1.0
+tests/check_order_guard.py  v1.1
+v1.1  2026-10-05  r473 / F5 — the fake account answers get_balances with ample
+      buying power. F5 refuses a live post when balances are unreadable, so a
+      fake without the call now refused every post and G2-G4 went red on a
+      path that is correct. Nothing else changes.
 v1.0  2026-10-04  r466 / B2 — AN ORDER THAT WAS SENT IS NEVER FORGOTTEN BY AN ERROR.
 
   🔴 Found by OTV4TEST's live-readiness audit, measured on mainline: in every
@@ -77,6 +81,10 @@ class _Acct:
 
     async def delete_order(self, session, oid):
         self.deleted.append(oid)
+
+    async def get_balances(self, session, currency="USD"):           # F5 (r473)
+        from types import SimpleNamespace
+        return SimpleNamespace(derivative_buying_power=1_000_000.0)
 
 
 class _C:

@@ -1,5 +1,10 @@
 """
-execution/entry_engine.py  v5.4
+execution/entry_engine.py  v5.5
+v5.5  2026-10-05  r473 / F5 — every live entry checks buying power before it posts
+      (execution/buying_power.affordable, right after B2's clear_to_post): single
+      leg at its limit, the standing ORB offer at its price, the butterfly at its
+      mark cap (the most it can ever post, FLY.1), each x contracts x 100. Short
+      or unreadable -> not posted. Paper unchanged.
 v5.4  2026-10-04  r466 / B2 — an error AFTER place_order no longer forgets the order: it is cancelled,
       remembered as suspect and paged, the rung is refused, and the intent posts
       nothing until the broker says the order is dead (execution/order_guard.py).
@@ -240,6 +245,7 @@ from risk.risk_manager import SizingResult
 from database.trade_logger import TradeRecord, make_record, get_trade_logger
 from data.tasty_client import get_session, get_account, TastyClientError, sdk_result
 from execution import order_guard as _guard                          # B2
+from execution import buying_power as _bp                            # F5
 from config import (
     PAPER_TRADING, PAPER_FILL_SLIPPAGE_PCT,
     CONTRACT_MULTIPLIER, INSTRUMENT,
@@ -730,6 +736,11 @@ class EntryEngine:
                 logger.warning("[guard] single-leg %s not posted: %s", symbol, _gwhy)
                 return None, "", 0
             limit, _why = self._walk_price(_key, "buy", _bid, _ask, symbol, mid)
+            _bok, _bwhy = _bp.affordable(float(limit) * int(contracts) * 100.0,
+                                         session, account, f"single-leg {symbol}")   # F5
+            if not _bok:
+                logger.warning("[bp] single-leg %s not posted: %s", symbol, _bwhy)
+                return None, "", 0
             logger.info("[ladder] %s BUY %s @ %.2f — %s (bid %.2f / ask %.2f)",
                         symbol, "single", limit, _why, _bid, _ask)
             order = NewOrder(
@@ -862,6 +873,11 @@ class EntryEngine:
             if not _ok:
                 logger.warning("[guard] standing offer %s not posted: %s", symbol, _gwhy)
                 return None, "", 0
+            _bok, _bwhy = _bp.affordable(float(mark) * int(contracts) * 100.0,
+                                         session, account, f"standing offer {symbol}")   # F5
+            if not _bok:
+                logger.warning("[bp] standing offer %s not posted: %s", symbol, _bwhy)
+                return None, "", 0
             leg = Leg(instrument_type=InstrumentType.EQUITY_OPTION,
                       symbol=symbol, action=OrderAction.BUY_TO_OPEN,
                       quantity=contracts)
@@ -991,6 +1007,11 @@ class EntryEngine:
             if _cap is None:
                 logger.info("[ladder] BUTTERFLY not posted: mark %.4f is under one cent - "
                             "any valid limit would exceed it", float(mid or 0.0))
+                return None, "", 0
+            _bok, _bwhy = _bp.affordable(float(_cap) * int(contracts) * 100.0,
+                                         session, account, "butterfly")      # F5
+            if not _bok:
+                logger.warning("[bp] butterfly not posted: %s", _bwhy)
                 return None, "", 0
             for attempt in range(2):
                 if attempt == 0 and _fly_ask > 0:
