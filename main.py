@@ -1,5 +1,9 @@
 """
-main.py  v4.51
+main.py  v4.52
+v4.52 2026-10-04  r471 / PAUSE.1 — _safe_strategy returns no signal for a name in
+      config.STRATEGIES_PAUSED, without asking the strategy, tells the plan board
+      why, and logs once per name per process. Operator: "For this week, disable
+      sweep, TCS, and orb", then "Re-enable sweep then": ORB and TCS. Management of open positions is untouched.
 v4.51 2026-10-04  r466 / B2 — an error AFTER place_order no longer forgets the order: it is cancelled,
       remembered as suspect and paged, the rung is refused, and the intent posts
       nothing until the broker says the order is dead (execution/order_guard.py).
@@ -1247,6 +1251,7 @@ from strategy.runaway_continuation import RunawayContinuationStrategy
 from strategy.sweep_credit_spread import SweepCreditSpreadStrategy
 from strategy.gex_pin_butterfly import GEXPinButterflyStrategy
 from config import SWEEP_SETUP_FLOOR
+from config import STRATEGIES_PAUSED          # r471 / PAUSE.1
 from utils import mem_trace          # MEM.2 — in-process tracemalloc, env-gated
 
 # MEM.2 — start at import. Deliberately placed BELOW this import and not
@@ -3015,6 +3020,9 @@ def _plan_skip_management(reason: str) -> None:
         pass
 
 
+_PAUSE_ANNOUNCED: set = set()
+
+
 def _safe_strategy(name: str, fn, ctx=None):
     """v4.9 — run ONE strategy evaluation in isolation.
 
@@ -3035,6 +3043,14 @@ def _safe_strategy(name: str, fn, ctx=None):
     decline, and logs at ERROR naming the strategy: a raise is a defect and must
     never be quiet, but it must not take the rest of the tick with it.
     """
+    # r471 / PAUSE.1 — an operator-paused strategy is not asked at all.
+    if name in STRATEGIES_PAUSED:
+        _plan_skip(name, "paused by the operator for the week of 2026-10-05")
+        if name not in _PAUSE_ANNOUNCED:
+            _PAUSE_ANNOUNCED.add(name)
+            logger.info(f"[pause] {name} is paused by the operator "
+                        f"(config.STRATEGIES_PAUSED) — not asked")
+        return None
     try:
         sig = fn()
         # r146 — the plan board learns this strategy was ASKED. AFTER fn().

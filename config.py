@@ -1,5 +1,11 @@
 """
-config.py  v4.19
+config.py  v4.20
+v4.20 2026-10-04  r471 / PAUSE.1 — STRATEGIES_PAUSED: TCS and ORB take no new entries
+      for the week of 2026-10-05. Operator: "For this week, disable sweep, TCS,
+      and orb", then "Re-enable sweep then." Read by main._safe_strategy, which returns no signal
+      for a paused name without asking the strategy. Default is the week's list;
+      OT_PAUSED_STRATEGIES overrides it (empty string = nothing paused). Ending
+      the pause is a revision that sets the default to "".
 v4.19 2026-09-16  r386 — ORB.17: `ORB_STOP_RESPECT_TOL`, THE GRACE THE
       STRUCTURE STOP IS ALLOWED BEFORE THE STOP IS SIMPLY IGNORED.
       🔴 `_size_geometry` sizes on `width / stop_distance` and promises *"every
@@ -527,6 +533,17 @@ TCS_WING_WIDTH_QQQ          = float(os.environ.get("OT_TCS_WING_QQQ", "5"))
 # that no surface reports. If TC.6 is ever to be disabled again it is an
 # explicit OT_TCS_ACTIVE=0, not an absence.
 TREND_CREDIT_ACTIVE         = os.environ.get("OT_TCS_ACTIVE", "1") == "1"
+
+# r471 / PAUSE.1 — OPERATOR PAUSE, WEEK OF 2026-10-05: "For this week, disable
+# sweep, TCS, and orb", amended before landing: "Re-enable sweep then." The
+# names are main._safe_strategy's dispatch names. Sweep (SweepCreditSpread and
+# SweepForLeg2) stays ON. Open positions keep their management — this stops
+# NEW entries only.
+STRATEGIES_PAUSED = frozenset(
+    s.strip() for s in os.environ.get(
+        "OT_PAUSED_STRATEGIES",
+        "ORB,TrendCreditSpread").split(",")
+    if s.strip())
 # ── TC.6 ENTRY GATES (2026-08-14 HOTFIX — it rapid-fired the whole fleet) ─────
 # Observed 10:02 ET on 08-14: NVDA sold a $5-wide for $0.06, PLTR a $6-wide for
 # $0.08, and every box re-entered seconds after a nickel close.
