@@ -1,5 +1,12 @@
 """
-execution/exit_engine.py  v4.19
+execution/exit_engine.py  v4.20
+v4.20 2026-10-06  r475 / F3 — NO MARKET CLOSE BEFORE 15:45 FOR WANT OF A MARK. A single-leg close
+      asked to go out with no mark (None or <= 0) sent a MARKET order at any hour — on a thin 0DTE
+      contract that fills at whatever the bid (or, buying back, the ask) is. Operator: "more of a
+      fail safe", yes. Before 15:45 it now posts NOTHING, pages once per trade ("no mark"), and the
+      caller retries next tick; from 15:45 (hard_close_order_mode "market") it still crosses — the
+      position must close. force_market (the 15:45 flatten) is unchanged. Live-only. Pinned by
+      tests/check_no_mark_close.py.
 v4.19 2026-10-04  r470 / BBK.1 — A SINGLE-LEG BUY-BACK IS PRICED AS A BUY. Operator
       (via OTV4TEST, 19:39 ET): "Have reporter do the buy-back." _close_single_leg
       chose BUY_TO_CLOSE for a short single (r345) but always asked _exit_limit
@@ -2663,6 +2670,8 @@ class ExitEngine:
         if placed is None:
             placed = self._submit_live_close(record, remaining, mark_price,
                                              reason=reason)
+            if placed is None and record.pop("_exit_nomark_hold", None):
+                return FillResult(confirmed=False, detail="no mark before 15:45; nothing posted")   # F3
             if placed is None:
                 self._alert_live_exit_once(
                     trade_id, "submit",
@@ -3026,14 +3035,25 @@ class ExitEngine:
             action          = action,
             quantity        = contracts,
         )
-        if force_market or mark_price is None or mark_price <= 0:
-            # 15:45 flatten, or no mark to price against — cross and be done.
+        _no_mark = mark_price is None or mark_price <= 0
+        if _no_mark and not force_market and hard_close_order_mode(now_et()) != "market":
+            # 🔴 r475 / F3 — no mark before 15:45: post NOTHING, page once, retry next tick.
+            record["_exit_nomark_hold"] = 1
+            self._alert_live_exit_once(
+                record.get("trade_id", ""), "nomark",
+                f"LIVE close {str(record.get('trade_id', ''))[:8]}: NO MARK for {symbol} — "
+                f"nothing posted before 15:45 (no market order into an unknown book); "
+                f"retrying each tick, position stays OPEN")
+            return None
+        record.pop("_exit_nomark_hold", None)
+        if force_market or _no_mark:
+            # 15:45 flatten, or no mark at/after 15:45 — cross and be done.
             order = NewOrder(
                 time_in_force = OrderTimeInForce.DAY,
                 order_type    = OrderType.MARKET,   # single-leg market is accepted
                 legs          = [leg],
             )
-            why = "hard-close cross" if force_market else "no mark"
+            why = "hard-close cross" if force_market else "no mark, at/after 15:45"
             return self._place(session, account, order,
                                f"Single-leg close (MARKET — {why})")
         tick  = self._tick_for(record)

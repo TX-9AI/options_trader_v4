@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-tools/emergency_watchdog.py  v1.1-otv4 — THE OUT-OF-PROCESS EMERGENCY WATCHDOG.
+tools/emergency_watchdog.py  v1.2-otv4 — THE OUT-OF-PROCESS EMERGENCY WATCHDOG.
 
+otv4 v1.2  2026-10-06  r475 / WDOG.2 — THE WATCHDOG'S FLATTEN CROSSES AFTER 15:45. Mainline crosses
+      only for a close whose REASON contains "hard_close" (exit_engine force_market); r474 passed
+      "emergency_watchdog", so at 15:50 the flatten WALKED a limit toward the mark (with no mark, at
+      the entry premium) and a falling option could still be open at 16:00 — the case this tool
+      exists for. It now passes "hard_close_emergency_watchdog": debits cross, credit verticals
+      keep r105's no-cross rule. Pinned by check_emergency_watchdog W15c.
 otv4 v1.1  2026-10-05  r474 / WDOG.1 — MIRRORED ON MAINLINE from OTV4TEST r168 + r242 (7130c51), on
       the operator's ruling: "Can we adopt the watchdog". ONE CODE CHANGE, named: flatten_pass
       calls flatten_all(reason=, chain=) WITHOUT spot= — mainline's PositionManager.flatten_all
@@ -249,7 +255,7 @@ class Real:
         except Exception as exc:                                  # noqa: BLE001
             _log(f"chain fetch failed ({type(exc).__name__}); pass runs without marks")
         pm.has_open_position()                  # a fresh process loads the open rows
-        pm.flatten_all(reason="emergency_watchdog", chain=chain)   # otv4: no spot= (W15b)
+        pm.flatten_all(reason="hard_close_emergency_watchdog", chain=chain)   # otv4: no spot= (W15b); crosses (W15c)
         # ⚠️ THE ANSWER IS trades.db, READ FRESH - and _open_records is NEVER
         # reassigned: a live close's working order id rides in the record
         # dict between passes, and a reload would drop it mid-walk.

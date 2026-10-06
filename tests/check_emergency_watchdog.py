@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_emergency_watchdog.py  v1.0-otv4 — the emergency watchdog, mirrored on mainline.
+tests/check_emergency_watchdog.py  v1.1-otv4 — the emergency watchdog, mirrored on mainline.
+
+otv4 v1.1  2026-10-06  r475 / WDOG.2 — W15c added: the watchdog's flatten reason must contain
+      "hard_close", because mainline's exit engine crosses only on that reason. r474 passed
+      "emergency_watchdog" and its flatten would have walked a limit at 15:50; W15c is red on 674e0cc.
 
 otv4 v1.0  2026-10-05  r474 / WDOG.1. Mirrored from OTV4TEST r168 (+ r242) at 7130c51 on the
       operator's ruling: "Can we adopt the watchdog". THREE PER-TREE CHANGES, named:
@@ -15,7 +19,9 @@ otv4 v1.0  2026-10-05  r474 / WDOG.1. Mirrored from OTV4TEST r168 (+ r242) at 71
           one. (4) Under an interpreter that cannot import the trading stack (control's bare
           /usr/bin/python3 has no pandas/pytz/tastytrade) it prints NOT RUN and exits 2 instead of
           reporting import crashes as FAILs — a crash is not a verdict. (5) W12 points config.LOG_FILE
-          at scratch before `import main`, so the check never writes a live bot.log. (6) This header.
+          at scratch before `import main`, so the check never writes a live bot.log. (6) r475: W15c —
+          the flatten reason must contain "hard_close", or mainline walks instead of crossing. (7) This
+          header.
 
 v1.0  2026-09-27  OTV4TEST r168 — born with WDOG.1: one message per event (the operator's ruling).
 
@@ -337,6 +343,17 @@ try:
 except Exception as exc:                                          # noqa: BLE001
     _bind_ok, _why = False, f"{type(exc).__name__}: {exc}"
 ck("W15b the watchdog's flatten_all call binds to the REAL PositionManager.flatten_all", _bind_ok, _why)
+
+# W15c (otv4, r475) — the flatten reason must carry "hard_close", or mainline's exit engine
+# walks a limit at 15:50 instead of crossing (force_market keys on the reason).
+try:
+    _reasons = [k.value.value for c in _calls for k in c.keywords
+                if k.arg == "reason" and isinstance(k.value, _ast.Constant)]
+    ck("W15c the watchdog's flatten reason contains 'hard_close' (so it crosses after 15:45)",
+       bool(_reasons) and all("hard_close" in r for r in _reasons), f"reasons={_reasons}")
+except Exception as exc:                                          # noqa: BLE001
+    ck("W15c the watchdog's flatten reason contains 'hard_close' (so it crosses after 15:45)", False,
+       f"{type(exc).__name__}: {exc}")
 
 # W16
 with tempfile.TemporaryDirectory() as td:
