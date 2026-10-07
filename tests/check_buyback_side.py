@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
-"""tests/check_buyback_side.py  v1.0
+"""tests/check_buyback_side.py  v1.1
 BBK.1 — A SINGLE-LEG BUY-BACK IS PRICED AS A BUY.
+
+v1.1  2026-10-07  r476 — B5 WAS TIME-OF-DAY DEPENDENT SINCE r475 (F3). B5 sends a no-mark close
+      and expects MARKET; since F3 that is true only at/after the 15:45 cross, so before 15:45
+      B5 crashed (AttributeError on a __new__-built engine's page) and the check went red — every
+      sweep after r475 ran in the evening and never saw it. Found by OTV4TEST's 08:00 sweep
+      (MSG-1007-01), measured here at 08:11 ET. B5 now PINS exit_engine.now_et to
+      limit_ladder.HARD_CLOSE_MARKET_AT_ET (read from this tree's module) and restores it; new B5b
+      pins 10:00 and asserts a no-mark close posts NOTHING (F3). Test-only.
 
 v1.0  2026-10-04  r470. Operator (via OTV4TEST, 19:39 ET): "Have reporter do the
       buy-back & run the fix by you for a sanity check." _close_single_leg sent
@@ -21,7 +29,9 @@ The side under test is read off the posted order's ACTION, not off a predicate.
       the limit is at or below mark (1.10, never 1.15)
   B4  UNCHANGED: long single, walk: SELL_TO_CLOSE, first limit at or above mark,
       next limit walks DOWN
-  B5  UNCHANGED: no mark -> MARKET order, BUY_TO_CLOSE for the short
+  B5  UNCHANGED: no mark AT THE CROSS (clock pinned to HARD_CLOSE_MARKET_AT_ET) -> MARKET
+      order, BUY_TO_CLOSE for the short
+  B5b no mark at 10:00 (clock pinned) -> nothing posted (F3, r475)
   B6  the posted price is signed as a debit for a buy-back (negative)
 
 Run:  python3 tests/check_buyback_side.py   (needs the venv's tastytrade)
@@ -128,14 +138,31 @@ def main():
           and l1 is not None and l1 >= 1.10 - 1e-9 and l2 is not None and l2 < l1,
           f"action={getattr(legL, 'action', None)} first={l1} next={l2}")
 
-    # B5 — MARKET branch untouched
-    LR.reset_all()
-    r = rec("BBK-S3", "QQQ", 1.00, 1.20, short=True)
-    _, o, leg, _ = post(r, None, "target", _Account())
-    check("B5 no mark -> MARKET, BUY_TO_CLOSE",
-          o is not None and o.order_type == OrderType.MARKET
-          and leg.action == OrderAction.BUY_TO_CLOSE,
-          f"type={getattr(o, 'order_type', None)} action={getattr(leg, 'action', None)}")
+    # B5 / B5b — the no-mark branch, with the clock PINNED (r476): since F3 (r475) the answer
+    # depends on the time of day, so an unpinned check was green only after 15:45.
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    from execution.limit_ladder import HARD_CLOSE_MARKET_AT_ET as _CROSS
+    _real_now = EE.now_et
+    _alerted = []
+    eng._alert_live_exit_once = lambda *a, **k: _alerted.append(a[1] if len(a) > 1 else None)
+    try:
+        EE.now_et = lambda: _dt.datetime.combine(_dt.date(2026, 10, 7), _CROSS, tzinfo=_ZI("America/New_York"))
+        LR.reset_all()
+        r = rec("BBK-S3", "QQQ", 1.00, 1.20, short=True)
+        _, o, leg, _ = post(r, None, "target", _Account())
+        check("B5 no mark AT THE CROSS -> MARKET, BUY_TO_CLOSE",
+              o is not None and o.order_type == OrderType.MARKET
+              and leg.action == OrderAction.BUY_TO_CLOSE,
+              f"type={getattr(o, 'order_type', None)} action={getattr(leg, 'action', None)}")
+        EE.now_et = lambda: _dt.datetime(2026, 10, 7, 10, 0, tzinfo=_ZI("America/New_York"))
+        LR.reset_all()
+        r = rec("BBK-S4", "QQQ", 1.00, 1.20, short=True)
+        _, o, leg, _ = post(r, None, "target", _Account())
+        check("B5b no mark at 10:00 -> nothing posted (F3)",
+              o is None and "nomark" in _alerted, f"order={getattr(o, 'order_type', None)} alerts={_alerted}")
+    finally:
+        EE.now_et = _real_now
 
     print()
     if PROBLEMS:

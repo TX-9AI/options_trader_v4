@@ -340,7 +340,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/limit_ladder.py`
 - **calls:** `config.py`, `execution/tick_size.py`
-- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `main.py`, `strategy/condor_roll.py`
+- **called by:** `execution/entry_engine.py`, `execution/exit_engine.py`, `main.py`, `strategy/condor_roll.py`, `tests/check_buyback_side.py`
 
 ### `execution/order_confirm.py`
 - **calls:** `config.py`, `data/tasty_client.py`
@@ -567,7 +567,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** (not imported) — referenced in `docs/PLAN_SPEC.md`
 
 ### `tests/check_buyback_side.py`
-- **calls:** `execution/__init__.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`
+- **calls:** `execution/__init__.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`, `execution/limit_ladder.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_buying_power.py`

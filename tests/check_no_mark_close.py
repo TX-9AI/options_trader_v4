@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""tests/check_no_mark_close.py  v1.0
+"""tests/check_no_mark_close.py  v1.1
 F3 — NO MARKET CLOSE BEFORE 15:45 FOR WANT OF A MARK; WDOG.2 — THE WATCHDOG'S FLATTEN CROSSES.
 
+v1.1  2026-10-07  r476 — N3b: no mark at 15:42 (inside the 15:40-15:44 LIMIT window) posts
+      NOTHING. A mutant crossing from 15:40 (`== "none"` for `!= "market"`) SURVIVED v1.0, because
+      nothing tested that window. Found by OTV4TEST's own N3b/N3c (their r256), measured here.
 v1.0  2026-10-06  r475. F3: a single-leg close with no mark sent a MARKET order at any
       hour. WDOG.2: the mainline watchdog's flatten reason lacked "hard_close", so at 15:50
       it walked a limit instead of crossing.
@@ -12,6 +15,7 @@ account and a pinned ET clock; and the REAL live close for the page/alert path.
   N1  10:30 ET, no mark: NOTHING posted, one "nomark" page (a second try pages no more)
   N2  10:30 ET, mark 0.0: nothing posted
   N3  15:46 ET, no mark: a MARKET order (the position must close)
+  N3b 15:42 ET (the limit window), no mark: still NOTHING posted
   N4  UNCHANGED: 10:30 ET with a mark posts a LIMIT
   N5  the full live close at 10:30 with no mark returns unconfirmed "no mark", and the
       generic "SUBMIT FAILED" alert does NOT also fire (one message per event)
@@ -101,6 +105,11 @@ def main():
           and n1_pages[0][1] == "nomark", f"orders={len(a1.orders)}/{len(a1b.orders)} pages={n1_pages}")
     o2, a2 = close(rec("N2"), 0.0)
     check("N2 10:30, mark 0.0: nothing posted", o2 is None and not a2.orders, f"orders={len(a2.orders)}")
+
+    clock["t"] = dt.datetime(2026, 10, 6, 15, 42, tzinfo=ET)
+    o3b, a3b = close(rec("N3b"), None)
+    check("N3b 15:42 (limit window), no mark: nothing posted", o3b is None and not a3b.orders,
+          f"orders={[getattr(o, 'order_type', None) for o in a3b.orders]}")
 
     clock["t"] = dt.datetime(2026, 10, 6, 15, 46, tzinfo=ET)
     o3, a3 = close(rec("N3"), None)
