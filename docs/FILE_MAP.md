@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-337 Python modules across 13 local packages.
+338 Python modules across 13 local packages.
 
-**Reached by:** 105 imported · 8 declared entry points · 163 referenced from a script, unit or doc but never imported · **61 by nothing here**.
+**Reached by:** 105 imported · 8 declared entry points · 164 referenced from a script, unit or doc but never imported · **61 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -545,6 +545,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_bands_on.py`
 - **calls:** `analysis/character.py`
 - **called by:** (nothing — no importer and no mention in any script, unit or doc here)
+
+### `tests/check_blind_open_grace.py`
+- **calls:** `utils/blindness_latch.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_brief_bias_join.py`
 - **calls:** (none)
@@ -1368,7 +1372,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/blindness_latch.py`
 - **calls:** (none)
-- **called by:** `main.py`
+- **called by:** `main.py`, `tests/check_blind_open_grace.py`
 
 ### `utils/check_sdk.py`
 - **calls:** (none)
