@@ -904,7 +904,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_one_per_session.py`
 - **calls:** `database/trade_logger.py`
-- **called by:** (not imported) — referenced in `docs/PLAN_SPEC.md`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `docs/PLAN_SPEC.md`
 
 ### `tests/check_orb_bounds_capability.py`
 - **calls:** (none)

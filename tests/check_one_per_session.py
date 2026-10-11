@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-tests/check_one_per_session.py  v1.0  (2026-08-28, r179)
+tests/check_one_per_session.py  v1.1
+v1.1  2026-10-11  r481 / RUN.1 — S6: THE RUNAWAY CAP MUST GATE, NOT NARRATE.
+      S5 counted guard CALLS and pinned the butterfly's order, and never asked
+      whether the runaway's strategy call was reachable after the skip. It was:
+      the skip sat in an if/elif chain and the call in a separate `if`, so for
+      six weeks the box wrote "already traded today" and traded. S6 finds the
+      If that holds `_runaway_strategy.generate_signal` and requires its test to
+      carry `not _rc_capped`, with `_rc_capped` bound from the cap. Born red at
+      4c4bd19; a mutant that drops the `not _rc_capped` is killed.
+v1.0  2026-08-28  r179
 
 ONE RUNAWAY, ONE BUTTERFLY, PER SESSION, PER BOX — DB-BACKED.
 
@@ -21,6 +30,8 @@ bounce cleared them, and 08-28 had five bounces. This cap reads trades.db.
   S5  main guards all THREE sites — the runaway dispatch, the in-dispatch
       butterfly path, and _attempt_butterfly's entry — each BEFORE the
       strategy is asked, each writing a plan row (AST)
+  S6  the runaway strategy call is UNREACHABLE once the cap is used: its If
+      test carries `not _rc_capped`, bound from _one_per_session_used (AST)
 """
 import ast
 import os
@@ -88,6 +99,28 @@ def main():
           f"guards={n_guards} order={i_g}<{i_a}")
     check("S5b the skips are plan rows",
           'one per session on this box' in src and src.count("one per session on this box") >= 3)
+
+    # ── S6 — the cap GATES the runaway call ─────────────────────────────
+    def _calls_runaway(node):
+        return any(isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                   and c.func.attr == "generate_signal"
+                   and isinstance(c.func.value, ast.Name)
+                   and c.func.value.id == "_runaway_strategy"
+                   for c in ast.walk(node))
+    gate_ifs = [n for n in ast.walk(tree) if isinstance(n, ast.If)
+                and any(_calls_runaway(b) for b in n.body)
+                and not any(isinstance(b, ast.If) and _calls_runaway(b) for b in n.body)]
+    neg = lambda t: any(isinstance(x, ast.UnaryOp) and isinstance(x.op, ast.Not)
+                        and isinstance(x.operand, ast.Name) and x.operand.id == "_rc_capped"
+                        for x in ast.walk(t))
+    bound = any(isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "_rc_capped"
+                                                  for t in n.targets)
+                and "_one_per_session_used('RunawayContinuation')" in ast.unparse(n.value)
+                for n in ast.walk(tree))
+    check("S6 the runaway call sits under `not _rc_capped`, bound from the cap",
+          len(gate_ifs) == 1 and neg(gate_ifs[0].test) and bound,
+          f"ifs={len(gate_ifs)} test={ast.unparse(gate_ifs[0].test) if gate_ifs else None} "
+          f"bound={bound}")
 
     print()
     if _fails:

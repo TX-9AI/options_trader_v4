@@ -1,5 +1,13 @@
 """
-main.py  v4.56
+main.py  v4.57
+v4.57  2026-10-11  r481 / RUN.1 — THE ONE-RUNAWAY-PER-SESSION CAP GATES, AS r179 RULED.
+      The dispatch wrote "one per session on this box — already traded today" and
+      then asked RunawayContinuation anyway, because the call sat in its own `if`
+      outside the skip's `elif` chain (r179 added the skip above r34's call and
+      never joined them). So the cap never stopped a trade. 236 closed runaways
+      09-14..10-09: 135 first-of-session +$2,682; 101 more after it -$3,726, of
+      which 93 re-entered within a minute of a WINNING exit (the standing-state
+      trigger RUN.1 described). `_rc_capped` now gates the call. Operator: Yes.
 v4.56  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v4.55 2026-10-11  r478 / DEP.12 — HALF DAYS. Every close-anchored instant here moves to
       the day's bell (utils/time_utils.close_anchored): _vertical_close_due (credit hold
@@ -3973,7 +3981,12 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
     # r179 — ONE PER SESSION ON THIS BOX (operator, 2026-08-28: "Only one
     # runway debit trade aloud per session on a box … Simple"). DB-backed,
     # survives restarts, fails closed.
-    if signal is None and _one_per_session_used("RunawayContinuation"):
+    # 🔴 r481 / RUN.1 — THE CAP NOW GATES. Since r179 this branch wrote the
+    # "already traded today" plan row and then the `if` below asked the
+    # strategy anyway: a skip that skipped nothing. 96 re-entries after a
+    # winning exit, -$3,794, 09-14..10-09, every one past this line.
+    _rc_capped = signal is None and _one_per_session_used("RunawayContinuation")
+    if _rc_capped:
         _plan_skip("RunawayContinuation",
                    "one per session on this box — already traded today")
     elif signal is not None:
@@ -3982,7 +3995,7 @@ def attempt_new_entry(ctx: dict, ms: MarketState, state: BotState):
         _plan_skip("RunawayContinuation",
                    f"ORB has not run away (invalidation_reason="
                    f"{getattr(orb, 'invalidation_reason', '') or 'none'})")
-    if signal is None and _is_runaway:
+    if signal is None and _is_runaway and not _rc_capped:
         _prev_close = None
         try:
             _df1 = ctx.get("df_1m")
