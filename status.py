@@ -1,5 +1,6 @@
 """
-status.py  v4.6
+status.py  v4.7
+v4.7  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v4.6  2026-09-20  r405 / OPS.32 — `Manifold: unavailable` WAS HIDING A
       TIMEOUT, AND IT WAS FIRING ON MOST OF THE FLEET.
       🔴 MEASURED 2026-09-20: this line gives `manifold_health.py --bulb`
@@ -139,7 +140,7 @@ import subprocess
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-ET  = ZoneInfo("US/Eastern")
+ET  = ZoneInfo("America/New_York")
 UTC = timezone.utc
 
 INSTALL_DIR  = os.path.expanduser("~/options-trader")

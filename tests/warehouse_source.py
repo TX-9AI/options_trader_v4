@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-tests/warehouse_source.py  v1.8
+tests/warehouse_source.py  v1.9
+v1.9  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v1.8  2026-09-20  r399 / S3.31 - THE BANNER CERTIFIED ITS OWN IGNORANCE. On
 zero objects it printed "(a real, empty result - not a missing path)", which
 ASSERTS the absence belongs to the tape. Measured: load_series of
@@ -572,7 +573,7 @@ def _et_today() -> str:
     from datetime import datetime, timezone
     try:
         from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo("US/Eastern")).date().isoformat()
+        return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
     except Exception:                                            # noqa: BLE001
         return datetime.now(timezone.utc).date().isoformat()
 

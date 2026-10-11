@@ -1,5 +1,6 @@
 """
-analysis/get_orb_range.py  v4.0
+analysis/get_orb_range.py  v4.1
+v4.1  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 Opening-range accessor with the date filter.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
@@ -60,7 +61,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.market_data import fetch_candles
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 OUTPUT_PATH = os.path.expanduser("~/options-trader/orb_range.json")
 
 STATUS_ESTABLISHED = "ESTABLISHED"

@@ -1,5 +1,6 @@
 """
-strategy/trend_credit_spread.py  v4.14
+strategy/trend_credit_spread.py  v4.15
+v4.15  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v4.14 2026-09-10  r351 - THE BEST AVAILABLE R IS RECORDED WHEN THE WING FLOOR
 REFUSES. `wing_r_best` is the single most common last refusal in the book -
 over 2026-09-05..09-10 it was the ONLY failing rung on 8,381 TCS ticks, 52% of
@@ -290,7 +291,7 @@ logger = logging.getLogger(__name__)
 # no trigger. If ORB-boundary credit is worth having, the sweep
 # discriminator's method measures it first and the spec comes after.
 GATES = {}
-ET = pytz.timezone("US/Eastern")
+ET = pytz.timezone("America/New_York")
 
 
 class _TCSPreparation:

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""check_decisions_today.py — v1.1
+"""check_decisions_today.py — v1.2
+v1.2  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v1.1  2026-09-01  r210 — D2 RE-DERIVED. It matched the SOURCE TEXT
       `_today0 = _open.timestamp()`, so extracting that boundary into
       `session_start_epoch()` — so GATES and PLANS could share one definition
@@ -37,7 +38,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 _fails = []
 
 
@@ -85,10 +86,10 @@ def main():
     from zoneinfo import ZoneInfo as _Z
     # ⚠️ `_cut_dt`, not `_cut`: this file already defines a `_cut()` helper
     # and shadowing it turned the next case into a TypeError.
-    _cut_dt = _dt.fromtimestamp(_m.session_start_epoch(), _Z("US/Eastern"))
+    _cut_dt = _dt.fromtimestamp(_m.session_start_epoch(), _Z("America/New_York"))
     check("D2 the row cut is the open itself, not midnight",
           (_cut_dt.hour, _cut_dt.minute, _cut_dt.second) == (9, 30, 0)
-          and _cut_dt.date() == _dt.now(_Z("US/Eastern")).date(),
+          and _cut_dt.date() == _dt.now(_Z("America/New_York")).date(),
           _cut_dt.strftime("%Y-%m-%d %H:%M:%S ET"))
 
     # ── D3 — both halves of the panel use it ─────────────────────────────

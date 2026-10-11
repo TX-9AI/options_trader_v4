@@ -1,5 +1,6 @@
 """
-main.py  v4.55
+main.py  v4.56
+v4.56  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v4.55 2026-10-11  r478 / DEP.12 — HALF DAYS. Every close-anchored instant here moves to
       the day's bell (utils/time_utils.close_anchored): _vertical_close_due (credit hold
       12:45 on a 13:00 close), the tent's minutes_to_flatten, and
@@ -4587,7 +4588,7 @@ def handle_session_reset(state: BotState):
     # is fully closed and baked. Fetching at 9:30 returns a degenerate
     # candle (high == low == 0 width) because the candle is still forming.
     if not state.orb_range_established_today:
-        now_et_dt = datetime.now(ZoneInfo("US/Eastern"))
+        now_et_dt = datetime.now(ZoneInfo("America/New_York"))
         if (now_et_dt.hour, now_et_dt.minute) >= (9, 30):
             # Poll from the open: 9:30-9:35 writes IN_PROGRESS, then ESTABLISHED
             # once the candle closes. Latch ONLY on ESTABLISHED (returns True) so

@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-339 Python modules across 13 local packages.
+340 Python modules across 13 local packages.
 
-**Reached by:** 105 imported · 8 declared entry points · 165 referenced from a script, unit or doc but never imported · **61 by nothing here**.
+**Reached by:** 105 imported · 8 declared entry points · 166 referenced from a script, unit or doc but never imported · **61 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -873,6 +873,10 @@ Change these with the most care; a break here reaches everything downstream.
 ### `tests/check_no_env_dump.py`
 - **calls:** (none)
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_no_legacy_zone.py`
+- **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `requirements.txt`
 
 ### `tests/check_no_mark_close.py`
 - **calls:** `config.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`

@@ -1,5 +1,6 @@
 """
-config.py  v4.22
+config.py  v4.23
+v4.23  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v4.22 2026-10-11  r478 / DEP.12 — HALF_DAY_ENTRY_LEAD_MIN = 90. On a listed early close
       (utils/market_calendar.EARLY_CLOSES) entries_open() closes 90 min before the
       bell: 11:30 on a 13:00 day. Operator 2026-10-11: "Agree. Let's implement it."
@@ -951,7 +952,7 @@ IV_RANK_HIGH                = 50
 
 # ─── SESSION / TIME RULES ─────────────────────────────────────────────────────
 
-TIMEZONE                    = "US/Eastern"
+TIMEZONE                    = "America/New_York"
 RTH_OPEN_ET                 = (9, 30)
 RTH_CLOSE_ET                = (16, 0)
 HARD_CLOSE_ET               = (15, 45)

@@ -1,5 +1,6 @@
 """
-strategy/iron_condor_strategy.py  v4.10
+strategy/iron_condor_strategy.py  v4.11
+v4.11  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v4.10  2026-09-09  r324 — FIX (ported from OTV4TEST r10): manage() recognises a lone credit vertical.
 v4.9  2026-08-27  r166: manage() takes ctx and writes the condor's r66 vector
       (VRP, channel over EM, fork) to strategy_note with outcome "manage" —
@@ -168,7 +169,7 @@ GATES = {
     "CONDOR_EXPECTED_MOVE_GUARDRAIL_MULT": "FEASIBILITY",
     # FOUNDATIONAL — fork required, strikes outside rails, not exceeded
 }
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 
 
 @dataclass

@@ -1,5 +1,6 @@
 """
-utils/time_utils.py  v4.5
+utils/time_utils.py  v4.6
+v4.6  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v4.5  2026-10-11  r478 / DEP.12 - HALF DAYS. close_shift()/close_anchored(): every
       close-anchored constant (written against a 16:00 bell) moves to the day's
       real bell, CLOSE SIDE ONLY. is_rth's close, is_hard_close_time (now takes
@@ -52,7 +53,7 @@ from config import ORB_NO_ENTRY_AFTER_ET
 
 logger = logging.getLogger(__name__)
 
-ET = pytz.timezone("US/Eastern")
+ET = pytz.timezone("America/New_York")
 
 # RTH boundaries (ET)
 RTH_OPEN    = dtime(9, 30)

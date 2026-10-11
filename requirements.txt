@@ -42,10 +42,10 @@ numpy>=1.24.0
 
 # ── Timezones. 2 shipped files (utils/time_utils.py,
 #    strategy/trend_credit_spread.py).
-#    ⚠️ SEE [[OPS.22]]: those sites still name the LEGACY `US/Eastern` link,
-#    which tzdata 2026c moved into a package this fleet does not install. The
-#    pip `pytz` wheel is what keeps them resolving; that row is the real fix
-#    and this line is not a substitute for it.
+#    [[OPS.22]] CLOSED r479: they named the LEGACY `US/Eastern` link, which
+#    tzdata 2026c moved into a package this fleet does not install; every zone
+#    in the tree is now `America/New_York` (tests/check_no_legacy_zone.py), so
+#    nothing depends on pytz bundling the old link. pytz stays: 2 files use it.
 pytz>=2024.1
 
 # ── HTTP. 2 shipped files (data/macro_data.py,
