@@ -1,5 +1,31 @@
 """
-derived/levels.py  v4.2
+derived/levels.py  v4.3
+v4.3  2026-10-11  r480 / LVL.20 — A LEVEL KEEPS THE SIDE IT WAS FIRST SEEN ON,
+      AND IT IS COUNTED ONCE PER CLOSED 5m BAR. RECORD-ONLY.
+      🔴 LVL.20 WAS FILED AS "THE SWEEP READS THE BLIND ROW". IT DOES NOT: no
+      decision reads this table (ctx["level_board"] has no consumer; the named
+      sweep reads `analysis/liquidity_ledger.interaction_at`). What made two
+      rows at one price disagree is here, and it is two defects:
+      (a) a named pool's side was re-derived from LIVE price on every tick, so
+          the moment price crossed a resistance pool it became "support", and
+          the acceptance test for support (close BELOW) could never fire on a
+          level price had just gone through. `prev_day`/`ny` rows carry a
+          fixed side and retired; their named twins at the same price never
+          could. META 09-14: `prev_day` 664.24 ACCEPTED_THROUGH, `PDH` 664.24
+          `closes_beyond=0`, `touch_count=261`. The side is now fixed when the
+          engine first sees the level — which is also the `kind` the store
+          already kept, since the upsert never updates it.
+      (b) touches and closes beyond were counted every TICK on `iloc[-1]` of
+          the 5m frame, which is the FORMING bar: `ACCEPT_CLOSES=2` could be
+          met by two ticks inside one bar, on a close that was not a close,
+          and `touch_count` measured tick rate. Counting now happens once per
+          CLOSED 5m bar (start + 5 min <= now), keyed on that bar's stamp.
+      ⚠️ A RESTART RESUMES TODAY'S ROW instead of overwriting it with zeros:
+      the engine's state is RAM, the row is not, and the upsert used to
+      replace the morning's counts with the restarted process's.
+      ⚠️ STILL RECORD-ONLY. dtp `tests/screen_sweep_forensics.py` reads
+      `touch_count`, which is why this is fixed before the next study, not
+      deferred (OTV4TEST MSG-QQQ-1011-20).
 Owns `level_ledger`. Tier 3 — stateful; the object has a biography.
 
 v4.2  2026-09-12  r376 — LVL.6: THE 1h TINES COME FROM THE OBSERVER, WHICH
@@ -118,6 +144,24 @@ def _level_id(symbol: str, provenance: str, price: float) -> str:
     return f"{symbol}:{provenance}:{price:.2f}"
 
 
+def _last_closed_5m(df, now_epoch: float):
+    """(stamp, close) of the newest CLOSED bar in a 5m frame, or (None, None).
+
+    r480 / LVL.20 (b). A bar stamped at its start is closed once start + 5 min
+    has passed; the frame's last row is normally still forming.
+    """
+    try:
+        if df is None or getattr(df, "empty", True):
+            return None, None
+        for i in range(len(df) - 1, -1, -1):
+            ts = df.index[i]
+            if ts.timestamp() + 300 <= now_epoch:
+                return str(ts), _f(df["close"].iloc[i])
+    except Exception:                                           # noqa: BLE001
+        pass
+    return None, None
+
+
 class LevelEngine(DerivedEngine):
     name = "levels"
     table = "level_ledger"
@@ -131,6 +175,36 @@ class LevelEngine(DerivedEngine):
         # r376 / LVL.6 — the OBSERVER's 1h rails, restashed every derive().
         # None until the first tick, and None again the moment the fork dies.
         self._obs_rails = None
+
+    def _resume(self, lid: str, now: float):
+        """Today's stored row for `lid` as engine state, or None.
+
+        r480 / LVL.20 — the engine's state is RAM and the row is not, so a
+        restart used to overwrite the morning's counts with zeros. Only a row
+        CREATED TODAY (ET) resumes: level ids carry no date, and yesterday's
+        PDH at the same price is not today's level.
+        """
+        try:
+            conn = getattr(self._store, "conn", None)
+            if conn is None:
+                return None
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            ny = ZoneInfo("America/New_York")
+            day0 = datetime.fromtimestamp(now, ny).replace(
+                hour=0, minute=0, second=0, microsecond=0).timestamp()
+            r = conn.execute(
+                "SELECT kind, created_ts, touch_count, last_touch_ts,"
+                " closes_beyond, retired_ts, retired_reason FROM level_ledger"
+                " WHERE level_id=? AND created_ts>=?", (lid, day0)).fetchone()
+            if not r:
+                return None
+            return {"kind": r[0], "created": r[1], "touches": int(r[2] or 0),
+                    "last_touch": r[3], "beyond": int(r[4] or 0),
+                    "retired": r[5], "reason": r[6]}
+        except Exception as exc:                                # noqa: BLE001
+            logger.debug("levels: resume %s skipped: %s", lid, exc)
+            return None
 
     def _sources(self, ctx: dict):
         """(provenance, price, kind, timeframe, is_live) for every known level.
@@ -207,13 +281,11 @@ class LevelEngine(DerivedEngine):
         # wicks test — so acceptance is judged on a CLOSE. Using `price`
         # mid-bar would retire levels on wicks, which is the failure the
         # convention exists to prevent.
-        close = price
-        df = ctx.get("df_5m")
-        try:
-            if df is not None and not getattr(df, "empty", True):
-                close = _f(df["close"].iloc[-1]) or price
-        except Exception:                                       # noqa: BLE001
-            pass
+        # 🔴 r480 / LVL.20 (b) — `iloc[-1]` IS THE FORMING BAR. This read it
+        # every tick, so the "close" was the live price and one bar could count
+        # many times. Only a CLOSED bar counts now, once, keyed on its stamp;
+        # with no closed bar in hand nothing is counted at all.
+        bar_ts, close = _last_closed_5m(ctx.get("df_5m"), time.time())
 
         # ── 🔴 r376 / LVL.6 — THE 1h TINES COME FROM THE OBSERVER NOW ────────
         # OPERATOR'S RULING, r367: of the two live 1h pitchfork builders, the
@@ -259,9 +331,17 @@ class LevelEngine(DerivedEngine):
             lid = _level_id(sym, prov, lvl_price)
             st = self._live.get(lid)
             if st is None:
-                st = {"created": now, "touches": 0, "beyond": 0,
-                      "last_touch": None, "retired": None, "reason": None}
+                # r480 — a restart RESUMES today's row rather than zeroing it.
+                st = self._resume(lid, now) or {
+                    "created": now, "touches": 0, "beyond": 0,
+                    "last_touch": None, "retired": None, "reason": None,
+                    "kind": kind}
                 self._live[lid] = st
+            # 🔴 r480 / LVL.20 (a) — THE SIDE IS THE ONE FIRST SEEN. `_sources`
+            # names a pool's side from live price, so after price crossed a
+            # resistance pool it arrived here as "support" and could never be
+            # accepted through. The store already kept the first kind.
+            kind = st.setdefault("kind", kind)
             if st["retired"]:
                 continue                       # finished — operator's ruling
 
@@ -282,23 +362,26 @@ class LevelEngine(DerivedEngine):
                 continue
 
             tol = lvl_price * TOUCH_TOL_PCT
-            if kind == "resistance":
-                accepted = close > lvl_price + tol
-            elif kind == "support":
-                accepted = close < lvl_price - tol
-            else:
-                accepted = False               # VWAP is crossed, not broken
+            # r480 (b) — ONE count per CLOSED 5m bar, never per tick.
+            if bar_ts is not None and st.get("bar") != bar_ts:
+                st["bar"] = bar_ts
+                if kind == "resistance":
+                    accepted = close > lvl_price + tol
+                elif kind == "support":
+                    accepted = close < lvl_price - tol
+                else:
+                    accepted = False           # VWAP is crossed, not broken
 
-            if accepted:
-                st["beyond"] += 1
-                if st["beyond"] >= ACCEPT_CLOSES:
-                    st["retired"] = now
-                    st["reason"] = "ACCEPTED_THROUGH"
-            elif abs(close - lvl_price) <= tol:
-                # Held at the level — that is a TOUCH.
-                st["touches"] += 1
-                st["last_touch"] = now
-                st["beyond"] = 0               # the run of acceptance is broken
+                if accepted:
+                    st["beyond"] += 1
+                    if st["beyond"] >= ACCEPT_CLOSES:
+                        st["retired"] = now
+                        st["reason"] = "ACCEPTED_THROUGH"
+                elif abs(close - lvl_price) <= tol:
+                    # Held at the level — that is a TOUCH.
+                    st["touches"] += 1
+                    st["last_touch"] = now
+                    st["beyond"] = 0           # the run of acceptance is broken
 
             store.upsert_level((lid, sym, lvl_price, kind, prov, tf,
                                 st["created"], st["touches"], st["last_touch"],

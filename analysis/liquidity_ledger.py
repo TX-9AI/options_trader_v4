@@ -1,5 +1,35 @@
 """
-analysis/liquidity_ledger.py  v4.3
+analysis/liquidity_ledger.py  v4.4
+v4.4  2026-10-11  r480 / LVL.16 — A LEVEL THAT JOINS LATE IS REPLAYED FROM THE
+      BOX'S OWN STORE, AND A GAP LONGER THAN THE FRAME IS BACKFILLED FROM IT.
+      🔴 THE PREMISE OF THE r378 FLAG WAS WRONG. It said the box holds ~60 1m
+      bars and only control has the session. The box's `feed_store.db` keeps
+      EVERY 1m bar of the session: FEED.3 set no pruning, the 1m backfill
+      starts at 09:30, and ORB has rebuilt from 420 stored 1m bars on every
+      restart since r95. The 60 bars are the FRAME the loop hands in, not the
+      store. So a level admitted at 14:00, or re-seeded by a bake, was being
+      marked `partial` and starved the named sweep, while the tape that would
+      have answered it sat on the same disk.
+      🔑 ONE COUNTER, TWO CALLERS. The per-level rule moved out of
+      `on_closed_bar` into `_apply_bar`, and the replay drives the SAME
+      function over the stored bars up to `last_bar_ts`. A late level ends
+      with exactly the counters it would have had from 09:30
+      (`check_level_replay` R1); there is no second definition of a test.
+      ⚠️ `partial` NOW MEANS ONE THING: THE STORE ITSELF DOES NOT REACH. It
+      clears only when the store's first RTH bar is at or before 09:32
+      (BLIND.1's grace: a vendor may send no 09:30 candle) AND the replay
+      reaches `last_bar_ts` exactly. A failed or short read leaves it set,
+      which is today's behaviour, so the strategy still STARVES rather than
+      refuses on a level the box could not see.
+      🔴 THE SAME HOLE, ONE LEVEL UP. `feed_frame` walked the 60-bar frame and
+      skipped anything at or before `last_bar_ts`, so a bake longer than the
+      frame lost the gap for EVERY level, silently, with no flag at all. When
+      the frame's first unconsumed session bar is more than a minute past
+      `last_bar_ts` (or past the open, on a cold book) the missing bars are
+      fed from the store first, oldest first.
+      ⚠️ A BEHAVIOUR CHANGE, BY RULING (operator, 2026-10-11: "Yes"). A level
+      that used to starve the sweep now carries a real result: a hold can fire
+      it, a breach refuses it.
 v4.3  2026-09-13  r380 / LVL.18 — THE HISTORY CACHE FOLLOWS THE FILE, AND A
       MISSING FILE SAYS SO. r379 cached `load_history()` per symbol with no
       invalidation, and it cached the EMPTY answer too — so a process that read
@@ -220,6 +250,39 @@ MIN_LEVELS_PER_SIDE = 3
 # history to invalidate.
 TOUCH_TOL_PCT = float(os.environ.get("OT_LEDGER_TOUCH_TOL", "0.002"))
 
+# r480 / LVL.16 — the stored 1m tape a late level is replayed over. 420 is the
+# reach ORB's restart rebuild already uses (ORB_REBUILD_1M_BARS): a full 390-bar
+# session plus margin.
+REPLAY_1M_BARS = 420
+# The store reaches the open when its first RTH bar is at or before this. Not
+# 09:30: BLIND.1 measured CVX with no 09:30 candle on a live feed (r477).
+REPLAY_OPEN_BY_HM = (9, 32)
+
+
+def _store_session_bars(symbol: str, date: str) -> Optional[list]:
+    """`date`'s RTH 1m bars from the box's own feed store, ascending, as
+    (stamp, high, low, close) with the same stamp format `feed_frame` uses.
+    None when the store cannot answer — never a short list pretending to be
+    the session. The newest row may be FORMING; every caller bounds the stamps
+    it takes by a bar it already knows is closed.
+    """
+    try:
+        from data.market_data import fetch_candles
+        df = fetch_candles(symbol, "1m", REPLAY_1M_BARS)
+        if df is None or getattr(df, "empty", True):
+            return None
+        out = []
+        for ts, row in df.iterrows():
+            if str(ts.date()) != date or (ts.hour, ts.minute) < (9, 30):
+                continue
+            out.append((str(ts), float(row["high"]), float(row["low"]),
+                        float(row["close"])))
+        return out
+    except Exception as e:                                     # noqa: BLE001
+        logger.warning("[ledger] %s: stored session bars unreadable (%s)",
+                       symbol, e)
+        return None
+
 
 def load_history(symbol: str) -> list:
     """The delivered defense history for `symbol`, as a list of price zones.
@@ -324,9 +387,9 @@ class Level:
                  "prior_touches", "prior_holds", "prior_breaches",
                  "prior_sessions",
                  # r378 — TODAY'S OBSERVATION STARTED LATE. `touches == 0` must
-                 # not conflate "never tested" with "we were not watching": a
-                 # level admitted mid-session (every bake re-seeds) can never
-                 # backfill its morning from the box's own 60-bar frame.
+                 # not conflate "never tested" with "we were not watching".
+                 # r480 — a late level is REPLAYED from the store, so this is
+                 # set only when the store itself does not reach the open.
                  "partial")
 
     def __init__(self, price: float, kind: str, name: str = "",
@@ -394,6 +457,7 @@ class LiquidityLedger:
         self.levels: List[Level] = []
         self.last_bar_ts = ""     # A2.4 — newest CLOSED bar fed, ISO w/ offset.
         self._dirty = False
+        self._bars_cache = None   # r480 — ((date, last_bar_ts), stored bars)
 
     # ── session lifecycle ────────────────────────────────────────────────────
 
@@ -491,8 +555,11 @@ class LiquidityLedger:
         an afternoon `last_bar_ts`. Measured on 2026-09-09, 147 level-rows: 45
         were DEFLATED against a replay of the same tape, `AMD Asia High (R1)`
         banked 0 against 24 real tests and 216 bars of contact.
-        ⚠️ THE REAL REPAIR IS THE SEED FILE, NOT THIS FLAG. Only control holds
-        the full tape; this flag is how the box states what it could not know.
+        🔑 r480 / LVL.16 — THE REPAIR, AND IT IS ON THE BOX. `feed_store.db`
+        holds the whole session's 1m tape, so a late level is REPLAYED over
+        the bars already consumed (`_replay`) and ends with the counters it
+        would have had from the open. `partial` survives only for a store that
+        does not reach the open.
         """
         try:
             if not price or price <= 0 or kind not in ("high", "low"):
@@ -504,11 +571,9 @@ class LiquidityLedger:
             lv = Level(price, kind, name, is_named, first_seen or self.date)
             self._stamp_history(lv)
             if self.last_bar_ts:
-                lv.partial = True
-                logger.info("[ledger] %s %s %.2f joined AFTER bar %s — marked "
-                            "PARTIAL: its session counters cannot include the "
-                            "bars already consumed", self.symbol, name or kind,
-                            float(price), self.last_bar_ts)
+                # r480 / LVL.16 — replay the bars already consumed, from the
+                # store, through the same counter. Partial only if it cannot.
+                self._replay(lv)
             self.levels.append(lv)
             self._dirty = True
         except Exception as e:                                 # noqa: BLE001
@@ -536,6 +601,7 @@ class LiquidityLedger:
             if df_1m is None or getattr(df_1m, "empty", True) or len(df_1m) < 2:
                 return 0
             fed = 0
+            todo = []
             for ts, row in df_1m.iloc[:-1].iterrows():         # [-1] is FORMING
                 if str(ts.date()) != self.date:
                     continue
@@ -544,6 +610,13 @@ class LiquidityLedger:
                 stamp = str(ts)
                 if self.last_bar_ts and stamp <= self.last_bar_ts:
                     continue
+                todo.append((ts, stamp, row))
+            # 🔴 r480 / LVL.16 — A GAP LONGER THAN THE FRAME IS FED FROM THE
+            # STORE FIRST. Before this, a bake longer than the frame lost those
+            # bars for every level with no flag at all.
+            if todo and self._frame_gap(todo[0][0]):
+                fed += self._backfill_from_store(todo[0][1])
+            for ts, stamp, row in todo:
                 self.on_closed_bar(float(row["high"]), float(row["low"]),
                                    float(row["close"]), ts=stamp)
                 fed += 1
@@ -601,40 +674,117 @@ class LiquidityLedger:
                 self.last_bar_ts = ts
                 self._dirty = True
             for lv in self.levels:
-                tol = abs(lv.price) * TOUCH_TOL_PCT
-                # CONTACT: does the bar's RANGE reach the level at all?
-                reached = (low - tol) <= lv.price <= (high + tol)
-                if reached:
-                    lv.contact_bars += 1
-                    if not lv.visit_open:
-                        lv.visit_open = True
-                        lv.visit_started = ts
-                        lv.visit_bars = 0
-                        lv.touches += 1          # ONE touch per TEST
-                    lv.visit_bars += 1
-                    self._dirty = True
-                    continue
-                if not lv.visit_open:
-                    continue
-                # ── THE TEST ENDS HERE, and the departing close decides it. The
-                # bar's range does not contain the level, so the close is
-                # unambiguously on one side or the other.
-                lv.visit_open = False
-                origin = (close < lv.price - tol) if lv.kind == "high" \
-                    else (close > lv.price + tol)
-                if origin:
-                    lv.holds += 1
-                    lv.last_result = "hold"
-                else:
-                    lv.breaches += 1
-                    lv.last_result = "breach"
-                lv.last_touch = ts               # the bar the test RESOLVED on
-                lv.last_visit_started = lv.visit_started
-                lv.last_visit_bars = lv.visit_bars
-                lv.visit_bars = 0
-                self._dirty = True
+                self._apply_bar(lv, high, low, close, ts)
         except Exception as e:                                 # noqa: BLE001
             logger.debug("ledger on_closed_bar skipped: %s", e)
+
+    def _apply_bar(self, lv, high: float, low: float, close: float,
+                   ts: str = "") -> None:
+        """THE per-level rule for ONE closed bar — see `on_closed_bar`.
+
+        🔑 r480 / LVL.16 — ONE COUNTER, TWO CALLERS. `on_closed_bar` applies it
+        to every level; `_replay` applies it to one late level over the stored
+        bars. A second copy of this rule would be a second definition of a test.
+        """
+        tol = abs(lv.price) * TOUCH_TOL_PCT
+        # CONTACT: does the bar's RANGE reach the level at all?
+        reached = (low - tol) <= lv.price <= (high + tol)
+        if reached:
+            lv.contact_bars += 1
+            if not lv.visit_open:
+                lv.visit_open = True
+                lv.visit_started = ts
+                lv.visit_bars = 0
+                lv.touches += 1          # ONE touch per TEST
+            lv.visit_bars += 1
+            self._dirty = True
+            return
+        if not lv.visit_open:
+            return
+        # ── THE TEST ENDS HERE, and the departing close decides it. The
+        # bar's range does not contain the level, so the close is
+        # unambiguously on one side or the other.
+        lv.visit_open = False
+        origin = (close < lv.price - tol) if lv.kind == "high" \
+            else (close > lv.price + tol)
+        if origin:
+            lv.holds += 1
+            lv.last_result = "hold"
+        else:
+            lv.breaches += 1
+            lv.last_result = "breach"
+        lv.last_touch = ts               # the bar the test RESOLVED on
+        lv.last_visit_started = lv.visit_started
+        lv.last_visit_bars = lv.visit_bars
+        lv.visit_bars = 0
+        self._dirty = True
+
+    def _session_bars(self) -> Optional[list]:
+        """The store's bars for this session, cached on `(date, last_bar_ts)`
+        so a re-seed admitting several levels reads the store once."""
+        key = (self.date, self.last_bar_ts)
+        cached = self._bars_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        bars = _store_session_bars(self.symbol, self.date)
+        self._bars_cache = (key, bars)
+        return bars
+
+    def _replay(self, lv) -> None:
+        """Bring a level admitted after bars were consumed up to `last_bar_ts`.
+
+        🔴 r480 / LVL.16. Drives `_apply_bar` over the stored bars at or before
+        `last_bar_ts` — never past it, so `feed_frame` still owns every bar
+        after and nothing is counted twice. `partial` clears only when the
+        store's first RTH bar is at or before REPLAY_OPEN_BY_HM AND the replay
+        reaches `last_bar_ts` exactly; anything short of that is the box
+        stating what it could not see, as r378 intended.
+        """
+        bars = self._session_bars()
+        upto = [b for b in (bars or []) if b[0] <= self.last_bar_ts]
+        for stamp, high, low, close in upto:
+            self._apply_bar(lv, high, low, close, stamp)
+        first_hm = (int(upto[0][0][11:13]), int(upto[0][0][14:16])) if upto else None
+        covered = bool(upto) and first_hm <= REPLAY_OPEN_BY_HM \
+            and upto[-1][0] == self.last_bar_ts
+        lv.partial = not covered
+        if covered:
+            logger.info("[ledger] %s %s %.2f joined after bar %s — REPLAYED %d "
+                        "stored bar(s) from %s: tests=%d holds=%d breaches=%d",
+                        self.symbol, lv.name or lv.kind, float(lv.price),
+                        self.last_bar_ts, len(upto), upto[0][0], lv.touches,
+                        lv.holds, lv.breaches)
+        else:
+            logger.info("[ledger] %s %s %.2f joined AFTER bar %s — marked "
+                        "PARTIAL: the store does not reach the open (%d bar(s)"
+                        ", first %s)", self.symbol, lv.name or lv.kind,
+                        float(lv.price), self.last_bar_ts, len(upto),
+                        upto[0][0] if upto else "none")
+
+    def _frame_gap(self, first_ts) -> bool:
+        """True when the frame's first unconsumed session bar does not follow
+        `last_bar_ts` (or, on a cold book, the open) by one minute."""
+        try:
+            if self.last_bar_ts:
+                import pandas as pd
+                return (first_ts - pd.Timestamp(self.last_bar_ts)).total_seconds() > 60
+            return (first_ts.hour, first_ts.minute) > (9, 30)
+        except Exception:                                      # noqa: BLE001
+            return False
+
+    def _backfill_from_store(self, before: str) -> int:
+        """Feed the stored bars after `last_bar_ts` and before `before` (the
+        frame's first unconsumed bar, so every one of them is closed)."""
+        bars = _store_session_bars(self.symbol, self.date) or []
+        gap = [b for b in bars
+               if (not self.last_bar_ts or b[0] > self.last_bar_ts) and b[0] < before]
+        for stamp, high, low, close in gap:
+            self.on_closed_bar(high, low, close, ts=stamp)
+        if gap:
+            logger.info("[ledger] %s: frame starts at %s — backfilled %d bar(s) "
+                        "%s..%s from the store", self.symbol, before, len(gap),
+                        gap[0][0], gap[-1][0])
+        return len(gap)
 
     # ── read side ────────────────────────────────────────────────────────────
 

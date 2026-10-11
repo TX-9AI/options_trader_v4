@@ -29,7 +29,7 @@ Regenerated in the land gate; a stale map fails `--check`.
 | `fire_snapshot` | `data/derived_store.py` | `data/derived_store.py` (insert) | `tests/edge_scan.py`, `warehouse/s3_push.py` |
 | `fork_series` | `data/derived_store.py` | `data/derived_store.py` (insert), `tests/check_purge_reclaim.py` (insert) | `main.py`, `query.py`, `status.py`, `tests/check_derived_layer.py`, `warehouse/s3_push.py` |
 | `indicator_series` | `data/derived_store.py` | `data/derived_store.py` (insert), `tests/check_purge_reclaim.py` (insert) | `warehouse/s3_push.py` |
-| `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert) | `derived/levels.py`, `warehouse/s3_push.py` |
+| `level_ledger` | `data/derived_store.py` | `data/derived_store.py` (insert), `tests/check_level_replay.py` (update) | `derived/levels.py`, `warehouse/s3_push.py` |
 | `plan_ledger` | `derived/plan_ledger.py` | `derived/plan_ledger.py` (insert/update), `tests/check_purge_pushed.py` (update) | `query.py`, `tests/check_audit_20260823.py`, `tests/check_butterfly_legs.py`, `tests/check_missed_inert.py`, `tests/check_plan_lifecycle.py`, `tests/edge_scan.py`, `warehouse/s3_push.py` |
 | `strategy_note` | `derived/notes.py` | `derived/notes.py` (insert) | `tests/check_management_plan.py`, `tests/check_tick_join.py`, `warehouse/s3_push.py` |
 | `surface_series` | `data/derived_store.py` | `data/derived_store.py` (insert), `tests/check_purge_reclaim.py` (insert) | `main.py`, `query.py`, `warehouse/s3_push.py` |

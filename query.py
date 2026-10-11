@@ -1,5 +1,9 @@
 """
-query.py  v4.11
+query.py  v4.12
+v4.12 2026-10-11  r480 / LVL.20 — COMMENT ONLY. show_market said `level_ledger` is
+      read live by the sweep and the fork. Nothing decides on it: the named sweep
+      reads `analysis/liquidity_ledger`, and `ctx["level_board"]` has no reader.
+      That false claim is how LVL.20 was filed as "the sweep reads the blind row".
 v4.11 2026-10-03  r460 / OPS.65 — _STRAT_ABBR gains OpeningRangeCreditSpread -> ORCS,
       mirroring dtp strategy_registry v1.3 (check_strategy_registry R5 pins the two).
       Display only; no box behaviour changes.
@@ -980,8 +984,8 @@ def show_market(dc):
     # and nothing in the operator's workflow reads them.
     # ⚠️ THE LEDGER IS UNTOUCHED AND STILL WRITTEN. `level_ledger` is a
     # LIFECYCLE table — retention_purge excludes it in code precisely because a
-    # recomputation cannot rebuild a biography (r81) — and the sweep and fork
-    # paths both read it live. This deletes a VIEW, not a collector.
+    # recomputation cannot rebuild a biography (r81). r480: NO decision reads it
+    # (the sweep reads analysis/liquidity_ledger). This deletes a VIEW only.
     fk = _q(dc, "SELECT interval, built, reject_reason, containment, span_bars"
                 " FROM fork_series WHERE symbol=? ORDER BY ts_epoch DESC LIMIT 2",
             (INSTRUMENT,))

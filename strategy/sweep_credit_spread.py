@@ -1,5 +1,23 @@
 """
-strategy/sweep_credit_spread.py  v5.6
+strategy/sweep_credit_spread.py  v5.7
+v5.7  2026-10-11  r480 / LVL.20 — THE AGE OF THE HOLD AND THE OPEN TEST ARE ON
+      THE ROW. RECORD-ONLY; NOTHING GATES ON EITHER.
+      🔴 THE NAMED SWEEP ACCEPTS THE LEVEL'S LAST *RESOLVED* TEST, OF ANY AGE,
+      WHILE A NEW TEST MAY BE IN PROGRESS. META 09-14 13:50: PDH 664.24's
+      last result was a hold resolved at 10:00 — 231 minutes earlier — and
+      price had been in contact since 12:48 (63 bars, visit open). That test
+      resolved as a BREACH at 13:55; the sweep lost -$81.
+      📊 BUT THE MONEY DOES NOT SAY GATE IT. Every closed named-level sweep
+      since r378 (60 matched against the banked ledger, tines excluded):
+      fresh hold and no open test 10 trades -$114; open test or a hold older
+      than 15 min 50 trades +$534. Fifty of sixty fired this way, the clean
+      cell is the worst, and four sit within the 0-5 min snapshot lag of the
+      15-minute line. A gate would have cut five sixths of the strategy on no
+      evidence. OTV4TEST concurred (MSG-QQQ-1011-20).
+      🔑 SO THE QUANTITIES ARE RECORDED, r351's pattern: `level_hold_age_min`
+      (minutes since the bar the last test resolved on; ABSENT when there is
+      no resolved test, never 0) and `level_visit_open` (1 while price is
+      still in contact). The operator rules on them once they are fitted.
 v5.6  2026-09-12  r378 — THE TRADE FIRES ON AN INTERACTION NOW, NOT ON GATE
       ALIGNMENT, AND THE NAMED LEVEL IS JUDGED BY ITS OWN RECORD.
       OPERATOR'S RULING, 2026-09-12: *"Ungate the sweep trade on the definitions
@@ -949,6 +967,23 @@ def _ledger_interaction(level_price: float, kind: str):
         return None
 
 
+def _hold_age_min(last_touch: str, now=None):
+    """Minutes from the bar the level's last test RESOLVED on to now, or None.
+
+    r480 / LVL.20 — record-only. None when there is no resolved test or the
+    stamp will not parse: an absent age is not an age of zero.
+    """
+    if not last_touch:
+        return None
+    try:
+        from datetime import datetime, timezone
+        t = datetime.fromisoformat(str(last_touch))   # aware: carries -04:00
+        now = now or datetime.now(timezone.utc)
+        return round((now - t).total_seconds() / 60.0, 1)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
 def _sweep_at_level(liq_map, level: float, side: str = ""):
     """The sweep on a SUPPLIED level — an input the plan gathered, r158.
 
@@ -1340,6 +1375,15 @@ class SweepCreditSpreadStrategy:
                 t.check("level_holds", float(_iv.get("holds") or 0), None)
                 t.check("level_breaches", float(_iv.get("breaches") or 0), None)
                 t.check("level_contact_bars", float(_iv.get("contact_bars") or 0), None)
+                # 🔴 r480 / LVL.20 — RECORD-ONLY. Whether the hold this gate is
+                # about to accept is THIS interaction's, and whether price is
+                # still testing the level. Measured at 50 of 60 named sweeps
+                # firing on an older hold or an open test, with no P&L case for
+                # a gate — so they are recorded and fitted, never judged here.
+                t.check("level_visit_open", 1.0 if _iv.get("visit_open") else 0.0, None)
+                _age = _hold_age_min(_iv.get("last_touch"))
+                if _age is not None:
+                    t.check("level_hold_age_min", _age, None)
                 # THE DEFENSE RECORD from previous sessions, which is the thing
                 # the operator ruled the fit must be per level type against:
                 # *"those named levels also have historical defense numbers that
