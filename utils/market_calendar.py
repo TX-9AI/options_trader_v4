@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-utils/market_calendar.py  v1.2
+utils/market_calendar.py  v1.3
+v1.3  2026-10-11  r478 / DEP.12 - EARLY CLOSES. EARLY_CLOSES (52 sessions,
+2026-2050, generated from the NYSE rules and identical to dtp's list),
+close_time(), is_half_day(), close_shift_minutes(). Nothing here changes
+is_trading_day(); a half day stays a trading day. Fails toward a FULL day.
 v1.2  2026-09-07  r310 - THE HORIZON GOES TO 2050. Operator's call once the
 2035 boundary was named as the arbitrary prior it was: the list is GENERATED
 and the oracle verifies every date, so extending it costs bytes and nothing
@@ -50,10 +54,11 @@ has its own `market_calendar.py` on the control side; the repos cannot import
 each other, so they are two copies by necessity, and DEP.11 records the
 obligation to refresh both together.
 
-⚠️ HALF DAYS ARE NOT MODELLED. The day after Thanksgiving and Christmas Eve
-close at 13:00 ET. They are TRADING days, so this correctly returns True, and
-nothing here shortens the session — a strategy holding to 15:45 on a 13:00
-close is a real question and it is filed as DEP.12 rather than guessed at.
+⚠️ HALF DAYS ARE TRADING DAYS, and since r478 (DEP.12) they are MODELLED:
+EARLY_CLOSES lists the 13:00 sessions, close_time()/close_shift_minutes() say
+when the bell rings, and utils/time_utils.close_anchored() moves every
+close-anchored constant to it. Before r478 nothing shortened the session, so
+the 15:40 flatten and 15:45 cross would have fired ~3 h after a 13:00 bell.
 
 Run:  python3 utils/market_calendar.py            # today's verdict
       python3 utils/market_calendar.py --selftest
@@ -407,6 +412,107 @@ def is_trading_day(d: _dt.date | None = None) -> bool:
     return d.isoformat() not in US_MARKET_HOLIDAYS
 
 
+# ── EARLY CLOSES — r478 / DEP.12 ────────────────────────────────────────────
+# The 13:00 ET sessions. GENERATED from the NYSE rules, like the closures above,
+# and `tests/check_market_calendar.py` regenerates them (C6/C7) and diffs them
+# against day_trader_pro's EARLY_CLOSES (C8), the control-side copy that has
+# driven the morning brief's half-day banner since dtp r319.
+#   · the day after Thanksgiving, always;
+#   · July 3 when July 4 falls Tue-Fri (Sat: Jul 3 is the holiday itself;
+#     Sun/Mon: no early close);
+#   · December 24 when it falls Mon-Thu (Fri: it is the observed Christmas).
+#
+# ⚠️ THE FAIL-SAFE DIRECTION IS A FULL DAY. An unlisted half day runs the
+# 16:00 clock, which is exactly the behaviour before r478. A date wrongly
+# PRESENT flattens a full session three hours early — so this list is verified
+# arithmetic, never hand-typed.
+# Value = the close as "HH:MM" ET, so a future close other than 13:00 is one
+# entry, and close_shift_minutes() derives from it rather than assuming 3 h.
+EARLY_CLOSES: dict = {
+    "2026-11-27": "13:00",  # day after Thanksgiving
+    "2026-12-24": "13:00",  # Christmas Eve
+    "2027-11-26": "13:00",  # day after Thanksgiving
+    "2028-07-03": "13:00",  # July 3
+    "2028-11-24": "13:00",  # day after Thanksgiving
+    "2029-07-03": "13:00",  # July 3
+    "2029-11-23": "13:00",  # day after Thanksgiving
+    "2029-12-24": "13:00",  # Christmas Eve
+    "2030-07-03": "13:00",  # July 3
+    "2030-11-29": "13:00",  # day after Thanksgiving
+    "2030-12-24": "13:00",  # Christmas Eve
+    "2031-07-03": "13:00",  # July 3
+    "2031-11-28": "13:00",  # day after Thanksgiving
+    "2031-12-24": "13:00",  # Christmas Eve
+    "2032-11-26": "13:00",  # day after Thanksgiving
+    "2033-11-25": "13:00",  # day after Thanksgiving
+    "2034-07-03": "13:00",  # July 3
+    "2034-11-24": "13:00",  # day after Thanksgiving
+    "2035-07-03": "13:00",  # July 3
+    "2035-11-23": "13:00",  # day after Thanksgiving
+    "2035-12-24": "13:00",  # Christmas Eve
+    "2036-07-03": "13:00",  # July 3
+    "2036-11-28": "13:00",  # day after Thanksgiving
+    "2036-12-24": "13:00",  # Christmas Eve
+    "2037-11-27": "13:00",  # day after Thanksgiving
+    "2037-12-24": "13:00",  # Christmas Eve
+    "2038-11-26": "13:00",  # day after Thanksgiving
+    "2039-11-25": "13:00",  # day after Thanksgiving
+    "2040-07-03": "13:00",  # July 3
+    "2040-11-23": "13:00",  # day after Thanksgiving
+    "2040-12-24": "13:00",  # Christmas Eve
+    "2041-07-03": "13:00",  # July 3
+    "2041-11-29": "13:00",  # day after Thanksgiving
+    "2041-12-24": "13:00",  # Christmas Eve
+    "2042-07-03": "13:00",  # July 3
+    "2042-11-28": "13:00",  # day after Thanksgiving
+    "2042-12-24": "13:00",  # Christmas Eve
+    "2043-11-27": "13:00",  # day after Thanksgiving
+    "2043-12-24": "13:00",  # Christmas Eve
+    "2044-11-25": "13:00",  # day after Thanksgiving
+    "2045-07-03": "13:00",  # July 3
+    "2045-11-24": "13:00",  # day after Thanksgiving
+    "2046-07-03": "13:00",  # July 3
+    "2046-11-23": "13:00",  # day after Thanksgiving
+    "2046-12-24": "13:00",  # Christmas Eve
+    "2047-07-03": "13:00",  # July 3
+    "2047-11-29": "13:00",  # day after Thanksgiving
+    "2047-12-24": "13:00",  # Christmas Eve
+    "2048-11-27": "13:00",  # day after Thanksgiving
+    "2048-12-24": "13:00",  # Christmas Eve
+    "2049-11-26": "13:00",  # day after Thanksgiving
+    "2050-11-25": "13:00",  # day after Thanksgiving
+}
+
+RTH_CLOSE_HM = (16, 0)   # the full-session bell every close-anchored constant assumes
+
+
+def close_time(d: _dt.date | None = None) -> _dt.time:
+    """The session's closing bell: the listed early close, else 16:00."""
+    d = d or _dt.datetime.now(ET).date()
+    hm = EARLY_CLOSES.get(d.isoformat()) if is_trading_day(d) else None
+    if hm:
+        h, m = (int(x) for x in hm.split(":"))
+        return _dt.time(h, m)
+    return _dt.time(*RTH_CLOSE_HM)
+
+
+def is_half_day(d: _dt.date | None = None) -> bool:
+    """True on a listed early close. A half day is a TRADING day."""
+    c = close_time(d)
+    return (c.hour, c.minute) != RTH_CLOSE_HM
+
+
+def close_shift_minutes(d: _dt.date | None = None) -> int:
+    """Minutes the bell is EARLY versus 16:00: 180 on a 13:00 day, else 0.
+
+    🔑 Every close-anchored constant in the tree (15:40 flatten, 15:45 cross
+    and credit hold, 15:50 watchdog, 16:00 bell) is written against a 16:00
+    bell; on an early close each moves earlier by exactly this many minutes.
+    """
+    c = close_time(d)
+    return max(0, RTH_CLOSE_HM[0] * 60 + RTH_CLOSE_HM[1] - (c.hour * 60 + c.minute))
+
+
 def _selftest() -> int:
     F = []
 
@@ -432,8 +538,14 @@ def _selftest() -> int:
        and not is_trading_day(D(2028, 1, 17)), "MLK 2028")
     ck("M5  coverage() now reaches 2050", coverage() == (2026, 2050),
        str(coverage()))
-    ck("M6  a half day is a TRADING day (sessions are not modelled)",
-       is_trading_day(D(2026, 11, 27)), "DEP.12")
+    ck("M6  a half day is a TRADING day", is_trading_day(D(2026, 11, 27)),
+       "DEP.12")
+    ck("M9  2026-11-27 closes at 13:00, shift 180 min",
+       close_time(D(2026, 11, 27)) == _dt.time(13, 0)
+       and close_shift_minutes(D(2026, 11, 27)) == 180, "r478 / DEP.12")
+    ck("M10 a full day closes at 16:00, shift 0",
+       close_time(D(2026, 11, 25)) == _dt.time(16, 0)
+       and close_shift_minutes(D(2026, 11, 25)) == 0 and not is_half_day(D(2026, 11, 25)))
     print()
     if F:
         print(f"market_calendar selftest: FAIL ({len(F)})")

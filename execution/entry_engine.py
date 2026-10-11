@@ -1,5 +1,8 @@
 """
-execution/entry_engine.py  v5.5
+execution/entry_engine.py  v5.6
+v5.6  2026-10-11  r478 / DEP.12 — the [entry-gate] HELD line also names a half day's
+      entry cutoff (entries_open() now refuses from bell - 90 min on an early
+      close). Log text only; the gate itself is unchanged here.
 v5.5  2026-10-05  r473 / F5 — every live entry checks buying power before it posts
       (execution/buying_power.affordable, right after B2's clear_to_post): single
       leg at its limit, the standing ORB offer at its price, the butterfly at its
@@ -351,7 +354,8 @@ class EntryEngine:
             _h, _m = _cfg_entry_open()
             logger.info(
                 "[entry-gate] %s %s HELD — entries open at %02d:%02d ET "
-                "(opening range not established). The setup was fully formed; "
+                "(opening range not established, or past a half day's entry "
+                "cutoff — r478). The setup was fully formed; "
                 "it re-signals next tick.", mode, signal.strategy_name, _h, _m)
             return None
 

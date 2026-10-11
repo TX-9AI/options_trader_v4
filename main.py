@@ -1,5 +1,11 @@
 """
-main.py  v4.54
+main.py  v4.55
+v4.55 2026-10-11  r478 / DEP.12 — HALF DAYS. Every close-anchored instant here moves to
+      the day's bell (utils/time_utils.close_anchored): _vertical_close_due (credit hold
+      12:45 on a 13:00 close), the tent's minutes_to_flatten, and
+      _intraday_reconcile_slot's wind-down slots (12:45/12:50/12:57, dormant 13:00; the
+      09:30 base stays raw and every key is true ET). The hard-close branch already reads
+      is_hard_close_time, so run_analysis goes quiet at 12:40 as it does at 15:40 today.
 v4.54 2026-10-05  r474 / WDOG.1 — THE HEARTBEAT. _touch_heartbeat writes data/BOT_HEARTBEAT
       first thing in every main-loop pass (never raises; a failed write warns once), the
       liveness signal for the emergency watchdog (tools/emergency_watchdog.py). Mirrored from
@@ -1969,7 +1975,9 @@ def run_analysis(state: BotState, chain=None) -> dict:
     # Derived from the SAME 15:45 flatten so the two can never disagree.
     try:
         from config import VERTICAL_HOLD_TO_ET as _VH
-        _fm = _VH[0] * 60 + _VH[1]
+        from utils.time_utils import close_anchored as _ca
+        _VHa = _ca(_VH, now_et())                     # r478: the day's bell
+        _fm = _VHa.hour * 60 + _VHa.minute
         _nm = ctx.get("now_et_minutes")
         ctx["minutes_to_flatten"] = (float(_fm - _nm) if _nm is not None
                                      else None)
@@ -2636,7 +2644,8 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
     # and the second-leg window route through here, so one test covers them.
     if not entries_open():
         logger.info("[entry-gate] %s %s HELD — entries open at %02d:%02d ET "
-                    "(opening range not established)", mode,
+                    "(opening range not established, or past a half day's "
+                    "entry cutoff — r478)", mode,
                     getattr(signal, "strategy_name", "credit vertical"),
                     *ENTRY_OPEN_ET[:2])
         return
@@ -4593,8 +4602,9 @@ def _vertical_close_due() -> bool:
     from config import VERTICAL_HOLD_TO_ET, VERTICAL_HOLD_TO_CLOSE
     if not VERTICAL_HOLD_TO_CLOSE:
         return True
-    _n = now_et()
-    return (_n.hour, _n.minute) >= tuple(VERTICAL_HOLD_TO_ET)
+    # r478 / DEP.12 — 12:45 on a 13:00 close.
+    from utils.time_utils import past_close_anchor
+    return past_close_anchor(VERTICAL_HOLD_TO_ET, now_et())
 
 
 def handle_hard_close(state: BotState):
@@ -5301,15 +5311,21 @@ def _intraday_reconcile_slot(now):
     if now.weekday() >= 5:
         return None
     t = now.time()
-    if t < dtime(9, 30) or t >= dtime(16, 0):
+    # r478 / DEP.12 — the OPEN side stays raw (09:30); every CLOSE-side instant
+    # moves to the day's bell: 12:45 / 12:50 / 12:57, dormant at 13:00 on a
+    # 13:00 close. The KEY is the moved instant, so it reads true ET.
+    from utils.time_utils import close_anchored as _ca
+    _bell, _w45, _w50, _w57 = (_ca(dtime(16, 0), now), _ca(dtime(15, 45), now),
+                               _ca(dtime(15, 50), now), _ca(dtime(15, 57), now))
+    if t < dtime(9, 30) or t >= _bell:
         return None
-    if t >= dtime(15, 45):
-        if t >= dtime(15, 57):
-            hh, mm = 15, 57
-        elif t >= dtime(15, 50):
-            hh, mm = 15, 50
+    if t >= _w45:
+        if t >= _w57:
+            hh, mm = _w57.hour, _w57.minute
+        elif t >= _w50:
+            hh, mm = _w50.hour, _w50.minute
         else:
-            hh, mm = 15, 45
+            hh, mm = _w45.hour, _w45.minute
         return f"{now:%Y-%m-%d} {hh:02d}:{mm:02d}"
     interval = max(1, int(BROKER_RECONCILE_INTERVAL_MIN))
     mins_since_open = (now.hour - 9) * 60 + now.minute - 30

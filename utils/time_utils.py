@@ -1,5 +1,11 @@
 """
-utils/time_utils.py  v4.4
+utils/time_utils.py  v4.5
+v4.5  2026-10-11  r478 / DEP.12 - HALF DAYS. close_shift()/close_anchored(): every
+      close-anchored constant (written against a 16:00 bell) moves to the day's
+      real bell, CLOSE SIDE ONLY. is_rth's close, is_hard_close_time (now takes
+      an optional clock) and current_session_label read it. entries_open closes
+      at the bell minus config.HALF_DAY_ENTRY_LEAD_MIN (90 -> 11:30) on a listed
+      early close; a full day is unchanged.
 v4.4  2026-09-07  r304 / DEP.9 - is_rth consults utils/market_calendar; a market holiday is no longer RTH. It failed toward TRADING on holidays, and entries_open wraps it.
 v4.3  2026-08-24  r102: entries_open() defers to is_orb_complete() — the floor
       session_guard has enforced since v3 — instead of carrying a rival
@@ -111,7 +117,48 @@ def is_rth(now: Optional[datetime] = None) -> bool:
     if not market_calendar.is_trading_day(now.date()):
         return False
     t = now.time()
-    return RTH_OPEN <= t < RTH_CLOSE
+    # r478 / DEP.12 — the OPEN side is raw; the CLOSE side is the day's bell.
+    return RTH_OPEN <= t < close_anchored(RTH_CLOSE, now)
+
+
+# ── r478 / DEP.12 — THE DAY'S BELL ──────────────────────────────────────────
+# Every close-anchored time in this tree (15:40 flatten, 15:45 cross and credit
+# hold, 15:50/15:57 reconciles, the watchdog's 15:50-16:00, the 16:00 bell) is
+# written against a 16:00 close. On an early close (market_calendar
+# .EARLY_CLOSES) each moves earlier by the same number of minutes, so the
+# constants stay the one source and nothing grows a half-day twin.
+# ⚠️ CLOSE SIDE ONLY. Never shift an OPEN-side boundary (09:30, 09:35, the
+# reconcile slots' 09:30 base): on 11-27 the market still opens at 09:30.
+# ⚠️ THE CONSTANT MOVES, NOT THE CLOCK. Shifting `now` forward by 3 h wraps past
+# midnight after 21:00 and reads "00:30 < 16:00" as RTH; moving the anchor
+# cannot. Log lines and slot keys therefore stay in true ET.
+def close_shift(now: Optional[datetime] = None) -> timedelta:
+    """How much earlier than 16:00 the session at `now` closes (0 on a full day)."""
+    now = now or now_et()
+    try:
+        return timedelta(minutes=market_calendar.close_shift_minutes(now.date()))
+    except Exception:                                          # noqa: BLE001
+        return timedelta(0)        # fails toward a FULL day: the pre-r478 clock
+
+
+def close_anchored(t, now: Optional[datetime] = None) -> dtime:
+    """A 16:00-bell constant (dtime or (h, m)) moved to the bell of `now`'s day.
+
+    15:40 -> 12:40 on a 13:00 close; unchanged on a full day.
+    """
+    if not isinstance(t, dtime):
+        h, m = tuple(t)[:2]
+        t = dtime(int(h), int(m))
+    mins = t.hour * 60 + t.minute - int(close_shift(now).total_seconds() // 60)
+    mins = max(0, mins)
+    return dtime(mins // 60, mins % 60, t.second)
+
+
+def past_close_anchor(t, now: Optional[datetime] = None) -> bool:
+    """True once the clock is at or past `t` moved to the day's bell (minute grain)."""
+    now = now or now_et()
+    a = close_anchored(t, now)
+    return (now.hour, now.minute) >= (a.hour, a.minute)
 
 
 # v3.8: flatten window opens 5 min before the hard cross so the mark-limit
@@ -148,6 +195,19 @@ def entries_open(now: Optional[datetime] = None) -> bool:
         n = now or now_et()
         if not is_rth(n):
             return False
+        # 🔴 r478 / DEP.12 — ON AN EARLY CLOSE, NOTHING OPENS IN THE LAST
+        # HALF_DAY_ENTRY_LEAD_MIN (90) MINUTES: 11:30 on a 13:00 day. Operator
+        # 2026-10-11. ORB (to 11:00) and Runaway (to 11:30) keep their windows;
+        # the sweep (11:31), butterfly (12:00) and TCS never open. A judgement,
+        # not a measurement: no box has traded a half day. Full days: no change
+        # (the r60 ruling stands — there is no global afternoon cutoff).
+        if market_calendar.is_half_day(n.date()):
+            # Imported, not getattr'd (C.44): a missing key fails CLOSED here.
+            from config import HALF_DAY_ENTRY_LEAD_MIN as _lead
+            _c = market_calendar.close_time(n.date())
+            _cut = max(0, _c.hour * 60 + _c.minute - _lead)
+            if (n.hour * 60 + n.minute) >= _cut:
+                return False
         import config as _cfg
         _override = getattr(_cfg, "ENTRY_OPEN_ET", None)
         if _override is not None and now is not None:
@@ -158,7 +218,7 @@ def entries_open(now: Optional[datetime] = None) -> bool:
         return False
 
 
-def is_hard_close_time() -> bool:
+def is_hard_close_time(now: Optional[datetime] = None) -> bool:
     """True if the end-of-day flatten window is open (≥ 15:40 ET).
 
     v3.8: the window now OPENS FIVE MINUTES EARLIER than the hard close itself.
@@ -167,9 +227,10 @@ def is_hard_close_time() -> bool:
     position closes unconditionally. Opening at 15:45 would have left zero time
     for the limit phase — the escalation would never fire before the bell. The
     cross-over instant is still HARD_CLOSE (15:45); see
-    execution/limit_ladder.hard_close_order_mode."""
-    now = now_et()
-    return now.time() >= FLATTEN_WINDOW_OPEN
+    execution/limit_ladder.hard_close_order_mode.
+    r478 / DEP.12: 12:40 on a 13:00 close (close_anchored)."""
+    now = now or now_et()
+    return now.time() >= close_anchored(FLATTEN_WINDOW_OPEN, now)
 
 
 # r60 (2026-08-21): is_past_entry_cutoff() DELETED with ORB_NO_ENTRY_AFTER_ET —
@@ -256,6 +317,6 @@ def current_session_label() -> str:
         return "early_session"
     if dtime(11, 0) <= t < dtime(14, 0):
         return "mid_session"
-    if dtime(14, 0) <= t < HARD_CLOSE:
+    if dtime(14, 0) <= t < close_anchored(HARD_CLOSE, now):
         return "late_session"
     return "closed"

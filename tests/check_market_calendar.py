@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_market_calendar.py  v1.0
+tests/check_market_calendar.py  v1.1
+v1.1  2026-10-11  r478 / DEP.12 — EARLY CLOSES ARE VERIFIED THE SAME WAY. C6/C7
+regenerate the 13:00 sessions from the NYSE rules (day after Thanksgiving; July 3
+when July 4 is Tue-Fri; Dec 24 Mon-Thu) and diff them both ways; C8 diffs them
+against day_trader_pro's EARLY_CLOSES (the brief's banner list), read as TEXT so
+nothing of dtp is imported. dtp absent = C8 NOT RUN, reported, not failed.
 v1.0  2026-09-07  r307 / DEP.13 — THE HARDCODED LIST IS VERIFIED ARITHMETIC,
 NOT TRUSTED TRANSCRIPTION.
 
@@ -92,6 +97,28 @@ def rules_for(y: int) -> set:
     }}
 
 
+def early_rules_for(y: int) -> set:
+    out = {(_nth(y, 11, 3, 4) + d.timedelta(1)).isoformat()}
+    if d.date(y, 7, 4).weekday() in (1, 2, 3, 4):
+        out.add(d.date(y, 7, 3).isoformat())
+    if d.date(y, 12, 24).weekday() in (0, 1, 2, 3):
+        out.add(d.date(y, 12, 24).isoformat())
+    return out
+
+
+def _dtp_early_closes():
+    """dtp's EARLY_CLOSES as ISO strings, parsed from its source; None if absent."""
+    import re
+    p = os.path.expanduser("~/day_trader_pro/market_calendar.py")
+    if not os.path.exists(p):
+        return None
+    src = open(p).read()
+    blk = src[src.index("EARLY_CLOSES = {"):]
+    blk = blk[:blk.index("\n}")]
+    return {d.date(int(a), int(b), int(c)).isoformat()
+            for a, b, c in re.findall(r"date\((\d+), (\d+), (\d+)\)", blk)}
+
+
 def main() -> int:
     print("\ncheck_market_calendar\n")
     listed = set(mc.US_MARKET_HOLIDAYS) - set(mc.AD_HOC_CLOSURES)
@@ -119,6 +146,26 @@ def main() -> int:
     print(f"  NOTE  AD_HOC_CLOSURES: {sorted(mc.AD_HOC_CLOSURES) or 'none'}")
     check("C5  ad-hoc entries are real dates",
           all(len(x) == 10 and x[4] == "-" for x in mc.AD_HOC_CLOSURES))
+
+
+    # ── r478 / DEP.12 — early closes ─────────────────────────────────────────
+    early = set(getattr(mc, "EARLY_CLOSES", {}) or {})
+    egen = set()
+    for y in range(lo, hi + 1):
+        egen |= early_rules_for(y)
+    check("C6  every listed early close is produced by the rules",
+          early and not (early - egen), f"unexplained: {sorted(early - egen)}")
+    check("C7  every rule-produced early close is listed",
+          not (egen - early), f"missing: {sorted(egen - early)[:6]}")
+    check("C7b every listed early close is 13:00 on a trading day",
+          all(mc.EARLY_CLOSES[x] == "13:00" and mc.is_trading_day(d.date.fromisoformat(x))
+              for x in early))
+    dtp = _dtp_early_closes()
+    if dtp is None:
+        print("  NOTE  C8  NOT RUN — ~/day_trader_pro/market_calendar.py absent")
+    else:
+        check("C8  identical to day_trader_pro's EARLY_CLOSES",
+              dtp == early, f"only otv4: {sorted(early - dtp)[:4]} only dtp: {sorted(dtp - early)[:4]}")
 
     print()
     if F:

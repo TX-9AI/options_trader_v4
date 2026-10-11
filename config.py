@@ -1,5 +1,11 @@
 """
-config.py  v4.21
+config.py  v4.22
+v4.22 2026-10-11  r478 / DEP.12 — HALF_DAY_ENTRY_LEAD_MIN = 90. On a listed early close
+      (utils/market_calendar.EARLY_CLOSES) entries_open() closes 90 min before the
+      bell: 11:30 on a 13:00 day. Operator 2026-10-11: "Agree. Let's implement it."
+      Every close-anchored time here (HARD_CLOSE_ET, VERTICAL_HOLD_TO_ET,
+      FLATTEN_WINDOW_OPEN_ET, RTH_CLOSE_ET) keeps its 16:00-bell value and is moved
+      to the day's bell by utils/time_utils.close_anchored(). Full days unchanged.
 v4.21 2026-10-05  r474 / F1 — LIVE_FILL_DEADLINE_SECONDS 30 -> 8. Operator: "get it down
       to eight seconds." A live close waited up to 30 s (+6 s cancel grace) for a
       fill, blocking the whole tick loop, so stops on other positions went
@@ -1035,6 +1041,16 @@ DEBIT_DIRECTIONAL_CUTOFF_ET = tuple(int(x) for x in
 # says nothing opens before it.
 ENTRY_OPEN_ET = tuple(int(x) for x in
                       os.environ.get("OT_ENTRY_OPEN_ET", "9,35").split(","))
+
+# r478 / DEP.12 — ON AN EARLY CLOSE (13:00), NOTHING OPENS IN THE LAST 90 MINUTES.
+# Operator 2026-10-11, on the half-day proposal: entries close at the bell minus
+# this lead — 11:30 on 13:00 — so ORB (to 11:00) and Runaway (to 11:30) keep
+# their windows and the sweep, butterfly and TCS do not open. It also clips the
+# TEST boxes' later per-box dials (SPX-TEST Runaway 12:00, QQQ-TEST Breakout
+# 15:40) when mirrored. ⚠️ A JUDGEMENT, NOT A MEASUREMENT: no box has ever
+# traded a half day. Read ONLY on a listed early close; full days have no
+# global entry cutoff (r60).
+HALF_DAY_ENTRY_LEAD_MIN = 90
 
 DEBIT_BLOCKED_STRUCTURES = {"long_debit"}
 DEBIT_BLOCK_ACTIVE          = os.environ.get("OT_DEBIT_BLOCK_ACTIVE", "1") == "1"

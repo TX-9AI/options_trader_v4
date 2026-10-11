@@ -1,5 +1,8 @@
 """
-strategy/credit_vertical.py  v4.4
+strategy/credit_vertical.py  v4.5
+v4.5  2026-10-11  r478 / DEP.12 — bars_left() moves its close to the day's bell
+      (utils/time_utils.close_anchored): the condor's horizon is 12:45 on a 13:00
+      close, so POP is not computed on three hours that do not exist.
 v4.4  2026-09-03  r234 — `search_wing` RETURNS A NAMEDTUPLE AND IS
       BRACKETED FROM BOTH ENDS. r219 added a fifth value and MISSED two guard
       returns still returning four; both callers unpacked five, so a short leg
@@ -224,7 +227,9 @@ def bars_left(now_et_dt, bar_minutes: float, close_et) -> float:
     overstate T and make every POP look worse than the trade really is.
     """
     try:
-        end = now_et_dt.replace(hour=close_et[0], minute=close_et[1],
+        from utils.time_utils import close_anchored   # r478: the day's bell
+        _c = close_anchored(close_et, now_et_dt)
+        end = now_et_dt.replace(hour=_c.hour, minute=_c.minute,
                                 second=0, microsecond=0)
         mins = (end - now_et_dt).total_seconds() / 60.0
         return max(0.0, mins / max(1e-9, float(bar_minutes)))

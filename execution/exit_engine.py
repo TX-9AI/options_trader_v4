@@ -1,5 +1,10 @@
 """
-execution/exit_engine.py  v4.20
+execution/exit_engine.py  v4.21
+v4.21 2026-10-11  r478 / DEP.12 — both credit-vertical hold checks read past_close_anchor:
+      12:45 on a 13:00 close, 15:45 on a full day. The exit_reason string stays
+      "hard_close_15:45_ET" so the mainline cross rule (reason contains "hard_close",
+      WDOG.2) still matches; the real time is in the log line. The flatten's
+      limit/market switch moves through limit_ladder.hard_close_order_mode.
 v4.20 2026-10-06  r475 / F3 — NO MARKET CLOSE BEFORE 15:45 FOR WANT OF A MARK. A single-leg close
       asked to go out with no mark (None or <= 0) sent a MARKET order at any hour — on a thin 0DTE
       contract that fills at whatever the bid (or, buying back, the ask) is. Operator: "more of a
@@ -1880,7 +1885,8 @@ class ExitEngine:
         # assignment. The paper engine has no assignment model and would show a
         # clean result that does not survive going live.
         _vnow = datetime.now(ET)
-        _vert_close = ((_vnow.hour, _vnow.minute) >= VERTICAL_HOLD_TO_ET
+        from utils.time_utils import past_close_anchor   # r478: 12:45 on a 13:00 close
+        _vert_close = (past_close_anchor(VERTICAL_HOLD_TO_ET, _vnow)
                        if VERTICAL_HOLD_TO_CLOSE else is_hard_close_time())
         if _vert_close:
             decision.should_exit = True
@@ -2174,7 +2180,8 @@ class ExitEngine:
                                     * record["contracts"] * CONTRACT_MULTIPLIER)
 
         _n = datetime.now(_ET)
-        if ((_n.hour, _n.minute) >= VERTICAL_HOLD_TO_ET
+        from utils.time_utils import past_close_anchor   # r478: 12:45 on a 13:00 close
+        if (past_close_anchor(VERTICAL_HOLD_TO_ET, _n)
                 if VERTICAL_HOLD_TO_CLOSE else is_hard_close_time()):
             decision.should_exit = True
             decision.exit_reason = "hard_close_15:45_ET"

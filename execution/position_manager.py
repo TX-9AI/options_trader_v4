@@ -1,5 +1,7 @@
 """
-execution/position_manager.py  v4.10
+execution/position_manager.py  v4.11
+v4.11 2026-10-11  r478 / DEP.12 — _vertical_close_due reads past_close_anchor: credit
+      verticals close at 12:45 on a 13:00 close, 15:45 on a full day.
 v4.10 2026-10-04  r468 / F4 — THE LIVE MARK FALLBACK WORKS, AND PRICES THE WHOLE STRUCTURE.
       When no chain is in hand a LIVE box priced through _get_option_mark, which
       called client.get("/market-data/quotes/..."). Session has no .get on the
@@ -208,11 +210,11 @@ def _vertical_close_due() -> bool:
     time so a test can pin the clock; fails toward FLATTEN on any error."""
     try:
         from config import VERTICAL_HOLD_TO_ET, VERTICAL_HOLD_TO_CLOSE
-        from utils.time_utils import now_et
+        from utils.time_utils import now_et, past_close_anchor
         if not VERTICAL_HOLD_TO_CLOSE:
             return True
-        _n = now_et()
-        return (_n.hour, _n.minute) >= tuple(VERTICAL_HOLD_TO_ET)
+        # r478 / DEP.12 — 12:45 on a 13:00 close.
+        return past_close_anchor(VERTICAL_HOLD_TO_ET, now_et())
     except Exception:                                          # noqa: BLE001
         return True
 

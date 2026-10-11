@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tools/emergency_watchdog.py  v1.2-otv4 — THE OUT-OF-PROCESS EMERGENCY WATCHDOG.
+tools/emergency_watchdog.py  v1.3-otv4 — THE OUT-OF-PROCESS EMERGENCY WATCHDOG.
+
+otv4 v1.3  2026-10-11  r478 / DEP.12 — HALF DAYS. WINDOW's end, CLOSE_AT and CLOSE_END move
+      to the day's bell through _at() (utils/market_calendar.close_shift_minutes): on a
+      13:00 close it flattens 12:50-13:00 and idles from 13:05. WINDOW's 09:30 start is
+      raw. The constants keep their 16:00-bell values; the timer (09..16 every minute)
+      already fires inside the moved window.
 
 otv4 v1.2  2026-10-06  r475 / WDOG.2 — THE WATCHDOG'S FLATTEN CROSSES AFTER 15:45. Mainline crosses
       only for a close whose REASON contains "hard_close" (exit_engine force_market); r474 passed
@@ -295,6 +301,18 @@ def health(w) -> tuple:
     return True, f"heartbeat {hb:.0f}s"
 
 
+def _at(t: dt.time, now: dt.datetime) -> dt.time:
+    """r478 / DEP.12 — a 16:00-bell time moved to `now`'s bell (15:50 -> 12:50 on a
+    13:00 close). CLOSE SIDE ONLY. Fails toward a FULL day: the pre-r478 times."""
+    try:
+        from utils.market_calendar import close_shift_minutes
+        sh = int(close_shift_minutes(now.date()))
+    except Exception:                                             # noqa: BLE001
+        sh = 0
+    m = max(0, t.hour * 60 + t.minute - sh)
+    return dt.time(m // 60, m % 60)
+
+
 def run_once(w) -> str:
     """One timer firing. Returns a one-word verdict for the log and the gate.
     ⚠️ PAGES ONLY FROM emergency_close, ONCE PER EVENT (the ruling)."""
@@ -302,7 +320,7 @@ def run_once(w) -> str:
     st = w.load_state()
     if st.get("date") != now.date().isoformat():
         st = {"date": now.date().isoformat()}
-    if not w.trading_day(now.date()) or not (WINDOW[0] <= now.time() < WINDOW[1]):
+    if not w.trading_day(now.date()) or not (WINDOW[0] <= now.time() < _at(WINDOW[1], now)):
         return "idle"
     w.load_env()
     ok, why = health(w)
@@ -319,7 +337,8 @@ def run_once(w) -> str:
     first = st.setdefault("unhealthy_since", now.isoformat())
     seen_twice = first != now.isoformat()
     _log(f"UNHEALTHY ({why}) with {len(opened)} open: {', '.join(opened)}")
-    if seen_twice and CLOSE_AT <= now.time() < CLOSE_END and not st.get("closed"):
+    if (seen_twice and _at(CLOSE_AT, now) <= now.time() < _at(CLOSE_END, now)
+            and not st.get("closed")):
         st["closed"] = True                     # once a day, whatever happens next
         w.save_state(st)
         return emergency_close(w, os.environ.get("OT_INSTRUMENT", "?"),
@@ -347,7 +366,8 @@ def emergency_close(w, inst: str, mode: str, opened: list, why: str) -> str:
             left = w.flatten_pass()
         except Exception as exc:                                  # noqa: BLE001
             _log(f"flatten pass raised {type(exc).__name__}: {exc}")
-        if not left or w.now().time() >= CLOSE_END:
+        _n = w.now()
+        if not left or _n.time() >= _at(CLOSE_END, _n):
             break
         w.sleep(PASS_S)
     try:

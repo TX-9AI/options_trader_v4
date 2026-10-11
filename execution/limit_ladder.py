@@ -1,6 +1,10 @@
 """
-execution/limit_ladder.py  v4.0
+execution/limit_ladder.py  v4.1
 Escalating limit ladder for fills.
+
+v4.1  2026-10-11  r478 / DEP.12 - hard_close_order_mode() moves 15:40/15:45 to the
+      day's bell (utils/time_utils.close_anchored): 12:40/12:45 on a 13:00 close.
+      A bare time argument carries no date and is read as a full day.
 
 v4.0  2026-08-19  Ported from options_trader_v3 at the OTV4 split.
 
@@ -86,9 +90,16 @@ def hard_close_order_mode(now_et) -> str:
     'market' 15:45 onward — the position MUST close; cross and be done.
     """
     t = now_et.time() if hasattr(now_et, "time") else now_et
-    if t >= HARD_CLOSE_MARKET_AT_ET:
+    # r478 / DEP.12 — 12:40 / 12:45 on a 13:00 close. Module constants are read
+    # at call time, so a test that pins them (check_buyback_side B5) still works.
+    _cross, _start = HARD_CLOSE_MARKET_AT_ET, HARD_CLOSE_LIMIT_START_ET
+    if hasattr(now_et, "date"):
+        from utils.time_utils import close_anchored
+        _cross = close_anchored(_cross, now_et)
+        _start = close_anchored(_start, now_et)
+    if t >= _cross:
         return "market"
-    if t >= HARD_CLOSE_LIMIT_START_ET:
+    if t >= _start:
         return "limit"
     return "none"
 

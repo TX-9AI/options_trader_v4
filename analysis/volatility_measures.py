@@ -1,6 +1,10 @@
 """
-analysis/volatility_measures.py  v4.0
+analysis/volatility_measures.py  v4.1
 Realised volatility, implied volatility and EXPECTED MOVE.
+
+v4.1  2026-10-11  r478 / DEP.12 - session_fraction_remaining knows the day's bell. On
+      a 13:00 close it is (390 - elapsed - 180) / 390: 210/390 at the open, 120/390
+      at 11:00, 0 at 13:00. Found by OTV4TEST's critique (MSG-QQQ-1011-10).
 
 v4.0  2026-08-22  Built with the manifold. See docs/DERIVED_STORES.md.
 
@@ -126,15 +130,19 @@ def session_fraction_remaining(now: Optional[datetime] = None) -> Optional[float
     # ~3.5x — all day, on every box, silently. It was visible in CVX's payload
     # as session_fraction_remaining=0.036 at 11:45 and read as "some other
     # cutoff" until the manifold board surfaced the same clock bug.
-    from utils.time_utils import ET
+    from utils.time_utils import ET, close_anchored, close_shift
     now = now or datetime.now(ET)
     t = now.time()
-    if t >= dtime(16, 0):
+    # 🔴 r478 / DEP.12 — ON AN EARLY CLOSE THE SESSION IS SHORTER, NOT SLOWER.
+    # Remaining = (390 - elapsed - shift) / 390: 120/390 at 11:00 on a 13:00
+    # day, 210/390 at the open. ⚠️ THE DENOMINATOR STAYS 390 ON PURPOSE. The
+    # variance is per MINUTE of trading; renormalising to a 210-minute day
+    # would call 11:00 "57% remaining" and overstate the move by ~1.4x.
+    if t >= close_anchored(dtime(16, 0), now):
         return 0.0
-    if t <= dtime(9, 30):
-        return 1.0
-    mins = (now.hour * 60 + now.minute) - (9 * 60 + 30)
-    return max(0.0, min(1.0, (RTH_MINUTES - mins) / RTH_MINUTES))
+    _shift = close_shift(now).total_seconds() / 60.0
+    mins = max(0, (now.hour * 60 + now.minute) - (9 * 60 + 30))
+    return max(0.0, min(1.0, (RTH_MINUTES - mins - _shift) / RTH_MINUTES))
 
 
 def expected_move_iv(spot: float, atm_iv: float,
