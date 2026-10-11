@@ -1,5 +1,8 @@
 """
-data/options_chain.py  v4.5
+data/options_chain.py  v4.6
+v4.6  2026-10-11  r482 / EXIT.5 — mark_of() is the ONE mark formula (the chain read and the
+      floor watch share it), and read_quote() returns one contract's (mark, age_s)
+      from chain_marks for main's 2-second floor watch. Read-only, its own handle.
 v4.5  2026-10-04  r464 / F6 (SPXW.1) — THE MORNING EXPIRATION IS NEVER TRADED. fetch_chain
       drops every settlement_type "AM" contract BEFORE the date is chosen, so an
       AM-only date never becomes "today"; logged once per (symbol, date);
@@ -150,6 +153,47 @@ logger = logging.getLogger(__name__)
 OT_CHAIN_STRUCT_REFRESH_S = float(os.environ.get("OT_CHAIN_STRUCT_REFRESH_S", "1800"))
 OT_CHAIN_STALE_S          = float(os.environ.get("OT_CHAIN_STALE_S",          "120"))
 OT_CHAIN_BOOTSTRAP_S      = float(os.environ.get("OT_CHAIN_BOOTSTRAP_S",      "30"))
+
+def mark_of(bid, ask) -> float:
+    """THE mark: the mid when both sides quote, else whichever side does.
+    r482 — shared by the chain read and the floor watch so the watch can never
+    wake on a price the tick would not see."""
+    bid = float(bid or 0.0)
+    ask = float(ask or 0.0)
+    return (bid + ask) / 2 if bid > 0 and ask > 0 else (bid or ask)
+
+
+_QUOTE_RO = None
+
+
+def read_quote(streamer_symbol: str, now: Optional[float] = None):
+    """(mark, age_s) for ONE contract from `chain_marks`, or None.
+
+    r482 / EXIT.5 — the floor watch's read: one indexed row from the table the
+    feed flushes every 2 s. Its OWN read-only handle (never the chain's), and
+    None on any failure — a watch that cannot read simply does not wake, and
+    the 15-second tick still decides.
+    """
+    global _QUOTE_RO
+    if not streamer_symbol:
+        return None
+    try:
+        if _QUOTE_RO is None:
+            _QUOTE_RO = sqlite3.connect(f"file:{_feed_db_path()}?mode=ro",
+                                        uri=True, timeout=1.0)
+        r = _QUOTE_RO.execute(
+            "SELECT bid, ask, updated_epoch FROM chain_marks WHERE streamer_symbol=?",
+            (streamer_symbol,)).fetchone()
+    except Exception:                                           # noqa: BLE001
+        _QUOTE_RO = None
+        return None
+    if not r or r[2] is None:
+        return None
+    m = mark_of(r[0], r[1])
+    if not (0 < m < 1e6):
+        return None
+    return m, max(0.0, (now if now is not None else time.time()) - float(r[2]))
+
 
 def _feed_db_path() -> str:
     """Same resolution as data/candle_feed.feed_db_path (kept import-free so this
@@ -633,7 +677,7 @@ class OptionsChainFetcher:
                 ask = float(quote.ask_price or 0)
                 oc.bid  = bid
                 oc.ask  = ask
-                oc.mark = (bid + ask) / 2 if bid > 0 and ask > 0 else (bid or ask)
+                oc.mark = mark_of(bid, ask)                     # r482 — one formula
 
     # ─── Strike Selection ─────────────────────────────────────────────────────
 

@@ -1,5 +1,8 @@
 """
-execution/position_manager.py  v4.11
+execution/position_manager.py  v4.12
+v4.12 2026-10-11  r482 / EXIT.5 — the single-leg premium read remembers its contract's
+      streamer symbol on the record (`_streamer`), and watch_targets() lists
+      (trade_id, streamer, watched_stop) for main's 2-second floor watch.
 v4.11 2026-10-11  r478 / DEP.12 — _vertical_close_due reads past_close_anchor: credit
       verticals close at 12:45 on a 13:00 close, 15:45 on a full day.
 v4.10 2026-10-04  r468 / F4 — THE LIVE MARK FALLBACK WORKS, AND PRICES THE WHOLE STRUCTURE.
@@ -427,6 +430,20 @@ class PositionManager:
         self._open_records = still_open
         return len(self._open_records) > 0
 
+    def watch_targets(self) -> list:
+        """(trade_id, streamer_symbol, stop) for every open position the floor
+        watch covers. r482 / EXIT.5 — the stop is exit_engine.watched_stop, the
+        engine's own level; a record not yet priced by a tick has no streamer
+        symbol and is not watched until it has."""
+        from execution.exit_engine import watched_stop
+        out = []
+        for rec in list(self._open_records or []):
+            lvl = watched_stop(rec)
+            sym = rec.get("_streamer")
+            if lvl and sym:
+                out.append((str(rec.get("trade_id") or ""), sym, lvl))
+        return out
+
     def _manage_one(self, record: TradeRecord,
                     df_1m: Optional[pd.DataFrame],
                     chain,
@@ -604,6 +621,8 @@ class PositionManager:
                         None
                     )
                     if match:
+                        # r482 / EXIT.5 — the contract the floor watch reads.
+                        record["_streamer"] = str(getattr(match, "streamer_symbol", "") or "")
                         # r105 — the single-leg quote, for the exit ladder.
                         _stash_quote(record,
                                      bid=float(getattr(match, "bid", 0.0) or 0.0),

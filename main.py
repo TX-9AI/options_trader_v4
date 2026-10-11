@@ -1,5 +1,14 @@
 """
-main.py  v4.57
+main.py  v4.58
+v4.58  2026-10-11  r482 / EXIT.5 — THE WAIT BETWEEN TICKS WATCHES THE STOPS. The loop slept
+      `POLL_INTERVAL_SECONDS - elapsed`, so a premium stop was checked every 15 s
+      and the fill was the first 15-s sample under it: 200 mainline debit stop
+      exits since 09-13 filled $4,564 beyond their stops (paper). _floor_watch_sleep
+      re-reads each watched position's own mark every 2 s (one chain_marks row,
+      the table the feed flushes every 2 s) and ends the wait when a FRESH mark
+      (<= 4 s old) is at or below exit_engine.watched_stop; the tick then runs and
+      decides exactly as before. At most one early wake per position per 10 s.
+      Replay of 60 exits: about 23% of the overshoot. Operator: Yes.
 v4.57  2026-10-11  r481 / RUN.1 — THE ONE-RUNAWAY-PER-SESSION CAP GATES, AS r179 RULED.
       The dispatch wrote "one per session on this box — already traded today" and
       then asked RunawayContinuation anyway, because the call sat in its own `if`
@@ -4343,6 +4352,58 @@ def _attempt_butterfly(ctx, ms, state, *, additive: bool) -> None:
         logger.warning("Butterfly attempt failed: %s", exc)
 
 
+# ── r482 / EXIT.5 — THE FLOOR WATCH ────────────────────────────────────────
+FLOOR_WATCH_STEP_S     = 2.0    # the feed flushes chain_marks every 2 s
+FLOOR_WATCH_MAX_AGE_S  = 4.0    # two flush cycles: an older quote does not wake
+FLOOR_WATCH_COOLDOWN_S = 10.0   # one early wake per position per 10 s
+_FLOOR_WAKE_AT: dict = {}
+
+
+def _floor_watch_sleep(seconds: float, pos_mgr, read=None,
+                       clock=time.time, sleep=time.sleep):
+    """Sleep up to `seconds`; end early when a watched position's FRESH mark is
+    at or below its stop. Returns (trade_id, mark, age_s, stop, early_s) on a
+    wake, else None.
+
+    🔴 IT ONLY WAKES THE TICK. Nothing here exits, closes or decides: the tick
+    that follows prices the position and evaluate()/decide() rule as they always
+    have. A wrong level costs one early tick, never a trade (check_floor_watch W4).
+    ⚠️ A STALE QUOTE DOES NOT WAKE (OTV4TEST FILL.1: a fast exit that books a
+    4-second-old mid has bought speed and kept the error). ⚠️ No targets -> one
+    plain sleep, so a flat box pays nothing.
+    """
+    end = clock() + max(0.0, seconds)
+    try:
+        targets = pos_mgr.watch_targets()
+    except Exception as exc:                                    # noqa: BLE001
+        logger.debug("[floor-watch] no targets (%s)", exc)
+        targets = []
+    if not targets:
+        sleep(max(0.0, end - clock()))
+        return None
+    if read is None:
+        from data.options_chain import read_quote as read
+    while True:
+        now = clock()
+        left = end - now
+        if left <= 0:
+            return None
+        for tid, sym, lvl in targets:
+            if now - _FLOOR_WAKE_AT.get(tid, float("-inf")) < FLOOR_WATCH_COOLDOWN_S:
+                continue
+            q = read(sym, now)
+            if not q:
+                continue
+            mark, age = q
+            if age <= FLOOR_WATCH_MAX_AGE_S and mark <= lvl:
+                _FLOOR_WAKE_AT[tid] = now
+                logger.info("[floor-watch] %s %s mark %.2f <= stop %.2f (quote %.1fs "
+                            "old) — running the tick %.1fs early",
+                            tid[:8], sym, mark, lvl, age, left)
+                return tid, mark, age, lvl, left
+        sleep(min(FLOOR_WATCH_STEP_S, left))
+
+
 def _one_per_session_used(strategy: str) -> bool:
     """r179 — the durable session cap. True when this strategy has already
     entered a trade this ET session on this box (open OR closed), read from
@@ -5276,7 +5337,8 @@ def main_loop(state: BotState):
                 sys.exit(1)
 
         elapsed = time.time() - tick_start
-        time.sleep(max(0, POLL_INTERVAL_SECONDS - elapsed))
+        # r482 / EXIT.5 — the wait watches the open stops; see _floor_watch_sleep.
+        _floor_watch_sleep(max(0, POLL_INTERVAL_SECONDS - elapsed), pos_mgr)
 
 
 # Below this many seconds of system uptime, a startup is treated as a fresh

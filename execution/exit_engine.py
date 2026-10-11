@@ -1,5 +1,10 @@
 """
-execution/exit_engine.py  v4.21
+execution/exit_engine.py  v4.22
+v4.22 2026-10-11  r482 / EXIT.5 — watched_stop(record): the ONE definition of the
+      premium level a single-leg debit position is stopped at (the trail when
+      armed, else the floor, the same fallback this engine uses). main's 2-second
+      floor watch reads it to decide when to run the tick early; the decision
+      itself stays here. Gated against evaluate() by check_floor_watch.
 v4.21 2026-10-11  r478 / DEP.12 — both credit-vertical hold checks read past_close_anchor:
       12:45 on a 13:00 close, 15:45 on a full day. The exit_reason string stays
       "hard_close_15:45_ET" so the mainline cross rule (reason contains "hard_close",
@@ -702,6 +707,49 @@ from config import (VELOCITY_STALL_ENABLED, VELOCITY_STALL_ENFORCE,   # VEL.1
                     VELOCITY_MEASURED_STRATEGIES)
 # r155 — the lone-vertical stop, anchored to RISK rather than credit.
 from config import LONE_STOP_PCT_OF_RISK
+# ── r482 / EXIT.5 — THE LEVEL THE FLOOR WATCH WATCHES ─────────────────────────
+# Strategies whose exits this repo decides on the OPTION MARK. Anything else
+# (credit verticals, butterflies, tents, condor legs, and any strategy this repo
+# does not ship) is not watched: its stop is a spread value, a composite, or an
+# underlying close, and a watch on one contract's mark would wake on nothing.
+WATCHED_STRATEGIES = ("ORBStrategy", "RunawayContinuation")
+
+
+def watched_stop(record) -> Optional[float]:
+    """The premium at or below which this position's stop FIRES, or None.
+
+    🔴 r482 / EXIT.5. The watch WAKES the tick and never exits: the tick's own
+    evaluate()/decide() still decides. So this must name the level the engine
+    enforces — the trail when armed, else `stop_premium` with the engine's own
+    fallback `entry * (1 - MAX_LOSS_PCT)` — and `check_floor_watch` W1 drives
+    evaluate() either side of it to prove they agree.
+    ⚠️ EXCLUDED, each for a reason: a working or part-filled live close
+    (`live_exit_state`, r467 — the exit is already in flight); short, credit,
+    butterfly, tent and condor-leg records (not one contract's mark); any
+    strategy outside WATCHED_STRATEGIES.
+    """
+    try:
+        if str(record.get("strategy") or "") not in WATCHED_STRATEGIES:
+            return None
+        # r345's resolver, never the raw flag: rows before r343 carry
+        # is_short_position=0 on credit spreads (check_exit_credit_side X5).
+        from database.trade_logger import is_credit_position as _is_credit
+        if (record.get("live_exit_state") or _is_credit(record)
+                or record.get("is_butterfly") or record.get("is_credit_vertical")
+                or record.get("is_condor_leg")
+                or float(record.get("short_strike") or 0) > 0):
+            return None
+        entry = float(record.get("entry_premium") or 0.0)
+        if entry <= 0:
+            return None
+        floor = float(record.get("stop_premium") or 0.0) or entry * (1 - MAX_LOSS_PCT)
+        trail = float(record.get("trail_stop") or 0.0)
+        level = max(floor, trail)
+        return level if level > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 THETA_MIN_GAIN_PCT       = 0.10    # gain floor: don't protect a gain smaller than this
 MINUTES_PER_CALENDAR_DAY = 1440    # theta greek is $/share/CALENDAR day (not the 390 RTH min)
 
