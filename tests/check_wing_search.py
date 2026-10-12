@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""check_wing_search.py  v1.3
+"""check_wing_search.py  v1.4
+v1.4  2026-10-11  r483 — W8 RE-DERIVED. It asserted relaxed still LOOSENED three sweep
+      evidence dials in criteria.CRITERIA; `sweep_max_age_bars` has since left the
+      table and was red at every sweep. The live fact is stronger: nothing in
+      production reads CRITERIA at all (DOC.22), and relaxed entry was turned OFF
+      fleet-wide on 2026-10-11 (operator). W8 now pins that no production module
+      reads the table, so relaxed cannot quietly start loosening a sweep gate.
 v1.3  2026-09-04  r238 — W9 RE-DERIVED. TCS no longer calls
       `search_wing` — it needs the WIDEST qualifying wing, the opposite search.
 v1.2  2026-09-03  r234 — W2 RE-DERIVED. It matched the SOURCE TEXT
@@ -44,6 +50,7 @@ not more. Every setup must find a wing that pays for its own risk. That is the
 cost of the trade being real, and the operator accepted it explicitly.
 """
 import ast
+import re
 import os
 import sys
 
@@ -150,14 +157,21 @@ def main():
     check("W7 the refusal says relaxed does not waive it",
           "relaxed does not" in src and "structure, not selection" in src)
 
-    # ── 🔴 W8 — RELAXED STILL LOOSENS THE EVIDENCE DIALS ─────────────────
-    # The trade was not "stop relaxing"; it was "relax evidence, never
-    # economics". If CRITERIA ever loses these, relaxed stops doing anything.
-    from strategy.criteria import CRITERIA
-    for k in ("sweep_max_age_bars", "sweep_pierce_ceiling", "level_hold_min"):
-        check(f"W8 {k} is still a relaxable evidence dial",
-              k in CRITERIA and CRITERIA[k][0] != CRITERIA[k][1],
-              f"{CRITERIA.get(k)}")
+    # ── W8 — NOTHING IN PRODUCTION READS criteria.CRITERIA (r483) ─────────
+    # The evidence dials that relaxed used to loosen have no production reader
+    # (DOC.22). A module that starts calling `criteria.get(` or indexing CRITERIA
+    # would quietly make a sweep gate mode-dependent again.
+    _readers = []
+    for _dp, _dn, _fs in os.walk(_root):
+        _dn[:] = [d for d in _dn if d not in ("venv", ".git", "__pycache__", "tests")]
+        for _fn in _fs:
+            if not _fn.endswith(".py") or _fn == "criteria.py":
+                continue
+            _t = open(os.path.join(_dp, _fn), encoding="utf-8", errors="replace").read()
+            if re.search(r"criteria\.get\(|\bCRITERIA\[|\bCRITERIA\.get\(", _t):
+                _readers.append(os.path.relpath(os.path.join(_dp, _fn), _root))
+    check("W8 no production module reads criteria.CRITERIA (relaxed loosens no sweep dial)",
+          not _readers, f"{_readers}")
 
     # ── 🔴 W9 — ALL FOUR CREDIT STRATEGIES, NOT JUST THE SWEEP ───────────
     # r156 shipped the sweep alone; the other three kept fixed dollar wings

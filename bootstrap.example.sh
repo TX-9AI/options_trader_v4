@@ -1,6 +1,8 @@
 #!/bin/bash
 # ==========================================================================
-# bootstrap.example.sh  v4.2
+# bootstrap.example.sh  v4.3
+# v4.3  2026-10-11  r483 — EXEC BIT ONLY: 100644 -> 100755 in the git index, so a fresh
+#   clone can run it (check_configure_relaxed C5). Content unchanged.
 # v4.2  2026-09-21  r408 / OPS.34 — THIS FILE SAID IT WAS SAFE TO COMMIT AND
 #   GIT HAD NEVER LET ANYONE COMMIT IT.
 #   🔴 `.gitignore` carried `!bootstrap.example.sh` at line 2 and

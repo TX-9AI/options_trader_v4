@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_ledger_parity.py  v1.5
+tests/check_ledger_parity.py  v1.6
+v1.6  2026-10-11  r483 — r309, r334 AND r338 JOIN THE KNOWN-ROWLESS SET. L3 had been red
+      since they were cited and every sweep reported it as "pre-existing", which is
+      how a red check hides the next one. None landed in either repo (checked both
+      git logs): r334 is named in GENESIS as an attempt LAND DISCIPLINE refused,
+      r338 is a study result quoted by r339, r309 is the harness edit r372 dates.
+      Allowed by name, as r226 and r316 were.
 v1.5  2026-09-08  r318 — r316 JOINS THE KNOWN-ROWLESS SET, AND THE LAND ORDER
       IS WHY NOBODY SAW IT. r316 was cut and never landed (it bundled r317's
       work with r315's; r315 landed first and made its BASE stale), so r317's
@@ -193,7 +199,7 @@ def main():
     # stale. r317's row says so by name, so the citation is the record of why
     # the number is missing rather than evidence of a lost row. §26: the
     # number is spent and does not come back.
-    KNOWN_ROWLESS_CITATIONS = {110, 141, 159, 226, 316}
+    KNOWN_ROWLESS_CITATIONS = {110, 141, 159, 226, 309, 316, 334, 338}   # r483: 309/334/338
     # 🔴 r317 — A CROSS-REPO CITATION IS NOT A CITATION OF THIS LEDGER.
     # otv4 rows routinely say "DOCS ONLY - DEV.5 FILED FOR dtp r305", naming a
     # day_trader_pro revision. `\br305\b` matched it, so L3 demanded an otv4

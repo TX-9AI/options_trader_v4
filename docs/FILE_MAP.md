@@ -624,7 +624,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_configure_relaxed.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `configure.sh`, `docs/BACKLOG.md`
+- **called by:** (not imported) — referenced in `bootstrap.example.sh`, `configure.sh`, `docs/BACKLOG.md`, `install_midnight_halt.sh`
 
 ### `tests/check_conviction_removed.py`
 - **calls:** (none)

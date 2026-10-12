@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# options_trader_v4/install_midnight_halt.sh — v1.0
+# options_trader_v4/install_midnight_halt.sh — v1.1
+# v1.1 (2026-10-11) — r483. EXEC BIT ONLY: 100644 -> 100755 in the git index, so a fresh
+#   clone can run it (check_configure_relaxed C5). Content unchanged.
 # v1.0 (2026-09-06) — r289 / EOD.3. Installs the midnight ET backstop.
 #
 # Operator: *"I do sometimes work on them late & might forget. So I want another

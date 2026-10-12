@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-tests/check_fill_basis.py  v1.3
+tests/check_fill_basis.py  v1.4
+v1.4  2026-10-11  r483 — F6/F6b RE-PINNED TO r315's SHAPE. r315 (LAD.1) moved the credit
+      walk into ONE placer, `main._post_credit_vertical`, priced through
+      `ladder_registry.price_for` by an injectable pricer and keyed on the
+      INTENT (`lkey`), with partials carried by execution/credit_remainder. The
+      old text pins (`_lr.price_for(_lkey`, `fill.quantity >= _req_contracts`)
+      matched nothing after that and were red at every sweep since 09-08 while
+      the ladder worked — `check_credit_remainder` (26 checks) drives it. These
+      now pin the same facts inside the function that does the posting.
 v1.3  2026-09-03  r234 — RE-DERIVED. F0 asserted "five values" — the
       exact invariant r219 broke by adding a fifth and missing two guard
       returns, which this check could not see because it only drove the
@@ -214,15 +222,18 @@ def main():
     # conceding toward mark, which is where the ladder's own "never posts worse
     # than mark" rule stops it.
     mainsrc = open(os.path.join(_root, "main.py"), encoding="utf-8").read()
+    _post = mainsrc[mainsrc.index("def _post_credit_vertical"):]
+    _post = _post[:_post.index("\ndef ", 10)]
     check("F6 the credit-vertical live order prices through the ladder",
-          "_lr.price_for(_lkey" in mainsrc and '"sell"' in mainsrc)
+          "_lr.price_for(" in _post and 'pricer(lkey, "sell"' in _post)
 
     # 🔑 A LADDER THAT NEVER ADVANCES IS THE STATIC LIMIT WITH A NEW NAME.
     # `refuse` on a non-fill, `clear` on a complete fill — and NOT on a
-    # partial, because the remainder is still an open intent.
+    # partial, because the remainder is still an open intent (r315:
+    # execution/credit_remainder carries it; check_credit_remainder drives it).
     check("F6b a non-fill advances the walk and a full fill ends it",
-          "_lr.refuse(_lkey" in mainsrc and "_lr.clear(_lkey)" in mainsrc
-          and "fill.quantity >= _req_contracts" in mainsrc)
+          "_lr.refuse(lkey" in _post and "_lr.clear(lkey)" in _post
+          and "_filled >= contracts" in _post)
 
     # ⚠️ AND THE STRUCTURE QUOTE IS BUILT PER LEG. `short.ask - long.bid` is
     # the best credit and `short.bid - long.ask` the worst; their midpoint is
