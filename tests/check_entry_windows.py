@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""check_entry_windows.py — v1.3
+"""check_entry_windows.py — v1.4
+v1.4  2026-10-11  r484: W4c — THE BUTTERFLY OPENS AT 13:00, DRIVEN. prepare() at 12:59 is
+      dormant on entry_window and at 13:00 it is not; the config constant is
+      (13, 0). Operator, 2026-10-11: "Move the flies to 1300."
 v1.3  2026-09-08  r321: W9 — THE WINDOW A STRATEGY COMPUTES, NOT THE CONSTANT
       IT DECLARES. W5 asserts `sweep.EARLIEST_ET == CREDIT_ENTRY_START_ET` and
       was green while the sweep OPENED AT 09:45 under relaxed, because
@@ -109,6 +112,19 @@ def main():
     check("W4 the butterfly STRATEGY honours the config noon rule",
           _hm(_bf.EARLIEST_ET) == tuple(C.BUTTERFLY_ENTRY_START_ET),
           f"strategy {_bf.EARLIEST_ET} vs config {C.BUTTERFLY_ENTRY_START_ET}")
+
+    # ── W4c — r484: 13:00, DRIVEN through prepare(), not read off a constant ─
+    def _window_open(hhmm):
+        # Out of window, prepare() returns BEFORE recording the entry_window
+        # condition; in window it records it. The condition list is the signal.
+        p = _bf.GEXPinButterflyStrategy().prepare(gex=None, price_now=100.0, now_et=hhmm)
+        return "entry_window" in repr(p.conditions)
+
+    check("W4c the butterfly is (13, 0) and prepare() is dormant at 12:59, open at 13:00",
+          tuple(C.BUTTERFLY_ENTRY_START_ET) == (13, 0)
+          and not _window_open("12:59") and _window_open("13:00"),
+          f"config={C.BUTTERFLY_ENTRY_START_ET} 12:59 open={_window_open('12:59')} "
+          f"13:00 open={_window_open('13:00')}")
 
     check("W5 the sweep STRATEGY honours the universal credit start",
           _hm(_sc.EARLIEST_ET) == tuple(start),

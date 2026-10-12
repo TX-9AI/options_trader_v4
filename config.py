@@ -1,5 +1,11 @@
 """
-config.py  v4.23
+config.py  v4.24
+v4.24  2026-10-11  r484 / FEE.4 — BUTTERFLY_ENTRY_START_ET 12:00 -> 13:00. Operator, 2026-10-11:
+      "Move the flies to 1300." 38 mainline flies 09-14..10-09 (net of fees): entry
+      time was the one monotonic variable — 12:00-12:08 -$2,578 (1 winner), 12:09-
+      13:16 -$1,999 (1), 13:18-14:32 +$3,132 (6); the first five minutes of the
+      window 11 trades, 1 winner, -$2,117. Stop and wing width were measured and
+      left alone. Feeds GEX_BFLY_EARLIEST_ET, the strategy's FOUNDATIONAL floor.
 v4.23  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v4.22 2026-10-11  r478 / DEP.12 — HALF_DAY_ENTRY_LEAD_MIN = 90. On a listed early close
       (utils/market_calendar.EARLY_CLOSES) entries_open() closes 90 min before the
@@ -1127,7 +1133,9 @@ BUTTERFLY_ENTRY_CUTOFF_ET   = (14, 0)   # was 15:00 and unreachable (see v3.1 he
 # opened a full HOUR before the rule the operator just stated. Same shape as
 # SWEEP_CS_EARLIEST_ET: a default is the only source, and the config value
 # everyone reads is decorative.
-BUTTERFLY_ENTRY_START_ET    = (12, 0)   # No butterfly entries before noon
+# 🔴 r484 — 13:00 (operator, 2026-10-11, on the 38-fly entry-time measurement:
+# winners concentrated after ~13:15; the first minutes after noon were 1 for 11).
+BUTTERFLY_ENTRY_START_ET    = (13, 0)   # No butterfly entries before 13:00
 GEX_BFLY_EARLIEST_ET        = f"{BUTTERFLY_ENTRY_START_ET[0]}:{BUTTERFLY_ENTRY_START_ET[1]:02d}"
 # r147 — UNPARKED. Operator, 2026-08-26: "I want it active. It already has to
 # clear a high bar to fire." OT_GEX_BUTTERFLY=0 parks it again.
