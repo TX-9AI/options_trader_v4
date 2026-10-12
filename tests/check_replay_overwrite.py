@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-tests/check_replay_overwrite.py  v1.0
+tests/check_replay_overwrite.py  v1.1
+v1.1  2026-10-12  FEED.9b — A CORRECTION IS TAKEN. v1.0 pinned range as the
+  referee, and on its first boot replay the rule refused the vendor's
+  correction of CVX's 10-12 daily bar (stored L 211.02 off the tape, 1m low
+  213.7501). U11-U13 added; U1-U10 unchanged and still pass.
+  U11 an intraday equity bar that gets NARROWER with ~no volume lost (a
+      busted print removed) replaces the stored one
+  U12 1d is last-write-wins: a correction of the real CVX 10-12 bar is taken
+  U13 the refusal log carries the kept and the refused OHLCV
+  BORN RED on otv4 eed0069 at U11 U12 U13.
 v1.0  2026-10-12  FEED.9 — A HISTORY REPLAY CANNOT SHRINK A BAR WE ALREADY HOLD.
 
   upsert_candles was INSERT OR REPLACE. DXFeed's replay of 2026-10-08 11:55
@@ -155,6 +164,33 @@ def main():
     put(("AMZN", "5m", TS, 258.38, 258.40, 257.90, 257.97, 64000.0))
     check("U10 nothing is logged when nothing is refused",
           not [m for m in seen if "FEED.9" in m], str(seen))
+    lg.removeHandler(h)
+
+    # U11 — a busted-print correction on an intraday equity bar
+    T11 = TS + 900000
+    put(("CVX", "5m", T11, 214.0, 216.67, 211.02, 215.0, 100000.0))
+    put(("CVX", "5m", T11, 214.0, 216.67, 213.75, 215.0, 99900.0))
+    got = get("CVX", ts=T11)
+    check("U11 a narrower correction with ~no volume lost is taken",
+          got is not None and got[2] == 213.75, str(got))
+
+    # U12 — 1d is last-write-wins. Stored: the real CVX 10-12 bar; the
+    # correction is shaped from its 1m (the refused values were never logged)
+    TD = 1791777600000
+    put(("CVX", "1d", TD, 214.0, 216.67, 211.02, 215.0, 1999182.0))
+    put(("CVX", "1d", TD, 214.75, 216.67, 213.7501, 215.0, 1948276.0))
+    got = get("CVX", "1d", TD)
+    check("U12 1d takes the vendor's correction",
+          got == (214.75, 216.67, 213.7501, 215.0, 1948276.0), str(got))
+
+    # U13 — the log carries both versions
+    seen.clear()
+    lg.addHandler(h)
+    put(("QQQ", "5m", TS, 752.635, 752.9191, 752.57, 752.91, 33808.0))
+    named = [m for m in seen if "FEED.9" in m]
+    check("U13 the refusal log carries the kept and the refused OHLCV",
+          len(named) == 1 and "107877" in named[0] and "33808" in named[0],
+          str(named))
     lg.removeHandler(h)
 
     st.close()

@@ -1,5 +1,17 @@
 """
-data/candle_feed.py  v4.13
+data/candle_feed.py  v4.14
+v4.14 2026-10-12  FEED.9b — v4.13 REFUSED A CORRECTION. Its first boot replay
+      (16:14 ET, 13 boxes) refused only DAILY bars, and on CVX the bar it kept
+      was wrong: stored 1d L 211.02 for 10-12 against a 1m low of 213.7501
+      (box and S3 EOD upload; CVX_EXT 1d agrees with the 1m), refused twice.
+      Range cannot tell a correction (stored bar too WIDE, a bad print) from a
+      slice (stored bar complete, replay too NARROW). 🔑 1d is last-write-wins
+      again; intraday bars with volume yield unless the new version lost more
+      than 5% of it; 0-volume (index) bars keep v4.13's range/open rule. The
+      refusal log carries the kept and refused OHLCV. Critiqued by OTV4TEST
+      (MSG-QQQ-1012-23; its "narrower AND any volume drop" clause was left
+      out: that is exactly what a busted-print correction looks like).
+      GATE check_replay_overwrite v1.1 U11-U13.
 v4.13 2026-10-12  FEED.9 — A REPLAY CANNOT SHRINK A BAR WE ALREADY HOLD.
       upsert_candles was INSERT OR REPLACE, last write wins. Every (re)subscribe
       replays history, and DXFeed's history for 2026-10-08 11:50-11:55 holds
@@ -600,47 +612,59 @@ class FeedStore:
         with self._lock:
             self._upsert_candles_locked(rows)
 
+    # v4.14 FEED.9b — when a stored bar yields. Three cases, in this order:
+    #   · a stored NULL price always yields;
+    #   · 1d is last-write-wins, as before v4.13: the vendor's daily is its
+    #     official bar and a replay CORRECTS it (CVX 2026-10-12 stored an
+    #     off-tape low of 211.02 against a 1m low of 213.75; v4.13 refused the
+    #     vendor's correction twice, and that bar becomes tomorrow's prior-day
+    #     low);
+    #   · a bar WITH volume yields unless the new version lost more than 5% of
+    #     it. The 10-08 slices lost 14-90%; a correction that removes a bad
+    #     print loses almost none and is now taken, narrower range or not;
+    #   · a 0-volume bar (index: SPX, VIX; SQLite stores NaN as NULL, hence
+    #     the coalesce) keeps v4.13's rule: range no narrower, and the same
+    #     open or a wider range.
+    _UPSERT_CANDLE_SQL = (
+        "INSERT INTO candles "
+        "(symbol, interval, ts_epoch_ms, open, high, low, close, volume) "
+        "VALUES (?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(symbol, interval, ts_epoch_ms) DO UPDATE SET "
+        "open=excluded.open, high=excluded.high, low=excluded.low, "
+        "close=excluded.close, volume=excluded.volume "
+        "WHERE candles.open IS NULL OR candles.high IS NULL "
+        "OR candles.low IS NULL OR candles.close IS NULL "
+        "OR excluded.interval = '1d' "
+        "OR (coalesce(candles.volume,0) > 0 AND "
+        "coalesce(excluded.volume,0) >= 0.95 * candles.volume) "
+        "OR (coalesce(candles.volume,0) = 0 "
+        "AND excluded.high >= candles.high AND excluded.low <= candles.low "
+        "AND (excluded.open = candles.open "
+        "OR excluded.high > candles.high OR excluded.low < candles.low))")
+
     def _upsert_candles_locked(self, rows: List[Tuple]):
-        # v4.13 FEED.9 — a stored bar is replaced only by a version that holds
-        # AT LEAST AS MUCH TAPE: volume no lower, range no narrower, and either
-        # the same open or strictly more of something. A forming bar only grows,
-        # so the live stream always passes; a history replay that carries only
-        # a slice of a closed bar is refused. Index volume is 0 (SQLite stores
-        # NaN as NULL), hence the coalesce; a stored NULL price always yields.
-        # Refusals are counted per (symbol, interval): *_EXT has two sources
-        # (the RTH guard's re-key and the EXT subscription).
-        groups: Dict[Tuple[str, str], List[Tuple]] = {}
+        # Refusals are reported per (symbol, interval) with the stored and the
+        # refused values: *_EXT has two sources (the RTH guard's re-key and the
+        # EXT subscription), and a refusal has to be judgeable after the fact.
+        refused: Dict[Tuple[str, str], List[Tuple]] = {}
         for r in rows:
-            groups.setdefault((r[0], r[1]), []).append(r)
-        for (sym, iv), grp in groups.items():
-            before = self.conn.total_changes
-            self._upsert_group_locked(grp)
-            refused = len(grp) - (self.conn.total_changes - before)
-            if refused > 0:
-                logger.info("FEED.9: kept %d stored %s %s bar(s) a smaller "
-                            "version would have overwritten", refused, sym, iv)
+            if self.conn.execute(self._UPSERT_CANDLE_SQL, r).rowcount == 0:
+                refused.setdefault((r[0], r[1]), []).append(r)
+        for (sym, iv), rr in refused.items():
+            first = rr[0]
+            kept = self.conn.execute(
+                "SELECT open, high, low, close, volume FROM candles WHERE "
+                "symbol=? AND interval=? AND ts_epoch_ms=?",
+                (sym, iv, first[2])).fetchone()
+            logger.info("FEED.9: kept %d stored %s %s bar(s) a smaller "
+                        "version would have overwritten; first ts=%d kept "
+                        "OHLCV=%s refused OHLCV=%s", len(rr), sym, iv,
+                        first[2], kept, tuple(first[3:8]))
         now = _time.time()
         touched = {(r[0], r[1]) for r in rows}
         self.conn.executemany(
             "INSERT OR REPLACE INTO feed_meta (symbol, interval, last_write_epoch) "
             "VALUES (?,?,?)", [(s, i, now) for (s, i) in touched])
-
-    def _upsert_group_locked(self, rows: List[Tuple]):
-        self.conn.executemany(
-            "INSERT INTO candles "
-            "(symbol, interval, ts_epoch_ms, open, high, low, close, volume) "
-            "VALUES (?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(symbol, interval, ts_epoch_ms) DO UPDATE SET "
-            "open=excluded.open, high=excluded.high, low=excluded.low, "
-            "close=excluded.close, volume=excluded.volume "
-            "WHERE candles.open IS NULL OR candles.high IS NULL "
-            "OR candles.low IS NULL OR candles.close IS NULL OR ("
-            "coalesce(excluded.volume,0) >= coalesce(candles.volume,0) "
-            "AND excluded.high >= candles.high AND excluded.low <= candles.low "
-            "AND (excluded.open = candles.open "
-            "OR coalesce(excluded.volume,0) > coalesce(candles.volume,0) "
-            "OR excluded.high > candles.high OR excluded.low < candles.low))",
-            rows)
 
     def purge_poison(self) -> int:
         """Delete any poison rows already in the store (v3.2). Runs at feed

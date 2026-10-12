@@ -1,4 +1,4 @@
-# BACKLOG.md — v3.83
+# BACKLOG.md — v3.84
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -547,6 +547,7 @@ INVERTED — an exhausted move near a pin is a BETTER fly. Lift it once it works
 | **GATE.1** | Nothing verified that a delivery bumped its headers, wrote its changelog, appended its GENESIS row, or regenerated its maps. | r183 / dtp r225 | ◐ **PUSHED.** `day_trader_pro/tools/check_land_discipline.py` v1.0 — one tool, both repos, capability-detected (dtp has no GENESIS or maps; those report **SKIP by name**, never a silent pass). Selftest is **7 born-red cases + a positive control, 7/7**. Replayed over r162–r182: **zero false positives on correct deliveries**, and it found the real misses now filed as DOC.6/DOC.8. Optional pre-commit hook via `tools/install_land_hook.sh`. ⚠️ **It proves the BOOKKEEPING, never the truth of the edit** — see C.7. |
 | **DOC.3** | `FILE_MAP.md` and `WRITE_MAP.md` existed **twice** — repo root and `docs/`. | r182 | ◐ **PUSHED.** Both generators write to `docs/`; nothing read the root pair. They were last written at r160 and had gone stale: root `FILE_MAP.md` claimed **190 modules** against `docs/`'s **198**. Deleted per WA §28 and the SHIPPING_LOG lesson in WA §35 — *two documents claiming the same job, and whichever gets updated becomes the truth while the other rots.* |
 | **FEED.9** | 🔴 **A HISTORY REPLAY OVERWROTE COMPLETE BARS WITH A SLICE OF THEM.** `upsert_candles` was INSERT OR REPLACE, and every (re)subscribe replays history. DXFeed's history for 2026-10-08 11:50-11:55 holds only the last ~2 minutes: QQQ 5m 11:55 was V 107877 / L 752.39 live (S3 push 16:00:50Z, equal to the 1m sum) and V 33808 / L 752.57 after a replay, with the 15m and 1h bars carrying the same slice. Found by OTV4TEST (MSG-QQQ-1012-01/02), byte-identical on both fleets from different replays. | r485 | ✅ **r485.** 📊 **MEASURED** 2026-10-12, 13 boxes, 10-05..10-09, every 5m/15m/1h bar against its 1m: one vendor event, 1-2 bars per tenor on QQQ, AMZN, CRM, CVX, UNH and VIX (AMD); every other bar agrees. `candle_feed` v4.13: a stored bar is replaced only by a version with volume no lower, range no narrower, and the same open or strictly more of something (a forming bar only grows, so the live stream passes; a slice is refused); a stored NULL price always yields; the poison guard rejects NaN; refusals log per (symbol, interval). ⚠️ A vendor correction that lowers a high or a volume is refused too. Rebuilding 5m/15m/1h from 1m was rejected (the 1m can be replayed partial too). Gate `check_replay_overwrite` U1-U10, BORN RED. Critiqued by OTV4TEST (MSG-QQQ-1012-06). **Repair of the damaged bars, operator: *"Repair them"*** — box-side from the S3 live copies after the bake, not part of the commit. |
+| **FEED.9b** | 🔴 **r485 REFUSED A CORRECTION.** Its first boot replay (16:14 ET 10-12, 13 boxes) refused only DAILY bars, and on CVX the bar it kept was wrong: stored 1d L 211.02 for 10-12 against a 1m low of 213.7501 (box and S3 EOD upload; CVX_EXT 1d agrees with the 1m), refused twice. That bar is tomorrow's prior-day low. Range cannot tell a correction (stored too WIDE) from a slice (replay too NARROW). | r486 | ✅ **r486.** `candle_feed` v4.14: 1d is last-write-wins again; intraday bars with volume yield unless the new version lost more than 5% of it (the 10-08 slices lost 14-90%; a busted-print correction loses ~none); 0-volume index bars keep r485's range/open rule; the refusal log carries the kept and refused OHLCV. Critiqued by OTV4TEST (MSG-QQQ-1012-23); its "narrower AND any volume drop" clause was left out (that is what a correction looks like); the 1m-referee option was deferred. The 14 10-08 intraday bars were repaired box-side from S3 on 10-12 (operator: *"Repair them"*). Gate `check_replay_overwrite` v1.1 U11-U13, BORN RED on eed0069. Operator: Yes. |
 
 ---
 
@@ -616,6 +617,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v3.84 — 2026-10-12 — r486 — A CORRECTION IS TAKEN.** r485's first replay refused the vendor's correction of CVX's daily bar; 1d is last-write-wins again and intraday volume, not range, referees. Operator: *"Yes"*. [[FEED.9]]
 
 **v3.83 — 2026-10-12 — r485 — A REPLAY CANNOT SHRINK A BAR WE ALREADY HOLD.** Operator: *"Send it now."* DXFeed's history slice of 10-08 11:55 overwrote complete live bars on both fleets; the write now keeps the version with more tape. [[FEED.9]]
 
