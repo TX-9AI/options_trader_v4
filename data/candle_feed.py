@@ -1,5 +1,23 @@
 """
-data/candle_feed.py  v4.12
+data/candle_feed.py  v4.13
+v4.13 2026-10-12  FEED.9 — A REPLAY CANNOT SHRINK A BAR WE ALREADY HOLD.
+      upsert_candles was INSERT OR REPLACE, last write wins. Every (re)subscribe
+      replays history, and DXFeed's history for 2026-10-08 11:50-11:55 holds
+      only the last ~2 minutes: the live-pushed QQQ 5m 11:55 bar (S3,
+      V 107877, L 752.39, equal to the 1m sum) was replaced by V 33808,
+      L 752.57, and the 15m and 1h bars carry the same slice. 📊 MEASURED
+      2026-10-12 on 13 boxes, 10-05..10-09: one vendor event, 1-2 bars per
+      tenor on QQQ, AMZN, CRM, CVX, UNH and VIX (AMD); every other bar agrees
+      with its 1m. OTV4TEST found it (MSG-QQQ-1012-01/02) and saw it on its
+      own box byte-identically, from a different replay.
+      🔑 The write now keeps the version with more tape (see
+      _upsert_candles_locked). ⚠️ A vendor correction that LOWERS a high or
+      volume is refused too (rare; the accepted cost).
+      Also, per OTV4TEST's critique (MSG-QQQ-1012-06): a stored NULL price
+      always yields; the poison guard rejects NaN (it passed `<= 0` and
+      landed as NULL); refusals log per (symbol, interval), only when > 0.
+      GATE tests/check_replay_overwrite.py U1-U10.
+      ⚠️ Bars already damaged are NOT repaired here.
 v4.12 2026-09-06  r288 / DEV.11 — THE DISK GUARD MOVES OUT, to main.py's tick
       loop. v4.11 put it at the top of `run()`'s `while True`, which is the
       RECONNECT loop rather than a tick loop, so the check ran ONCE PER
@@ -162,6 +180,7 @@ import asyncio
 import logging
 import os
 import json
+import math
 import sqlite3
 import traceback
 import threading
@@ -582,15 +601,46 @@ class FeedStore:
             self._upsert_candles_locked(rows)
 
     def _upsert_candles_locked(self, rows: List[Tuple]):
-        self.conn.executemany(
-            "INSERT OR REPLACE INTO candles "
-            "(symbol, interval, ts_epoch_ms, open, high, low, close, volume) "
-            "VALUES (?,?,?,?,?,?,?,?)", rows)
+        # v4.13 FEED.9 — a stored bar is replaced only by a version that holds
+        # AT LEAST AS MUCH TAPE: volume no lower, range no narrower, and either
+        # the same open or strictly more of something. A forming bar only grows,
+        # so the live stream always passes; a history replay that carries only
+        # a slice of a closed bar is refused. Index volume is 0 (SQLite stores
+        # NaN as NULL), hence the coalesce; a stored NULL price always yields.
+        # Refusals are counted per (symbol, interval): *_EXT has two sources
+        # (the RTH guard's re-key and the EXT subscription).
+        groups: Dict[Tuple[str, str], List[Tuple]] = {}
+        for r in rows:
+            groups.setdefault((r[0], r[1]), []).append(r)
+        for (sym, iv), grp in groups.items():
+            before = self.conn.total_changes
+            self._upsert_group_locked(grp)
+            refused = len(grp) - (self.conn.total_changes - before)
+            if refused > 0:
+                logger.info("FEED.9: kept %d stored %s %s bar(s) a smaller "
+                            "version would have overwritten", refused, sym, iv)
         now = _time.time()
         touched = {(r[0], r[1]) for r in rows}
         self.conn.executemany(
             "INSERT OR REPLACE INTO feed_meta (symbol, interval, last_write_epoch) "
             "VALUES (?,?,?)", [(s, i, now) for (s, i) in touched])
+
+    def _upsert_group_locked(self, rows: List[Tuple]):
+        self.conn.executemany(
+            "INSERT INTO candles "
+            "(symbol, interval, ts_epoch_ms, open, high, low, close, volume) "
+            "VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(symbol, interval, ts_epoch_ms) DO UPDATE SET "
+            "open=excluded.open, high=excluded.high, low=excluded.low, "
+            "close=excluded.close, volume=excluded.volume "
+            "WHERE candles.open IS NULL OR candles.high IS NULL "
+            "OR candles.low IS NULL OR candles.close IS NULL OR ("
+            "coalesce(excluded.volume,0) >= coalesce(candles.volume,0) "
+            "AND excluded.high >= candles.high AND excluded.low <= candles.low "
+            "AND (excluded.open = candles.open "
+            "OR coalesce(excluded.volume,0) > coalesce(candles.volume,0) "
+            "OR excluded.high > candles.high OR excluded.low < candles.low))",
+            rows)
 
     def purge_poison(self) -> int:
         """Delete any poison rows already in the store (v3.2). Runs at feed
@@ -1072,9 +1122,12 @@ class CandleFeed:
                 "REJECTED poison candle %s %s: insane ts=%d (%.1f) — outside sane window",
                 key_sym, interval, ts_ms, ts_ms / 1000.0)
             return
-        if o <= 0 or h <= 0 or l <= 0 or cl <= 0:
+        # v4.13 FEED.9: NaN slipped past `<= 0` and landed as NULL, which no
+        # later version of the bar could ever replace.
+        if not all(math.isfinite(x) and x > 0 for x in (o, h, l, cl)):
             logger.warning(
-                "REJECTED poison candle %s %s ts=%d: non-positive price "
+                "REJECTED poison candle %s %s ts=%d: non-positive or "
+                "non-finite price "
                 "(o=%.4f h=%.4f l=%.4f c=%.4f)", key_sym, interval, ts_ms, o, h, l, cl)
             return
 

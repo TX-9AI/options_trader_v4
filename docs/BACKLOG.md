@@ -1,4 +1,4 @@
-# BACKLOG.md — v3.82
+# BACKLOG.md — v3.83
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -546,6 +546,7 @@ INVERTED — an exhausted move near a pin is a BETTER fly. Lift it once it works
 | **S3.2** | `fit_readiness.py` sourced from a box path that does not exist on control. | r184 / dtp r226 | ◐ **PUSHED.** Menu **57 produces a number on control for the first time.** `warehouse_reader` v1.7 gains `load_derived()` (CDC collapse latest-per-(symbol,_rid) by `pushed_at_utc`); `fit_readiness` v1.1 defaults to S3 with `--db` kept as the explicit on-a-box escape hatch. **One aggregator, two sources** — `collect()` takes plain dicts and cannot tell them apart, proven by a row-for-row parity assertion. Also fixed in passing: v1.0 bounded its window with NAIVE LOCAL time on a UTC box, so "2026-08-25" meant 20:00 ET on the 24th — the operator's own "a report for today run after the close fails". Both paths now bound on the ET trading day. `tests/test_fit_readiness_s3.py` v1.0, 6 cases, born red at `438c827` (AttributeError — the loader did not exist). Full dtp suite unchanged before and after. |
 | **GATE.1** | Nothing verified that a delivery bumped its headers, wrote its changelog, appended its GENESIS row, or regenerated its maps. | r183 / dtp r225 | ◐ **PUSHED.** `day_trader_pro/tools/check_land_discipline.py` v1.0 — one tool, both repos, capability-detected (dtp has no GENESIS or maps; those report **SKIP by name**, never a silent pass). Selftest is **7 born-red cases + a positive control, 7/7**. Replayed over r162–r182: **zero false positives on correct deliveries**, and it found the real misses now filed as DOC.6/DOC.8. Optional pre-commit hook via `tools/install_land_hook.sh`. ⚠️ **It proves the BOOKKEEPING, never the truth of the edit** — see C.7. |
 | **DOC.3** | `FILE_MAP.md` and `WRITE_MAP.md` existed **twice** — repo root and `docs/`. | r182 | ◐ **PUSHED.** Both generators write to `docs/`; nothing read the root pair. They were last written at r160 and had gone stale: root `FILE_MAP.md` claimed **190 modules** against `docs/`'s **198**. Deleted per WA §28 and the SHIPPING_LOG lesson in WA §35 — *two documents claiming the same job, and whichever gets updated becomes the truth while the other rots.* |
+| **FEED.9** | 🔴 **A HISTORY REPLAY OVERWROTE COMPLETE BARS WITH A SLICE OF THEM.** `upsert_candles` was INSERT OR REPLACE, and every (re)subscribe replays history. DXFeed's history for 2026-10-08 11:50-11:55 holds only the last ~2 minutes: QQQ 5m 11:55 was V 107877 / L 752.39 live (S3 push 16:00:50Z, equal to the 1m sum) and V 33808 / L 752.57 after a replay, with the 15m and 1h bars carrying the same slice. Found by OTV4TEST (MSG-QQQ-1012-01/02), byte-identical on both fleets from different replays. | r485 | ✅ **r485.** 📊 **MEASURED** 2026-10-12, 13 boxes, 10-05..10-09, every 5m/15m/1h bar against its 1m: one vendor event, 1-2 bars per tenor on QQQ, AMZN, CRM, CVX, UNH and VIX (AMD); every other bar agrees. `candle_feed` v4.13: a stored bar is replaced only by a version with volume no lower, range no narrower, and the same open or strictly more of something (a forming bar only grows, so the live stream passes; a slice is refused); a stored NULL price always yields; the poison guard rejects NaN; refusals log per (symbol, interval). ⚠️ A vendor correction that lowers a high or a volume is refused too. Rebuilding 5m/15m/1h from 1m was rejected (the 1m can be replayed partial too). Gate `check_replay_overwrite` U1-U10, BORN RED. Critiqued by OTV4TEST (MSG-QQQ-1012-06). **Repair of the damaged bars, operator: *"Repair them"*** — box-side from the S3 live copies after the bake, not part of the commit. |
 
 ---
 
@@ -615,6 +616,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v3.83 — 2026-10-12 — r485 — A REPLAY CANNOT SHRINK A BAR WE ALREADY HOLD.** Operator: *"Send it now."* DXFeed's history slice of 10-08 11:55 overwrote complete live bars on both fleets; the write now keeps the version with more tape. [[FEED.9]]
 
 **v3.82 — 2026-10-11 — r484 — THE BUTTERFLY OPENS AT 13:00.** Operator: *"Move the flies to 1300."* Entry time was the one monotonic variable on 38 mainline flies; stop and wing width were measured and left alone. [[FEE.4]]
 
