@@ -191,7 +191,7 @@ Change these with the most care; a break here reaches everything downstream.
 - **called by:** `main.py`, `tests/check_audit_20260823.py`, `tests/check_db_handles.py`, `tests/check_feed_always_on.py`, `tests/check_pin_bounded.py`, `tests/check_spxw_only.py`
 
 ### `data/candle_feed.py`
-- **calls:** `config.py`, `data/tasty_client.py`
+- **calls:** `config.py`, `data/tasty_client.py`, `utils/__init__.py`, `utils/market_calendar.py`
 - **called by:** `analysis/tape_at_level.py`, `data/candle_logger.py`, `data/market_data.py`, `derived/counterfactual.py`, `derived/surface.py`, `tests/check_audit_20260823.py`, `tests/check_bar_referee.py`, `tests/check_ext_polarity.py`, `tests/check_feed_always_on.py`, `tests/check_replay_overwrite.py`
 
 ### `data/candle_logger.py`
@@ -1392,7 +1392,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/__init__.py`
 - **calls:** (none)
-- **called by:** `main.py`, `tests/check_half_day.py`, `tests/check_holiday_aware.py`, `tests/check_market_calendar.py`, `utils/time_utils.py`
+- **called by:** `data/candle_feed.py`, `main.py`, `tests/check_half_day.py`, `tests/check_holiday_aware.py`, `tests/check_market_calendar.py`, `utils/time_utils.py`
 
 ### `utils/blindness_latch.py`
 - **calls:** (none)
@@ -1404,7 +1404,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/market_calendar.py`
 - **calls:** (none)
-- **called by:** `shadow/trading_day.py`, `tests/check_half_day.py`, `tests/check_holiday_aware.py`, `tests/check_market_calendar.py`, `tools/emergency_watchdog.py`, `utils/time_utils.py`
+- **called by:** `data/candle_feed.py`, `shadow/trading_day.py`, `tests/check_half_day.py`, `tests/check_holiday_aware.py`, `tests/check_market_calendar.py`, `tools/emergency_watchdog.py`, `utils/time_utils.py`
 
 ### `utils/math_utils.py`
 - **calls:** (none)
