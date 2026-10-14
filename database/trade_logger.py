@@ -1,5 +1,15 @@
 """
-database/trade_logger.py  v4.17
+database/trade_logger.py  v4.18
+v4.18  2026-10-14  r490 / SWEEP.13 — A LOSING SWEEP SPENDS ITS LEVEL, FOR REAL. The r154/r167
+      lock had never armed: log_exit read `is_credit_vertical`, a column the table
+      has never had, so every losing close raised `no such column` into its own
+      except; and `pool_price` was in the CREATE TABLE but not in _MIGRATION_ADDS,
+      so no existing trades.db carried it. pool_price is now migrated; the exit
+      keys by spent_key_of() (price for a closed-session level, name only for a
+      moving tine); a stop-out with no level says so; _reseed_spent_levels()
+      rebuilds today's spent levels from this table at boot, so a restart no
+      longer re-arms them. SPX 2026-10-14: three sweeps on NY Low (R3) 7731.26
+      (the 10-08 NY low), -$545. Pinned by tests/check_sweep_spent_level.py.
 v4.17  2026-10-04  r467 / B3 — new column live_exit_state (TEXT, NULL unless a live
        close is part-filled or working): the exit engine keeps the filled
        portions and the working order id here so a restart resumes the remainder.
@@ -352,6 +362,33 @@ def is_credit_position(record) -> bool:
     return str(record.get("strategy") or "") == "IronCondorStrategy"
 
 
+def _is_spent_strategy(strategy: str) -> bool:
+    """r167 — the strategies whose losing close spends the level it sold at."""
+    return "Sweep" in strategy or "TrendCredit" in strategy
+
+
+def spent_key_of(row) -> Optional[tuple]:
+    """r490 — (symbol, side, level key) for a credit vertical's spent lock, or
+    None when the row carries no level. ONE derivation for log_exit and the
+    boot reseed, so the two can never key the same trade differently.
+
+    A level from a CLOSED session (a ladder rung such as "NY Low (R3)") has a
+    FIXED price, so it is keyed by price: the NAME is not an identity, because
+    several rungs share a label and the rung number renumbers when one breaks.
+    Only a MOVING level (a fork tine, r163) is keyed by name, as the sweep plan
+    keys it.
+    """
+    name = row.get("swept_level_name") or ""
+    if "tine" in name:
+        from strategy.sweep_credit_spread import _name_key
+        pool = _name_key(name)
+    else:
+        pool = row.get("pool_price") or row.get("underlying_stop")
+    if not pool:
+        return None
+    return (row.get("symbol") or "", row.get("option_side") or "", float(pool))
+
+
 def make_record(**kwargs) -> TradeRecord:
     r = TradeRecord()
     r.update(kwargs)
@@ -527,6 +564,47 @@ class TradeLogger:
         # in the schema, so legacy rows count as paper (safe: live sees none).
         self._mode_flag = 1 if paper_trading else 0
         self._ensure_db()
+        self._reseed_spent_levels()
+
+    def _reseed_spent_levels(self) -> None:
+        """r490 — a level spent today stays spent across a restart.
+
+        `_SPENT` lives in process memory, so every mid-session restart (a bake,
+        a crash-loop) re-armed every level that had already stopped out. The
+        record of those stop-outs is in this table, so the lock is rebuilt from
+        it: today's (ET) losing closes of this mode, keyed exactly as log_exit
+        keys them. Never raises — this runs at boot, and a lock that cannot be
+        rebuilt must not stop the bot; it says so instead.
+        """
+        try:
+            today = datetime.now(ET).strftime("%Y-%m-%d")
+            with self._db() as conn:
+                rows = conn.execute(
+                    "SELECT trade_id, strategy, symbol, option_side, pool_price, "
+                    "underlying_stop, swept_level_name, exit_time, exit_reason, "
+                    "pnl_usd FROM trades WHERE status='closed' AND pnl_usd < 0 "
+                    "AND paper_trade=? AND exit_time IS NOT NULL",
+                    (self._mode_flag,)).fetchall()
+            n = 0
+            for r in rows:
+                if not _is_spent_strategy(r["strategy"] or ""):
+                    continue
+                if self._et_date(r["exit_time"] or "") != today:
+                    continue
+                k = spent_key_of(dict(r))
+                if k is None:
+                    continue
+                from strategy.sweep_credit_spread import mark_spent
+                mark_spent(*k, f"stopped out {r['exit_reason']} "
+                               f"pnl=${float(r['pnl_usd']):+.2f} (from trades.db)")
+                n += 1
+            if n:
+                logger.info("[sweep_cs] %d level(s) spent today re-armed as "
+                            "SPENT from trades.db", n)
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning("[sweep_cs] could not rebuild today's spent levels "
+                           "from trades.db (%s) — a level that stopped out "
+                           "before this restart can be sold again", exc)
 
     def _ensure_db(self):
         import os
@@ -622,6 +700,11 @@ class TradeLogger:
             # "order_id", "last_order_id"}. NULL otherwise. Written only by
             # exit_engine._exit_state_save.
             ("live_exit_state",        "TEXT"),
+            # 🔴 r490 — the level a credit vertical was sold against. It has
+            # been in the CREATE TABLE since r154, but a CREATE TABLE IF NOT
+            # EXISTS never reaches an existing table, so no box ever had it and
+            # the spent-level lock could not key a single stop-out.
+            ("pool_price",             "REAL"),
         ]
         for col, definition in _MIGRATION_ADDS:
             try:
@@ -933,24 +1016,31 @@ class TradeLogger:
                         logger.warning("[spent] could NOT finish the runaway "
                                        "break (%s) — another entry on this "
                                        "break is still possible", _fbexc)
-                _is_cv = bool(self._get_field(trade_id, "is_credit_vertical")) \
-                    or "Sweep" in _strat or "TrendCredit" in _strat
-                if _is_cv:
-                    _pool = self._get_field(trade_id, "pool_price") \
-                        or self._get_field(trade_id, "underlying_stop")
-                    _side = self._get_field(trade_id, "option_side") or ""
-                    _sym  = self._get_field(trade_id, "symbol") or ""
-                    # r163 — a MOVING level (a fork tine) is keyed by NAME, since
-                    # its price drifts every bar; the sweep plan reads the same key.
-                    _lvl_name = self._get_field(trade_id, "swept_level_name") or ""
-                    if "tine" in _lvl_name:
-                        from strategy.sweep_credit_spread import _name_key
-                        _pool = _name_key(_lvl_name)
-                    if _pool:
+                # 🔴 r490 — THIS LOCK HAD NEVER ARMED. It read
+                # `is_credit_vertical`, a column the trades table has never had,
+                # so every losing close raised `no such column` into the except
+                # below; and `pool_price` was in the CREATE TABLE but not in
+                # _MIGRATION_ADDS, so no existing trades.db had it (the insert
+                # dropped it with a [schema] warning) and the fallback,
+                # underlying_stop, is 0.0 on a sweep. SPX 2026-10-14: three
+                # sweeps on NY Low (R3) 7731.26 (the 10-08 NY low) in 30
+                # minutes, the third one second after the second stopped, -$545.
+                if _is_spent_strategy(_strat):
+                    _row = {f: self._get_field(trade_id, f) for f in
+                            ("symbol", "option_side", "pool_price",
+                             "underlying_stop", "swept_level_name")}
+                    _k = spent_key_of(_row)
+                    if _k is None:
+                        logger.warning(
+                            "[sweep_cs] %s %s stopped out but carries NO level "
+                            "price (pool_price=%r, swept_level_name=%r) — the "
+                            "level CANNOT be spent and can be sold again",
+                            _strat, trade_id[:8], _row.get("pool_price"),
+                            _row.get("swept_level_name"))
+                    else:
                         from strategy.sweep_credit_spread import mark_spent
-                        mark_spent(_sym, _side, float(_pool),
-                                   f"stopped out {exit_reason} "
-                                   f"pnl=${float(pnl_usd):+.2f}")
+                        mark_spent(*_k, f"stopped out {exit_reason} "
+                                        f"pnl=${float(pnl_usd):+.2f}")
         except Exception as exc:                               # noqa: BLE001
             # ⚠️ NEVER RAISE INTO THE CLOSE PATH — but say so. A silent failure
             # here means the level re-arms and nobody knows why.

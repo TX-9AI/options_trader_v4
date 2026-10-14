@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-tests/check_management_plan.py  v1.4
+tests/check_management_plan.py  v1.5
+v1.5  2026-10-14  r490 — D12b re-pinned to spent_key_of(): TCS still keys on underlying_stop
+      (its ORB bound); the exit reads it into the row instead of field-by-field.
 v1.4  2026-09-09  r324 — the `esrc` undefined-name (a dir() guard) removed; pyflakes-clean.  (2026-08-27)
 v1.3  r169: the butterfly rides to the 15:45 flatten or the 25% floor — D12
       re-pinned (above the old target -> HOLD), D12a the floor, D12c the
@@ -307,7 +309,8 @@ def main():
           "target_hit" not in bfs and "butterfly_max_hold" not in bfs and "stop_hit" in bfs)
     tlsrc = open(os.path.join(_root, "database", "trade_logger.py"), encoding="utf-8").read()
     check("D12b a losing exit on ANY lone credit vertical marks its level spent (TCS keys on the bound)",
-          "_is_cv" in tlsrc and 'self._get_field(trade_id, "underlying_stop")' in tlsrc)
+          "_is_spent_strategy(_strat)" in tlsrc and '"TrendCredit" in strategy' in tlsrc
+          and 'row.get("underlying_stop")' in tlsrc and '"underlying_stop", "swept_level_name")' in tlsrc)
 
     esrc = open(os.path.join(_root, "execution", "exit_engine.py"), encoding="utf-8").read()
     ecode = "\n".join(l for l in esrc.split("\n") if not l.strip().startswith("#"))

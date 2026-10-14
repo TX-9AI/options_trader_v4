@@ -1,5 +1,9 @@
 """
-main.py  v4.58
+main.py  v4.59
+v4.59  2026-10-14  r490 / SWEEP.13 — THE SWEEP'S INTERACTION LATCH IS SET WHERE SWEEPS
+      EXECUTE. r378 put mark_event_fired_key in entry_engine.enter(); sweeps run
+      through _execute_condor_leg, which never called it, so `event_fresh` was
+      never armed by a real entry. Latched here after the fill, before the record.
 v4.58  2026-10-11  r482 / EXIT.5 — THE WAIT BETWEEN TICKS WATCHES THE STOPS. The loop slept
       `POLL_INTERVAL_SECONDS - elapsed`, so a premium stop was checked every 15 s
       and the fill was the first 15-s sample under it: 200 mainline debit stop
@@ -2929,6 +2933,20 @@ def _execute_condor_leg(signal: "OptionsSignal", state: BotState,
         relaxed_entry    = int(getattr(signal, 'relaxed_entry', 0) or 0),   # AUDIT F4 — same drop as entry_engine
         status           = "open",
     )
+    # 🔴 r490 — THE SWEEP'S INTERACTION IS SPENT AT THE FILL, ON THIS PATH TOO.
+    # r378 sited the latch in entry_engine.enter(), but every sweep is a credit
+    # vertical and executes HERE, so `event_fresh` had never been armed by a
+    # real entry (SPX 2026-10-14: no "INTERACTION SPENT" line in three
+    # entries). Same siting as entry_engine: after the fill, before the record.
+    _sek = str(getattr(signal, "sweep_event_key", "") or "")
+    if _sek:
+        try:
+            from strategy.sweep_credit_spread import mark_event_fired_key
+            mark_event_fired_key(_sek, f"filled {contracts} @ {fill_credit}")
+        except Exception as _sexc:                             # noqa: BLE001
+            logger.warning("[%s] could NOT latch the sweep interaction %s "
+                           "(%s) — this interaction can fire again", mode,
+                           _sek, _sexc)
     get_trade_logger().log_entry(record)
     # v5.1 — a condor leg is "neutral": no in-favor side, so no trail anchor.
     # The zone inventory is still captured — it bounds where the underlying had
