@@ -1,5 +1,12 @@
 """
-analysis/orb_engine.py  v4.12
+analysis/orb_engine.py  v4.13
+v4.13  2026-10-15  r491 / RUN.8 — THE RUNAWAY GETS ITS MOVE WHEN NO ORB TRADE EXISTS. A
+      confirmed break+retest sets OPEN_* with or without an ORB trade; the 50%
+      acceptance stood down only ARMED_*, and OPEN_* waited for a position close
+      that, with ORB paused (r471), never comes. Runaway was never asked (QQQ
+      10-06, 10-14, 10-15). At acceptance, OPEN_* with no open ORBStrategy trade
+      now stands down to INVALIDATED / "runaway"; a live ORB position is left to
+      its close as before. Pinned by tests/check_orb_rearm_zone.py Z4d/Z4e/Z4f.
 v4.12  2026-10-02  r456 (LADR.1, shared with OTV4TEST r185) — THE ORB CARRIES THE RAW
       100% TARGET AS ITS `target_strike`; THE CHAIN SNAP PICKS THE CONTRACT. It
       was orb_strike_selection(..., STRIKE_INCREMENT), pre-rounded on one table
@@ -531,6 +538,35 @@ class ORBData:
                                      # penetration into the range, in PX
                                      # (long: orb_high - low; short: high - orb_low).
                                      # Measured only — gates nothing.
+
+
+def _orb_position_open(db_path: Optional[str] = None) -> bool:
+    """r491 — is an ORBStrategy trade actually open (this mode)?
+
+    READ-ONLY against trades.db: a box with no trades.db has no position, and
+    this never creates one. ⚠️ ANY OTHER FAILURE ANSWERS True — the engine then
+    leaves an OPEN state to `notify_position_closed`, as it always did, and
+    says so: a read failure must never stand down a live ORB position.
+    """
+    import sqlite3
+    from config import DB_PATH, PAPER_TRADING
+    path = db_path or DB_PATH
+    if not os.path.exists(path):
+        return False
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            n = con.execute(
+                "SELECT COUNT(*) FROM trades WHERE status='open' "
+                "AND strategy='ORBStrategy' AND COALESCE(paper_trade,1)=?",
+                (1 if PAPER_TRADING else 0,)).fetchone()[0]
+        finally:
+            con.close()
+        return n > 0
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("ORB: could not read open trades (%s) — an OPEN state "
+                       "is left to its position's close", exc)
+        return True
 
 
 class ORBEngine:
@@ -1422,6 +1458,23 @@ class ORBEngine:
             d.invalidation_reason = "runaway"
             logger.info("ORB: was ARMED when the 50%% was accepted — standing "
                         "down, the runaway owns this move")
+        # 🔴 r491 / RUN.8 — AN OPEN STATE WITH NO ORB TRADE IS A PHANTOM. A
+        # confirmed break+retest sets OPEN_* here whether or not ORB took the
+        # trade, and only `notify_position_closed` (a real close) ever handed
+        # the move over. With ORBStrategy paused since r471 no trade opens, so
+        # nothing ever closed: the engine sat OPEN until 11:00 with
+        # invalidation_reason empty and main.py never asked the runaway.
+        # QQQ 2026-10-15: CONFIRMED LONG 09:42, 50% 720.62 ACCEPTED 10:11,
+        # "ORB has not run away" every tick, 716 -> 730 with no trade (same on
+        # 10-06 and 10-14). Operator: "That's a defect, not a tuning problem."
+        # ⚠️ ASKED OF THE TRADE RECORD, NOT OF THE PAUSE LIST: a LIVE ORB
+        # position is still left to its own close, exactly as before.
+        elif (d.state in (ORBState.OPEN_LONG, ORBState.OPEN_SHORT)
+              and not _orb_position_open()):
+            d.state = ORBState.INVALIDATED
+            d.invalidation_reason = "runaway"
+            logger.info("ORB: OPEN with NO ORB trade when the 50%% was accepted "
+                        "— standing down, the runaway owns this move")
 
     def _check_for_break(self, df_1m: pd.DataFrame):
         d = self._data

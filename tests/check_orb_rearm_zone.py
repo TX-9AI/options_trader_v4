@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_orb_rearm_zone.py  v1.6
+tests/check_orb_rearm_zone.py  v1.7
+v1.7  2026-10-15  r491 / RUN.8 — Z4d now states its premise (an ORB trade IS open);
+      Z4e-Z4e3: OPEN with no ORB trade stands down to INVALIDATED/"runaway" at
+      the 50% acceptance and keeps its direction; Z4f-Z4f4 pin the read-only
+      trades.db query. The suite reads a scratch path, never a box's trades.db.
 v1.6  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v1.5  2026-09-04  r235 — Z1d RE-DERIVED. It asserted `order_placed` is
       CLEARED on the armed path — r227's fix against a GLOBAL latch, and the
@@ -106,6 +110,15 @@ def main():
     from zoneinfo import ZoneInfo as _ZI
     _FROZEN = _dt(2026, 9, 3, 10, 15, tzinfo=_ZI("America/New_York"))
     OE.now_et = lambda: _FROZEN
+    # r491 — the stand-down now asks trades.db whether an ORB trade is open.
+    # Pinned to a scratch path that does not exist (no trade open) so no check
+    # here reads, or creates, the trades.db of whatever box runs the suite.
+    import tempfile as _tf
+    _SCRATCH = _tf.mkdtemp(prefix="check_orb_rearm_zone_")
+    _real_open = OE._orb_position_open if hasattr(OE, "_orb_position_open") else None
+    if _real_open is not None:
+        OE._orb_position_open = lambda db_path=None: _real_open(
+            os.path.join(_SCRATCH, "absent.db"))
 
     def armed_long_engine():
         """An engine mid-setup: broke 227.43 long, impulse candle recorded."""
@@ -287,11 +300,64 @@ def main():
 
     # ⚠️ BUT A LIVE POSITION IS NEVER TOUCHED. The exit engine manages an open
     # trade; standing the ENGINE down must not reach into one that is running.
-    e6, _ = armed_long_engine()          # state is OPEN_LONG
+    # r491 — "live" is now a fact read from trades.db, so Z4d says it is.
+    _saved = OE._orb_position_open if hasattr(OE, "_orb_position_open") else None
+    OE._orb_position_open = lambda db_path=None: True
+    e6, _ = armed_long_engine()          # state is OPEN_LONG, ORB trade open
     e6._update_break_latches(_bars(228.40))
     e6._update_break_latches(_bars(228.50))
-    check("Z4d a LIVE position is left alone by the stand-down",
+    check("Z4d a LIVE ORB position is left alone by the stand-down",
           e6._data.state == OE.ORBState.OPEN_LONG, e6._data.state)
+    if _saved is not None:
+        OE._orb_position_open = _saved
+
+    # ── Z4e — r491 / RUN.8: OPEN WITH NO ORB TRADE HANDS OVER AT ONCE ───
+    # 🔴 QQQ 2026-10-15: CONFIRMED LONG 09:42 set OPEN_LONG with ORB paused, so
+    # no trade existed; the 50% was ACCEPTED at 10:11 and the engine stayed
+    # OPEN, invalidation_reason empty, waiting for a close that never comes.
+    # main.py asks the runaway only on invalidation_reason == "runaway", so it
+    # was never asked on a 716 -> 730 day (also 10-06, 10-14).
+    e7, _ = armed_long_engine()          # OPEN_LONG, and NO ORB trade open
+    e7._update_break_latches(_bars(228.40))
+    e7._update_break_latches(_bars(228.50))
+    check("Z4e OPEN with NO ORB trade stands down to INVALIDATED/'runaway' on acceptance",
+          e7._data.state == OE.ORBState.INVALIDATED
+          and e7._data.invalidation_reason == "runaway",
+          f"{e7._data.state}/{e7._data.invalidation_reason}")
+    check("Z4e2 and keeps its break direction, which the runaway reads",
+          str(e7._data.break_direction).lower() == "long", e7._data.break_direction)
+    e7.notify_position_closed()          # the runaway's mark_triggered path
+    check("Z4e3 a later close notification leaves the hand-over intact",
+          e7._data.state == OE.ORBState.INVALIDATED
+          and e7._data.invalidation_reason == "runaway",
+          f"{e7._data.state}/{e7._data.invalidation_reason}")
+
+    # ── Z4f — THE "IS AN ORB TRADE OPEN" READ, ON A REAL trades.db ──────
+    import sqlite3 as _sq
+    _f = getattr(OE, "_orb_position_open", None)
+    _db = os.path.join(_SCRATCH, "z4f.db")
+    _con = _sq.connect(_db)
+    _con.execute("CREATE TABLE trades (trade_id TEXT, strategy TEXT, "
+                 "status TEXT, paper_trade INTEGER)")
+    _con.execute("INSERT INTO trades VALUES ('r1','RunawayContinuation','open',1)")
+    _con.execute("INSERT INTO trades VALUES ('o0','ORBStrategy','closed',1)")
+    _con.commit()
+    _ok_none = _real_open is not None and _real_open(_db) is False
+    _con.execute("INSERT INTO trades VALUES ('o1','ORBStrategy','open',1)")
+    _con.commit()
+    _con.close()
+    _ok_open = _real_open is not None and _real_open(_db) is True
+    _ok_absent = (_real_open is not None
+                  and _real_open(os.path.join(_SCRATCH, "nope.db")) is False
+                  and not os.path.exists(os.path.join(_SCRATCH, "nope.db")))
+    check("Z4f no open ORB trade -> False (a closed ORB row and an open runaway do not count)",
+          _ok_none)
+    check("Z4f2 an open ORBStrategy row -> True", _ok_open)
+    check("Z4f3 no trades.db -> False, and none is created", _ok_absent)
+    _bad = os.path.join(_SCRATCH, "bad.db")
+    open(_bad, "w").write("not a database")
+    check("Z4f4 an unreadable trades.db -> True (the old behaviour: left to its close)",
+          _real_open is not None and _real_open(_bad) is True)
 
     # ── Z5 — ACCEPTANCE IS A LATCH ──────────────────────────────────────
     # ⚠️ Once the runaway owns the move it keeps it for the session, even if
