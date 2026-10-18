@@ -1,5 +1,14 @@
 """
-strategy/runaway_continuation.py  v4.8
+strategy/runaway_continuation.py  v4.9
+v4.9  2026-10-17  r492 / RUN.9 — THE FALLBACK STRIKE IS THE FIRST OTM OR NOTHING.
+      gamma_leverage_pick's "else the first OTM strike" took the nearest SURVIVOR
+      of the filters: when every near strike failed r174's spread floor it reached
+      out to whatever passed (UNH 2026-10-16 09:42: 380P at 0.07, delta 0.02, 16.5
+      out on a 5.23 run, x161, stopped in 27 s, -$322). The first OTM strike is now
+      the chain's own, found before any filter; if it is not a candidate, nothing is
+      picked and the plan DECLINEs naming the nearest strike that did pass. Inside
+      the run nothing changes. The two early returns now give 4 values like the
+      rest. Operator, 2026-10-17: "Yes, both trees". Critique: OTV4TEST MSG-QQQ-1017-09.
 v4.8  2026-09-08  r321 — DOCTRINE HEADER CORRECTED, NO BEHAVIOUR CHANGE. The
       GATE CATEGORIES block still read *"SELECTION — relaxed. cutoff 11:30 ->
       14:00"*, which r176 removed on 2026-08-29. Code and `criteria.py` were
@@ -306,7 +315,7 @@ def finish_break(direction: str, boundary) -> None:
 
 
 def gamma_leverage_pick(contracts, direction: str, spot: float, run: float,
-                        floor_pct: float = 0.20):
+                        floor_pct: float = 0.20, note: Optional[list] = None):
     """THE STRIKE GAMMA PAYS MOST OVER THE MOVE'S OWN INTENSITY.
 
     Operator, 2026-08-27: *"Make gamma do the heavy lifting. Try to get just
@@ -322,7 +331,16 @@ def gamma_leverage_pick(contracts, direction: str, spot: float, run: float,
     (strike − spot ≤ run, "just enough OTM"); if the increments leave nothing
     inside that band, the first OTM strike. Ties go to the nearer strike.
 
-    Returns (contract, score, candidates_considered) or (None, 0.0, 0).
+    r492 / RUN.9 — "the first OTM strike" is the nearest OTM strike OF THE
+    CHAIN, found before any filter. If that strike is not itself a candidate
+    (it fails the premium, delta or spread floor) there is NO fallback: the
+    nearest SURVIVOR can sit many strikes out, past every strike this function
+    just ruled untradeable (UNH 2026-10-16: 380P at 0.07, delta 0.02, 16.5 out
+    on a 5.23 run, x161, -$322 in 27 s). `note`, when given, receives the
+    refusal's reason. Selection inside the run is unchanged.
+
+    Returns (contract, score, candidates_considered, spread_rejected), or
+    (None, 0.0, n, spread_rejected) when nothing is picked.
     ⚠️ Reads only fields that exist on OptionContract: strike, mark, ask,
     delta, gamma (check_attr_fidelity, r150).
     """
@@ -330,11 +348,12 @@ def gamma_leverage_pick(contracts, direction: str, spot: float, run: float,
         spot = float(spot)
         run = abs(float(run))
     except (TypeError, ValueError):
-        return None, 0.0, 0
+        return None, 0.0, 0, 0
     if run <= 0:
-        return None, 0.0, 0
+        return None, 0.0, 0, 0
     cands = []
     spread_rejected = 0
+    first_otm, first_dist = None, None      # r492 — the chain's own nearest OTM, unfiltered
     for c in contracts or []:
         try:
             k = float(c.strike)
@@ -345,6 +364,8 @@ def gamma_leverage_pick(contracts, direction: str, spot: float, run: float,
         except (TypeError, ValueError, AttributeError):
             continue
         otm = (k > spot) if direction == "long" else (k < spot)
+        if otm and (first_dist is None or abs(k - spot) < first_dist):
+            first_otm, first_dist = c, abs(k - spot)
         if not otm or prem <= 0.05 or d <= 0:
             continue
         # r174 — THE FLOOR MUST CLEAR THE SPREAD. A stop narrower than the
@@ -359,7 +380,20 @@ def gamma_leverage_pick(contracts, direction: str, spot: float, run: float,
     if not cands:
         return None, 0.0, 0, spread_rejected
     inside = [x for x in cands if x[2] <= run]
-    pool = inside if inside else [min(cands, key=lambda x: x[2])]
+    if inside:
+        pool = inside
+    else:
+        # r492 / RUN.9 — the fallback is the chain's first OTM strike or nothing.
+        pool = [x for x in cands if x[3] is first_otm]
+        if not pool:
+            near = min(cands, key=lambda x: x[2])
+            if note is not None:
+                note.append(
+                    f"no strike within the {run:.2f} run clears its floors; the first OTM "
+                    f"{_n(getattr(first_otm, 'strike', None))} does not either, and the "
+                    f"nearest that does is {_n(getattr(near[3], 'strike', None))} "
+                    f"({near[2]:.2f} out) - not reachable, not traded")
+            return None, 0.0, len(cands), spread_rejected
     best = max(pool, key=lambda x: (x[0], x[1]))
     return best[3], best[0], len(cands), spread_rejected
 
@@ -521,11 +555,15 @@ class RunawayContinuationStrategy:
             prep.starved.append("chain")
         else:
             contracts = chain.calls if side == "call" else chain.puts
+            why_none: list = []
             c, lev, n, spread_rej = gamma_leverage_pick(
-                contracts, direction, price_now, run, floor_pct=self.MAX_LOSS_PCT)
+                contracts, direction, price_now, run, floor_pct=self.MAX_LOSS_PCT,
+                note=why_none)
             t.check("considered", n, n > 0)
             t.check("spread_rejected", spread_rej, None)
-            if c is None:
+            if c is None and why_none:                     # r492 / RUN.9
+                prep.structural.append(("contract", f"{side}: {why_none[0]}"))
+            elif c is None:
                 prep.structural.append(("contract",
                     f"no {side} whose {self.MAX_LOSS_PCT:.0%} floor clears its own bid/ask "
                     f"spread ({spread_rej} rejected for spread; a stop inside the spread is "
