@@ -1,5 +1,15 @@
 """
-execution/exit_engine.py  v4.22
+execution/exit_engine.py  v4.23
+v4.23 2026-10-18  r493 / EXIT.6 — A RESTART KEEPS THE LOCKED TRAIL. _seed_trail_from_record
+      re-armed _trail_active only for ADOPTED, so for every other strategy (on mainline:
+      Runaway, orb_trail_stop) the first tick at or above the activation level took
+      _update_trail's first-activation branch and wrote entry x (1 + TRAIL_LOCK_PCT) over
+      the recovered level, which position_manager then persisted. The seed now arms the
+      flag wherever the uninterrupted engine would be armed (_trail_was_armed: the
+      persisted peak reached trail_activation; with no peak, a level at or above the
+      activation seed); a pre-activation FVG level stays un-armed, as it would have
+      been. The uninterrupted path is unchanged. Found
+      by OTV4TEST's 10-18 audit (MSG-QQQ-1018-04). Operator, 10-18: "Yes, please".
 v4.22 2026-10-11  r482 / EXIT.5 — watched_stop(record): the ONE definition of the
       premium level a single-leg debit position is stopped at (the trail when
       armed, else the floor, the same fallback this engine uses). main's 2-second
@@ -998,8 +1008,9 @@ class ExitEngine:
         (record['trail_stop'], written by position_manager v3.1) and this
         engine instance has no in-memory trail for it yet (i.e. we restarted
         mid-position), adopt the persisted level so the locked profit floor
-        survives the restart. Adopted longs also re-arm their persistent-trail
-        flag, since their trail block is gated on _trail_active."""
+        survives the restart. r493: any strategy whose trail was armed re-arms
+        the flag (it was ADOPTED only, so the shared _update_trail re-seeded
+        below the recovered level on its first armed tick)."""
         trade_id = record.get("trade_id", "")
         if not trade_id or trade_id in self._trail_stops:
             return
@@ -1009,7 +1020,13 @@ class ExitEngine:
             return
         if persisted > 0:
             self._trail_stops[trade_id] = persisted
-            if record.get("strategy", "") == "ADOPTED":
+            # r493 / EXIT.6 — re-arm wherever the uninterrupted engine WOULD be
+            # armed, not only for ADOPTED: an un-armed flag sent _update_trail
+            # down its first-activation branch, which wrote entry x (1 +
+            # TRAIL_LOCK_PCT) over the recovered level. Armed = the persisted
+            # peak reached trail_activation; with no peak on the row, a level
+            # at or above the activation seed can only be an armed trail's.
+            if record.get("strategy", "") == "ADOPTED" or _trail_was_armed(record, persisted):
                 self._trail_active[trade_id] = True
             logger.info(
                 f"Trail recovered from DB: {trade_id[:8]} trail=${persisted:.2f}"
@@ -3395,6 +3412,29 @@ _exit_engine: Optional[ExitEngine] = None
 # lives where a module-level function belongs: BELOW the class it must not
 # bisect. tests/check_exit_executes.py drives evaluate() so this class cannot
 # fall apart silently again.
+def _trail_was_armed(record, persisted: float) -> bool:
+    """r493 / EXIT.6 — would an engine that never restarted hold this trade's
+    percentage trail ARMED? _update_trail arms it the first tick the mark is at
+    or above `trail_activation`, so the persisted peak (mfe_premium /
+    max_premium_seen, both written while the position lives) answers it. A
+    level below the activation seed with no peak is the FVG trail's alone
+    (it arms earlier, at +20%), and the uninterrupted engine would still seed
+    entry x (1 + TRAIL_LOCK_PCT) at activation, so it is left un-armed."""
+    def _f(v):
+        try:
+            v = float(v)
+            return v if v == v and v > 0 else None
+        except (TypeError, ValueError):
+            return None
+    act = _f(record.get("trail_activation"))
+    peaks = [p for p in (_f(record.get("mfe_premium")), _f(record.get("max_premium_seen")))
+             if p is not None]
+    if act is not None and peaks:
+        return max(peaks) >= act
+    entry = _f(record.get("entry_premium"))
+    return entry is not None and persisted >= entry * (1 + TRAIL_LOCK_PCT)
+
+
 def _track_excursion(record, current_premium: float) -> None:
     """Record the best and worst mark this position has seen, and WHEN.
 
