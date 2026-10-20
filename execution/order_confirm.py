@@ -1,5 +1,7 @@
 """
-execution/order_confirm.py  v4.2
+execution/order_confirm.py  v4.3
+v4.3  2026-10-20  r494 / WDOG.3 (port of OTV4TEST r295 LIVE.2) — confirm_order_fill touches the
+      heartbeat on every broker poll (utils.heartbeat.touch).
 v4.2  2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
       13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
       a LIVE box could place and close nothing. Paper unaffected. Found by
@@ -49,6 +51,7 @@ from tastytrade.order import OrderStatus
 from data.tasty_client import sdk_result   # B0
 
 import config as _cfg
+from utils.heartbeat import touch as _hb_touch   # r494 (WDOG.3): never raises
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +149,7 @@ def confirm_order_fill(session, account, placed, basis: Basis,
     cancel_attempts  = 0
 
     while True:
+        _hb_touch("entry poll")              # r494 (WDOG.3): the watchdog must not read a posting bot as hung
         try:
             placed = sdk_result(account.get_order(session, order_id))   # B0
         except Exception as e:

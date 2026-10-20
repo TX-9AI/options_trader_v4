@@ -1,5 +1,8 @@
 """
-main.py  v4.59
+main.py  v4.60
+v4.60  2026-10-20  r494 / WDOG.3 (port of OTV4TEST r295 LIVE.2) - _touch_heartbeat delegates to
+      utils.heartbeat.touch (same file, same format); the live poll loops and flatten_all touch it
+      too, so a serial close ladder never reads as a hung bot to the emergency watchdog.
 v4.59  2026-10-14  r490 / SWEEP.13 — THE SWEEP'S INTERACTION LATCH IS SET WHERE SWEEPS
       EXECUTE. r378 put mark_event_fired_key in entry_engine.enter(); sweeps run
       through _execute_condor_leg, which never called it, so `event_fresh` was
@@ -4857,14 +4860,10 @@ def _touch_heartbeat(tick: int) -> None:
     it, however quiet or noisy bot.log is. ⚠️ NEVER RAISES: a heartbeat that could
     stop the loop would be the hang it exists to catch. A failed write warns once
     and the watchdog, seeing the file age, acts — the loud direction."""
-    global _heartbeat_warned
-    try:
-        with open(_HEARTBEAT, "w") as f:
-            f.write(f"{time.time():.0f} {tick}\n")
-    except Exception as exc:                                    # noqa: BLE001
-        if not _heartbeat_warned:
-            _heartbeat_warned = True
-            logger.warning("heartbeat write failed (%s) — the emergency watchdog will read this bot as stuck", exc)
+    # r494 (WDOG.3): one writer, utils.heartbeat.touch, shared with the live poll loops; this
+    # keeps the tick number and the _HEARTBEAT seam the watchdog checker pins (W12).
+    from utils.heartbeat import touch as _hb_touch
+    _hb_touch(str(tick), _HEARTBEAT)
 
 
 def main_loop(state: BotState):

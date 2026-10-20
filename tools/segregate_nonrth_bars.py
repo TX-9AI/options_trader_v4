@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tools/segregate_nonrth_bars.py — move the 24-hour contamination. v1.0
+tools/segregate_nonrth_bars.py — move the 24-hour contamination. v1.1
+v1.1 — 2026-10-20 — r494 NOTE ONLY. Its window table keeps a FIXED 16:00 end; candle_feed v4.17
+       (FEED.11) ends a half day (11-27, 12-24) at 13:00. Do not re-run it over a half day
+       without that shift, or the 13:00-16:00 bars stay in the RTH series.
 v1.0 — 2026-08-20 — INITIAL. Companion to candle_feed v3.17.
 
 ⚠️ THIS MOVES, IT DOES NOT DELETE — and that distinction was nearly missed.

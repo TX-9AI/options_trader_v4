@@ -1,5 +1,8 @@
 """
-execution/exit_engine.py  v4.23
+execution/exit_engine.py  v4.24
+v4.24 2026-10-20  r494 / WDOG.3 (port of OTV4TEST r295 LIVE.2) — the live close's broker poll touches
+      the heartbeat on every iteration (utils.heartbeat.touch), so a serial close ladder never reads
+      as a hung bot to the emergency watchdog (STALE_S 180).
 v4.23 2026-10-18  r493 / EXIT.6 — A RESTART KEEPS THE LOCKED TRAIL. _seed_trail_from_record
       re-armed _trail_active only for ADOPTED, so for every other strategy (on mainline:
       Runaway, orb_trail_stop) the first tick at or above the activation level took
@@ -675,6 +678,7 @@ from tastytrade.order import (
 )
 
 import config as _cfg   # live fill knobs read at CALL time (test/env tunable)
+from utils.heartbeat import touch as _hb_touch   # r494 (WDOG.3): never raises
 
 from database.trade_logger import TradeRecord, get_trade_logger
 from data.tasty_client import get_session, get_account, TastyClientError, sdk_result
@@ -2762,6 +2766,7 @@ class ExitEngine:
         deadline = time.monotonic() + float(getattr(_cfg, "LIVE_FILL_DEADLINE_SECONDS", 30.0))
         cancel_requested = False
         while True:
+            _hb_touch("live-exit poll")      # r494 (WDOG.3): the watchdog must not read a laddering bot as hung
             try:
                 placed = sdk_result(account.get_order(session, order_id))   # B0
             except Exception as e:

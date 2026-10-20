@@ -1,5 +1,7 @@
 """
-execution/position_manager.py  v4.12
+execution/position_manager.py  v4.13
+v4.13 2026-10-20  r494 / WDOG.3 (port of OTV4TEST r295 LIVE.2) — flatten_all touches the heartbeat
+      once per position (utils.heartbeat.touch).
 v4.12 2026-10-11  r482 / EXIT.5 — the single-leg premium read remembers its contract's
       streamer symbol on the record (`_streamer`), and watch_targets() lists
       (trade_id, streamer, watched_stop) for main's 2-second floor watch.
@@ -348,7 +350,9 @@ class PositionManager:
 
         failed: List[str] = []
         held: List[str] = []
+        from utils.heartbeat import touch as _hb_touch   # r494 (WDOG.3)
         for record in list(self._open_records):
+            _hb_touch("flatten")
             trade_id = record.get("trade_id", "")
             # 🔴 r99 — CREDIT VERTICALS HOLD TO VERTICAL_HOLD_TO_ET (15:45).
             # This loop ran from 15:40 (FLATTEN_WINDOW_OPEN) over EVERY record,
