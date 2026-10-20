@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_fly_mark_cap.py  v1.1
+tests/check_fly_mark_cap.py  v1.2
+v1.2  2026-10-20  otv4 r495 (B4) — the fake account answers get_live_orders with an empty
+      book. B4 posts no live entry until one working-order sweep is clean, so a fake
+      without the call refused every fly and C2/C3 went red on a correct path, exactly
+      as with F5 below. Nothing else changes.
 v1.1  2026-10-05  otv4 r473 (F5) — the fake account answers get_balances with
       ample buying power. F5 refuses a live post when balances are unreadable,
       so a fake without the call refused every fly and C2/C3 went red on a
@@ -69,6 +73,9 @@ def main():
 
         def get_balances(self, session, currency="USD"):              # F5 (r473)
             return types.SimpleNamespace(derivative_buying_power=1_000_000.0)
+
+        def get_live_orders(self, session):                            # B4 (r495)
+            return []
     sv = (EE.get_session, EE.get_account, EE.confirm_order_fill)
     EE.get_session = lambda: object()
     EE.get_account = lambda: _Acct()

@@ -1,5 +1,12 @@
 """
-strategy/condor_roll.py  v4.8
+strategy/condor_roll.py  v4.9
+v4.9  2026-10-20  r495 / B4 — the roll and the tent ask order_guard.clear_to_post BEFORE their first
+      leg on LIVE (found by OTV4TEST's r495 critique, MSG-QQQ-1020-18): both post an OPEN (the
+      rolled vertical; the hedge) and neither passed B2's guard or B4's no-entry-before-a-clean-
+      sweep. Whole adjustment or none: a refused roll or tent touches NOTHING and retries next
+      tick (operator 10-20: "A. Hold" — the not-clean state heals; closing the condor on a
+      transient read failure would be new behaviour). Never the winner off and the hedge
+      refused. The condor's stops still run: exits never pass through the guard. Paper unchanged.
 v4.8  2026-10-04  r464 / B0 — every Account call goes through tasty_client.sdk_result: on tastytrade
       13.x (the boxes run 13.0.0) Account methods are COROUTINES, and called bare
       a LIVE box could place and close nothing. Paper unaffected. Found by
@@ -304,6 +311,24 @@ def check_and_execute_roll(pos_mgr, chain, current_price: float, state) -> bool:
     return _execute_roll(pos_mgr, tested, untested, plan, state, chain)
 
 
+def _guard_clear(state, what: str) -> bool:
+    """r495 / B4 — may a LIVE adjustment that will post an OPEN start at all? Asked before the
+    first leg so it is the whole adjustment or none. Paper: always."""
+    if state.paper_trading:
+        return True
+    try:
+        from config import INSTRUMENT
+        from data.tasty_client import get_session, get_account
+        from execution import order_guard as _guard
+        ok, why = _guard.clear_to_post(f"{INSTRUMENT}|open|condor_{what}",
+                                       get_session(), get_account())
+    except Exception as exc:                                    # noqa: BLE001
+        ok, why = False, f"guard unavailable ({type(exc).__name__})"
+    if not ok:
+        logger.warning("[guard] condor %s not started: %s", what, why)
+    return ok
+
+
 def _execute_roll(pos_mgr, tested: dict, untested: dict,
                   plan: RollPlan, state, chain=None) -> bool:
     """Close the old untested vertical, open the rolled vertical, and flag the
@@ -316,6 +341,8 @@ def _execute_roll(pos_mgr, tested: dict, untested: dict,
     tl        = get_trade_logger()
     mode      = "PAPER" if state.paper_trading else "LIVE"
     contracts = plan.contracts
+    if not _guard_clear(state, "roll"):                         # r495 B4: before step 1
+        return False
 
     try:
         # ── 1. Close the OLD untested vertical (buy it back) ──────────────────
@@ -733,6 +760,8 @@ def _execute_tent(pos_mgr, winner: dict, keep: dict, hedge, hedge_ask: float,
     tl   = get_trade_logger()
     mode = "PAPER" if state.paper_trading else "LIVE"
     qty  = int(keep.get("contracts", 1))
+    if not _guard_clear(state, "tent"):                         # r495 B4: before step 1
+        return False                                            # HOLD: touch nothing, retry next tick
 
     # ── 1. take the profitable side off ─────────────────────────────────────
     w_mark = _leg_value(winner, chain)

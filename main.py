@@ -1,5 +1,8 @@
 """
-main.py  v4.60
+main.py  v4.61
+v4.61  2026-10-20  r495 / B4 - a LIVE start cancels this instrument's untracked working orders
+      (order_guard.boot_sweep) BEFORE the broker reconcile, so a part-filled leftover is adopted
+      by the same start; entries stay blocked until one sweep comes back clean.
 v4.60  2026-10-20  r494 / WDOG.3 (port of OTV4TEST r295 LIVE.2) - _touch_heartbeat delegates to
       utils.heartbeat.touch (same file, same format); the live poll loops and flatten_all touch it
       too, so a serial close ladder never reads as a hung bot to the emergency watchdog.
@@ -5687,6 +5690,13 @@ def _recover_open_position(state: BotState, restart_type: str = ""):
     # truth for what's actually open. (Paper has no broker to query; and even on
     # live this stays OFF until OT_BROKER_RECONCILE=True, so it can't fire before
     # get_open_option_positions() has been verified on a live box.)
+    # r495 / B4 — a working order left by the previous process is invisible to it (order_guard is
+    # in memory; B1 adopts positions, not orders). Cancel this instrument's untracked ones FIRST,
+    # so a part-fill is adopted by the reconcile below; a failed sweep blocks entries, never exits.
+    if not state.paper_trading:
+        from execution import order_guard as _guard
+        _guard.boot_sweep()
+
     if not state.paper_trading and BROKER_RECONCILE_ENABLED:
         live = _reconcile_with_broker(state, live, restart_type, instrument)
 
