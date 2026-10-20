@@ -1,5 +1,20 @@
 """
-execution/position_manager.py  v4.13
+execution/position_manager.py  v4.14
+v4.14 2026-10-20  r496 / F4.2 — THE LIVE MARK FALLBACK SURVIVES THE BROKER'S RATE LIMIT. Measured by
+      OTV4TEST r308 tools/probe_live_mark.py (16:05 ET, QQQ and SPX, the REAL r468 code against
+      the broker): QQQ priced 3 of 6 symbols, SPX 4 of 6; every answered call priced right and
+      every None with a cause was HTTP 429 Too Many Requests (nginx HTML, which the SDK raises as
+      TastytradeError "Couldn't parse response"). One call per LEG per position per tick (fly 3,
+      vertical 2) spent the bucket, and a None posts no close (F3) and pages to the cross.
+      Now: a structure's legs are priced in ONE get_market_data_by_type(options=[...]) call
+      (open_interest's batch call); a 429 is retried after 0.5 / 1 / 2 s (at most 4 calls,
+      3.5 s, the heartbeat touched before each, well inside the tick and the watchdog's 180 s);
+      any other failure is not retried; the warning names the HTTP status. After a request has
+      spent its retries on 429, MARK_COOLDOWN_S (10 s) of single tries follow, so one tick pays
+      the backoff once, whatever its position count. Answers are matched on a normalised key
+      (spaces stripped, upper-case), so a respaced OCC symbol still prices. The mid/mark/last
+      rule and F9's ceiling are unchanged. Critiqued by OTV4TEST (MSG-QQQ-1020-25). Operator (relayed by OTV4TEST, MSG-QQQ-1020-22): yes
+      to the build. GATE tests/check_mark_rate_limit.py.
 v4.13 2026-10-20  r494 / WDOG.3 (port of OTV4TEST r295 LIVE.2) — flatten_all touches the heartbeat
       once per position (utils.heartbeat.touch).
 v4.12 2026-10-11  r482 / EXIT.5 — the single-leg premium read remembers its contract's
@@ -160,6 +175,8 @@ repo-wide v3.0 bump: Yahoo-Finance purge & data stream
 """
 
 import logging
+import re
+import time
 from typing import Optional, List
 
 import pandas as pd
@@ -673,8 +690,12 @@ class PositionManager:
                                f"a tent is not priced by the quote fallback")
                 return None
             if _is_credit_vertical(record):
-                short_m = self._get_option_mark(client, record.get("short_symbol") or "")
-                long_m  = self._get_option_mark(client, record.get("long_symbol") or "")
+                s_sym = record.get("short_symbol") or ""
+                l_sym = record.get("long_symbol") or ""
+                if not s_sym or not l_sym:
+                    return None
+                m = self._get_option_marks(client, [s_sym, l_sym])     # r496: one call
+                short_m, long_m = m.get(s_sym), m.get(l_sym)
                 if short_m is None or long_m is None:
                     return None
                 return short_m - long_m           # current spread value (credit basis)
@@ -683,9 +704,10 @@ class PositionManager:
                 center_sym = record.get("center_symbol", "")
                 upper_sym  = record.get("upper_symbol",  "")
 
-                lower_mark  = self._get_option_mark(client, lower_sym)
-                center_mark = self._get_option_mark(client, center_sym)
-                upper_mark  = self._get_option_mark(client, upper_sym)
+                m = self._get_option_marks(client, [lower_sym, center_sym, upper_sym])   # r496
+                lower_mark  = m.get(lower_sym) if lower_sym else None
+                center_mark = m.get(center_sym) if center_sym else None
+                upper_mark  = m.get(upper_sym) if upper_sym else None
 
                 if None in (lower_mark, center_mark, upper_mark):
                     return None
@@ -699,17 +721,69 @@ class PositionManager:
             return None
 
     _mark_fail_warned: set = set()
+    MARK_RETRY_BACKOFF_S = (0.5, 1.0, 2.0)     # r496 F4.2: after each 429 -> at most 4 calls, 3.5 s
+    MARK_COOLDOWN_S = 10.0                     # after a spent retry: single tries only, this long
+    _mark_cool_until: float = 0.0              # class-wide: one bucket per box
 
-    def _get_option_mark(self, client, symbol: str) -> Optional[float]:
-        """r468 / F4 — one option's mark from the REST market-data endpoint, for a
-        LIVE box with no chain in hand. `client` is the Session. The SDK call is a
-        coroutine on 13.x, so it goes through sdk_result (B0)."""
-        if not symbol:
-            return None
-        try:
-            from tastytrade.market_data import get_market_data
-            from tastytrade.order import InstrumentType
-            md  = sdk_result(get_market_data(client, symbol, InstrumentType.EQUITY_OPTION))
+    @staticmethod
+    def _sym_key(sym) -> str:
+        """r496 — one key for an OCC symbol however it is spaced ('SPXW  261020C07545000'
+        and 'SPXW261020C07545000' are one contract)."""
+        return "".join(str(sym or "").split()).upper()
+
+    @staticmethod
+    def _http_status(exc) -> Optional[int]:
+        """r496 — the HTTP status behind an SDK failure. tastytrade raises TastytradeError
+        "Couldn't parse response: <html><title>429 Too Many Requests</title>..." for nginx's
+        page; an httpx error carries .response.status_code."""
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        if isinstance(code, int):
+            return code
+        m = re.search(r"\b([45]\d\d)\s+[A-Z][A-Za-z]", str(exc))
+        return int(m.group(1)) if m else None
+
+    def _get_option_marks(self, client, symbols) -> dict:
+        """r496 / F4.2 — {symbol: mark} for a structure's legs in ONE REST call
+        (get_market_data_by_type, a coroutine run through sdk_result, B0). A 429 is retried
+        after MARK_RETRY_BACKOFF_S, touching the heartbeat before every call; any other
+        failure is not. A symbol missing from the answer, or failing the rule, is absent."""
+        syms = [x for x in dict.fromkeys(symbols or []) if x]
+        if not syms:
+            return {}
+        from utils.heartbeat import touch as _hb_touch
+        rows, exc, status, tries = None, None, None, 0
+        backoff = (() if time.time() < PositionManager._mark_cool_until
+                   else self.MARK_RETRY_BACKOFF_S)
+        for attempt in range(len(backoff) + 1):
+            _hb_touch("mark fallback")
+            tries += 1
+            try:
+                from tastytrade.market_data import get_market_data_by_type
+                rows = sdk_result(get_market_data_by_type(client, options=syms))
+                break
+            except Exception as e:                             # noqa: BLE001
+                exc, status = e, self._http_status(e)
+                if status == 429 and attempt < len(backoff):
+                    time.sleep(backoff[attempt])
+                    continue
+                break
+        if rows is None and status == 429:
+            PositionManager._mark_cool_until = time.time() + self.MARK_COOLDOWN_S
+        if rows is None:
+            why = (f"HTTP {status}" + (f" Too Many Requests, after {tries} "
+                   f"tr{'y' if tries == 1 else 'ies'}" if status == 429 else "")
+                   if status else f"{type(exc).__name__}: {str(exc)[:160]}")
+            for x in syms:
+                if x not in self._mark_fail_warned:
+                    self._mark_fail_warned.add(x)
+                    logger.warning(f"live mark fallback failed for {x!r}: {why}")
+            return {}
+        want = {self._sym_key(x): x for x in syms}               # answer key -> the caller's symbol
+        out = {}
+        for md in rows or []:
+            sym = want.get(self._sym_key(getattr(md, "symbol", None)))
+            if sym is None:
+                continue
             bid = float(getattr(md, "bid", 0) or 0)
             ask = float(getattr(md, "ask", 0) or 0)
             if bid > 0 and ask > 0:
@@ -718,13 +792,16 @@ class PositionManager:
                 v = float(getattr(md, "mark", 0) or getattr(md, "last", 0) or 0)
             # AUDIT F9's ceiling, as the chain path applies it: a finite-absurd
             # print must not close a live position.
-            return v if 0 < v < 1e6 else None
-        except Exception as exc:                               # noqa: BLE001
-            if symbol not in self._mark_fail_warned:
-                self._mark_fail_warned.add(symbol)
-                logger.warning(f"live mark fallback failed for {symbol!r}: "
-                               f"{type(exc).__name__}: {exc}")
+            if 0 < v < 1e6:
+                out[sym] = v
+        return out
+
+    def _get_option_mark(self, client, symbol: str) -> Optional[float]:
+        """r468 / F4 — one option's mark for a LIVE box with no chain in hand. r496: a
+        one-symbol call to _get_option_marks (the batch call, with its 429 retry)."""
+        if not symbol:
             return None
+        return self._get_option_marks(client, [symbol]).get(symbol)
 
     def _execute_exit(self, record: TradeRecord,
                        decision: ExitDecision,

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""tests/check_live_mark_fallback.py  v1.0
+"""tests/check_live_mark_fallback.py  v1.1
 F4 — THE LIVE MARK FALLBACK WORKS, AND PRICES THE WHOLE STRUCTURE.
+
+v1.1  2026-10-20  r496 / F4.2 — the fallback now asks get_market_data_by_type(options=[...])
+      once per structure (the 429 fix), so the stub answers that call from the same quote
+      table; L8 asks that the call names the record's own symbol(s) as options. Every
+      expected value is unchanged.
 
 v1.0  2026-10-04  r468. Found by OTV4TEST's live-readiness audit. With no chain in
       hand, a LIVE box priced through PositionManager._get_option_mark, which
@@ -23,7 +28,7 @@ network, no database (the manager is built without __init__).
   L5  credit vertical with no long_symbol -> None (one leg is not a price)
   L6  a finite-absurd mark (1e12) -> None (AUDIT F9's ceiling)
   L7  the SDK raising -> None, and a WARNING names the symbol (not silent)
-  L8  the call asks for InstrumentType.EQUITY_OPTION with the record's symbol
+  L8  the call asks for the record's symbol as options=[...] (v1.1: the batch call)
   L9  UNCHANGED RULE: a one-sided quote (bid 0, ask 0.22, mark 0.22) -> 0.22
   L10 UNCHANGED PATH: paper with no chain returns the last mark, asks nothing
 
@@ -75,14 +80,19 @@ def main():
 
     quotes, calls = {}, []
 
-    async def fake_get_market_data(session, symbol, instrument_type):
-        calls.append((symbol, instrument_type))
-        q = quotes[symbol]
-        if isinstance(q, Exception):
-            raise q
-        return q
+    async def fake_by_type(session, options=None, **kw):
+        options = list(options or [])
+        calls.append(("options", tuple(options)))
+        out = []
+        for sym in options:
+            q = quotes[sym]
+            if isinstance(q, Exception):
+                raise q
+            q.symbol = sym
+            out.append(q)
+        return out
 
-    tmd.get_market_data = fake_get_market_data
+    tmd.get_market_data_by_type = fake_by_type
     PM.get_client = lambda: _Session()
     cap = _Capture()
     PM.logger.addHandler(cap)
@@ -111,8 +121,8 @@ def main():
 
     v = price({"trade_id": "L1", "strategy": "ORBStrategy", "option_symbol": "SYN 1C100"})
     check("L1 single leg, two-sided -> the mid 1.10", near(v, 1.10), f"got {v!r}")
-    check("L8 asks EQUITY_OPTION for the record's own symbol",
-          calls == [("SYN 1C100", InstrumentType.EQUITY_OPTION)], f"calls={calls!r}")
+    check("L8 asks for the record's own symbol as an equity option",
+          calls == [("options", ("SYN 1C100",))], f"calls={calls!r}")
 
     vert = {"trade_id": "L2", "strategy": "SweepCreditSpread", "is_condor_leg": 1,
             "option_symbol": "SYN 1P90", "short_symbol": "SYN 1P90", "long_symbol": "SYN 1P85"}

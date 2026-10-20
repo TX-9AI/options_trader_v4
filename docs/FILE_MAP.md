@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-351 Python modules across 13 local packages.
+352 Python modules across 13 local packages.
 
-**Reached by:** 106 imported · 8 declared entry points · 177 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 106 imported · 8 declared entry points · 178 referenced from a script, unit or doc but never imported · **60 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -352,7 +352,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/position_manager.py`
 - **calls:** `analysis/orb_engine.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/exit_engine.py`, `execution/resting_orders.py`, `notifications/alert_manager.py`, `risk/risk_manager.py`, `strategy/management.py`, `strategy/structure.py`, `utils/heartbeat.py`, `utils/time_utils.py`
-- **called by:** `main.py`, `tests/check_butterfly_nonblocking.py`, `tests/check_credit_remainder.py`, `tests/check_emergency_watchdog.py`, `tests/check_exit_quote.py`, `tests/check_floor_watch.py`, `tests/check_half_day.py`, `tests/check_live_mark_fallback.py`, `tests/check_manage_call.py`, `tests/check_plan_prepares.py`, `tools/emergency_watchdog.py`
+- **called by:** `main.py`, `tests/check_butterfly_nonblocking.py`, `tests/check_credit_remainder.py`, `tests/check_emergency_watchdog.py`, `tests/check_exit_quote.py`, `tests/check_floor_watch.py`, `tests/check_half_day.py`, `tests/check_live_mark_fallback.py`, `tests/check_manage_call.py`, `tests/check_mark_rate_limit.py`, `tests/check_plan_prepares.py`, `tools/emergency_watchdog.py`
 
 ### `execution/resting_orders.py`
 - **calls:** `analysis/orb_engine.py`, `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/order_confirm.py`, `utils/time_utils.py`
@@ -876,6 +876,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_map_accuracy.py`
 - **calls:** (none)
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_mark_rate_limit.py`
+- **calls:** `execution/position_manager.py`, `utils/heartbeat.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_market_calendar.py`
@@ -1428,7 +1432,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `utils/heartbeat.py`
 - **calls:** (none)
-- **called by:** `execution/exit_engine.py`, `execution/order_confirm.py`, `execution/order_guard.py`, `execution/position_manager.py`, `main.py`, `tests/check_boot_order_sweep.py`, `tests/check_exit_deadline.py`
+- **called by:** `execution/exit_engine.py`, `execution/order_confirm.py`, `execution/order_guard.py`, `execution/position_manager.py`, `main.py`, `tests/check_boot_order_sweep.py`, `tests/check_exit_deadline.py`, `tests/check_mark_rate_limit.py`
 
 ### `utils/market_calendar.py`
 - **calls:** (none)
