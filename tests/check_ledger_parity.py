@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_ledger_parity.py  v1.6
+tests/check_ledger_parity.py  v1.7
+v1.7  2026-10-20  r497 — AN OTV4TEST CITATION IS CROSS-REPO TOO. r496's GENESIS row quotes
+      "OTV4TEST r308" (the fork's probe), and L3 demanded an otv4 row for r308 — red on
+      fcbf104. The fork's numbers are its own ledger, exactly as dtp's are (r317): GENESIS
+      cites 16 distinct OTV4TEST revisions and 15 happen to also be real otv4 rows, which is
+      why only r308 surfaced. _DTP now strips "OTV4TEST rNNN" as well.
 v1.6  2026-10-11  r483 — r309, r334 AND r338 JOIN THE KNOWN-ROWLESS SET. L3 had been red
       since they were cited and every sweep reported it as "pre-existing", which is
       how a red check hides the next one. None landed in either repo (checked both
@@ -206,12 +211,13 @@ def main():
     # row for a number that belongs to the other repo. 28 of the 31 dtp numbers
     # cited here happen to also be real otv4 rows, which is why this only ever
     # surfaced on the three that fall outside otv4's range.
-    _DTP = re.compile(r'(?:dtp|day_trader_pro)[\s-]*r\d+', re.I)
+    # r497: the OTV4TEST fork numbers its own ledger too ("OTV4TEST r308").
+    _DTP = re.compile(r'(?:dtp|day_trader_pro|OTV4TEST)[\s-]*r\d+', re.I)
     _own = _DTP.sub(" ", gen)          # strip cross-repo citations, then look
     cited = [n for n in gaps
              if re.search(rf'\br{n}\b', _own) and n not in KNOWN_ROWLESS_CITATIONS]
     check("L3 no NEW missing OTV4 revision number is cited in GENESIS prose "
-          "(r110/r141/r159/r226/r316 known, DOC.13; dtp citations excluded)",
+          "(r110/r141/r159/r226/r316 known, DOC.13; dtp/OTV4TEST citations excluded)",
           not cited, f"cited but rowless: {cited}")
 
     # ══ L4 — THE SEQUENCE IS REPORTED, NOT ENFORCED ═══════════════════════

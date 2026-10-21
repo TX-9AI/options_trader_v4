@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-352 Python modules across 13 local packages.
+353 Python modules across 13 local packages.
 
-**Reached by:** 106 imported · 8 declared entry points · 178 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 106 imported · 8 declared entry points · 179 referenced from a script, unit or doc but never imported · **60 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -56,7 +56,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `strategy/__init__.py` | 40 | check_age_gate_gone.py, check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `database/trade_logger.py` | 31 | check_boot_order_sweep.py, check_cap_event.py, check_condor_pairing.py, check_condor_sibling_default.py |
 | `strategy/plan.py` | 31 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
-| `execution/exit_engine.py` | 25 | check_boot_order_sweep.py, check_buyback_side.py, check_condor_sibling_default.py, check_condor_spec.py |
+| `execution/exit_engine.py` | 26 | check_boot_order_sweep.py, check_buyback_side.py, check_condor_sibling_default.py, check_condor_spec.py |
 | `data/tasty_client.py` | 22 | buying_power.py, candle_feed.py, check_boot_order_sweep.py, check_buying_power.py |
 | `execution/__init__.py` | 20 | check_boot_order_sweep.py, check_buyback_side.py, check_buying_power.py, check_credit_remainder.py |
 | `strategy/sweep_credit_spread.py` | 18 | check_age_gate_gone.py, check_atr_units.py, check_chain_ordering.py, check_dispatch.py |
@@ -328,7 +328,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `execution/exit_engine.py`
 - **calls:** `config.py`, `data/tasty_client.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/ladder_registry.py`, `execution/limit_ladder.py`, `notifications/alert_manager.py`, `strategy/structure.py`, `utils/heartbeat.py`, `utils/math_utils.py`, `utils/time_utils.py`
-- **called by:** `analysis/entry_snapshot.py`, `execution/position_manager.py`, `strategy/condor_roll.py`, `strategy/management.py`, `stress_theta_bleed.py`, `tests/check_boot_order_sweep.py`, `tests/check_buyback_side.py`, `tests/check_condor_sibling_default.py`, `tests/check_condor_spec.py`, `tests/check_condor_stop_suppression.py`, `tests/check_exit_deadline.py`, `tests/check_exit_executes.py`, `tests/check_exit_partial_persist.py`, `tests/check_exit_quote.py`, `tests/check_exit_single_grid.py`, `tests/check_floor_watch.py`, `tests/check_ladder_wired.py`, `tests/check_management_plan.py`, `tests/check_no_mark_close.py`, `tests/check_orb_stop_respected.py`, `tests/check_orb_underwater_entry.py`, `tests/check_sdk_async.py`, `tests/check_spx_tick.py`, `tests/check_trail_restart.py`, `tests/stress_entry_path.py`
+- **called by:** `analysis/entry_snapshot.py`, `execution/position_manager.py`, `strategy/condor_roll.py`, `strategy/management.py`, `stress_theta_bleed.py`, `tests/check_boot_order_sweep.py`, `tests/check_buyback_side.py`, `tests/check_condor_sibling_default.py`, `tests/check_condor_spec.py`, `tests/check_condor_stop_suppression.py`, `tests/check_exit_deadline.py`, `tests/check_exit_executes.py`, `tests/check_exit_partial_persist.py`, `tests/check_exit_quote.py`, `tests/check_exit_single_grid.py`, `tests/check_floor_watch.py`, `tests/check_ladder_wired.py`, `tests/check_management_plan.py`, `tests/check_no_mark_close.py`, `tests/check_orb_stop_respected.py`, `tests/check_orb_underwater_entry.py`, `tests/check_sdk_async.py`, `tests/check_spx_tick.py`, `tests/check_trail_activation_keep.py`, `tests/check_trail_restart.py`, `tests/stress_entry_path.py`
 
 ### `execution/fill_model.py`
 - **calls:** (none)
@@ -1236,6 +1236,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_touch_pierce.py`
 - **calls:** `analysis/liquidity_mapper.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_trail_activation_keep.py`
+- **calls:** `execution/exit_engine.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_trail_restart.py`

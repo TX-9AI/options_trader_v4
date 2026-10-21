@@ -1,5 +1,15 @@
 """
-execution/exit_engine.py  v4.24
+execution/exit_engine.py  v4.25
+v4.25 2026-10-20  r497 / EXIT.7 — THE 50% TRAIL'S FIRST TICK NEVER LOWERS THE STOP. _update_trail's
+      first-activation branch wrote entry x (1 + TRAIL_LOCK_PCT) over _trail_stops, discarding a
+      higher FVG trail (written first on the same tick, >= 80% of the mark once armed at +20%) or
+      post-target trail, against "the higher of the two governs". The seed is now
+      max(entry x 1.25, the stored trail). Measured by replaying the 124 mainline Runaway/ORB
+      trades that reached activation (09-01..10-13) through the real engine both ways: the stop
+      was lowered on 72 of 103 activations (median 10% of entry), 17 exits change, 15 better
+      (+$1,085), 2 worse (-$318), net +$767. NEW EXIT POINT: a post-target pullback below target
+      now keeps the post-target level (0.75 x mark) and closes there, where it used to fall back to
+      entry x 1.25. Critiqued by OTV4TEST (MSG-QQQ-1020-29). Operator: Yes.
 v4.24 2026-10-20  r494 / WDOG.3 (port of OTV4TEST r295 LIVE.2) — the live close's broker poll touches
       the heartbeat on every iteration (utils.heartbeat.touch), so a serial close ladder never reads
       as a hung bot to the emergency watchdog (STALE_S 180).
@@ -2373,11 +2383,19 @@ class ExitEngine:
 
         if not self._trail_active.get(trade_id, False):
             self._trail_active[trade_id] = True
-            initial_trail = entry * (1 + TRAIL_LOCK_PCT)
+            # r497 / EXIT.7: the seed never LOWERS a stored trail. The FVG trail
+            # (armed at +20%, written first on this same tick) or a post-target
+            # trail is usually above entry x 1.25 by now; the higher governs.
+            seed = entry * (1 + TRAIL_LOCK_PCT)
+            held = self._trail_stops.get(trade_id)
+            # keep this argument order: max(seed, nan) is the seed
+            initial_trail = max(seed, held) if held is not None else seed
             self._trail_stops[trade_id] = initial_trail
             logger.info(
                 f"TRAIL ACTIVATED: {trade_id[:8]} "
                 f"initial_trail=${initial_trail:.2f}"
+                + (f" (kept the stored trail over the ${seed:.2f} seed)"
+                   if initial_trail > seed else "")
             )
 
         current_trail = self._trail_stops.get(trade_id, hard_stop)
