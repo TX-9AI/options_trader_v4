@@ -4,9 +4,9 @@
 Do not edit by hand: the generator runs inside the land command and
 the canary fails on drift (WORKING_AGREEMENT 33).
 
-354 Python modules across 13 local packages.
+355 Python modules across 13 local packages.
 
-**Reached by:** 106 imported · 8 declared entry points · 180 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 106 imported · 8 declared entry points · 181 referenced from a script, unit or doc but never imported · **60 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -54,7 +54,7 @@ Change these with the most care; a break here reaches everything downstream.
 | `config.py` | 80 | alert_manager.py, broker_reconcile.py, candle_feed.py, candle_logger.py |
 | `utils/time_utils.py` | 46 | alert_manager.py, broker_reconcile.py, check_butterfly_foundational.py, check_butterfly_legs.py |
 | `strategy/__init__.py` | 40 | check_age_gate_gone.py, check_audit_20260823.py, check_butterfly_foundational.py, check_butterfly_legs.py |
-| `database/trade_logger.py` | 31 | check_boot_order_sweep.py, check_cap_event.py, check_condor_pairing.py, check_condor_sibling_default.py |
+| `database/trade_logger.py` | 32 | check_boot_order_sweep.py, check_cap_event.py, check_condor_pairing.py, check_condor_sibling_default.py |
 | `strategy/plan.py` | 31 | check_butterfly_foundational.py, check_butterfly_legs.py, check_butterfly_wing_grid.py, check_chain_ordering.py |
 | `execution/exit_engine.py` | 26 | check_boot_order_sweep.py, check_buyback_side.py, check_condor_sibling_default.py, check_condor_spec.py |
 | `data/tasty_client.py` | 22 | buying_power.py, candle_feed.py, check_boot_order_sweep.py, check_buying_power.py |
@@ -240,7 +240,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `database/trade_logger.py`
 - **calls:** `config.py`, `derived/registry.py`, `strategy/runaway_continuation.py`, `strategy/sweep_credit_spread.py`, `utils/time_utils.py`
-- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/order_guard.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_boot_order_sweep.py`, `tests/check_cap_event.py`, `tests/check_condor_pairing.py`, `tests/check_condor_sibling_default.py`, `tests/check_condor_stop_suppression.py`, `tests/check_counterfactual_reads.py`, `tests/check_credit_remainder.py`, `tests/check_db_handles.py`, `tests/check_exit_deadline.py`, `tests/check_exit_partial_persist.py`, `tests/check_exit_quote.py`, `tests/check_lineage.py`, `tests/check_no_mark_close.py`, `tests/check_one_per_session.py`, `tests/check_orb_resume.py`, `tests/check_phantom_recovered.py`, `tests/check_pnl_pct_sign.py`, `tests/check_risk_seed_retry.py`, `tests/check_runaway_break_key.py`, `tests/check_standing_offer.py`, `tests/check_sweep_spent_level.py`, `tests/exit_replay.py`
+- **called by:** `derived/counterfactual.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/order_guard.py`, `execution/position_manager.py`, `execution/resting_orders.py`, `main.py`, `risk/risk_manager.py`, `strategy/condor_roll.py`, `tests/check_boot_order_sweep.py`, `tests/check_cap_event.py`, `tests/check_condor_pairing.py`, `tests/check_condor_sibling_default.py`, `tests/check_condor_stop_suppression.py`, `tests/check_counterfactual_reads.py`, `tests/check_credit_remainder.py`, `tests/check_db_handles.py`, `tests/check_exit_deadline.py`, `tests/check_exit_partial_persist.py`, `tests/check_exit_quote.py`, `tests/check_lineage.py`, `tests/check_no_mark_close.py`, `tests/check_one_per_session.py`, `tests/check_orb_resume.py`, `tests/check_phantom_recovered.py`, `tests/check_pnl_pct_sign.py`, `tests/check_risk_seed_retry.py`, `tests/check_runaway_break_key.py`, `tests/check_standing_offer.py`, `tests/check_sweep_spent_level.py`, `tests/check_tape_band_column.py`, `tests/exit_replay.py`
 
 ### `debug_status.py`
 - **calls:** `config.py`
@@ -1204,6 +1204,10 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_sweep_spread.py`
 - **calls:** `config.py`, `data/options_chain.py`, `strategy/base_strategy.py`, `strategy/structure.py`, `strategy/sweep_credit_spread.py`
+- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+
+### `tests/check_tape_band_column.py`
+- **calls:** `database/trade_logger.py`
 - **called by:** (not imported) — referenced in `docs/BACKLOG.md`
 
 ### `tests/check_tcs_fifty.py`

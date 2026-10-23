@@ -1,5 +1,16 @@
 """
-database/trade_logger.py  v4.18
+database/trade_logger.py  v4.19
+v4.19  2026-10-23  r499 / TAPE.1 — `tape_band` IS A COLUMN. analysis/tape_at_level.measure (r120)
+      returns tape_vol_at_level, tape_prints_at_level and tape_band (the price band it
+      counted prints in), and entry_engine record.update()s all three; the table had the
+      first two only, so log_entry dropped tape_band on every Runaway insert (10-22: 28 of 28
+      mainline Runaway rows carry tape_vol_at_level, none tape_band; one "[schema] ... NO
+      COLUMN" warning per process). REAL, NO DEFAULT: rows written before r499 stay NULL
+      (not recorded), never 0. In the CREATE and _MIGRATION_ADDS, after tape_prints_at_level.
+      ⚠️ ROLLBACK DROPS IT: the boot migration drops every column outside the canonical
+      shape (_canon), so reverting this and restarting PHYSICALLY DROPS tape_band and its
+      values. Shape proposed by OTV4TEST (MSG-QQQ-1022-08), which mirrors it. Operator, 10-23:
+      "Yes to both".
 v4.18  2026-10-14  r490 / SWEEP.13 — A LOSING SWEEP SPENDS ITS LEVEL, FOR REAL. The r154/r167
       lock had never armed: log_exit read `is_credit_vertical`, a column the table
       has never had, so every losing close raised `no such column` into its own
@@ -469,6 +480,9 @@ class TradeLogger:
         tape_vol_at_level      REAL,
         tape_buy_frac_at_level REAL,
         tape_prints_at_level   INTEGER,
+        -- r499: the price band (around the level) the prints were counted in.
+        -- NO DEFAULT: a row from before r499 is NULL (not recorded), never 0.
+        tape_band              REAL,
         short_strike      REAL DEFAULT 0.0,
         long_strike       REAL DEFAULT 0.0,
         credit_received   REAL DEFAULT 0.0,
@@ -693,6 +707,8 @@ class TradeLogger:
             ("tape_vol_at_level",      "REAL"),
             ("tape_buy_frac_at_level", "REAL"),
             ("tape_prints_at_level",   "INTEGER"),
+            # r499 / TAPE.1 — measure()'s band; NO DEFAULT (old rows stay NULL)
+            ("tape_band",              "REAL"),
             # r457 — which ENGINE wrote the row (see LINEAGE). NO DEFAULT, on
             # purpose: existing rows stay NULL rather than being relabelled.
             ("lineage",                "TEXT"),
