@@ -1,5 +1,9 @@
 """
-data/options_chain.py  v4.6
+data/options_chain.py  v4.7
+v4.7  2026-10-23  r498 / OI.3 — OptionContract.oi_known: True when the broker answered this
+      contract's open interest, False when it was asked and not answered (a failed or
+      rate-limited batch), None when no OI source ran (paper fixtures, tests). A missing
+      value stays distinguishable from a real zero, so compute_gex can count it.
 v4.6  2026-10-11  r482 / EXIT.5 — mark_of() is the ONE mark formula (the chain read and the
       floor watch share it), and read_quote() returns one contract's (mark, age_s)
       from chain_marks for main's 2-second floor watch. Read-only, its own handle.
@@ -221,6 +225,7 @@ class OptionContract:
     vega:           float   = 0.0
     iv:             float   = 0.0
     open_interest:  int     = 0
+    oi_known:       Optional[bool] = None   # r498: True answered, False asked-not-answered
     volume:         int     = 0
     streamer_symbol: str    = ""    # DXFeed streamer symbol
 
@@ -406,13 +411,16 @@ class OptionsChainFetcher:
             try:
                 from data.open_interest import fetch_open_interest
                 _occ = [oc.symbol for oc in calls_raw + puts_raw if oc.symbol]
-                _oi = fetch_open_interest(session, _occ)
-                if _oi:
-                    for oc in calls_raw + puts_raw:
-                        v = _oi.get(oc.symbol)
-                        if v is not None:
-                            oc.open_interest = int(v)
+                _oi = fetch_open_interest(session, _occ) or {}
+                for oc in calls_raw + puts_raw:
+                    v = _oi.get(oc.symbol)
+                    # r498 / OI.3 — asked and not answered is MISSING, not zero
+                    oc.oi_known = v is not None
+                    if v is not None:
+                        oc.open_interest = int(v)
             except Exception as _oie:                          # noqa: BLE001
+                for oc in calls_raw + puts_raw:
+                    oc.oi_known = False
                 logger.warning("OI wiring failed (%s) - GEX runs WITHOUT open "
                                "interest this cycle", _oie)
 

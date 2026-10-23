@@ -1,5 +1,20 @@
 """
-strategy/gex_pin_butterfly.py  v4.10
+strategy/gex_pin_butterfly.py  v4.11
+v4.11 2026-10-23  r498 / OI.3 — A HALF-GUESSED PIN IS NOT A PIN. When the GEX snapshot
+      counts contracts whose open interest was asked for and not answered
+      (gex.oi_missing > 0, a failed or rate-limited batch), compute_gex filled them
+      with its gamma/mark proxy beside measured strikes, and the pin is part guess.
+      prepare() records the tick STARVED on "open_interest" (NO PLAN, input absent),
+      so no butterfly fires on it; the fetch retries and the next complete tick is
+      evaluated as before. Every other gate is unchanged. Mainline 10-09..10-22: OI
+      was short only at 09:30-09:35, never inside the noon-onward slot.
+      ⚠️ THE TRADE-OFF, STATED: the starve is CHAIN-WIDE and all-or-nothing — one
+      unanswered far-OTM strike starves the fly, though it barely moves the pin. And a
+      contract the broker answers with open_interest None stays missing (re-asked
+      every 60 s) and starves the fly ALL DAY. Measured: every symbol answered on every
+      October fetch (414/414 QQQ, 494/494 SPX), so neither has occurred. Chosen over a
+      "near the pin only" rule because a pin built partly on proxies cannot say which
+      strikes are near it.
 v4.10 2026-10-02  r456 (LADR.1, shared with OTV4TEST r185) — `_chain_increment` IS NOW
       AN ALIAS of data/options_chain.chain_increment, where the r198 body moved
       verbatim so every caller reads one ladder reader. No wing, apex or gate
@@ -554,6 +569,12 @@ class GEXPinButterflyStrategy:
             t.starved("gex")
             return prep
         t.check("gex", 1.0, True)
+        # r498 / OI.3 — some strikes' OI never answered: the pin is part proxy
+        _oi_miss = getattr(gex, "oi_missing", 0)
+        if isinstance(_oi_miss, int) and not isinstance(_oi_miss, bool) and _oi_miss > 0:
+            prep.starved.append("open_interest")
+            t.starved("open_interest")
+            return prep
 
         env = str(getattr(gex, "gex_environment", "") or "")
         conc = float(getattr(gex, "pin_concentration", 0.0) or 0.0)

@@ -1,5 +1,29 @@
 """
-data/open_interest.py  v4.3
+data/open_interest.py  v4.4
+v4.4  2026-10-23  r498 / OI.3 — A RATE-LIMITED BATCH IS RETRIED IN SECONDS, NOT MINUTES.
+      Measured on S3 chain snapshots, 10-09..10-22 (130 mainline box-days): OI was short on
+      2, both at the 09:30 fetch (META 10-20 61 of 131 non-zero, QQQ 10-22 82 of 280),
+      healed by the 5-minute retry at 09:35-09:40; SPX-TEST 10-22 09:30:04 lost 94 symbols
+      to "Couldn't parse response: <html>" (the 429 page r496 measured). Every box's first
+      OI fetch fell at 09:30 itself, because the pre-open rehearsal stops at the opening-range
+      gate before it asks for a chain (main v4.62 now warms the cache before the bell).
+      A batch answered HTTP 429 is retried after 0.5 / 1 / 2 s (at most 4 calls per batch,
+      none started past _RETRY_DEADLINE_S, inside the 15 s bound); any other failure is not
+      (r324's attempt loop fell through and re-sent EVERY failure once at once, so a 429 drew
+      a second 429 and the batch waited 5 minutes; only the closed-loop retry is kept).
+      Only a FAILED fetch (a batch that raised, or a symbol asked and not answered) holds
+      the next attempt, for _RETRY_S, now 60 s (was 300: OTV4TEST's pin gate reads GEX from
+      09:35, so a 09:30 failure held five minutes judged those entries on a part-proxy
+      surface); the 60 s is MODULE-WIDE, all session (in a 429 storm each box re-asks every
+      60 s, at most 4 calls per batch); the hold still applies only once something is
+      cached. A success no longer
+      delays a new strike. Each batch is cached AS IT LANDS, so a fetch cut off by the 15 s
+      bound keeps what was already answered (critique (e)). ⚠️ A row answered with
+      open_interest None is skipped like an unanswered one: it stays missing, is re-asked
+      every _RETRY_S, and its contract reads oi_known False all day. The cache day
+      is the ET date (the boxes run UTC: at 20:00 ET the next day's key filled with the
+      prior session's OI). missing() names the symbols with no answer; the fetch line counts
+      them and says once a day when the set is complete. Operator, 10-23: "Yes to both".
 v4.3  2026-10-18  r493 / OI.2 — the fetch runs on tasty_client's shared background loop
       (run_coroutine_threadsafe, 15 s bound), not under asyncio.run(): the throw-away
       loop bound the Session's one pooled httpx connection and was then closed, so the
@@ -81,6 +105,7 @@ reported as gamma exposure for the life of the project.
 import logging
 import asyncio
 import concurrent.futures as cf
+import re
 import time
 from typing import Dict, Iterable, Optional
 
@@ -89,13 +114,31 @@ logger = logging.getLogger(__name__)
 _CACHE: Dict[str, int] = {}
 _CACHE_DAY: Optional[str] = None
 _LAST_ATTEMPT: float = 0.0
-_RETRY_S = 300.0            # a failed fetch should not hammer the API per tick
+_LAST_FAIL: float = 0.0     # r498: only a failed fetch holds the next one for _RETRY_S
+_COMPLETE_SAID: Optional[str] = None
+_RETRY_S = 60.0             # a failed fetch should not hammer the API per tick (r498: was 300)
+_RETRY_BACKOFF_S = (0.5, 1.0, 2.0)   # r498 / OI.3: after each 429 -> at most 4 calls per batch
+_RETRY_DEADLINE_S = 11.0    # r498: no retry STARTS past this, so the 15 s bound below holds
 _BATCH = 100                # keep REST payloads modest
 _FETCH_TIMEOUT_S = 15.0     # r493 — the tick waits at most this (asyncio.run had no bound); measured 10-18: every fetch <= 1 s (~1,500 fetches, QQQ/SPX/NVDA/TSLA, SPX 496 symbols)
 
 
 def _today() -> str:
-    return time.strftime("%Y-%m-%d")
+    # r498 — the ET trading date. The boxes run UTC, so time.strftime rolled at 20:00 ET
+    # and an evening fetch (the next expiry, yesterday's OI) filled the next day's key.
+    from utils.time_utils import now_et
+    return now_et().strftime("%Y-%m-%d")
+
+
+def _http_status(exc) -> Optional[int]:
+    """r498 — the HTTP status behind an SDK failure (position_manager._http_status's rule:
+    tastytrade raises "Couldn't parse response: <html><title>429 Too Many Requests</title>"
+    for nginx's page; an httpx error carries .response.status_code)."""
+    code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(code, int):
+        return code
+    m = re.search(r"\b([45]\d\d)\s+[A-Z][A-Za-z]", str(exc))
+    return int(m.group(1)) if m else None
 
 
 def _await(coro):
@@ -159,11 +202,11 @@ def fetch_open_interest(session, occ_symbols: Iterable[str],
     than as zero - unavailable and zero are different facts, and conflating them
     is what produced a gamma-squared surface labelled as gamma exposure.
     """
-    global _CACHE, _CACHE_DAY, _LAST_ATTEMPT
+    global _CACHE, _CACHE_DAY, _LAST_ATTEMPT, _LAST_FAIL, _COMPLETE_SAID
 
     day = _today()
     if _CACHE_DAY != day:
-        _CACHE, _CACHE_DAY = {}, day
+        _CACHE, _CACHE_DAY, _LAST_FAIL = {}, day, 0.0
 
     syms = [s for s in (occ_symbols or []) if s]
     if not syms:
@@ -173,8 +216,9 @@ def fetch_open_interest(session, occ_symbols: Iterable[str],
     if not missing and not force:
         return {s: _CACHE[s] for s in syms if s in _CACHE}
 
-    if not force and (time.time() - _LAST_ATTEMPT) < _RETRY_S and _CACHE:
+    if not force and (time.time() - _LAST_FAIL) < _RETRY_S and _CACHE:
         # a recent failure; serve what is cached rather than retry every tick
+        # (r498: _LAST_FAIL, not _LAST_ATTEMPT - a success never delays a new strike)
         return {s: _CACHE[s] for s in syms if s in _CACHE}
 
     _LAST_ATTEMPT = time.time()
@@ -185,49 +229,69 @@ def fetch_open_interest(session, occ_symbols: Iterable[str],
                        "WITHOUT open interest", e)
         return {s: _CACHE[s] for s in syms if s in _CACHE}
 
-    got = 0
+    got, failed = 0, False
     batches = [missing[i:i + _BATCH] for i in range(0, len(missing), _BATCH)]
+    t0 = time.monotonic()
 
     async def _all():
         # r324 (ported from OTV4TEST r6) — ONE loop for every batch. Each batch
         # under its own asyncio.run() handed the SDK's async client a CLOSED loop
         # on the next call ("Event loop is closed" on the first batch of every
         # cycle). A closed-loop error is retried once immediately.
-        out = []
+        # r498 / OI.3 — a 429 (the broker's rate limit, shared by every box on the login)
+        # is retried after _RETRY_BACKOFF_S; no retry starts past _RETRY_DEADLINE_S.
+        nonlocal failed, got
         for batch in batches:
-            rows = None
-            for attempt in (1, 2):
+            rows, loop_retried, n429, tries = None, False, 0, 0
+            while True:
+                tries += 1
                 try:
                     rows = await get_market_data_by_type(session, options=batch)
                     break
                 except Exception as e:                         # noqa: BLE001
-                    if attempt == 1 and "loop is closed" in str(e).lower():
+                    if not loop_retried and "loop is closed" in str(e).lower():
+                        loop_retried = True
                         continue
-                    logger.warning("OI: fetch failed for %d symbol(s): %s", len(batch), e)
-            out.append(rows or [])
-        return out
+                    status = _http_status(e)
+                    if (status == 429 and n429 < len(_RETRY_BACKOFF_S)
+                            and time.monotonic() - t0 < _RETRY_DEADLINE_S):
+                        await asyncio.sleep(_RETRY_BACKOFF_S[n429])
+                        n429 += 1
+                        continue
+                    failed = True
+                    why = (f"HTTP {status}" + (" Too Many Requests" if status == 429 else "")
+                           if status else f"{type(e).__name__}: {str(e)[:160]}")
+                    logger.warning("OI: fetch failed for %d symbol(s) after %d tr%s: %s",
+                                   len(batch), tries, "y" if tries == 1 else "ies", why)
+                    break
+            # r498 (OTV4TEST critique (e)) — each batch is cached AS IT LANDS, so a fetch
+            # cut off by the 15 s bound keeps the batches that were already answered.
+            for r in rows or []:
+                sym = getattr(r, "symbol", None)
+                oi = getattr(r, "open_interest", None)
+                if not sym or oi is None:
+                    continue
+                try:
+                    _CACHE[sym] = int(oi)
+                    got += 1
+                except Exception:                              # noqa: BLE001
+                    continue
 
     try:
-        results = _await(_all())
+        _await(_all())
     except Exception as e:                                     # noqa: BLE001
         logger.warning("OI: fetch failed outright: %s", e)
-        results = []
-    for rows in results:
-        for r in rows or []:
-            sym = getattr(r, "symbol", None)
-            oi = getattr(r, "open_interest", None)
-            if not sym or oi is None:
-                continue
-            try:
-                _CACHE[sym] = int(oi)
-                got += 1
-            except Exception:                                  # noqa: BLE001
-                continue
+        failed = True
 
+    still = [s for s in syms if s not in _CACHE]
+    if still:
+        failed = True        # asked and not answered: hold the next attempt as a failure
+    if failed:
+        _LAST_FAIL = time.time()
     if got:
         nz = sum(1 for v in _CACHE.values() if v > 0)
-        logger.info("OI: fetched %d symbol(s), %d cached, %d NON-ZERO",
-                    got, len(_CACHE), nz)
+        logger.info("OI: fetched %d symbol(s), %d cached, %d NON-ZERO, %d still missing",
+                    got, len(_CACHE), nz, len(still))
         if nz == 0:
             # ⚠️ SAY IT LOUDLY. All-zero OI is exactly the condition that made
             # GEX meaningless for the life of v3, and it hid because nothing
@@ -238,7 +302,21 @@ def fetch_open_interest(session, occ_symbols: Iterable[str],
         logger.warning("OI: no open interest retrieved - GEX is running "
                        "WITHOUT it (see data/open_interest.py header)")
 
+    if still:
+        logger.warning("OI: %d symbol(s) have no open interest yet (e.g. %s) - GEX treats "
+                       "them as unavailable; retried after %.0f s", len(still),
+                       ", ".join(still[:3]), _RETRY_S)
+    elif _COMPLETE_SAID != day:
+        _COMPLETE_SAID = day
+        logger.info("OI: complete - every requested symbol has open interest (%d cached)",
+                    len(_CACHE))
+
     return {s: _CACHE[s] for s in syms if s in _CACHE}
+
+
+def missing(occ_symbols: Iterable[str]) -> list:
+    """r498 — the symbols with no open-interest answer today (absent, never 0)."""
+    return [s for s in (occ_symbols or []) if s and s not in _CACHE]
 
 
 def coverage() -> tuple:

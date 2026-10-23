@@ -1,5 +1,11 @@
 """
-data/gex_data.py  v4.2
+data/gex_data.py  v4.3
+v4.3  2026-10-23  r498 / OI.3 - GEXSnapshot.oi_missing COUNTS THE CONTRACTS WHOSE OPEN
+INTEREST WAS ASKED FOR AND NOT ANSWERED (OptionContract.oi_known is False) among those
+that enter the surface (gamma != 0). Such a strike still takes the gamma/mark proxy below,
+so a partly answered chain mixes measured and guessed OI and nothing said so; the count
+lets a consumer refuse a half-guessed pin (GEXPinButterfly). The surface, the proxy, the
+walls and the pin are unchanged; oi_known None (no OI source ran) is not counted.
 v4.2  2026-09-10  r352 - THE PIN IS CLAMPED IN EXPECTED MOVES, NOT PERCENT OF
 SPOT. `pin_strike` was selected within 3% of spot and then judged by the
 butterfly in EXPECTED MOVES (`pin_em_fraction`, 0.30-1.00) - two scales with no
@@ -189,6 +195,9 @@ class GEXSnapshot:
     net_gex_ratio:      float = 0.0   # net/gross, signed: + pins, - trends
     orb_bias:           str = "NEUTRAL"   # "DAMPENING", "AMPLIFYING", "NEUTRAL"
 
+    # r498 / OI.3 — contracts in the surface whose OI was asked for and NOT answered
+    oi_missing:         int   = 0
+
     # Meta
     spot_price:         float = 0.0
     computed_at:        str   = ""
@@ -234,6 +243,8 @@ def compute_gex(chain: OptionsChain, spot_price: float,
     for call in chain.calls:
         if call.gamma == 0:
             continue
+        if getattr(call, "oi_known", None) is False:
+            snapshot.oi_missing += 1
         s = call.strike
         if s not in strike_map:
             strike_map[s] = StrikeGEX(strike=s)
@@ -247,6 +258,8 @@ def compute_gex(chain: OptionsChain, spot_price: float,
     for put in chain.puts:
         if put.gamma == 0:
             continue
+        if getattr(put, "oi_known", None) is False:
+            snapshot.oi_missing += 1
         s = put.strike
         if s not in strike_map:
             strike_map[s] = StrikeGEX(strike=s)

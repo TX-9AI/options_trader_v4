@@ -1,5 +1,19 @@
 """
-main.py  v4.61
+main.py  v4.62
+v4.62  2026-10-23  r498 / OI.3 - THE DAY'S OPEN INTEREST IS FETCHED BEFORE THE BELL. Outside RTH the
+      rehearsal stops at the opening-range gate before it asks for a chain, so every box's first
+      OI fetch fell at 09:30 itself, all on one login (QQQ 10-22: 82 of 280 at 09:30, healed 09:40).
+      EACH BOX PICKS ITS OWN MOMENT, WITH NO CONTROLLER AND NO KNOWLEDGE OF THE OTHERS (operator,
+      10-23): a random fraction drawn from the OS at process start places the box's warm inside
+      the time it has left before the open, capped at OI_WARM_LEAD_S (1 h) and ending
+      OI_WARM_FLOOR_S (180 s) before the bell; after the 09:15 wake that is ~09:17-09:27. The floor
+      is 180 s, not 60 (OTV4TEST critique (d)): inside 120 s the pre-open loop sleeps to 09:29:55
+      in one step, so a later slot would fire at the bell with the herd. At its slot the pre-open
+      pass fetches the chain (_warm_open_interest), which fills the OI cache; ONE-SHOT: once a
+      warm's chain carries OI for every contract, no further warm runs that day. The 09:30 tick
+      asks only for strikes not yet cached. Two boxes can still draw close
+      moments (no controller can forbid it); two at once is harmless, fifteen at once was the 429,
+      and open_interest v4.4 retries a 429 in seconds. Nothing is placed; a failure logs at DEBUG.
 v4.61  2026-10-20  r495 / B4 - a LIVE start cancels this instrument's untracked working orders
       (order_guard.boot_sweep) BEFORE the broker reconcile, so a part-filled leftover is adopted
       by the same start; entries stay blocked until one sweep comes back clean.
@@ -1107,6 +1121,7 @@ Run modes:
 import logging
 import logging.handlers
 import os
+import random
 import signal
 import sys
 import time
@@ -4794,6 +4809,69 @@ def _check_blindness(state: BotState):
 
 _REHEARSAL_FLAG = os.path.join(os.path.dirname(LOG_FILE), "data", "REHEARSAL_OFF")
 
+OI_WARM_LEAD_S = 3600       # r498 / OI.3: the warm window opens at most 1 h before the open
+OI_WARM_FLOOR_S = 180       # ... and closes 180 s before the bell (inside 120 s the loop sleeps to 09:29:55)
+_OI_WARM_FRAC = random.SystemRandom().random()   # this process's own draw, [0, 1)
+_OI_WARM_SLOT = None        # seconds-before-open of this box's warm, fixed on the first pass
+_OI_WARM_DONE = False       # one-shot: True once a warm's chain had OI for every contract
+
+
+def _oi_warm_slot(first_secs_to_open, frac) -> float:
+    """r498 — seconds before the open at which this box warms its OI: `frac` of the way
+    through the time left at its first pre-open pass (capped at OI_WARM_LEAD_S), ending
+    OI_WARM_FLOOR_S before the bell. A box that first looks inside the floor warms at once."""
+    room = min(float(first_secs_to_open), OI_WARM_LEAD_S)
+    if room <= OI_WARM_FLOOR_S:
+        return room
+    return room - frac * (room - OI_WARM_FLOOR_S)
+
+
+def _oi_warm_due(secs_to_open, frac=None) -> bool:
+    """r498 / OI.3 — True from this box's own slot until the open, until one warm has
+    succeeded (one-shot); never after the open, never on an evening or a weekend (the next
+    open is more than OI_WARM_LEAD_S away). Holidays are not known here: a weekday holiday
+    warms too, harmlessly."""
+    global _OI_WARM_SLOT, _OI_WARM_DONE
+    try:
+        secs = float(secs_to_open)
+    except (TypeError, ValueError):
+        return False
+    if not (0 < secs <= OI_WARM_LEAD_S):
+        _OI_WARM_SLOT, _OI_WARM_DONE = None, False   # outside the window: tomorrow draws anew
+        return False
+    if _OI_WARM_DONE:
+        return False
+    if _OI_WARM_SLOT is None:
+        _OI_WARM_SLOT = _oi_warm_slot(secs, _OI_WARM_FRAC if frac is None else frac)
+        logger.info("[oi] this box warms open interest %.0f s before the open (its own draw)",
+                    _OI_WARM_SLOT)
+    return secs <= _OI_WARM_SLOT
+
+
+def _warm_open_interest() -> None:
+    """r498 / OI.3 — fetch today's chain before the bell so its open interest is cached.
+
+    ⚠️ WHY: the pre-open rehearsal stops at can_enter's opening-range gate BEFORE
+    attempt_new_entry asks for a chain, so no box fetched OI until the 09:30 tick, and
+    every box asked at the same second on one login: the broker's 429 cut two whole
+    batches from QQQ on 10-22 (82 of 280 non-zero until 09:40). OI is published
+    overnight and does not change intraday, so the pre-open copy is the day's copy.
+    ⚠️ PLACES NOTHING AND NEVER RAISES. A failure logs at DEBUG; the 09:30 fetch is
+    unchanged and asks for whatever this did not get.
+    """
+    global _OI_WARM_DONE
+    try:
+        from data.options_chain import get_chain_fetcher
+        ch = get_chain_fetcher().fetch_chain()
+        if ch is not None:
+            cs = list(ch.calls or []) + list(ch.puts or [])
+            if cs and all(getattr(c, "oi_known", None) is True for c in cs):
+                _OI_WARM_DONE = True
+                logger.info("[oi] pre-open warm complete: open interest for all %d contracts",
+                            len(cs))
+    except Exception as exc:                                   # noqa: BLE001
+        logger.debug("pre-open OI warm skipped: %s", exc)
+
 
 def _rehearsal_disabled() -> bool:
     """r108 — True when the operator has turned the pre-open rehearsal OFF.
@@ -4931,6 +5009,9 @@ def main_loop(state: BotState):
                     logger.debug("pre-RTH observation pass skipped: %s",
                                  _obs_err)
                     _ctx = None
+                # r498 / OI.3 — the day's open interest before the bell, not at 09:30
+                if _oi_warm_due(seconds_until_rth_open()):
+                    _warm_open_interest()
                 # ── 🔴 r101 — RUN THE DECIDING PATH OUTSIDE RTH TOO ─────────
                 # Operator, 2026-08-24: "I want the executing logic running as
                 # long as the service is up. But one gate that blocks it from
