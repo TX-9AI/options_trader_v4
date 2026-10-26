@@ -6,7 +6,7 @@ the canary fails on drift (WORKING_AGREEMENT 33).
 
 355 Python modules across 13 local packages.
 
-**Reached by:** 106 imported · 8 declared entry points · 181 referenced from a script, unit or doc but never imported · **60 by nothing here**.
+**Reached by:** 106 imported · 8 declared entry points · 175 referenced from a script, unit or doc but never imported · **66 by nothing here**.
 
 ⚠️ The last group is a REVIEW LIST, not a delete list. A
 `land.spec CHECK` line ships inside a tarball and is never
@@ -648,7 +648,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_credit_marks_short.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_credit_remainder.py`
 - **calls:** `database/trade_logger.py`, `execution/__init__.py`, `execution/credit_remainder.py`, `execution/entry_engine.py`, `execution/entry_ladder.py`, `execution/ladder_registry.py`, `execution/position_manager.py`, `main.py`, `strategy/base_strategy.py`
@@ -656,7 +656,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_credit_sign_history.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_criteria.py`
 - **calls:** `strategy/__init__.py`, `strategy/criteria.py`
@@ -756,7 +756,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_exit_replay_streams.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_exit_single_grid.py`
 - **calls:** `execution/exit_engine.py`
@@ -796,7 +796,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_gex_from_chains.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_half_day.py`
 - **calls:** `analysis/volatility_measures.py`, `config.py`, `data/market_data.py`, `execution/limit_ladder.py`, `execution/position_manager.py`, `main.py`, `strategy/__init__.py`, `strategy/credit_vertical.py`, `tools/emergency_watchdog.py`, `utils/__init__.py`, `utils/market_calendar.py`, `utils/time_utils.py`
@@ -816,7 +816,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_install_target.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `bootstrap.example.sh`, `docs/BACKLOG.md`
+- **called by:** (not imported) — referenced in `bootstrap.example.sh`
 
 ### `tests/check_ladder_wired.py`
 - **calls:** `config.py`, `execution/__init__.py`, `execution/entry_engine.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`, `execution/order_confirm.py`
@@ -844,7 +844,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_level_vocabulary.py`
 - **calls:** `derived/levels.py`
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_lineage.py`
 - **calls:** `database/__init__.py`, `database/trade_logger.py`, `warehouse/__init__.py`, `warehouse/s3_push.py`
@@ -900,7 +900,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_no_legacy_zone.py`
 - **calls:** (none)
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`, `requirements.txt`
+- **called by:** (not imported) — referenced in `requirements.txt`
 
 ### `tests/check_no_mark_close.py`
 - **calls:** `config.py`, `database/trade_logger.py`, `execution/__init__.py`, `execution/exit_engine.py`, `execution/ladder_registry.py`
@@ -1048,7 +1048,7 @@ Change these with the most care; a break here reaches everything downstream.
 
 ### `tests/check_push_row_day.py`
 - **calls:** `warehouse/__init__.py`, `warehouse/retention_purge.py`, `warehouse/s3_push.py`
-- **called by:** (not imported) — referenced in `docs/BACKLOG.md`
+- **called by:** (nothing — no importer and no mention in any script, unit or doc here)
 
 ### `tests/check_query_paths.py`
 - **calls:** (none)
