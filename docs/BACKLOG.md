@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.09
+# BACKLOG.md — v4.10
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.10 — 2026-10-26 — r513 — THE STREAMS WARNING COUNTS GAP ROWS, AND THE DRAIN WRITES THE DAY'S OHLC FILE FIRST (dtp).** STRM.1, from the 2026-10-26 review: eod_analysis v1.5 _stream_gaps() no longer counts warehouse_coverage's own "🔴 N stream-day(s) need an answer." line (one gap read "2 gap(s)"); eod_conductor_v2 v2.13: the drain starts candle-logger.service on each box before `s3_push.py --verify`, because the 16:05 timer and QUIESCE race and 9 of 14 boxes had no ohlc file when verified. Gate dtp tests/check_streams_count S1-S4. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree.
 
 **v4.09 — 2026-10-26 — r512 — THE CONTROL HALF OF THE PAGER, AND A CREDENTIAL CHECK THAT KNOWS AN OTV5 BOX (dtp).** PAGE.1 dtp pager.py v0.1.0: one ssh stream per running box follows bot.log for the `[page] CODE ref` lines OTV5 r32 writes, prints `<SYM> <CODE> <ref> @HH:MM:SS ET`, drops unknown codes and duplicates, and catches up after a reconnect; ssh_util v0.7.0 adds ssh_argv. VER.1 verify_creds_remote v1.1: an OTV5 box with no GitHub token and origin OTV5 passes (13 of 14 failed on 2026-10-26 for being built correctly, and SOFI passed on a stale OTV4TEST repo and token); the Telegram probe names its box. Gates check_pager G1-G14, check_verify_github G1-G9. Rows live in OTV5 docs/BACKLOG.md. Docs only in this tree.
 
