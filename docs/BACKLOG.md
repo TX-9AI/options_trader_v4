@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.08
+# BACKLOG.md — v4.09
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.09 — 2026-10-26 — r512 — THE CONTROL HALF OF THE PAGER, AND A CREDENTIAL CHECK THAT KNOWS AN OTV5 BOX (dtp).** PAGE.1 dtp pager.py v0.1.0: one ssh stream per running box follows bot.log for the `[page] CODE ref` lines OTV5 r32 writes, prints `<SYM> <CODE> <ref> @HH:MM:SS ET`, drops unknown codes and duplicates, and catches up after a reconnect; ssh_util v0.7.0 adds ssh_argv. VER.1 verify_creds_remote v1.1: an OTV5 box with no GitHub token and origin OTV5 passes (13 of 14 failed on 2026-10-26 for being built correctly, and SOFI passed on a stale OTV4TEST repo and token); the Telegram probe names its box. Gates check_pager G1-G14, check_verify_github G1-G9. Rows live in OTV5 docs/BACKLOG.md. Docs only in this tree.
 
 **v4.08 — 2026-10-25 — r511 — CONTROL TOOLING FIXES (dtp).** Twelve control-side fixes from the OTV5 backlog triage (their rows live in OTV5 docs/BACKLOG.md): DEV.3, OPS.16, CTL.1, OPS.30, OPS.27, CHK.5, DEV.13, S3.29, S3.19, S3.6, DOC.7/DOC.8, and the fee/calendar readers repointed to OTV5. Docs only in this tree.
 
