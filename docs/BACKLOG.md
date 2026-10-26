@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.07
+# BACKLOG.md — v4.08
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.08 — 2026-10-25 — r511 — CONTROL TOOLING FIXES (dtp).** Twelve control-side fixes from the OTV5 backlog triage (their rows live in OTV5 docs/BACKLOG.md): DEV.3, OPS.16, CTL.1, OPS.30, OPS.27, CHK.5, DEV.13, S3.29, S3.19, S3.6, DOC.7/DOC.8, and the fee/calendar readers repointed to OTV5. Docs only in this tree.
 
 **v4.07 — 2026-10-25 — r510 — THE OPEN WORK MOVES TO OTV5.** Every open or unproven row of this backlog (63) moved to OTV5 docs/BACKLOG.md (OTV5 r22), filed by category; each row here now reads MOVED and names its OTV5 id. The fleet runs OTV5; the operator: "Migrate the open otv4 backlog items into the otv5 backlog."
 
