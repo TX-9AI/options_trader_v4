@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.11
+# BACKLOG.md — v4.12
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.12 — 2026-10-27 — r515 — test_ettime IS GREEN AGAIN (dtp).** ETT.1: tools/check_market_calendar v1.3 reads D3's year through ettime.today_et(); its bare naive date call was the one site T4 flagged. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree.
 
 **v4.11 — 2026-10-26 — r514 — THE NIGHTLY TAPE COMES FROM S3, SO LABEL AND DAILY_BARS HAVE SOMETHING TO READ (dtp).** LABEL.1, from the 2026-10-26 review: auto_label and daily_bars read ohlc/<date>/, which only harvest (an scp from a RUNNING box) wrote, and eod_analysis runs after takedown - LABEL had been rc=1 "no tape" every night and DAILY_BARS rebuilt 0 symbols. dtp ohlc_from_s3 v0.1.0 materializes the day and the prior session from raw/candles (engine boxes only; a harvested file is kept); eod_analysis v1.6 runs it as a TAPE phase before DAILY_BARS and LABEL. Gate dtp tests/test_ohlc_from_s3 T1-T6. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree.
 
