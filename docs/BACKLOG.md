@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.13
+# BACKLOG.md — v4.14
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.14 — 2026-10-31 — r517 — A SERIES BACKLOG IS HELD, NOT WAVED THROUGH AS DRIFT, AND A STREAM THAT STOPS EARLY IS GRADED (dtp).** eod_conductor_v2 v2.14 reads OTV5 s3_push v5.4's per-table series lag (OTV5 r64) and holds a lagging box; warehouse_coverage v1.10 --tail grades each box's newest quote_series key against close-15min; eod_analysis v1.7 runs it as a TAIL phase. 2026-10-30's S3 SPX quote_series stopped at 13:53 ET while the drain read OK. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "yes to all of the prepared solutions".
 
 **v4.13 — 2026-10-31 — r516 — THE SCRATCH PURGE SALVAGES A DIRTY BUILD CLONE BEFORE IT PRUNES IT (dtp).** Amends OPS.46 (dtp r422): tools/scratch_purge v1.3 ages a clone by its newest file (not its top directory) and archives a dirty clone's modified and untracked files, git diff HEAD and base sha to $ARCHIVE/builds/ before deleting it; a clone whose status cannot be read is not deleted. 2026-10-31 00:30-01:30 ET it pruned three OTV5 build clones holding approved, uncommitted fixes. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "Yes".
 
