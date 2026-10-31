@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.14
+# BACKLOG.md — v4.15
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.15 — 2026-10-31 — r518 — THE R SUITE RUNS OTV5'S TOOLS, AND A FAILED TOOL SAYS WHY (dtp).** eod_analysis v1.8 runs edge_scan and r_ledger from ~/OTV5/tests (DTP_OTV5_DIR) instead of this tree's frozen copies; edge_scan v1.2 here had raised KeyError on every Friday since 2026-08-28 (RPT.29). A failed tool's warning carries its stderr tail. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "Yes to dtp & the filter".
 
 **v4.14 — 2026-10-31 — r517 — A SERIES BACKLOG IS HELD, NOT WAVED THROUGH AS DRIFT, AND A STREAM THAT STOPS EARLY IS GRADED (dtp).** eod_conductor_v2 v2.14 reads OTV5 s3_push v5.4's per-table series lag (OTV5 r64) and holds a lagging box; warehouse_coverage v1.10 --tail grades each box's newest quote_series key against close-15min; eod_analysis v1.7 runs it as a TAIL phase. 2026-10-30's S3 SPX quote_series stopped at 13:53 ET while the drain read OK. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "yes to all of the prepared solutions".
 
