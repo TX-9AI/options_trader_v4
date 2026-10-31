@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.12
+# BACKLOG.md — v4.13
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.13 — 2026-10-31 — r516 — THE SCRATCH PURGE SALVAGES A DIRTY BUILD CLONE BEFORE IT PRUNES IT (dtp).** Amends OPS.46 (dtp r422): tools/scratch_purge v1.3 ages a clone by its newest file (not its top directory) and archives a dirty clone's modified and untracked files, git diff HEAD and base sha to $ARCHIVE/builds/ before deleting it; a clone whose status cannot be read is not deleted. 2026-10-31 00:30-01:30 ET it pruned three OTV5 build clones holding approved, uncommitted fixes. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "Yes".
 
 **v4.12 — 2026-10-27 — r515 — test_ettime IS GREEN AGAIN (dtp).** ETT.1: tools/check_market_calendar v1.3 reads D3's year through ettime.today_et(); its bare naive date call was the one site T4 flagged. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree.
 
