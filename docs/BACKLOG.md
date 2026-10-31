@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.16
+# BACKLOG.md — v4.17
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.17 — 2026-10-31 — r520 — THE SATURDAY BRIEF IS REWRITTEN FOR THE FLEET THAT EXISTS (dtp).** Seven sections (trading summary, bot-log issues, fleet health, documentation corrections, code hygiene, studies to increase P&L, recommendations), prepared at 03:00 ET and shown on request; the spec moves out of this tree's gitignored handoffs/ into dtp docs/SATURDAY_BRIEF.md v2.0, and new briefs are written to ~/reviews/weekly/. Retired from the brief: the minimum-stop veto, OTV4 vs TEST, the tape proxy, D5 pooling. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "Re-do the entire brief".
 
 **v4.16 — 2026-10-31 — r519 — THE LEDGER SEARCH READS OTV5, PARK HAS A CODE, AND A QUIET GATE DAY IS NOT A GAP (dtp).** tools/genesis_find v1.1 searches OTV5's GENESIS and BACKLOG before this tree's (still the history); it had read only this tree since the open rows moved on 10-24, so OPS.18 no longer matched "sparse" and check_genesis_find G1 was red (OPS.36). strategy_registry v1.6 registers PARK (it printed "?PAR") and lists only OTV5's active trading plans; the retired strategies leave the registry for a decode-only HISTORICAL table, so old rows keep their codes (OPS.50). PARC is not registered. warehouse_coverage v1.11 grades derived_gate_disposition as silent on a day with no gate change, as derived_level_event is: SPX wrote no row on 10-30 after its loss cap halted entries at 10:00. The rows live in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "Concur" (R1); "No to PARC & it was never an active strategy. Also, don't list the retired strategies either." (R5); "Agree" (R7).
 
