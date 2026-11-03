@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.17
+# BACKLOG.md — v4.18
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.18 — 2026-11-02 — r521 — CONTROL DECIDES WHO GETS A DXLINK SLOT, AND TESTS THE NODES ITSELF (dtp).** After the dxFeed node 129.153.134.53 began answering 502 at 14:19 ET and the other two nodes refused new sessions at the user-session limit, dtp tools/feed_triage.py v1.0 ranks the fleet (a box holding a position first and never touched, then flat boxes by window EV per trade, symbols a pre-cash theory excludes lower), stands down the lowest-ranked flat box by stopping its instance when a higher-ranked box is refused, restores it if the refused box still cannot get in, and brings it back when a slot frees: one message per action into a control outbox, a kill switch, a dry run, RTH and the 09:15 wake window only. dtp tools/dxlink_probe.py v1.0 tests each node from control with one TLS websocket upgrade and reads the status line only, with no session and no credentials. Neither is scheduled at land. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "We should manage our connections more actively, including standing down our worst performers or boxes who are flat when refusals occur". The operator's rulings (2026-11-03, "Yes to the proposal") are built in as defaults in feed_triage v1.1: demotion by H4P only, the ranking EV shrunk toward 0 below 20 trades (ev x min(n, 20)/20), the instance stop of a flat box kept, every box the tool stood down woken at 15:45 ET for the EOD run, and (dtp r522) the router muting a triage take-down's box STOPPED/STARTED alerts.
 
 **v4.17 — 2026-10-31 — r520 — THE SATURDAY BRIEF IS REWRITTEN FOR THE FLEET THAT EXISTS (dtp).** Seven sections (trading summary, bot-log issues, fleet health, documentation corrections, code hygiene, studies to increase P&L, recommendations), prepared at 03:00 ET and shown on request; the spec moves out of this tree's gitignored handoffs/ into dtp docs/SATURDAY_BRIEF.md v2.0, and new briefs are written to ~/reviews/weekly/. Retired from the brief: the minimum-stop veto, OTV4 vs TEST, the tape proxy, D5 pooling. The row lives in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "Re-do the entire brief".
 
