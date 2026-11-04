@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.19
+# BACKLOG.md — v4.20
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.20 — 2026-11-04 — r523 — CONTROL ASSIGNS EACH BOX ITS DXLINK NODE BEFORE THE OPEN (dtp).** NEW tools/dxlink_assign.py v1.0: from the control probe's confirmed-up nodes it spreads the running fleet evenly (holding boxes first, a box already on an up node keeps it under the cap of ceil(boxes / nodes)) and, with --apply, writes one small file on each box (~/options-trader/data/dxlink_assign.json: date, symbol, node, written_at) that OTV5 r74's candle feed dials first; nothing on a box is restarted or stopped. Units tools/dtp-dxlink-assign.{service,timer} (09:17 ET weekdays, --dry-run) ship NOT INSTALLED. tools/dxlink_probe.py v1.1 also asks the zone's authoritative nameservers. tools/saturday_brief.prompt section 6 gains the standing R6 no-progress lead line. Gates check_dxlink_assign D1-D6, check_dxlink_probe X9. The row is in OTV5 docs/BACKLOG.md (r74), beside the connection-triage row filed the same day. Docs only in this tree. Operator: "if we have control over the connections, then spread them out"; 2026-11-03 "Yes to the proposal".
 
 **v4.19 — 2026-11-03 — r522 — CONTROL DELIVERS THE FLEET'S ALERTS: ONE PACED, GROUPED TELEGRAM QUEUE (dtp; built 2026-11-02 as r521, renumbered r522 and rebased onto r521 (the connection triage and node probe) on 2026-11-03).** alert_router.py v0.1.0 takes each managed box's full alert from pager.py v0.2.0's ssh stream (OTV5 r71 writes it as an `[alert]` line), spools it, acks it back to the box over the same stream, groups BLIND alerts of one cause into one message with open-position boxes first and one recovery message, collapses startups, stops and same-text alerts, drops the copies boxes sent themselves (critical alerts, and any alert when control's ack file is stale), and paces the queue under Telegram's limits; it stops acking after 90 s of failed sends so every box sends its own. post_status() is the door for the recovery side's "working on it" and "recovered" lines. install_alert_router.sh is not run. Gate check_alert_router A1-A13; check_pager G1-G14 unchanged. 2026-11-02's 09:30 and 14:19 ET dxFeed node failures sent 3, then 8+, separate BLIND alerts inside a minute. The row, PAGE.2, is in OTV5 docs/BACKLOG.md. Docs only in this tree. Operator: "we need that message routing slash queue triage more than ever". With the triage ruling R5 (operator 2026-11-03, "Yes to the proposal"): alert_router v0.2.0 reads the triage's action log and mutes the box STOPPED/STARTED alerts of a triage take-down; the triage's own line is the one summary sent.
 
