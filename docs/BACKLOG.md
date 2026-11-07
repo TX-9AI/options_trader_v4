@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.20
+# BACKLOG.md — v4.21
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.21 — 2026-11-07 — r524 — THE NIGHTLY REVIEW RUNS FROM A CONTROL TIMER, NOT FROM A SESSION (dtp).** The nightly post-RTH review (~/reviews/YYYY-MM-DD.md, the EV benchmark's daily record) was a session-only scheduled job: it expired after 7 days (last fire 11-02), a session restart wipes such jobs, and it was fixed in UTC so after the 11-01 clock change it fired before the close; 11-04/11-05 were written late by hand and 11-06 not at all. NEW dtp tools/nightly_review.sh v1.0 runs the review headless (an isolated claude -p session, the prompt in tools/nightly_review.prompt v1.0, unattended so the lander refuses it) for the session that is due (16:40 ET, 13:40 ET on a half day), stands down when the review exists, and at 18:30 ET (--check-missing) sends one line through control's alert router when today's review is missing. NEW tools/review_kit.py v1.0 computes the figures with one right answer (the day's trades from the warehouse with the fee model's fees, OTV4TEST dropped; the window EV with its day-bootstrap interval and fees beside; the theories; the giveback) and replaces the day's rows in each tracking CSV, so a re-run never double-appends. Units tools/dtp-nightly-review{,-check}.{service,timer} and tools/install_nightly_review.sh ship NOT INSTALLED (the operator installs control units). Gate check_nightly_review N1-N8. The row is filed in OTV5 docs/BACKLOG.md with the next OTV5 land. Docs only in this tree. Operator, 2026-11-07: "Yes, on the timer".
 
 **v4.20 — 2026-11-04 — r523 — CONTROL ASSIGNS EACH BOX ITS DXLINK NODE BEFORE THE OPEN (dtp).** NEW tools/dxlink_assign.py v1.0: from the control probe's confirmed-up nodes it spreads the running fleet evenly (holding boxes first, a box already on an up node keeps it under the cap of ceil(boxes / nodes)) and, with --apply, writes one small file on each box (~/options-trader/data/dxlink_assign.json: date, symbol, node, written_at) that OTV5 r74's candle feed dials first; nothing on a box is restarted or stopped. Units tools/dtp-dxlink-assign.{service,timer} (09:17 ET weekdays, --dry-run) ship NOT INSTALLED. tools/dxlink_probe.py v1.1 also asks the zone's authoritative nameservers. tools/saturday_brief.prompt section 6 gains the standing R6 no-progress lead line. Gates check_dxlink_assign D1-D6, check_dxlink_probe X9. The row is in OTV5 docs/BACKLOG.md (r74), beside the connection-triage row filed the same day. Docs only in this tree. Operator: "if we have control over the connections, then spread them out"; 2026-11-03 "Yes to the proposal".
 
