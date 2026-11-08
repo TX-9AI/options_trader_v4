@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.31
+# BACKLOG.md — v4.32
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.32 — 2026-11-08 — r535 — ONE OWNER FOR EVERY CONSTANT dtp AND OTV5 BOTH CARRY (dtp).** dtp config v0.1.9 WAREHOUSE_BUCKET / ENGINE_EPOCH are the only dtp copies (eight bucket sites and two epoch sites read them; tools/trades_epoch_strip reads OT_S3_BUCKET, not OT_WAREHOUSE_BUCKET); selector.PANEL and s3_sweep's fallback are config.UNIVERSE; wake_and_bake v1.10 _in_rth reads market_calendar (v1.9 treated a weekday holiday and a half-day afternoon as RTH). Gate dtp tests/check_const_parity.py P1-P9. The row is CONST.1 in OTV5 docs/BACKLOG.md (OTV5 r85).
 
 **v4.31 — 2026-11-08 — r534 — check_floor_overshoot NO LONGER RESTS ON BUNDLES THAT CAN BE PRUNED (dtp).** dtp tests/check_floor_overshoot.py v1.3 reads tests/fixtures/floor_overshoot/ (the r383 corpus frozen, 171 rows from the 13 bundles 08-31..09-15, plus byte-identical copies of the 09-14 and 09-07 bundles F3-F5 drive excursion_report on); F1/F2 assert r383's figures again, the live reports/warehouse corpus is printed only, a missing fixture is F0 FAIL. The row is FIXT.1 in OTV5 docs/BACKLOG.md (OTV5 r84).
 
