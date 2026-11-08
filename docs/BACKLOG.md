@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.24
+# BACKLOG.md — v4.25
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.25 — 2026-11-08 — r528 — THE R SUITE MENU RUNS OTV5'S TOOLS (dtp).** dtp menu_functions.sh v1.78 `_r_tool` resolves ${DTP_OTV5_DIR:-~/OTV5}/tests/<tool> instead of this frozen tree's tests/, so the four R SUITE items run OTV5's r_ledger, stop_sweep and exit_replay (r75's streaming replay) and OTV5 r79's ported excursions.py; DTP_OTV4_DIR is no longer read there. Gate dtp tests/check_r_tool_paths.py R1-R6, 7 mutants each red. The row, RSUITE.1, is in OTV5 docs/BACKLOG.md (r79). Docs only in this tree. Operator, 2026-11-07: "These should all be addressed one at a time by their own agent & run the fix by you for approval."
 
 **v4.24 — 2026-11-08 — r527 — THE SATURDAY WRAPPER REFUSES A MISSING PROMPT FIRST, AND REPORTS THE TREES THE BRIEF IS ABOUT (dtp).** dtp tools/saturday_brief.sh v1.8 (the 11-07 Saturday brief R9 and section 5 item 7; hygiene queue item 2): check_saturday_brief S5 was red in the 11-07 sweep (rc=0) because the sweep ran while the real brief held ~/.saturday_brief_inflight and the wrapper stood down on it before the prompt check; the missing-prompt refusal now comes before both stand-downs and writes one REFUSED ledger line. --smoke and the run parameters report OTV5's and dtp's HEADs (a TREES line, also in --dry), never the frozen otv4's; the session still starts in ~/options-trader-v4 only because Claude's project memory is keyed by that directory. The prior brief comes only from ~/reviews/weekly/ (the handoffs/ fallback is gone), and a prior whose _work folder is missing is passed as NONE so botlog_scan and checker_sweep run without a dead --prior. tests/check_saturday_brief.py v1.4: every wrapper run uses a scratch in-flight marker (S7 had been backdating the LIVE marker during a real brief), S5c drives the 11-07 shape, S18/S18b the TREES line on fixture repos, S19/S19b/S19c the prior resolution; 8 mutants each red, and the v1.7 wrapper fails S5c with rc=0, the 11-07 red. docs/SATURDAY_BRIEF.md v2.2 says how PRIOR_WORK and TREES are used. Its row is filed in OTV5 docs/BACKLOG.md with the next OTV5 land. Docs only in this tree. Control tooling, outside the trading freeze. Operator, 2026-11-07: "These should all be addressed one at a time by their own agent & run the fix by you for approval."
 
