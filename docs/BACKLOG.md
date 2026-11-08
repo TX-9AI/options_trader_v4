@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.30
+# BACKLOG.md — v4.31
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.31 — 2026-11-08 — r534 — check_floor_overshoot NO LONGER RESTS ON BUNDLES THAT CAN BE PRUNED (dtp).** dtp tests/check_floor_overshoot.py v1.3 reads tests/fixtures/floor_overshoot/ (the r383 corpus frozen, 171 rows from the 13 bundles 08-31..09-15, plus byte-identical copies of the 09-14 and 09-07 bundles F3-F5 drive excursion_report on); F1/F2 assert r383's figures again, the live reports/warehouse corpus is printed only, a missing fixture is F0 FAIL. The row is FIXT.1 in OTV5 docs/BACKLOG.md (OTV5 r84).
 
 **v4.30 — 2026-11-08 — r533 — NO dtp TEST LOCATES THE CODE IT CHECKS IN THIS FROZEN TREE (dtp).** dtp tests/calibrate_trend_strength.py v1.4, screen_reach.py v1.3, screen_entry_vectors.py v1.2, test_trend_calibration.py v1.3, test_natural_key.py v1.1, test_standings_rows.py v1.6 and check_forward_scan_series.py v1.1 read the trend meter, the structure classifier, the derived schemas, the trades DDL and s3_push's series tables from ~/OTV5 (DTP_OTV5_DIR), not from this tree; dtp tests/check_no_otv4_deps.py v1.1 scans tests/ too. Each verdict unchanged. The row is OTV4DEP.2 in OTV5 docs/BACKLOG.md (OTV5 r83).
 
