@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.35
+# BACKLOG.md — v4.36
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.36 — 2026-11-08 — r539 — ONE MORNING CHECK ON A TIMER, AND THE PER-MINUTE TRIAGE REMOVED (dtp).** dtp tools/morning_check.py v1.0 and dtp-morning-check at 09:19, 09:50 and 11:10 ET replace three session crons (the wake verify and the two shadow-rule checks); each run sends the operator one line, critical on any red. tools/feed_triage.py and the dtp-feed-triage timer are deleted, and alert_router v0.3.0 no longer follows its files; dxlink_probe and dxlink_assign post through the router. dtp-eod-analysis (install_eod_v2 v1.2; install_eod_analysis.sh deleted) and dtp-regime are removed from control; saturday_brief.sh v1.9 states the real cron times. The row, TIMER.1, is in OTV5 docs/BACKLOG.md (OTV5 r91). Docs only in this tree. Operator, 2026-11-08: "On the timers, yes consolidate, clean up and optimize"; on the triage: "It should be reactionary, by event type—not run every minute looking for problems."
 
 **v4.35 — 2026-11-08 — r538 — THE TCS SHADOW'S READERS ON CONTROL ARE RETIRED WITH IT (dtp).** docs/SATURDAY_BRIEF.md v2.4 and tools/saturday_brief.prompt no longer read raw/shadow_trades (OTV5 r88 deleted the TCS shadow; the operator, 2026-11-08: "Delete"); the PARK late-day shadow is read by check_name through _envelopes. tools/warehouse_map.py v1.5 names raw/shadow_trades RETIRED; strategy_registry.py v1.7's TrendCreditSpread history row says the shadow is deleted (the code TCST stays to decode history). The row is filed in OTV5 docs/BACKLOG.md (r88, the RETIRE series, number 3).
 
