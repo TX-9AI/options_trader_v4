@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.33
+# BACKLOG.md — v4.34
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.34 — 2026-11-08 — r537 — /tmp ON CONTROL STOPS FILLING, AND TWO TESTS STOP INHERITING THE SWEEP'S PATHS (dtp).** tests/test_eod_excursion_source v1.2 and test_excursion_report v1.2 run their sandbox subprocess without inherited OT_/DTP_ variables; tools/nightly_review.sh v1.1 works in its own dir on disk and removes it, nightly_review.prompt v1.2 forbids /tmp; tools/scratch_purge.py v1.5 removes the checkers' abandoned top-level /tmp dirs (owned, pattern, newest file older than 24h, not held open); tools/checker_sweep v1.2 counts [env] reds apart; tests/test_trade_report_epoch v1.2 reads SOURCE across the report's line fold. Gates check_nightly_review N12, check_scratch_purge P26-P27, check_checker_sweep W8. The row is filed in OTV5 docs/BACKLOG.md (r87, the SWEEP series, number 7).
 
 **v4.33 — 2026-11-08 — r536 — THE STANDING CHECKER REDS ARE FIXED AT THEIR CAUSE (dtp).** Eleven standing reds from the 11-07 Saturday brief section 3.1 reproduced and fixed, none waived: menu_functions v1.80 (three confirms call _yes, C3), standings v1.12 (rows fit 43 characters, S6; the S9 fixture carries the query's 13 fields), excursion_report v3.9 (a missing trades/ root is no DB source; a --since run refuses instead of a FileNotFoundError); stale checks re-pointed to the same intent (test_reach, test_stream_coverage S4b/S14 to the SHD.5 DEAD ruling, test_trade_report_epoch to the 09-01 epoch, test_excursion_report labels, check_trade_report_fees T1b); sandbox environment reds fixed (test_eod_excursion_source, test_excursion_report, test_trade_report_epoch import the dtp siblings); tools/shadow_watch.py, install_shadow_watch.sh, tests/test_shadow_watch.py, tests/check_shadow_watch.py and check_repoint_pinned P10 deleted (no OTV5 box runs the shadow observer; its timer is disabled). 12/12 mutants red. The row is CHK.12 in OTV5 docs/BACKLOG.md (OTV5 r86).
 
