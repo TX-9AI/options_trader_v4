@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.26
+# BACKLOG.md — v4.27
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.27 — 2026-11-08 — r530 — A BOX THAT STOPS ITSELF IS RECORDED IN THE POWER LEDGER AS ITS OWN CLASS (dtp).** 2026-11-08 00:00 ET QQQ's midnight backstop (optbot-midnight-halt, working as designed) powered it off from inside the OS; nothing went through ec2ops.stop(), so the power ledger kept a START with no stop and the audit could not say who left it that way. dtp ec2ops.py v0.1.6: describe_by_tag carries EC2's StateReason.Code and StateTransitionReason; NEW stop_class (Client.InstanceInitiatedShutdown -> HALT, anything else -> XSTOP), transition_time_et, record_observed_stop. tools/fleet_power_audit.py v1.2: every run appends one HALT or XSTOP row, at EC2's transition time with caller=ec2:<code>, for each STOPPED box whose ledger still ends in START (once; never for a box the ledger never saw), prints it, and reads HALT/XSTOP as stops. Gate dtp tests/check_power_halt.py H1-H10 on scratch ledgers with EC2 and the clock faked, 9 mutants each red. Its row is filed in OTV5 docs/BACKLOG.md with the next OTV5 land. Docs only in this tree. Control tooling, outside the trading freeze. Operator, 2026-11-07: "Try not to suggest 'log only' as the proposed fix for most things."
 
 **v4.26 — 2026-11-08 — r529 — THE FLEET MENU ITEM IS THE RAMP TOP, AND ITS UNIT READER READS THE FLEET'S QUOTED UNITS (dtp).** dtp menu_registry.sh v1.27 relabels the FLEET item "ORB budget & spot (every running box)" to "Ramp TOP (OT_ORB_BUDGET_USD) & spot": the ORB trade is retired (OTV5 r76 RETIRE.1) and that key is the live Breakout ramp top (configure.sh item 7 "Ramp TOP (MAX)"); menu_functions.sh v1.79 and tests/orb_budget_fleet.py v1.2 say the same, and the report points at configure item 7, not 8. orb_budget_fleet's box program split each unit `Environment=` line on its first "=", so the quoted form the fleet's units carry (`Environment="K=V"`) became the key `"K` and such a box read (DEFAULT); it now reads the lines the way systemd does (shlex: bare, quoted, several per line) and counts a line it cannot parse. The function and script keep their names (only historical comments cite them). docs/MENU_INVENTORY.tsv regenerated from `tools/menu_extract.py --inventory` (86 stale rows -> 81; the 11-07 brief section 4 item 8). Gate dtp tests/check_ramp_top_report.py T1-T7, 7 mutants each red. Its row, MENU.1, is filed in OTV5 docs/BACKLOG.md with the next OTV5 land. Docs only in this tree. Control tooling, outside the trading freeze. Operator, 2026-11-07: "These should all be addressed one at a time by their own agent & run the fix by you for approval."
 
