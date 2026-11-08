@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.36
+# BACKLOG.md — v4.37
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.37 — 2026-11-08 — r540 — CONTROL TRIAGES EACH ALERT AS IT ARRIVES, BY EVENT TYPE (dtp).** dtp alert_triage.py v1.0, called by alert_router v0.4.0 for every alert it takes: each is typed and written to control's inbox, the approved recovery runs on a box proven flat (feed restart, bot start, retention purge after the close), and the wake's and the close's up / down alerts reach the operator as one message. The row, ROUTE.1, is in OTV5 docs/BACKLOG.md (OTV5 r92). Docs only in this tree. Operator, 2026-11-08: "It should be reactionary, by event type—not run every minute looking for problems."
 
 **v4.36 — 2026-11-08 — r539 — ONE MORNING CHECK ON A TIMER, AND THE PER-MINUTE TRIAGE REMOVED (dtp).** dtp tools/morning_check.py v1.0 and dtp-morning-check at 09:19, 09:50 and 11:10 ET replace three session crons (the wake verify and the two shadow-rule checks); each run sends the operator one line, critical on any red. tools/feed_triage.py and the dtp-feed-triage timer are deleted, and alert_router v0.3.0 no longer follows its files; dxlink_probe and dxlink_assign post through the router. dtp-eod-analysis (install_eod_v2 v1.2; install_eod_analysis.sh deleted) and dtp-regime are removed from control; saturday_brief.sh v1.9 states the real cron times. The row, TIMER.1, is in OTV5 docs/BACKLOG.md (OTV5 r91). Docs only in this tree. Operator, 2026-11-08: "On the timers, yes consolidate, clean up and optimize"; on the triage: "It should be reactionary, by event type—not run every minute looking for problems."
 
