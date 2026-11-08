@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.25
+# BACKLOG.md — v4.26
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.26 — 2026-11-08 — r529 — THE FLEET MENU ITEM IS THE RAMP TOP, AND ITS UNIT READER READS THE FLEET'S QUOTED UNITS (dtp).** dtp menu_registry.sh v1.27 relabels the FLEET item "ORB budget & spot (every running box)" to "Ramp TOP (OT_ORB_BUDGET_USD) & spot": the ORB trade is retired (OTV5 r76 RETIRE.1) and that key is the live Breakout ramp top (configure.sh item 7 "Ramp TOP (MAX)"); menu_functions.sh v1.79 and tests/orb_budget_fleet.py v1.2 say the same, and the report points at configure item 7, not 8. orb_budget_fleet's box program split each unit `Environment=` line on its first "=", so the quoted form the fleet's units carry (`Environment="K=V"`) became the key `"K` and such a box read (DEFAULT); it now reads the lines the way systemd does (shlex: bare, quoted, several per line) and counts a line it cannot parse. The function and script keep their names (only historical comments cite them). docs/MENU_INVENTORY.tsv regenerated from `tools/menu_extract.py --inventory` (86 stale rows -> 81; the 11-07 brief section 4 item 8). Gate dtp tests/check_ramp_top_report.py T1-T7, 7 mutants each red. Its row, MENU.1, is filed in OTV5 docs/BACKLOG.md with the next OTV5 land. Docs only in this tree. Control tooling, outside the trading freeze. Operator, 2026-11-07: "These should all be addressed one at a time by their own agent & run the fix by you for approval."
 
 **v4.25 — 2026-11-08 — r528 — THE R SUITE MENU RUNS OTV5'S TOOLS (dtp).** dtp menu_functions.sh v1.78 `_r_tool` resolves ${DTP_OTV5_DIR:-~/OTV5}/tests/<tool> instead of this frozen tree's tests/, so the four R SUITE items run OTV5's r_ledger, stop_sweep and exit_replay (r75's streaming replay) and OTV5 r79's ported excursions.py; DTP_OTV4_DIR is no longer read there. Gate dtp tests/check_r_tool_paths.py R1-R6, 7 mutants each red. The row, RSUITE.1, is in OTV5 docs/BACKLOG.md (r79). Docs only in this tree. Operator, 2026-11-07: "These should all be addressed one at a time by their own agent & run the fix by you for approval."
 
