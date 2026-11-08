@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.29
+# BACKLOG.md — v4.30
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.30 — 2026-11-08 — r533 — NO dtp TEST LOCATES THE CODE IT CHECKS IN THIS FROZEN TREE (dtp).** dtp tests/calibrate_trend_strength.py v1.4, screen_reach.py v1.3, screen_entry_vectors.py v1.2, test_trend_calibration.py v1.3, test_natural_key.py v1.1, test_standings_rows.py v1.6 and check_forward_scan_series.py v1.1 read the trend meter, the structure classifier, the derived schemas, the trades DDL and s3_push's series tables from ~/OTV5 (DTP_OTV5_DIR), not from this tree; dtp tests/check_no_otv4_deps.py v1.1 scans tests/ too. Each verdict unchanged. The row is OTV4DEP.2 in OTV5 docs/BACKLOG.md (OTV5 r83).
 
 **v4.29 — 2026-11-08 — r532 — NO dtp TOOL READS CODE OR LIVE DOCS FROM THIS FROZEN TREE (dtp).** dtp claude_boot.py v1.3 imports the boot alert's address from OTV5 (its WORKDIR keeps this folder: the Claude session's cwd); brief_sigint.py v1.2 reads `composite_call` from OTV5 r82's port of this tree's tests/brief_bias_join.py; gen_handoff.py v1.6 points a fresh thread at OTV5's WORKING_AGREEMENT, GENESIS and BACKLOG and lists this tree as frozen; scratch_purge.py v1.4's recreate note names ~/OTV5; the level-history builder, pusher and check are removed (they seeded this tree's analysis/liquidity_ledger, which OTV5 never carried); fit_readiness.py v1.10 lists only LIVE setups. Gate dtp tests/check_no_otv4_deps.py N1-N5. THE dtp LANDER CHANGES: tools/land.sh v1.19 runs DEL before the CHECKs (the first r532 attempt was refused by its own gate on tools/build_level_history.py, the file it deletes), mirroring OTV5 land.sh v5.3; die()'s discard recipe now restores DEL'd files; gate dtp tests/check_land_del_order.py O1-O3b. Docs only in this tree. The row, OTV4DEP.1, is in OTV5 docs/BACKLOG.md (r82).
 
