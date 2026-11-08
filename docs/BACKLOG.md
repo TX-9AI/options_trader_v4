@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.32
+# BACKLOG.md — v4.33
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.33 — 2026-11-08 — r536 — THE STANDING CHECKER REDS ARE FIXED AT THEIR CAUSE (dtp).** Eleven standing reds from the 11-07 Saturday brief section 3.1 reproduced and fixed, none waived: menu_functions v1.80 (three confirms call _yes, C3), standings v1.12 (rows fit 43 characters, S6; the S9 fixture carries the query's 13 fields), excursion_report v3.9 (a missing trades/ root is no DB source; a --since run refuses instead of a FileNotFoundError); stale checks re-pointed to the same intent (test_reach, test_stream_coverage S4b/S14 to the SHD.5 DEAD ruling, test_trade_report_epoch to the 09-01 epoch, test_excursion_report labels, check_trade_report_fees T1b); sandbox environment reds fixed (test_eod_excursion_source, test_excursion_report, test_trade_report_epoch import the dtp siblings); tools/shadow_watch.py, install_shadow_watch.sh, tests/test_shadow_watch.py, tests/check_shadow_watch.py and check_repoint_pinned P10 deleted (no OTV5 box runs the shadow observer; its timer is disabled). 12/12 mutants red. The row is CHK.12 in OTV5 docs/BACKLOG.md (OTV5 r86).
 
 **v4.32 — 2026-11-08 — r535 — ONE OWNER FOR EVERY CONSTANT dtp AND OTV5 BOTH CARRY (dtp).** dtp config v0.1.9 WAREHOUSE_BUCKET / ENGINE_EPOCH are the only dtp copies (eight bucket sites and two epoch sites read them; tools/trades_epoch_strip reads OT_S3_BUCKET, not OT_WAREHOUSE_BUCKET); selector.PANEL and s3_sweep's fallback are config.UNIVERSE; wake_and_bake v1.10 _in_rth reads market_calendar (v1.9 treated a weekday holiday and a half-day afternoon as RTH). Gate dtp tests/check_const_parity.py P1-P9. The row is CONST.1 in OTV5 docs/BACKLOG.md (OTV5 r85).
 
