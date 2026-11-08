@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.34
+# BACKLOG.md — v4.35
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.35 — 2026-11-08 — r538 — THE TCS SHADOW'S READERS ON CONTROL ARE RETIRED WITH IT (dtp).** docs/SATURDAY_BRIEF.md v2.4 and tools/saturday_brief.prompt no longer read raw/shadow_trades (OTV5 r88 deleted the TCS shadow; the operator, 2026-11-08: "Delete"); the PARK late-day shadow is read by check_name through _envelopes. tools/warehouse_map.py v1.5 names raw/shadow_trades RETIRED; strategy_registry.py v1.7's TrendCreditSpread history row says the shadow is deleted (the code TCST stays to decode history). The row is filed in OTV5 docs/BACKLOG.md (r88, the RETIRE series, number 3).
 
 **v4.34 — 2026-11-08 — r537 — /tmp ON CONTROL STOPS FILLING, AND TWO TESTS STOP INHERITING THE SWEEP'S PATHS (dtp).** tests/test_eod_excursion_source v1.2 and test_excursion_report v1.2 run their sandbox subprocess without inherited OT_/DTP_ variables; tools/nightly_review.sh v1.1 works in its own dir on disk and removes it, nightly_review.prompt v1.2 forbids /tmp; tools/scratch_purge.py v1.5 removes the checkers' abandoned top-level /tmp dirs (owned, pattern, newest file older than 24h, not held open); tools/checker_sweep v1.2 counts [env] reds apart; tests/test_trade_report_epoch v1.2 reads SOURCE across the report's line fold. Gates check_nightly_review N12, check_scratch_purge P26-P27, check_checker_sweep W8. The row is filed in OTV5 docs/BACKLOG.md (r87, the SWEEP series, number 7).
 
