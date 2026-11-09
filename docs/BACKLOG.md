@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.38
+# BACKLOG.md — v4.39
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.39 — 2026-11-08 — r542 — THE 09:50 MORNING CHECK ALSO CHECKS THE DAILY CANDLES (dtp).** dtp tools/morning_check.py v1.1: for every fleet symbol and VIX, the hunt run checks the bucket for the previous session's daily bar in raw/candles, a raw/candles_full 1d no older than 4 sessions, and (from 2026-11-10) last night's raw/candles_full 1d_eth; any gap is RED and pages. tests/check_morning_check.py v1.1 M14. Docs only in this tree. The row, CAP.6, is in OTV5 docs/BACKLOG.md (OTV5 r98).
 
 **v4.38 — 2026-11-08 — r541 — THE WAREHOUSE MAP NAMES THE CAPTURE PREFIXES (dtp).** dtp tools/warehouse_map.py v1.6: MEANING rows for raw/market_metrics, raw/chain_rest, raw/chain_listing, raw/corporate_events and raw/candles_full, written by OTV5 tools/capture_all.py (OTV5 r94); docs/WAREHOUSE_MAP.md regenerated. Docs only in this tree. The row, CAP.1, is in OTV5 docs/BACKLOG.md (OTV5 r94). Operator, 2026-11-08: "If they offer it, we better be downloading it. Non-negotiable. It all goes to the fucking warehouse."
 
