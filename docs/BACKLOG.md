@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.40
+# BACKLOG.md — v4.41
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.41 — 2026-11-09 — r544 — THE GEX PIN BUTTERFLY IS HISTORY IN THE REGISTRY AND THE NIGHTLY REVIEW (dtp).** dtp strategy_registry.py v1.8 moves GEXPinButterfly from REGISTRY to HISTORICAL (code GEXB kept, its rows decode as before; check_strategy_registry v1.5 R11 green again); tools/nightly_review.prompt v1.3 lists four live plans and drops the fly's exit rule; tools/review_kit.py v1.2 says T3 now drops PARK and the fly's window history; menu_functions.sh v1.81 stop forensics defaults to RunawayContinuation; tools/warehouse_map.py v1.7 notes surface_series stays. Docs only in this tree. The row, RETIRE.5, is in OTV5 docs/BACKLOG.md (OTV5 r103). The operator, 2026-11-08: "I concur on both, in that order".
 
 **v4.40 — 2026-11-08 — r543 — THE CONDUCTOR STARTS THE DAILY CANDLE CAPTURE ON EACH VERIFIED BOX (dtp).** dtp eod_conductor_v2.py v2.15: stop_services, in the same ssh command that stops optionsbot and candle-feed, starts OTV5's capture_all candles-recent detached and bounded (measured 11-08: with candle-feed up 10 of 13 boxes were refused at the user-session limit; with both stopped 13 of 13 pulled). tests/check_conductor_capture.py K1-K4. Docs only in this tree. The row, CAP.6, is in OTV5 docs/BACKLOG.md (OTV5 r99).
 
