@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.42
+# BACKLOG.md — v4.43
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.43 — 2026-11-09 — r546 — THE NIGHTLY CAPTURE WAIT RUNS TO 16:40 ET (dtp).** dtp eod_conductor_v2.py v2.17: the takedown waits for a running capture up to 1800 s but never past 16:40 ET (self_close fires at 16:45 on any box still up); option-candles bounded at 2100 s. Measured 11-09: SPX's front chain is about 570 contracts a day, 4-5 minutes a series at one stream (OTV5 r105). tests/check_conductor_capture.py v1.2 K8. Docs only in this tree. The row, CAP.7, is in OTV5 docs/BACKLOG.md.
 
 **v4.42 — 2026-11-09 — r545 — THE NIGHTLY CAPTURE ACTUALLY STARTS, TAKES THE DAY'S OPTION CANDLES, AND IS ASKED WHETHER IT RAN (dtp).** dtp eod_conductor_v2.py v2.16: the capture had never started (its log, capture_all.log, is created root-owned by the OTV5 capture timers' StandardOutput=append:, so the ubuntu redirect failed silently on 11-09 for all 14 boxes); it now writes logs/capture_nightly.log, runs candles-recent then OTV5 r104's option-candles, reports "CAPTURE running" / "CAPTURE NOT RUNNING" by the capture's pid, and the takedown waits for a running capture up to 900 s (tests/check_conductor_capture.py v1.1 K1-K7). tools/morning_check.py v1.2 pages a box with no option-candles manifest after the last close (from 11-11; check_morning_check v1.2 M15). tools/warehouse_map.py v1.8 + docs/WAREHOUSE_MAP.md: raw/candles_full holds option contracts and the quote candles; new row raw/option_candles_runs (check_warehouse_map_meaning v1.1 W4). Docs only in this tree. The row, CAP.7, is in OTV5 docs/BACKLOG.md (OTV5 r104). The operator, 2026-11-10: "Yes".
 
