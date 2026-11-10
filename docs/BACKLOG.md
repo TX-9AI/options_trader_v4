@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.43
+# BACKLOG.md — v4.44
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.44 — 2026-11-10 — r547 — THE MORNING CHECK READS THE BUCKET FROM config (dtp, §5 hygiene).** dtp tools/morning_check.py v1.3: BUCKET = config.WAREHOUSE_BUCKET (CONST.1); its own literal default made check_const_parity P2 red since r545. Same value, same OT_S3_BUCKET override. Docs only in this tree.
 
 **v4.43 — 2026-11-09 — r546 — THE NIGHTLY CAPTURE WAIT RUNS TO 16:40 ET (dtp).** dtp eod_conductor_v2.py v2.17: the takedown waits for a running capture up to 1800 s but never past 16:40 ET (self_close fires at 16:45 on any box still up); option-candles bounded at 2100 s. Measured 11-09: SPX's front chain is about 570 contracts a day, 4-5 minutes a series at one stream (OTV5 r105). tests/check_conductor_capture.py v1.2 K8. Docs only in this tree. The row, CAP.7, is in OTV5 docs/BACKLOG.md.
 

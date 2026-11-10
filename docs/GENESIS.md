@@ -595,3 +595,4 @@ interleaved. Nothing after this table.
 | **r544** | r544: dtp strategy_registry v1.8 / nightly_review.prompt v1.3 / review_kit v1.2 / menu v1.81 / warehouse_map v1.7 make the GEX pin butterfly history (RETIRE.5 step 2, OTV5 r103). Docs only in this tree: docs/BACKLOG.md v4.41 changelog entry. |
 | **r545** | r545: dtp eod_conductor_v2 v2.16 / morning_check v1.2 / warehouse_map v1.8 - the nightly capture actually starts, takes the day's option candles and is asked whether it ran (CAP.7, OTV5 r104). Docs only in this tree: docs/BACKLOG.md v4.42 changelog entry. |
 | **r546** | r546: dtp eod_conductor_v2 v2.17 - the nightly capture wait runs to 16:40 ET (CAP.7, OTV5 r105). Docs only in this tree: docs/BACKLOG.md v4.43 changelog entry. |
+| **r547** | r547: dtp tools/morning_check.py v1.3 reads the bucket from config (§5 hygiene, check_const_parity P2). Docs only in this tree: docs/BACKLOG.md v4.44 changelog entry. |
