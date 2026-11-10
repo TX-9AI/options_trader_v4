@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.41
+# BACKLOG.md — v4.42
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.42 — 2026-11-09 — r545 — THE NIGHTLY CAPTURE ACTUALLY STARTS, TAKES THE DAY'S OPTION CANDLES, AND IS ASKED WHETHER IT RAN (dtp).** dtp eod_conductor_v2.py v2.16: the capture had never started (its log, capture_all.log, is created root-owned by the OTV5 capture timers' StandardOutput=append:, so the ubuntu redirect failed silently on 11-09 for all 14 boxes); it now writes logs/capture_nightly.log, runs candles-recent then OTV5 r104's option-candles, reports "CAPTURE running" / "CAPTURE NOT RUNNING" by the capture's pid, and the takedown waits for a running capture up to 900 s (tests/check_conductor_capture.py v1.1 K1-K7). tools/morning_check.py v1.2 pages a box with no option-candles manifest after the last close (from 11-11; check_morning_check v1.2 M15). tools/warehouse_map.py v1.8 + docs/WAREHOUSE_MAP.md: raw/candles_full holds option contracts and the quote candles; new row raw/option_candles_runs (check_warehouse_map_meaning v1.1 W4). Docs only in this tree. The row, CAP.7, is in OTV5 docs/BACKLOG.md (OTV5 r104). The operator, 2026-11-10: "Yes".
 
 **v4.41 — 2026-11-09 — r544 — THE GEX PIN BUTTERFLY IS HISTORY IN THE REGISTRY AND THE NIGHTLY REVIEW (dtp).** dtp strategy_registry.py v1.8 moves GEXPinButterfly from REGISTRY to HISTORICAL (code GEXB kept, its rows decode as before; check_strategy_registry v1.5 R11 green again); tools/nightly_review.prompt v1.3 lists four live plans and drops the fly's exit rule; tools/review_kit.py v1.2 says T3 now drops PARK and the fly's window history; menu_functions.sh v1.81 stop forensics defaults to RunawayContinuation; tools/warehouse_map.py v1.7 notes surface_series stays. Docs only in this tree. The row, RETIRE.5, is in OTV5 docs/BACKLOG.md (OTV5 r103). The operator, 2026-11-08: "I concur on both, in that order".
 
