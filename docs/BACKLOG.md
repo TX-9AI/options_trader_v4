@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.45
+# BACKLOG.md — v4.46
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.46 — 2026-11-11 — r549 — THE SATURDAY STUDY QUEUE RUNS ON THE BOXES, IN PARALLEL (dtp).** dtp tools/study_dispatch.py v1.0 gives each OPEN item of ~/reviews/WEEKEND_STUDIES.md its own stopped box (never CRM, never a claimed box) and a bounded headless study agent; the seal is copied to control before any result, every box is cleaned, stopped and released on every exit path; the brief starts it after the box reads and CLOSEs only after it (prompt §6, saturday_brief.sh v2.0, spec v2.6). tests/check_study_dispatch.py v1.0, check_saturday_brief.py v1.6. The operator, 2026-11-11: "What about just waking more boxes at the 0300 to run these studies in parallel?" Docs only in this tree.
 
 **v4.45 — 2026-11-11 — r548 — THE SATURDAY BRIEF RUNS THE STUDY QUEUE (dtp).** dtp tools/saturday_brief.prompt §6 + docs/SATURDAY_BRIEF.md v2.5: every week the 03:00 brief runs each OPEN item of ~/reviews/WEEKEND_STUDIES.md blind (seal first, freeze, run once), after sections 1-5, one heavy job at a time, no new item in the last 45 min; unfinished items go to NOT MEASURED and stay OPEN; verdicts (TUNE or TRIM) go to §7. tests/check_saturday_brief.py v1.5 S20/S20b. The operator, 2026-11-10: "Make sure you add whatever we want to study to the 0300 weekend activity." Docs only in this tree.
 

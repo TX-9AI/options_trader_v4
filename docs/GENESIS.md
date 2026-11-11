@@ -597,3 +597,4 @@ interleaved. Nothing after this table.
 | **r546** | r546: dtp eod_conductor_v2 v2.17 - the nightly capture wait runs to 16:40 ET (CAP.7, OTV5 r105). Docs only in this tree: docs/BACKLOG.md v4.43 changelog entry. |
 | **r547** | r547: dtp tools/morning_check.py v1.3 reads the bucket from config (§5 hygiene, check_const_parity P2). Docs only in this tree: docs/BACKLOG.md v4.44 changelog entry. |
 | **r548** | r548: dtp - the Saturday brief runs the study queue ~/reviews/WEEKEND_STUDIES.md every week (prompt §6, spec v2.5). Docs only in this tree: docs/BACKLOG.md v4.45 changelog entry. |
+| **r549** | r549: dtp - the Saturday study queue runs on the boxes in parallel (tools/study_dispatch.py v1.0; brief prompt §6, saturday_brief.sh v2.0, spec v2.6). Docs only in this tree: docs/BACKLOG.md v4.46 changelog entry. |
