@@ -599,3 +599,4 @@ interleaved. Nothing after this table.
 | **r548** | r548: dtp - the Saturday brief runs the study queue ~/reviews/WEEKEND_STUDIES.md every week (prompt §6, spec v2.5). Docs only in this tree: docs/BACKLOG.md v4.45 changelog entry. |
 | **r549** | r549: dtp - the Saturday study queue runs on the boxes in parallel (tools/study_dispatch.py v1.0; brief prompt §6, saturday_brief.sh v2.0, spec v2.6). Docs only in this tree: docs/BACKLOG.md v4.46 changelog entry. |
 | **r550** | r550: dtp - the Saturday brief sizes QQQ for cash every week until 12-07 ($250/$500 and $500/$750, cap = the ramp max; prompt §1, spec v2.7 §1.8). Docs only in this tree: docs/BACKLOG.md v4.47 changelog entry. |
+| **r551** | r551: dtp - the Saturday brief's cash size table sizes Breakout as OTV5 size_for does (risk count floored at 1, geometry fallback, refused only over the ramp max; prompt §1, spec v2.8 §1.8). Docs only in this tree: docs/BACKLOG.md v4.48 changelog entry. |

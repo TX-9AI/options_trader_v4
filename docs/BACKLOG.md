@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.47
+# BACKLOG.md — v4.48
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.48 — 2026-11-11 — r551 — THE CASH SIZE TABLE SIZES BREAKOUT AS THE CODE DOES (dtp).** dtp tools/saturday_brief.prompt §1 + docs/SATURDAY_BRIEF.md v2.8 §1.8: Breakout's risk count is max(1, floor(base/((entry - stop premium) x 100))) with the geometry count max(1, floor(width/distance)) as the fallback, refused only when one contract costs more than the ramp max (OTV5 _size_geometry); r550's text had no floor and would have refused Breakout trades the bot takes. check_saturday_brief v1.8 S22c. The operator said yes to the fix, 2026-11-11. Docs only in this tree.
 
 **v4.47 — 2026-11-11 — r550 — THE SATURDAY BRIEF SIZES QQQ FOR CASH (dtp).** dtp tools/saturday_brief.prompt §1 + docs/SATURDAY_BRIEF.md v2.7 §1.8: every Saturday until the cash start 2026-12-07 (last run 12-05, then it skips itself), every QQQ trade since 10-26 is re-sized under A) base $250 / ramp max $500 and B) base $500 / ramp max $750, cap = the ramp max; per setup traded vs refused, contracts, P&L with fees beside, EV with its interval, worst day, largest loss. Report only. tests/check_saturday_brief.py v1.7 S22/S22b. The operator, 2026-11-11: "just brief it every weekend until the date arrives." Docs only in this tree.
 
