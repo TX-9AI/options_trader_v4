@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.46
+# BACKLOG.md — v4.47
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.47 — 2026-11-11 — r550 — THE SATURDAY BRIEF SIZES QQQ FOR CASH (dtp).** dtp tools/saturday_brief.prompt §1 + docs/SATURDAY_BRIEF.md v2.7 §1.8: every Saturday until the cash start 2026-12-07 (last run 12-05, then it skips itself), every QQQ trade since 10-26 is re-sized under A) base $250 / ramp max $500 and B) base $500 / ramp max $750, cap = the ramp max; per setup traded vs refused, contracts, P&L with fees beside, EV with its interval, worst day, largest loss. Report only. tests/check_saturday_brief.py v1.7 S22/S22b. The operator, 2026-11-11: "just brief it every weekend until the date arrives." Docs only in this tree.
 
 **v4.46 — 2026-11-11 — r549 — THE SATURDAY STUDY QUEUE RUNS ON THE BOXES, IN PARALLEL (dtp).** dtp tools/study_dispatch.py v1.0 gives each OPEN item of ~/reviews/WEEKEND_STUDIES.md its own stopped box (never CRM, never a claimed box) and a bounded headless study agent; the seal is copied to control before any result, every box is cleaned, stopped and released on every exit path; the brief starts it after the box reads and CLOSEs only after it (prompt §6, saturday_brief.sh v2.0, spec v2.6). tests/check_study_dispatch.py v1.0, check_saturday_brief.py v1.6. The operator, 2026-11-11: "What about just waking more boxes at the 0300 to run these studies in parallel?" Docs only in this tree.
 
