@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.44
+# BACKLOG.md — v4.45
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.45 — 2026-11-11 — r548 — THE SATURDAY BRIEF RUNS THE STUDY QUEUE (dtp).** dtp tools/saturday_brief.prompt §6 + docs/SATURDAY_BRIEF.md v2.5: every week the 03:00 brief runs each OPEN item of ~/reviews/WEEKEND_STUDIES.md blind (seal first, freeze, run once), after sections 1-5, one heavy job at a time, no new item in the last 45 min; unfinished items go to NOT MEASURED and stay OPEN; verdicts (TUNE or TRIM) go to §7. tests/check_saturday_brief.py v1.5 S20/S20b. The operator, 2026-11-10: "Make sure you add whatever we want to study to the 0300 weekend activity." Docs only in this tree.
 
 **v4.44 — 2026-11-10 — r547 — THE MORNING CHECK READS THE BUCKET FROM config (dtp, §5 hygiene).** dtp tools/morning_check.py v1.3: BUCKET = config.WAREHOUSE_BUCKET (CONST.1); its own literal default made check_const_parity P2 red since r545. Same value, same OT_S3_BUCKET override. Docs only in this tree.
 
