@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.49
+# BACKLOG.md — v4.50
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.50 — 2026-11-13 — r553 — THE STUDY LAUNCH RETURNS (dtp).** dtp tools/study_dispatch.py v1.2: the first Friday run (17:15 ET) timed out launching on AMD and AMZN, because the launch command's trailing `&` backgrounded the whole AND-list in a subshell that held ssh's stdout until the runner ended; launch_cmd() starts the runner with `setsid -f`, no `&`. tests/check_study_dispatch.py v1.2 K4 runs it for real (red on v1.1). Part of the approved r552 change. Docs only in this tree.
 
 **v4.49 — 2026-11-13 — r552 — THE WEEKEND STUDY QUEUE RUNS FRIDAY NIGHT (dtp).** dtp tools/friday_studies.sh v1.0 + units dtp-study-dispatch.{service,timer} (Fri 17:15 ET, not Persistent; tools/install_study_dispatch.sh, NOT INSTALLED BY THE LAND) run tools/study_dispatch.py v1.1 into the Saturday brief's WORK with the deadline Saturday 02:30 ET; the brief collects it and starts its own only as a fallback (saturday_brief.prompt §6, saturday_brief.sh v2.1, spec v2.9). study_dispatch v1.1: `- Depends:` items run in a second round with their dependencies' results (none passed -> DONE "nothing passed, not run"); study boxes hold the midnight halt (hold flag cleared only when it is the dispatcher's) and are acknowledged to the hourly power audit. tests/check_study_dispatch.py v1.1 (40/40), check_saturday_brief.py v1.9 (53/53). The operator, 2026-11-13: "Yes, don't wait until Sunday to do that study. Add it to the rest". Docs only in this tree.
 
