@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.52
+# BACKLOG.md — v4.53
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.53 — 2026-11-14 — r556 — BREAKOUT IS HISTORY ON CONTROL TOO (dtp; OTV5 r110 WS.3 TRIM).** The operator, 2026-11-14: "Concur". dtp strategy_registry.py v1.9: Breakout moves from REGISTRY to HISTORICAL (code BRKO kept, so its rows to 2026-11-13 decode as before); tests/check_strategy_registry.py v1.6 HISTORY_CODES gains it (R11 red on r555 once OTV5 r110 made Breakout DORMANT, green here); tools/nightly_review.prompt v1.4: the live plans are Runaway, the Hunt and PARK. Docs only in this tree.
 
 **v4.52 — 2026-11-14 — r555 — THE STUDY SEAL IS THE DISPATCHER'S; THREE CONTROL REDS AND A FEE ESTIMATE (dtp).** The operator, 2026-11-14: "Yes" (the brief's R4), "Concur" (R8) and "fix the top 10 today" (the amnesty bucket AM.9-AM.12). dtp tools/study_dispatch.py v1.3: the dispatcher writes each item's SEAL.txt on control before the agent starts (read-only on the box), records and acks FROZEN.json on control, and accepts a result only on control's own record of the order (box mtimes decide nothing); fixes after the freeze go to AMENDMENTS.txt; the runner grants writes in the work dir (WS.6d's refusal). tools/saturday_brief.prompt §6 + docs/SATURDAY_BRIEF.md v2.11 say so, and FALLBACK 2 logs each sha in CONTROL_LOG.txt. tools/review_kit.py v1.3 caps a blank-fee row's equity commission at $10 a leg (AM.10). tests/check_fleet_power_log.py v1.4 P6 takes its ack file from scratch (AM.11). study_dispatch and morning_check v1.4 take the clock from ettime (AM.12, test_ettime T4). Docs only in this tree.
 
