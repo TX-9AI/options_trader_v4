@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.55
+# BACKLOG.md — v4.56
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.56 — 2026-11-14 — r559 — THE THREE DEAD dtp DEFS ARE DELETED (dtp; the 11-14 Saturday brief section 5 item 6, B5.6).** Re-verified on dtp r558 by an AST scan of every dtp module and a word count across dtp, OTV5, the control units, the timers, the cron and the prompts: exactly three defs had no reference outside their own `def`, and r116-r119 made no further dtp def dead. Deleted: wake_and_bake.stage_pyclear (its docstring said "used by --shutdown-only"; that mode dropped its pycache clear on 2026-07-18, 1edfc41, the EMERGENCY STOP), orchestrator._fmt_score and strategy_registry.lineages_for (the lineage data stays; resolve_lineage and box_lineage read it), plus wake_and_bake's unread `import eod_report`. PYCLEAR stays (RESTART_CMD runs it). The --shutdown-only lines of wake_and_bake's module help and its argparse help= are corrected to the emergency stop (the old module-help words struck with a CORRECTION, not rewritten). wake_and_bake v1.11, orchestrator v0.8.2, strategy_registry v1.11. New gate tests/check_dead_defs_gone.py v1.0 (D1 none defined again, D1b the kept neighbours, D2 no eod_report import, D3 the help string): red on r558, five mutants each red. No behaviour change. Docs only in this tree.
 
 **v4.55 — 2026-11-14 — r558 — OGAP ON ITS OWN LINE, AND OGAP VS PARK (dtp; OTV5 OGAP.1).** The operator, 2026-11-14: "let's design & paper trade the OGAP on QQQ" and "compare them". dtp strategy_registry.py v1.10: OGAP joins REGISTRY ("OGAP", LIVE, OTV5). tools/review_kit.py v1.5: load_window leaves strategy OGAP out (window_ev.csv and theories.csv unchanged on any day without an OGAP row) and `window` prints OGAP on its own line. tools/nightly_review.prompt and tools/saturday_brief.prompt §1 (OGAP, and OGAP VS PARK like for like with the decision rule fixed 2026-11-14), docs/SATURDAY_BRIEF.md v2.13 §1.9 / §1.10; tests/check_saturday_brief.py v1.12 S26 / S26b. Docs only in this tree.
 
