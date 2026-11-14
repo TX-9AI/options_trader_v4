@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.54
+# BACKLOG.md — v4.55
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.55 — 2026-11-14 — r558 — OGAP ON ITS OWN LINE, AND OGAP VS PARK (dtp; OTV5 OGAP.1).** The operator, 2026-11-14: "let's design & paper trade the OGAP on QQQ" and "compare them". dtp strategy_registry.py v1.10: OGAP joins REGISTRY ("OGAP", LIVE, OTV5). tools/review_kit.py v1.5: load_window leaves strategy OGAP out (window_ev.csv and theories.csv unchanged on any day without an OGAP row) and `window` prints OGAP on its own line. tools/nightly_review.prompt and tools/saturday_brief.prompt §1 (OGAP, and OGAP VS PARK like for like with the decision rule fixed 2026-11-14), docs/SATURDAY_BRIEF.md v2.13 §1.9 / §1.10; tests/check_saturday_brief.py v1.12 S26 / S26b. Docs only in this tree.
 
 **v4.54 — 2026-11-14 — r557 — THE WINDOW LEADS WITH THE EXECUTABLE BASIS (dtp, AM.1's reporting half).** The operator, 2026-11-14: "fix the top 10 today". dtp tools/review_kit.py v1.4: the trade CSVs carry OTV5 r111's four executable columns (appended; nothing dropped); `window` prints the executable basis first (bought at the ask, sold at the bid: n priced, realized, EV, its interval, ex worst setup/symbol, every theory), the mark beside it and the spread cost, and names every trade it cannot price (the row's pnl_exec_usd, else ~/reviews/exec_basis_backfill.csv; never the mark); window_ev.csv and theories.csv gain exec columns after the old ones (migrated in place, every old cell kept). Giveback stays on the mark (there is no executable peak). nightly_review.prompt v1.5 and saturday_brief.prompt §1 + docs/SATURDAY_BRIEF.md v2.12 lead with it. On the 384 window trades 10-26..11-13: mark +$7,386.50 (+$19.24 a trade), executable -$23,582.00 (-$61.41 a trade [-142.49, +41.04]). Docs only in this tree.
 
