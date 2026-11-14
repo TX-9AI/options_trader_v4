@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.53
+# BACKLOG.md — v4.54
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -640,6 +640,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.54 — 2026-11-14 — r557 — THE WINDOW LEADS WITH THE EXECUTABLE BASIS (dtp, AM.1's reporting half).** The operator, 2026-11-14: "fix the top 10 today". dtp tools/review_kit.py v1.4: the trade CSVs carry OTV5 r111's four executable columns (appended; nothing dropped); `window` prints the executable basis first (bought at the ask, sold at the bid: n priced, realized, EV, its interval, ex worst setup/symbol, every theory), the mark beside it and the spread cost, and names every trade it cannot price (the row's pnl_exec_usd, else ~/reviews/exec_basis_backfill.csv; never the mark); window_ev.csv and theories.csv gain exec columns after the old ones (migrated in place, every old cell kept). Giveback stays on the mark (there is no executable peak). nightly_review.prompt v1.5 and saturday_brief.prompt §1 + docs/SATURDAY_BRIEF.md v2.12 lead with it. On the 384 window trades 10-26..11-13: mark +$7,386.50 (+$19.24 a trade), executable -$23,582.00 (-$61.41 a trade [-142.49, +41.04]). Docs only in this tree.
 
 **v4.53 — 2026-11-14 — r556 — BREAKOUT IS HISTORY ON CONTROL TOO (dtp; OTV5 r110 WS.3 TRIM).** The operator, 2026-11-14: "Concur". dtp strategy_registry.py v1.9: Breakout moves from REGISTRY to HISTORICAL (code BRKO kept, so its rows to 2026-11-13 decode as before); tests/check_strategy_registry.py v1.6 HISTORY_CODES gains it (R11 red on r555 once OTV5 r110 made Breakout DORMANT, green here); tools/nightly_review.prompt v1.4: the live plans are Runaway, the Hunt and PARK. Docs only in this tree.
 
