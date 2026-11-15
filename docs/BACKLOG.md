@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.57
+# BACKLOG.md — v4.58
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -641,6 +641,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.58 — 2026-11-15 — r561 — THE GEX-FLY STUDY TOOLS ARE DELETED (dtp; the 11-14 Saturday brief section 5 item 8, B5.8).** tools/bfly_pin_study.py (326 lines), tools/bfly_reach_probe.py (149) and tools/pin_strength_study.py (350), 825 lines that studied GEXPinButterfly, removed at OTV5 r103/r107. Re-verified on dtp r560: no menu item (menu_extract --check, 26 scripts, none of these), no timer, cron, prompt, ~/reviews script or WEEKEND_STUDIES row reads them; the only references were their own test tests/test_pin_strength.py (deleted with them) and tests/test_warehouse_cache.py C6, which read bfly_reach_probe's source to prove the cache rule and now reads tools/stop_report.py (v1.4, same rule). Comments in progress.py and warehouse_cache.py that tell the fly study's history stay. Study results in ~/reviews and warehouse data are untouched. Guard tests/check_dead_defs_gone.py v1.1 D4 (the files are absent and no dtp module names one by path or import) and D4b (stop_report keeps the pattern C6 pins); born red on r560 at D4, four mutants each red. dtp checker sweep 131/131 green (r560: 132/132; the difference is test_pin_strength). No behaviour change. Docs only in this tree.
 
 **v4.57 — 2026-11-14 — r560 — LAND.11: A CHECK THAT READS STDIN CAN NO LONGER SKIP THE CHECKS AFTER IT, AND A COUNT THAT DOES NOT MATCH REFUSES THE LAND (dtp).** dtp tools/land.sh v1.20: the CHECK loop reads the spec on fd 3, every CHECK runs with stdin from /dev/null, and after the loop the number that ran must equal the number declared or the land is refused as CHECK COUNT MISMATCH. Found at r559 (7 declared, 4 ran: check_ssh_budget reads stdin). tests/check_land_sh.py v1.14 SK1 (a first CHECK that drains stdin; the second still runs), SK1b (the fixture bites under the v1.19 loop), SK2 (the v1.19 loop with the guard is refused, HEAD unmoved); born red on v1.19. Mirrored in OTV5 land.sh v5.4 (OTV5 r121). The operator's yes, 2026-11-14. New row LAND.11. Docs only in this tree.
 
