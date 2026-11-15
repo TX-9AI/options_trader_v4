@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.59
+# BACKLOG.md — v4.60
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -641,6 +641,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.60 — 2026-11-15 — r563 — THE FIXTURES NAME LIVE SETUPS, AND CRM IS AN ORDINARY BOX (dtp; the 11-14 Saturday brief section 5 item 10, B5.10; OTV5 row HYG.27).** (a) Five dtp tests whose fixture only needed an example name a live setup (check_r_excludes_fees, test_trade_report_dedup: RunawayContinuation; test_cdc_partition_key, test_natural_key, test_plan_dupe_probe: LiquidityHunt); the dtp report and study fixtures that read the warehouse's old rows keep their old names (history). (b) tools/checker_sweep.py v1.3 stops setting OT_RESTING_DB and OT_RESTING_STOP_STATE (OTV5 r118 / r68 deleted their readers). (c) tools/study_dispatch.py v1.5 drops NEVER_BOXES: the operator, 2026-11-14, on the Claude session on CRM, "It's not 'my session'"; tests/check_study_dispatch.py v1.4 A1b requires CRM to be stopped like any idle running box. (d) tests/check_dead_defs_gone.py v1.2 D5/D5b, born red on r562; mutants (CRM skipped again, NEVER_BOXES restored, OT_RESTING_DB put back) each red. No trading behaviour change.
 
 **v4.59 — 2026-11-15 — r562 — ONE SOURCE FOR THE DUPLICATED CONSTANTS (dtp; the 11-14 Saturday brief section 5 item 9, B5.9; OTV5 row HYG.26).** (a) The warehouse bucket's fourth OTV5 copy, tools/capture_all.py:128 (r94), must stay a copy (OTV5 check_capture_all C2: capture_all imports nothing from warehouse/), so dtp tests/check_const_parity.py v1.1 P1 now pins it beside s3_push, warehouse_source and the s3-push unit, and the new P2b fails on any fifth OTV5 code site. (b) The study kit: tools/study_dispatch.py v1.4 types the box clone once (BOX_REPO, which P10 pins to /home/ubuntu + fleet.REMOTE_HOME_REL); BOX_VENV_BIN and BOX_HOLD_FLAG are built from it, and runner.sh, the agent brief and the cleanup command take them (all three byte-identical to v1.3, compared). P11 pins BOX_HOLD_FLAG to OTV5 midnight_halt.HOLD_FLAG's default (the repo root's data/NO_MIDNIGHT_HALT) and fails if any OTV5 unit, installer or setup script sets OT_NO_MIDNIGHT_HALT (none does today; a box carrying it would halt at midnight under a study). tools/friday_studies.sh v1.1 keeps its 1650 (bash cannot import) with a pointer, and P12 fails the day it differs from study_dispatch.RTH_END. No copy had drifted. Born red on r561 (P10 x3, P11); ten mutants each red (capture_all bucket, a fifth .py copy, a unit copy, the halt tail, an OT_NO_MIDNIGHT_HALT setter, a re-typed cleanup path, a re-typed runner hold flag, 1700 in the shell, RTH_END 17:00, fleet.REMOTE_HOME_REL). dtp checker sweep 131/131 green. No behaviour change. Docs only in this tree.
 
