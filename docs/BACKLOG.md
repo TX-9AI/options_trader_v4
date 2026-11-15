@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.60
+# BACKLOG.md — v4.61
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -641,6 +641,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.61 — 2026-11-15 — r564 — THE RAMP TOP REPORT NAMES OT_BREAKOUT_BUDGET_USD (dtp; OTV5 row HYG.28).** OTV5 r125 renames the ramp top's key from OT_ORB_BUDGET_USD (named after the retired ORB trade) to OT_BREAKOUT_BUDGET_USD, the old key read as a fallback. (a) tests/orb_budget_fleet.py v1.3: the box program reads config.BREAKOUT_BUDGET_USD, else config.ORB_BUDGET_USD on a box still on r124, and its labels name the new key; check_ramp_top_report v1.1 T2/T6/T7 follow it and new T8 runs the read against a stub config of each shape (red on r563, and on a mutant without the fallback). (b) menu_registry v1.28 / menu_functions v1.82: the FLEET item reads "Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot"; MENU_INVENTORY regenerated. (c) SATURDAY_BRIEF v2.14 and saturday_brief.prompt §1.8 name the new key. No behaviour change.
 
 **v4.60 — 2026-11-15 — r563 — THE FIXTURES NAME LIVE SETUPS, AND CRM IS AN ORDINARY BOX (dtp; the 11-14 Saturday brief section 5 item 10, B5.10; OTV5 row HYG.27).** (a) Five dtp tests whose fixture only needed an example name a live setup (check_r_excludes_fees, test_trade_report_dedup: RunawayContinuation; test_cdc_partition_key, test_natural_key, test_plan_dupe_probe: LiquidityHunt); the dtp report and study fixtures that read the warehouse's old rows keep their old names (history). (b) tools/checker_sweep.py v1.3 stops setting OT_RESTING_DB and OT_RESTING_STOP_STATE (OTV5 r118 / r68 deleted their readers). (c) tools/study_dispatch.py v1.5 drops NEVER_BOXES: the operator, 2026-11-14, on the Claude session on CRM, "It's not 'my session'"; tests/check_study_dispatch.py v1.4 A1b requires CRM to be stopped like any idle running box. (d) tests/check_dead_defs_gone.py v1.2 D5/D5b, born red on r562; mutants (CRM skipped again, NEVER_BOXES restored, OT_RESTING_DB put back) each red. No trading behaviour change.
 
