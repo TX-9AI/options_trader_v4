@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.61
+# BACKLOG.md — v4.62
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -641,6 +641,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.62 — 2026-11-16 — r565 — THE SATURDAY BRIEF SCORES THE RUNAWAY O08 WOULD-BE (dtp; the 11-16 Runaway variant study's one sealed-holdout finalist).** The operator, 2026-11-16: "Consider O08 as a candidate after we get more paper trades" and "Include its 'would be' in the weekend briefs." (a) docs/SATURDAY_BRIEF.md v2.15 §1.11 and tools/saturday_brief.prompt section 1: every Saturday from 11-21, the closed RunawayContinuation trades from 2026-11-16 (load_trades, then mainline(): OTV4TEST rows out) are re-scored as if O08 were on: skip when (entry_ask − entry_bid) / mid > 0.05, the warehouse row's entry_bid / entry_ask (the study's inputs). Week and cumulative: kept vs skipped by symbol; exec-basis P&L (pnl_exec_usd) all vs kept and the delta with a day-bootstrap 95% interval; fees beside (the review CSV's fee by trade_id), never in EV; the skipped trades listed, every skipped winner of $200+ named as a cost; rows with no usable entry bid/ask named UNSCORED, never guessed; index rows on their own line. Report only, never in the window EV or the theories; the decision note fixed today and stated verbatim weekly: "Candidate only. Decided at the end-of-November edge weighing (11-27) or later when the operator asks; no code until their yes." Not in the nightly review (the operator said weekend briefs). (b) tests/check_saturday_brief.py v1.14 S27/S27b (red on r564) and S27c (the nightly review prompt does not carry it). No bot code, no behaviour change. Docs only in this tree.
 
 **v4.61 — 2026-11-15 — r564 — THE RAMP TOP REPORT NAMES OT_BREAKOUT_BUDGET_USD (dtp; OTV5 row HYG.28).** OTV5 r125 renames the ramp top's key from OT_ORB_BUDGET_USD (named after the retired ORB trade) to OT_BREAKOUT_BUDGET_USD, the old key read as a fallback. (a) tests/orb_budget_fleet.py v1.3: the box program reads config.BREAKOUT_BUDGET_USD, else config.ORB_BUDGET_USD on a box still on r124, and its labels name the new key; check_ramp_top_report v1.1 T2/T6/T7 follow it and new T8 runs the read against a stub config of each shape (red on r563, and on a mutant without the fallback). (b) menu_registry v1.28 / menu_functions v1.82: the FLEET item reads "Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot"; MENU_INVENTORY regenerated. (c) SATURDAY_BRIEF v2.14 and saturday_brief.prompt §1.8 name the new key. No behaviour change.
 
