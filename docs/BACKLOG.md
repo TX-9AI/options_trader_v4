@@ -1,4 +1,4 @@
-# BACKLOG.md — v4.64
+# BACKLOG.md — v4.65
 
 **The record that survives the thread.** A commit is the change; this is what
 the change was for, what is left, and what was ruled. WORKING_AGREEMENT §18
@@ -641,6 +641,8 @@ not rediscovered the expensive way.
 ---
 
 ## PART 4 — CHANGELOG
+
+**v4.65 — 2026-11-21 — r568 — THE STUDY DISPATCHER'S POLL READS A BOX WHOSE STUDY HAS NOT FINISHED (dtp SD.2).** The operator, 2026-11-21: "We definitely want those missed studies today." tools/study_dispatch.py polled each box with `stat` on SEAL.txt, FROZEN.json, RESULT.json and AMENDMENTS.txt; the last two do not exist until late, so `stat` exited 1 and the poll read that as an unreachable box. No FROZEN.ack was ever sent, all seven 11-20 items (WS.13-WS.19) stopped INCOMPLETE, and seven boxes were held to the deadline (the 11-21 Saturday brief R2). study_dispatch v1.7: poll_cmd() ends with `; true`, so only ssh's own failure reads as unreachable. tests/check_study_dispatch.py v1.6 P1-P2 run the real command under bash (red on r567; a mutant without `; true` is red at P1). No OTV5 or trading code, no config knob, no fleet update.
 
 **v4.64 — 2026-11-19 — r567 — THE STUDY DISPATCHER READS A STATUS WITH "]" IN IT (dtp SD.1).** The operator, 2026-11-19: "Yes, fix the bug". tools/study_dispatch.py read a sub-item's `[Status: ...]` as "no ] up to a ] at the end of the line", so a status carrying an interval ("-$606/trade [-882, -177]") never matched and the sub-item fell back to its parent's OPEN: WS.6a-6d in ~/reviews/WEEKEND_STUDIES.md, FORWARD to 2026-11-27, would have been re-run by the Friday 11-20 dispatch (WS.6d already ran twice, folders _20261113 and _20261114). set_status had the same pattern, so a rewrite appended a second status instead of replacing the first. A greedy ".* up to the last ]" is not enough: WS.6d's status sits mid-line, followed by "Hypothesis: ...". (a) tools/study_dispatch.py v1.6: _status_spans() scans brackets by depth, so each "[Status: " group ends at its balancing "]" wherever it sits on the line (an unbalanced one runs to the last "]"); the last group is the status; set_status replaces it in place and drops any older ones, or appends one when there is none. (b) tests/check_study_dispatch.py v1.5 B1-B4, a fixture modelled on the real WS.6 bullets: `plan` lists none of WS.6a-6d, set_status replaces (one status, no other line touched), two statuses read as the last and collapse to one, nested brackets read whole, a bullet with no status takes the parent's; red on r566 at B1, B2 and B3, and a greedy-pattern mutant red at B1. `plan` on the real queue: 11 OPEN before (WS.6a-6d, WS.13-WS.19), 7 after (WS.13-WS.19). WEEKEND_STUDIES.md itself is not edited. No OTV5 or trading code, no config knob, no fleet update.
 
